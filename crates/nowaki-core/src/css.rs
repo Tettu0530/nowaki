@@ -126,19 +126,31 @@ mod tests {
     }
 
     #[test]
-    fn css_scope_id_aligns_scoped_names_across_call_sites() {
+    fn css_scope_id_rejects_absolute_path_as_scope_id() {
         let root = Path::new("/proj/hello");
         let abs = Path::new("/proj/hello/islands/Badge.module.css");
         let css = ".badge { color: red }";
         let id = css_scope_id(root, abs);
-        let (_, from_id) = scope_css(&id, css);
-        let (_, from_abs_path) = scope_css(&abs.to_string_lossy(), css);
+        let (_, from_root_relative) = scope_css(&id, css);
+        let (_, from_absolute) = scope_css(&abs.to_string_lossy(), css);
         assert_ne!(
-            from_id[0].1, from_abs_path[0].1,
+            from_root_relative[0].1, from_absolute[0].1,
             "absolute path must not be used as scope id when root-relative id exists"
         );
-        let (_, from_id_again) = scope_css(&css_scope_id(root, abs), css);
-        assert_eq!(from_id[0].1, from_id_again[0].1);
+    }
+
+    /// Dev SSR, dev CSS serving, and build emit must pass the same id into `scope_css`.
+    #[test]
+    fn css_scope_id_same_for_all_call_sites() {
+        let root = Path::new("/proj/hello");
+        let abs = Path::new("/proj/hello/islands/Badge.module.css");
+        let css = ".badge { color: red } .badge:hover { color: white }";
+        let id = css_scope_id(root, abs);
+        let (_, map) = scope_css(&id, css);
+        let (_, again) = scope_css(&css_scope_id(root, abs), css);
+        assert_eq!(map, again);
+        assert_eq!(map[0].0, "badge");
+        assert_eq!(map[0].1.len(), "badge".len() + 1 + 8);
     }
 
     #[test]
