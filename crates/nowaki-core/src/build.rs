@@ -2,7 +2,7 @@
 //! dist/client/ へコンテンツハッシュ付きESMで出力する。
 //! island ごとに、その island だけが使うアプリモジュールを1スコープへ連結する
 //! （スコープホイスティング、chunk.rs）。node_modules/共有/css/asset は別チャンクとして
-//! 共有・dedup する。連結に未対応のモジュールは従来の unbundled emit にフォールバックする。
+//! 共有・dedup する。連結に未対応のモジュールは unbundled emit にフォールバックする。
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -67,8 +67,6 @@ pub fn build_client(
     };
 
     // エントリ2..: islands/ 配下の各コンポーネント。
-    // 各 island の「その island だけが使うアプリモジュール」を1スコープへ連結する
-    // （スコープホイスティング）。node_modules / 共有 / css / asset は別チャンクで共有する。
     let mut islands: Vec<(String, String)> = Vec::new();
     let mut live_islands: Vec<String> = Vec::new();
     let islands_dir = core.root.join("islands");
@@ -119,7 +117,6 @@ pub fn build_client(
         }
     }
 
-    // ライブ島があれば live.js（WS + DOM morph）を1チャンク出力する。
     let live_runtime_out = if !live_islands.is_empty() {
         let live_rt = core
             .root
@@ -170,7 +167,6 @@ pub fn build_server(
     use rayon::prelude::*;
 
     let server_dir = dist.join("server");
-    // routes/islands に加え、共有のサーバーモジュール (components/, lib/, actions/) も出力する。
     let mut files = Vec::new();
     for sub in ["routes", "islands", "components", "lib", "actions"] {
         let src_root = core.root.join(sub);
@@ -241,9 +237,8 @@ fn with_js_suffix(rel: &str) -> String {
     }
 }
 
-/// SSR向け変換: TS除去 + JSX(automatic, preact)。相対ローカルimportの拡張子を
-/// .js へ書き換える。bare import (npm) はそのまま（Nodeが解決する）。minifyしない
-/// （SSRのスタックトレース可読性のため）。
+/// SSR向け変換: TS除去 + JSX(automatic, preact) + 相対importを .js へ。
+/// minifyしない（SSRのスタックトレース可読性のため）。
 fn transform_for_server(
     path: &Path,
     source: &str,
@@ -298,13 +293,13 @@ fn transform_for_server(
             _ => None,
         };
         let Some(lit) = source_lit else { continue };
-        // React 系 bare import → Preact 互換（bare のまま残し、Node が preact/compat を解決）。
+        // React 系 → preact/compat（bare のまま残し Node に解決させる）。
         if let Some(aliased) = crate::resolve::alias_specifier(lit.value.as_str()) {
             lit.value = allocator.alloc_str(aliased).into();
             lit.raw = None;
         }
         let spec = lit.value.as_str();
-        // 仮想モジュール（resolveId/load）: SSR は data: モジュールへインライン化（自己完結 ESM 想定）。
+        // 仮想モジュールは data: へインライン化（自己完結 ESM 想定）。
         if !spec.starts_with('.') && !spec.starts_with('/') && !spec.contains("://") {
             if let Some(data) = core.virtual_ssr_module(dir, spec) {
                 lit.value = allocator.alloc_str(&data).into();
@@ -312,12 +307,12 @@ fn transform_for_server(
                 continue;
             }
         }
-        // CSS Modules: クラス名マップだけを export（DOM が無いので注入はしない）。
+        // CSS Modules: SSR はクラス名マップだけ（DOM が無いので注入しない）。
         if spec.ends_with(".module.css") {
             if let Ok(resolution) = core.resolver.resolve(dir, spec) {
                 let full = resolution.full_path();
                 if let Ok(css) = fs::read_to_string(&full) {
-                    // クライアントと同じ id（ルート相対）でスコープ化し、クラス名を一致させる。
+                    // クライアントと同じ id でスコープ化しクラス名を一致させる。
                     let id = css_scope_id(&core.root, &full);
                     let (_scoped, map) = crate::css::scope_css(&id, &css);
                     let body = format!("export default {}", crate::css::mapping_object(&map));
@@ -328,7 +323,7 @@ fn transform_for_server(
             }
             continue;
         }
-        // アセット: クライアントビルドのハッシュ付きURLへ（無ければ basename フォールバック）。
+        // アセット: クライアントビルドのハッシュ付きURLへ（無ければ basename）。
         if !spec.starts_with('/') && !spec.contains("://") && !spec.starts_with("data:") {
             if let Ok(resolution) = core.resolver.resolve(dir, spec) {
                 let full = resolution.full_path();
@@ -373,10 +368,10 @@ fn transform_for_server(
 /// 相対ローカルimportの TS拡張子を .js へ。bare/absolute/.js は触らない。
 fn rewrite_server_spec(spec: &str) -> Option<String> {
     if !spec.starts_with('.') {
-        return None; // bare import (npm) はそのまま
+        return None;
     }
     if spec.ends_with(".css") {
-        // SSR では .css を no-op に（CSS はクライアント専用）
+        // CSS はクライアント専用
         return Some(crate::css::CSS_NOOP_SPECIFIER.to_string());
     }
     for ext in [".tsx", ".jsx", ".ts", ".tsrx"] {
@@ -387,12 +382,10 @@ fn rewrite_server_spec(spec: &str) -> Option<String> {
     None
 }
 
-/// 相対パスの拡張子を .js に変えて返す。
 fn with_js_ext(rel: &Path) -> PathBuf {
     rel.with_extension("js")
 }
 
-/// ディレクトリ以下のファイルを再帰的に集める。
 fn walk_files(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
     for entry in fs::read_dir(dir)? {
@@ -409,11 +402,9 @@ fn walk_files(dir: &Path) -> Result<Vec<PathBuf>> {
 /// 出力グラフを辿る際の可変状態。1回のビルドで使い回す。
 #[derive(Default)]
 struct EmitCtx {
-    /// 入力絶対パス → 出力ファイル名（emit 済み）
     emitted: HashMap<PathBuf, String>,
     /// 現在 DFS スタック上のモジュール（循環検出用）
     visiting: HashSet<PathBuf>,
-    /// アセット絶対パス → 配信URL
     assets: HashMap<PathBuf, String>,
     /// 循環時に使う pre-rewrite の暫定ファイル名
     provisional: HashMap<PathBuf, String>,
@@ -421,18 +412,13 @@ struct EmitCtx {
     cyclic: HashSet<PathBuf>,
     /// 出力ファイル名 → 直接依存の出力ファイル名（preload チェーン計算用）
     deps: HashMap<String, Vec<String>>,
-    /// 画像最適化の入力/出力バイト総量（build summary の節約表示用）。
     asset_in: u64,
     asset_out: u64,
 }
 
-/// 1モジュールを（依存を先に処理してから）出力し、出力ファイル名を返す。
-/// 非循環は最終内容のハッシュで命名（immutable キャッシュが正しい）。循環は
-/// pre-rewrite ハッシュの暫定名にフォールバックして解決する（後順DFSのまま）。
-/// CSS のスコープ ID。`data-nowaki-css` 属性やスコープハッシュとしてクライアントへ
-/// 同梱されるため、絶対パス（OS ユーザー名・内部ディレクトリ構造）を晒さないよう
-/// ルート相対化する。ルート外（pnpm ストア等）は安定ハッシュにフォールバックする。
-/// SSR 側(build.rs:transform_for_server)とクライアント側で同じ id を使う必要がある。
+/// CSS のスコープ ID。クライアントへ同梱されるため、絶対パス（OS ユーザー名・内部構造）を
+/// 晒さないようルート相対化し、ルート外（pnpm ストア等）は安定ハッシュにする。
+/// SSR（transform_for_server）とクライアントで同じ id を使う必要がある。
 fn css_scope_id(root: &Path, abs: &Path) -> String {
     match abs.strip_prefix(root) {
         Ok(rel) => rel.to_string_lossy().replace('\\', "/"),
@@ -454,6 +440,9 @@ fn client_source_name(root: &Path, path: &Path) -> PathBuf {
     PathBuf::from(path.file_name().unwrap_or(path.as_os_str()))
 }
 
+/// 1モジュールを（依存を先に処理してから）出力し、出力ファイル名を返す。
+/// 非循環は最終内容のハッシュで命名（immutable キャッシュが正しい）。循環は
+/// pre-rewrite ハッシュの暫定名にフォールバックして解決する（後順DFSのまま）。
 fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Result<String> {
     if let Some(name) = ctx.emitted.get(abs) {
         return Ok(name.clone());
@@ -464,7 +453,6 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
         let raw = fs::read(abs).with_context(|| format!("読み込み失敗: {}", abs.display()))?;
         let ext = abs.extension().and_then(|e| e.to_str()).unwrap_or("bin");
         let stem = abs.file_stem().and_then(|s| s.to_str()).unwrap_or("asset");
-        // 自動最適化（PNG ロスレス再エンコード + メタデータ除去）。小さくならなければ元のまま。
         let (bytes, out_ext) =
             crate::asset::optimize(&raw, ext, &crate::asset::Transform::default());
         ctx.asset_in += raw.len() as u64;
@@ -482,8 +470,7 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
         ctx.emitted.insert(abs.to_path_buf(), mod_name.clone());
         return Ok(mod_name);
     }
-    // .css は <style> 注入の JS シムとして出力（依存なし）。
-    // *.module.css はスコープ化 + クラス名マップ export。id はルート相対（SSR と一致 + 絶対パス非露出）。
+    // .css は <style> 注入の JS シム、*.module.css はスコープ化 + クラス名マップ export（依存なし）。
     if crate::css::is_css(abs) {
         let css =
             fs::read_to_string(abs).with_context(|| format!("読み込み失敗: {}", abs.display()))?;
@@ -575,7 +562,7 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
 
 /// island を1チャンクへスコープホイスティングして出力する。連結対象は island 本体 +
 /// その island だけが使い連結可能なアプリモジュール。外部依存（node_modules/共有/css/asset）は
-/// emit() で別チャンク化して ESM import で繋ぐ。連結に失敗したら従来の emit にフォールバック。
+/// emit() で別チャンク化して ESM import で繋ぐ。連結に失敗したら unbundled emit にフォールバック。
 fn emit_island(
     core: &NowakiCore,
     island: &Path,
@@ -584,7 +571,6 @@ fn emit_island(
     out_dir: &Path,
     ctx: &mut EmitCtx,
 ) -> Result<String> {
-    // 連結対象 = island 本体 + その island だけが使い、連結可能なアプリモジュール
     let mut internal: Vec<PathBuf> = vec![island.to_path_buf()];
     for m in app_set {
         if m == island {
@@ -596,7 +582,6 @@ fn emit_island(
     }
     let internal_set: HashSet<&Path> = internal.iter().map(|p| p.as_path()).collect();
 
-    // 外部依存（連結対象外）を emit して名前を得る
     let mut external_name: HashMap<PathBuf, String> = HashMap::new();
     for m in &internal {
         for dep in crate::chunk::module_deps(core, m)? {
@@ -623,13 +608,12 @@ fn emit_island(
                 code.push_str(&format!("\n//# sourceMappingURL={map_name}\n"));
             }
             fs::write(out_dir.join(&filename), &code)?;
-            // preload: このチャンクが import する外部チャンク群（推移依存は render_manifest が辿る）
+            // 直接依存のみ記録（推移依存は render_manifest が辿る）
             ctx.deps
                 .insert(filename.clone(), external_name.values().cloned().collect());
             ctx.emitted.insert(island.to_path_buf(), filename.clone());
             Ok(filename)
         }
-        // フォールバック: 連結に失敗したら従来の unbundled emit
         Err(_) => emit(core, island, out_dir, ctx),
     }
 }
@@ -721,7 +705,6 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
             _ => None,
         };
         let Some(lit) = source_lit else { continue };
-        // React 系 bare import → Preact 互換（解決して別チャンクへ）。
         if let Some(aliased) = crate::resolve::alias_specifier(lit.value.as_str()) {
             lit.value = allocator.alloc_str(aliased).into();
             lit.raw = None;
@@ -742,8 +725,7 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
         });
     }
 
-    // sources はルート相対/合成名にして prod で絶対パスを晒さない（sourcesContent は埋まる）。
-    // ルート外依存（pnpm ストア）の絶対パス露出を防ぐ。
+    // sources はルート相対にし、ルート外依存（pnpm ストア）を含め絶対パスを晒さない。
     let rel = client_source_name(&core.root, path);
     let ret = Codegen::new()
         .with_options(CodegenOptions {
@@ -761,17 +743,16 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
     })
 }
 
-/// manifest.json を手書きで生成（依存を増やさないため serde 不使用）。
-/// ファイル名は ascii のみなのでエスケープ不要。
-/// `preload`: 各エントリチャンク → 推移的依存チャンク。瀑布リクエストを避けるため、
-/// ページは島チャンクとその全依存を一括で `<link rel=modulepreload>` する。
-/// ライブ島か（`export const live` を持つ）。read_source 後（.tsrx もコンパイル済み）で判定。
+/// `export const live` を持つか。read_source 後（.tsrx もコンパイル済み）で判定する。
 fn is_live_island(core: &NowakiCore, abs: &Path) -> bool {
     core.read_source(abs)
         .map(|s| s.contains("export const live"))
         .unwrap_or(false)
 }
 
+/// manifest.json を手書きで生成（依存を増やさないため serde 不使用。ファイル名は ascii のみ）。
+/// `preload`: 各エントリチャンク → 推移的依存チャンク。瀑布リクエストを避けるため、
+/// ページは島チャンクとその全依存を一括で `<link rel=modulepreload>` する。
 fn render_manifest(
     runtime: Option<&str>,
     router_runtime: Option<&str>,

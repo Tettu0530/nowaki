@@ -20,7 +20,6 @@ pub fn load_client_defines(root: &Path) -> Vec<(String, String)> {
             let Some(eq) = line.find('=') else { continue };
             let key = line[..eq].trim().to_string();
             let mut val = line[eq + 1..].trim().to_string();
-            // クォート除去
             let quoted = (val.starts_with('"') && val.ends_with('"'))
                 || (val.starts_with('\'') && val.ends_with('\''));
             if quoted && val.len() >= 2 {

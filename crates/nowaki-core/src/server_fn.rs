@@ -36,11 +36,9 @@ fn has_directive(source: &str, want: &str) -> bool {
         i += 3; // UTF-8 BOM
     }
     loop {
-        // 空白
         while i < bytes.len() && bytes[i].is_ascii_whitespace() {
             i += 1;
         }
-        // 行コメント
         if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'/' {
             i += 2;
             while i < bytes.len() && bytes[i] != b'\n' {
@@ -48,7 +46,6 @@ fn has_directive(source: &str, want: &str) -> bool {
             }
             continue;
         }
-        // ブロックコメント
         if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
             i += 2;
             while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
@@ -57,7 +54,6 @@ fn has_directive(source: &str, want: &str) -> bool {
             i = (i + 2).min(bytes.len());
             continue;
         }
-        // 文字列リテラルのディレクティブか
         let quote = match bytes.get(i) {
             Some(&b'"') => b'"',
             Some(&b'\'') => b'\'',
@@ -67,12 +63,12 @@ fn has_directive(source: &str, want: &str) -> bool {
         let mut j = start;
         while j < bytes.len() && bytes[j] != quote {
             if bytes[j] == b'\\' {
-                j += 1; // エスケープを飛ばす
+                j += 1;
             }
             j += 1;
         }
         if j >= bytes.len() {
-            return false; // 閉じない文字列
+            return false;
         }
         if &source[start..j] == want {
             return true;
@@ -149,8 +145,7 @@ pub fn client_proxy(module_key: &str, exports: &[String]) -> String {
     out.push_str(
         "// nowaki: \"use server\" モジュールのクライアントプロキシ（実装はサーバーに留まる）。\n",
     );
-    // FormData 引数はオブジェクト化する（`<form action={serverFn}>` で渡される FormData を
-    // JSON 化できるように）。これで島内の form action から server fn を呼べる。
+    // `<form action={serverFn}>` で渡される FormData を JSON 化できるようオブジェクト化する。
     out.push_str(
         "const __nowakiArg = (a) => (typeof FormData !== \"undefined\" && a instanceof FormData) ? Object.fromEntries(a) : a;\n",
     );
