@@ -1,4 +1,4 @@
-// streaming レスポンスのデモ。web の Response + ReadableStream をそのまま返せる。
+// Streaming response demo. A web Response + ReadableStream can be returned as-is.
 export function GET() {
   const enc = new TextEncoder();
   const stream = new ReadableStream({

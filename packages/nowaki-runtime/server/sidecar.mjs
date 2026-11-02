@@ -1,15 +1,15 @@
-// dev SSR サイドカー。Rust dev サーバーから起動され、ページ描画と API ルートを担当する。
-// 起動完了は stdout の "NOWAKI_SIDECAR_READY <port>" で Rust へ通知する。
+// Dev SSR sidecar. Spawned by the Rust dev server; handles page rendering and API routes.
+// Signals readiness to Rust with "NOWAKI_SIDECAR_READY <port>" on stdout.
 
 import { createServer } from "node:http";
 import { register } from "node:module";
 import path from "node:path";
 import { loadEnv } from "./env.mjs";
 
-// ルート/loader が process.env を読めるよう、ルート読込より前に .env を読む
+// load .env before routes so routes/loaders can read process.env
 loadEnv();
 
-// 以降のdynamic importする .tsx/.ts はRustの変換エンドポイント経由で読み込まれる
+// from here on, dynamically imported .tsx/.ts go through Rust's transform endpoint
 register(new URL("./loader-hooks.mjs", import.meta.url));
 
 const { scanRoutes } = await import("./router.mjs");
@@ -21,7 +21,7 @@ const { pathToFileURL } = await import("node:url");
 const appRoot = process.cwd();
 const RUST = `http://127.0.0.1:${process.env.NOWAKI_RUST_PORT ?? "3000"}`;
 
-// dev は build しないのでサーバー関数の allowlist は Rust が discover する。HMR 世代ごとにキャッシュ。
+// dev doesn't build, so Rust discovers the server function allowlist. Cached per HMR generation.
 const fnCache = new Map();
 async function serverFnEntries(version) {
   if (fnCache.has(version)) return fnCache.get(version);
@@ -36,7 +36,7 @@ async function serverFnEntries(version) {
 
 const env = {
   dev: true,
-  // dev は毎リクエスト再スキャン（ファイル変更を反映）
+  // dev rescans on every request (picks up file changes)
   routeTable: () => scanRoutes(appRoot),
   importModule: (file, version) => import(`${pathToFileURL(file).href}?v=${version}`),
   ensureIslands: (version) => loadIslandRegistry(appRoot, version),
@@ -45,7 +45,7 @@ const env = {
       const entries = await serverFnEntries(String(version ?? "0"));
       return entries[id] ?? null;
     },
-    // dev は dist が無いのでソースを直接 import（loader-hooks が Rust 変換へ橋渡し）。
+    // dev has no dist, so import sources directly (loader-hooks bridges to the Rust transform).
     importModule: (m, version) =>
       import(`${pathToFileURL(path.join(appRoot, m)).href}?v=${version}`),
   },

@@ -1,5 +1,5 @@
-//! transform_file の統合テスト（import 解決の要らない範囲）。
-//! TS 型剥がし・JSX→preact・react→preact/compat エイリアスを検証する。
+//! Integration tests for transform_file (cases that need no import resolution).
+//! Covers TS type stripping, JSX→preact, and the react→preact/compat alias.
 
 use std::path::Path;
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# nowaki.dev ランディングを静的ファイルに事前レンダリングする。
-# 出力: site/public/  (Cloudflare Pages 等の静的ホストへそのままデプロイ可能)
+# Prerenders the nowaki.dev landing page to static files.
+# Output: site/public/  (deployable as-is to static hosts like Cloudflare Pages)
 #   /        -> public/index.html
 #   /ja      -> public/ja/index.html
-#   /_nowaki -> public/_nowaki/*   (content-hash 付きクライアントアセット)
-# 前提: `nowaki` が PATH にあること (cargo install nowaki もしくはリポジトリの
-#        target/debug/nowaki) と、site で `pnpm install` 済みであること。
+#   /_nowaki -> public/_nowaki/*   (content-hashed client assets)
+# Requires: `nowaki` on PATH (cargo install nowaki or the repo's
+#           target/debug/nowaki), and `pnpm install` already run in site.
 set -euo pipefail
 
 SITE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -34,7 +34,7 @@ curl -sf "http://127.0.0.1:$PORT/" -o public/index.html
 curl -sf "http://127.0.0.1:$PORT/ja" -o public/ja/index.html
 cp -R dist/client/. public/_nowaki/
 
-# Cloudflare Pages: ハッシュ付きアセットは長期 immutable キャッシュ
+# Cloudflare Pages: long-lived immutable caching for hashed assets
 cat > public/_headers <<'HEADERS'
 /_nowaki/*
   Cache-Control: public, max-age=31536000, immutable

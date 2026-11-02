@@ -1,5 +1,5 @@
-// わざと遅いローダー。クライアント遷移で loading 境界が出るのを確認するためのデモ。
-// `?ms=600` で遅延を変えられる（既定 400ms）。
+// A deliberately slow loader. Demo for checking that the loading boundary shows on client navigation.
+// `?ms=600` changes the delay (default 400ms).
 export const title = "Slow — Nowaki";
 
 export const loader = async (ctx) => {
@@ -12,8 +12,8 @@ export default function Slow({ data }) {
   return (
     <main style="font-family:system-ui,sans-serif;max-width:640px;margin:4rem auto;padding:0 1.25rem">
       <h1 data-testid="slow">Slow page</h1>
-      <p>このページのローダーは {data.ms}ms かかります。クライアント遷移ではその間 loading 境界が出ます。</p>
-      <a href="/">戻る</a>
+      <p>This page's loader takes {data.ms}ms. On client navigation, the loading boundary shows meanwhile.</p>
+      <a href="/">Back</a>
     </main>
   );
 }

@@ -18,7 +18,7 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "nowaki",
     version,
-    about = "Nowaki — Rust製ツールチェーンのフルスタックフレームワーク"
+    about = "Nowaki — a full-stack framework built on a Rust toolchain"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -27,61 +27,61 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// 開発サーバーを起動する
+    /// Start the dev server
     Dev {
-        /// アプリのルートディレクトリ
+        /// App root directory
         #[arg(default_value = ".")]
         dir: PathBuf,
         #[arg(short, long, default_value_t = 3000)]
         port: u16,
-        /// LAN に公開する（0.0.0.0 で待ち受け、Network URL を表示）
+        /// Expose on the LAN (listen on 0.0.0.0, show the Network URL)
         #[arg(long)]
         host: bool,
-        /// 起動後に既定ブラウザを開く
+        /// Open the default browser after startup
         #[arg(long)]
         open: bool,
     },
-    /// 本番用にビルドし、デプロイアダプタの配備物を出力する
+    /// Build for production and emit output for the deploy adapter
     Build {
-        /// アプリのルートディレクトリ
+        /// App root directory
         #[arg(default_value = ".")]
         dir: PathBuf,
-        /// デプロイ先アダプタ (node|static|bun|deno|cloudflare|vercel)
+        /// Deploy target adapter (node|static|bun|deno|cloudflare|vercel)
         #[arg(long, value_enum, default_value_t = Adapter::Node)]
         adapter: Adapter,
     },
-    /// ビルド済みアプリを本番モードで配信する
+    /// Serve a built app in production mode
     Start {
-        /// アプリのルートディレクトリ
+        /// App root directory
         #[arg(default_value = ".")]
         dir: PathBuf,
         #[arg(short, long, default_value_t = 3000)]
         port: u16,
-        /// 全インターフェースで待ち受ける（既定は NOWAKI_HOST or 127.0.0.1）
+        /// Listen on all interfaces (default: NOWAKI_HOST or 127.0.0.1)
         #[arg(long)]
         host: bool,
     },
-    /// 静的サイトとして事前レンダリングする (SSG)
+    /// Prerender as a static site (SSG)
     Prerender {
-        /// アプリのルートディレクトリ
+        /// App root directory
         #[arg(default_value = ".")]
         dir: PathBuf,
-        /// 出力ディレクトリ (dir からの相対 or 絶対)
+        /// Output directory (relative to dir, or absolute)
         #[arg(short, long, default_value = "dist/static")]
         out: PathBuf,
     },
-    /// nowaki(CLI) と @nowaki-dev/runtime を最新へ更新する
+    /// Update nowaki (CLI) and @nowaki-dev/runtime to the latest version
     Upgrade {
-        /// アプリのルートディレクトリ
+        /// App root directory
         #[arg(default_value = ".")]
         dir: PathBuf,
-        /// 更新先のバージョン（既定: latest）。例: --to 0.11.0
+        /// Version to update to (default: latest), e.g. --to 0.11.0
         #[arg(long)]
         to: Option<String>,
     },
-    /// 型付きルート（.nowaki/types.d.ts）を生成する
+    /// Generate typed routes (.nowaki/types.d.ts)
     Typegen {
-        /// アプリのルートディレクトリ
+        /// App root directory
         #[arg(default_value = ".")]
         dir: PathBuf,
     },
@@ -105,7 +105,7 @@ fn main() -> anyhow::Result<()> {
         Command::Build { dir, adapter } => {
             let root = dir.canonicalize()?;
             typegen::write(&root)?;
-            // static アダプタは prerender に委譲（build → 一時起動 → 各ルートを静的化）。
+            // The static adapter delegates to prerender (build → temporary server → render each route).
             if adapter == Adapter::Static {
                 let out = root.join("dist/static");
                 return tokio::runtime::Builder::new_multi_thread()
@@ -114,7 +114,7 @@ fn main() -> anyhow::Result<()> {
                     .block_on(prerender::run(root.clone(), out));
             }
             let dist = root.join("dist");
-            // build 終了まで生かす（drop でホストを落とす）。
+            // Keep alive until the build finishes (drop kills the host).
             let plugin_host = plugins::start(&root)?;
             let mut core = nowaki_core::NowakiCore::new(root.clone());
             if let Some(host) = &plugin_host {
@@ -142,7 +142,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Start { dir, port, host } => {
             let root = dir.canonicalize()?;
-            // Rust(axum) が静的配信 + HTML 組み立て、Node prod-sidecar がコンポーネント描画。
+            // Rust (axum) serves static files + assembles HTML; the Node prod-sidecar renders components.
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?

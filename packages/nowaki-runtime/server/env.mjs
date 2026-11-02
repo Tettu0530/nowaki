@@ -1,4 +1,4 @@
-// 依存を増やさないための最小 .env ローダー（cwd の .env / .env.local → 未設定の process.env）。
+// Minimal dependency-free .env loader (cwd's .env / .env.local → unset process.env keys).
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -24,7 +24,7 @@ function parse(content) {
 }
 
 export function loadEnv(root = process.cwd()) {
-  // .env.local が .env を上書きする慣例だが、既存の process.env は上書きしない
+  // by convention .env.local overrides .env, but existing process.env values are never overwritten
   for (const file of [".env", ".env.local"]) {
     let content;
     try {

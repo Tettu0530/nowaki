@@ -25,9 +25,9 @@ pub struct DevState {
     sidecar_port: u16,
     http: reqwest::Client,
     live_hub: Arc<crate::live::LiveHub>,
-    /// /@fs/ で配信を許可するルート集合（実体パス）。これ以外への到達を弾く。
+    /// Roots /@fs/ may serve from (canonical paths). Anything else is rejected.
     fs_allow: Vec<PathBuf>,
-    /// --host で全インターフェース公開しているか。WS の Origin/Host 検証に使う。
+    /// Whether --host exposes all interfaces. Used for WS Origin/Host checks.
     expose: bool,
 }
 
@@ -50,11 +50,11 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         hmr_tx: hmr_tx.clone(),
         ssr_version: AtomicU64::new(1),
         sidecar_port: sidecar.port,
-        // リダイレクト(302等)はブラウザへ素通しする（サーバー側で追従しない）。
+        // Pass redirects (302 etc.) through to the browser (don't follow server-side).
         http: reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .expect("reqwest client の構築に失敗"),
+            .expect("failed to build reqwest client"),
         live_hub: crate::live::LiveHub::new(),
         fs_allow: compute_fs_allow(&root),
         expose,
@@ -97,7 +97,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
     Ok(())
 }
 
-/// ファイル監視 → ssr_version更新 + reloadブロードキャスト (100msデバウンス)
+/// File watch → bump ssr_version + broadcast reload (100ms debounce)
 fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::RecommendedWatcher> {
     let root_owned = root.to_path_buf();
     let last_fire = Mutex::new(Instant::now() - Duration::from_secs(1));
@@ -169,13 +169,13 @@ async fn hmr_ws(
     ws.on_upgrade(move |socket| handle_hmr(socket, state))
 }
 
-/// サーバーリアクティブ島の WS。セッションロジックは crate::live が担う。
+/// WS for server-reactive islands. Session logic lives in crate::live.
 async fn live_ws(
     ws: WebSocketUpgrade,
     headers: axum::http::HeaderMap,
     State(state): State<Arc<DevState>>,
 ) -> Response {
-    // クロスサイト WebSocket ハイジャック(CSWSH)対策: 異オリジンからの upgrade を拒否。
+    // Cross-site WebSocket hijacking (CSWSH) guard: reject cross-origin upgrades.
     if !ws_origin_ok(&headers, state.expose) {
         return (StatusCode::FORBIDDEN, "forbidden origin").into_response();
     }
@@ -205,8 +205,8 @@ async fn handle_hmr(mut socket: WebSocket, state: Arc<DevState>) {
     }
 }
 
-/// サーバー関数の allowlist（id → { module, export }）。dev は build しないので
-/// サイドカーはこれを引いて RPC を dispatch する。
+/// Server function allowlist (id → { module, export }). Dev doesn't build, so
+/// the sidecar looks RPCs up here to dispatch them.
 async fn server_functions(State(state): State<Arc<DevState>>) -> Response {
     let core_state = state.clone();
     let body = tokio::task::spawn_blocking(move || {
@@ -237,12 +237,12 @@ async fn server_functions(State(state): State<Arc<DevState>>) -> Response {
 #[derive(serde::Deserialize)]
 pub struct SsrModuleQuery {
     path: String,
-    #[allow(dead_code)] // キャッシュバスター (Nodeローダーが付与)
+    #[allow(dead_code)] // cache buster (added by the Node loader)
     v: Option<String>,
 }
 
-/// Nodeローダーフック向けの SSR 変換。`path` はユーザー入力なので実体パスへ正規化し、
-/// 許可ルート配下・非機微の変換対象だけを通す（`?path=/etc/passwd` 等の任意ファイル読み取り防止）。
+/// SSR transform for the Node loader hook. `path` is user input, so canonicalize it and
+/// only pass transformable, non-sensitive files under allowed roots (blocks arbitrary reads like `?path=/etc/passwd`).
 async fn ssr_module(
     State(state): State<Arc<DevState>>,
     Query(q): Query<SsrModuleQuery>,
@@ -256,8 +256,8 @@ async fn ssr_module(
     transform_response(state, canon, Mode::Ssr).await
 }
 
-/// /@fs/<絶対パス>: アプリルート外 (pnpmストア等) のファイル配信。`rest` はユーザー入力なので
-/// 実体パスへ正規化してから許可ルート配下・非機微を検証する（パストラバーサル防止）。
+/// /@fs/<absolute path>: serves files outside the app root (pnpm store etc.). `rest` is user input, so
+/// canonicalize it, then check it's under an allowed root and non-sensitive (prevents path traversal).
 async fn serve_fs(
     State(state): State<Arc<DevState>>,
     axum::extract::Path(rest): axum::extract::Path<String>,
@@ -272,10 +272,10 @@ async fn serve_fs(
     serve_file(state, canon).await
 }
 
-/// フォールバック: アプリルート配下のファイルならば配信、さもなくばサイドカーへSSRプロキシ
+/// Fallback: serve the file if it's under the app root, otherwise proxy SSR to the sidecar
 async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Response {
     let path = req.uri().path().to_string();
-    // 仮想 id に `..` は無いので弾く（合成ディレクトリ実在時の root.join 経由トラバーサル防止）。
+    // Virtual ids never contain `..`, so reject it (prevents traversal via root.join when the synthetic dir exists).
     if path.starts_with(&format!("/{VIRTUAL_DIR}/")) {
         if path.split('/').any(|seg| seg == "..") {
             return (StatusCode::NOT_FOUND, "not found").into_response();
@@ -286,8 +286,8 @@ async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Res
     if req.method() == axum::http::Method::GET && path != "/" {
         let candidate = state.core.root.join(path.trim_start_matches('/'));
         if candidate.is_file() {
-            // `..`/symlink でルート外へ抜けていないか実体で確認し、機微パスも配信しない
-            // （root は main.rs で canonicalize 済み）。
+            // Check the real path hasn't escaped the root via `..`/symlinks, and never serve sensitive paths
+            // (root is already canonicalized in main.rs).
             match candidate.canonicalize() {
                 Ok(canon) if canon.starts_with(&state.core.root) && !is_denied_fs_path(&canon) => {
                     return serve_file(state, candidate).await;
@@ -300,8 +300,8 @@ async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Res
 }
 
 async fn serve_file(state: Arc<DevState>, abs: PathBuf) -> Response {
-    // .css は <style> を注入する JS シムとして配信する（import で副作用適用）。
-    // *.module.css はクラス名をスコープ化し、名前マップを default export する。
+    // Serve .css as a JS shim that injects a <style> (applied as an import side effect).
+    // *.module.css scopes class names and default-exports the name map.
     if nowaki_core::css::is_css(&abs) {
         return match tokio::fs::read_to_string(&abs).await {
             Ok(css) => {
@@ -334,7 +334,7 @@ async fn serve_file(state: Arc<DevState>, abs: PathBuf) -> Response {
 }
 
 async fn transform_response(state: Arc<DevState>, abs: PathBuf, mode: Mode) -> Response {
-    // oxc変換はCPUバウンドなのでblockingプールで実行
+    // oxc transforms are CPU-bound, so run them on the blocking pool
     let core_state = state.clone();
     let result = tokio::task::spawn_blocking(move || core_state.core.load_module(&abs, mode)).await;
     match result {
@@ -348,8 +348,8 @@ async fn transform_response(state: Arc<DevState>, abs: PathBuf, mode: Mode) -> R
             .into_response(),
         Ok(Err(err)) => {
             let msg = format!("{err:#}");
-            eprintln!("[nowaki] 変換エラー: {msg}");
-            // 診断はソース全文を含み得るので HTTP ボディに載せず、同一オリジンの HMR オーバーレイへだけ送る。
+            eprintln!("[nowaki] transform error: {msg}");
+            // Diagnostics may contain the full source, so keep them out of the HTTP body and send them only to the same-origin HMR overlay.
             let _ = state
                 .hmr_tx
                 .send(json!({ "type": "error", "message": msg }).to_string());
@@ -385,7 +385,7 @@ async fn proxy_to_sidecar(state: Arc<DevState>, req: Request) -> Response {
             state.ssr_version.load(Ordering::SeqCst).to_string(),
         )
         .body(body.to_vec());
-    // 元 Host は剥がすが、同一オリジン検証（サーバー関数の CSRF 対策）用に転送する。
+    // Strip the original Host but forward it for the same-origin check (server function CSRF guard).
     if let Some(host) = headers.get(header::HOST) {
         builder = builder.header("x-forwarded-host", host);
     }
@@ -419,15 +419,15 @@ async fn proxy_to_sidecar(state: Arc<DevState>, req: Request) -> Response {
             crate::ui::request_log(&method_str, &log_path, 502, started.elapsed().as_millis());
             (
                 StatusCode::BAD_GATEWAY,
-                format!("SSRサイドカーへの接続に失敗: {err}"),
+                format!("failed to connect to SSR sidecar: {err}"),
             )
                 .into_response()
         }
     }
 }
 
-/// /@fs/ の許可ルート: アプリルートとワークスペースルート（pnpm/モノレポの共有 node_modules）。
-/// それ以外（`/etc`・ホーム・ルート外の `.env` 等）への到達を弾く。
+/// Allowed roots for /@fs/: the app root and workspace root (shared node_modules in pnpm/monorepos).
+/// Anything else (`/etc`, home, `.env` outside the root, etc.) is rejected.
 fn compute_fs_allow(root: &Path) -> Vec<PathBuf> {
     let mut allow = Vec::new();
     if let Ok(c) = root.canonicalize() {
@@ -443,7 +443,7 @@ fn compute_fs_allow(root: &Path) -> Vec<PathBuf> {
     allow
 }
 
-/// 最も近いワークスペース境界（`pnpm-workspace.yaml` か `.git`）。
+/// Nearest workspace boundary (`pnpm-workspace.yaml` or `.git`).
 fn workspace_root(root: &Path) -> Option<PathBuf> {
     let mut dir = Some(root);
     while let Some(d) = dir {
@@ -455,7 +455,7 @@ fn workspace_root(root: &Path) -> Option<PathBuf> {
     None
 }
 
-/// 許可ルート配下でも配信を拒否する機微パス（`.git` 配下・`.env*`・秘密鍵）。
+/// Sensitive paths refused even under allowed roots (inside `.git`, `.env*`, private keys).
 fn is_denied_fs_path(p: &Path) -> bool {
     p.components().any(|c| {
         let s = c.as_os_str().to_string_lossy();
@@ -471,7 +471,7 @@ fn is_loopback_host(host: &str) -> bool {
     let h = if let Some(rest) = host.strip_prefix('[') {
         rest.split(']').next().unwrap_or(rest)
     } else if host.matches(':').count() >= 2 {
-        // ブラケット無しの IPv6（例 `::1`）はポートを持たない。
+        // Unbracketed IPv6 (e.g. `::1`) has no port.
         host
     } else {
         host.rsplit_once(':').map(|(h, _)| h).unwrap_or(host)
@@ -479,8 +479,8 @@ fn is_loopback_host(host: &str) -> bool {
     matches!(h, "localhost" | "127.0.0.1" | "::1")
 }
 
-/// WebSocket upgrade の Origin を検証する（CSWSH 対策）。Origin 無し（非ブラウザ）は許可、
-/// 同一オリジンは許可だが既定バインドでは DNS リバインディング対策に Host をループバックへ限定。
+/// Validate the WebSocket upgrade Origin (CSWSH guard). No Origin (non-browser) is allowed;
+/// same-origin is allowed, but on the default bind Host must be loopback to defeat DNS rebinding.
 fn ws_origin_ok(headers: &axum::http::HeaderMap, expose: bool) -> bool {
     let origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
     let Some(origin) = origin else {
@@ -495,7 +495,7 @@ fn ws_origin_ok(headers: &axum::http::HeaderMap, expose: bool) -> bool {
             return expose || is_loopback_host(host);
         }
     }
-    // Host と不一致でも、明示的なループバック Origin（localhost:port 等）は許可。
+    // Even without a Host match, an explicit loopback Origin (localhost:port etc.) is allowed.
     is_loopback_host(origin_host)
 }
 
@@ -521,10 +521,10 @@ mod tests {
     #[test]
     fn rejects_paths_outside_allow_roots() {
         let allow = vec![PathBuf::from("/proj/node_modules")];
-        // 許可ルート外（任意ファイル読み取り）は弾く
+        // Reject paths outside allowed roots (arbitrary file reads)
         assert!(!fs_path_allowed(Path::new("/etc/passwd"), &allow));
         assert!(!fs_path_allowed(Path::new("/home/u/.ssh/id_rsa"), &allow));
-        // 前方一致の取りこぼし（兄弟ディレクトリ）も弾く
+        // Also reject prefix-match slips (sibling directories)
         assert!(!fs_path_allowed(
             Path::new("/proj/node_modules_evil/x"),
             &allow
@@ -543,7 +543,7 @@ mod tests {
     #[test]
     fn denies_sensitive_files_even_within_allow_roots() {
         let allow = vec![PathBuf::from("/proj")];
-        // 許可ルート配下でも .env / .git 配下 / 秘密鍵は配信しない
+        // Never serve .env / inside .git / private keys, even under allowed roots
         assert!(!fs_path_allowed(Path::new("/proj/.env"), &allow));
         assert!(!fs_path_allowed(Path::new("/proj/.env.local"), &allow));
         assert!(!fs_path_allowed(Path::new("/proj/.git/config"), &allow));
@@ -557,7 +557,7 @@ mod tests {
 
     #[test]
     fn is_denied_fs_path_matches_components_not_substrings() {
-        // ".env" を名前に含むだけのディレクトリは誤爆させない
+        // Don't misfire on directories whose name merely contains ".env"
         assert!(!is_denied_fs_path(Path::new("/proj/environments/dev.js")));
         assert!(is_denied_fs_path(Path::new("/proj/.env.production")));
     }
@@ -575,7 +575,7 @@ mod tests {
 
     #[test]
     fn ws_origin_rejects_cross_site() {
-        // 既定バインド: localhost への異オリジン接続を弾く（CSWSH）
+        // Default bind: reject cross-origin connections to localhost (CSWSH)
         let h = hdrs(&[("host", "localhost:3000"), ("origin", "http://evil.com")]);
         assert!(!ws_origin_ok(&h, false));
         assert!(!ws_origin_ok(&h, true));
@@ -597,7 +597,7 @@ mod tests {
 
     #[test]
     fn ws_origin_defeats_dns_rebinding_on_default_bind() {
-        // Origin==Host だが Host が非ループバック → 既定バインドでは拒否、--host では許可
+        // Origin==Host but Host is non-loopback → rejected on default bind, allowed with --host
         let h = hdrs(&[
             ("host", "attacker.test:3000"),
             ("origin", "http://attacker.test:3000"),
@@ -608,14 +608,14 @@ mod tests {
 
     #[test]
     fn ws_origin_allows_missing_origin() {
-        // ネイティブ WS クライアント（Origin 無し）は許可
+        // Native WS clients (no Origin) are allowed
         let h = hdrs(&[("host", "localhost:3000")]);
         assert!(ws_origin_ok(&h, false));
     }
 
     #[test]
     fn ws_origin_lan_same_origin_under_host() {
-        // --host で LAN IP の同一オリジンは許可
+        // With --host, same-origin on a LAN IP is allowed
         let h = hdrs(&[
             ("host", "192.168.1.10:3000"),
             ("origin", "http://192.168.1.10:3000"),

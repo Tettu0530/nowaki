@@ -1,5 +1,5 @@
-// サーバーリアクティブ島のデモ。クライアントにコンポーネント JS を送らずに対話する。
-// クライアント島（Counter, 楽観UI）と共存することも示す。
+// Server-reactive island demo. Interactive without sending component JS to the client.
+// Also shows it coexisting with a client island (Counter, optimistic UI).
 import LiveCounter from "../islands/LiveCounter.tsx";
 import Counter from "../islands/Counter.tsx";
 

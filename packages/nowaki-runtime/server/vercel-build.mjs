@@ -1,7 +1,7 @@
-// Vercel アダプタのビルド時生成器（Node 実行）。Build Output API v3 を `.vercel/output/` に出力する。
-// Function は自己完結が前提なので、dist/server と必要な node_modules を Function へ取り込む。
+// Build-time generator for the Vercel adapter (runs on Node). Emits Build Output API v3 to `.vercel/output/`.
+// Functions must be self-contained, so dist/server and the needed node_modules are copied into the Function.
 //
-// 使い方: node vercel-build.mjs <serverDir> <clientDir> <outputDir> <appRoot>
+// Usage: node vercel-build.mjs <serverDir> <clientDir> <outputDir> <appRoot>
 
 import { writeFile, mkdir, cp, rm } from "node:fs/promises";
 import path from "node:path";
@@ -19,7 +19,7 @@ await rm(outputDir, { recursive: true, force: true });
 await mkdir(funcDir, { recursive: true });
 await mkdir(staticDir, { recursive: true });
 
-// dist/client/* → static/_nowaki/*（Vercel が配信）
+// dist/client/* → static/_nowaki/* (served by Vercel)
 await cp(clientDir, path.join(staticDir, "_nowaki"), { recursive: true });
 
 await cp(serverDir, path.join(funcDir, "server"), { recursive: true });
@@ -29,9 +29,9 @@ await cp(path.join(clientDir, "manifest.json"), path.join(funcDir, "client", "ma
 const nodeModules = path.join(funcDir, "node_modules");
 for (const dep of ["@nowaki-dev/runtime", "preact", "preact-render-to-string"]) {
   const src = path.join(appRoot, "node_modules", dep);
-  // 依存パッケージの「ネストした node_modules」は取り込まない。取り込むと preact が
-  // 二重になり（runtime の devDep）、フックが別インスタンスになって SSR が正しく動かなくなる。
-  // Node は上位 node_modules を辿るので、トップレベルの単一 preact に解決される。
+  // Don't copy dependencies' nested node_modules. Doing so duplicates preact
+  // (runtime's devDep), splitting hooks across instances and breaking SSR.
+  // Node walks up node_modules, so it resolves to the single top-level preact.
   await cp(src, path.join(nodeModules, dep), {
     recursive: true,
     dereference: true,
@@ -39,7 +39,7 @@ for (const dep of ["@nowaki-dev/runtime", "preact", "preact-render-to-string"]) 
   });
 }
 
-const handler = `// 自動生成: Vercel serverless function（Node）。
+const handler = `// Generated: Vercel serverless function (Node).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "@nowaki-dev/runtime/server/app.mjs";
@@ -53,7 +53,7 @@ export default handle;
 `;
 await writeFile(path.join(funcDir, "index.mjs"), handler);
 
-// launcher=Nodejs で (req,res) ハンドラを受ける。
+// launcher=Nodejs accepts a (req,res) handler.
 await writeFile(
   path.join(funcDir, ".vc-config.json"),
   JSON.stringify({ runtime: "nodejs20.x", handler: "index.mjs", launcherType: "Nodejs" }, null, 2) +

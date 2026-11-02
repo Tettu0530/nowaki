@@ -1,6 +1,6 @@
-// ISR + ヘッダ依存ルート。security e2e がクロスユーザーのキャッシュ隔離を検証するために使う。
-// accept-language を読むので、Vary 学習でその値がキャッシュキーに含まれ、
-// 別言語のリクエストが他言語のキャッシュ済み内容を受け取らない。
+// ISR + header-dependent route. Used by the security e2e to verify cross-user cache isolation.
+// It reads accept-language, so Vary learning puts that value in the cache key and
+// a request in one language never gets content cached for another.
 export const revalidate = 30;
 
 export const loader = (ctx: { get: (name: string) => string | undefined }) => ({

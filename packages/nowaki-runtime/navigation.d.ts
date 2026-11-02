@@ -1,34 +1,34 @@
-// 型安全なナビゲーションの型。`nowaki typegen` が .nowaki/types.d.ts で NowakiRoutes を拡張して
-// 実際のルートを登録する。生成前は RoutePath が string にフォールバックする。
+// Types for type-safe navigation. `nowaki typegen` augments NowakiRoutes in .nowaki/types.d.ts
+// to register the actual routes. Until then, RoutePath falls back to string.
 
 import type { VNode } from "preact";
 
-/** 生成された型がパス→パラメータ型を登録する。例: { "/blog/[slug]": { slug: string } } */
+/** Generated types register path → params type here, e.g. { "/blog/[slug]": { slug: string } }. */
 export interface NowakiRoutes {}
 
 type Keys = keyof NowakiRoutes & string;
 
-/** 既知のルートパスの合併（未生成なら string）。 */
+/** Union of known route paths (string until types are generated). */
 export type RoutePath = [Keys] extends [never] ? string : Keys;
 
 type ParamsOf<P extends string> = P extends keyof NowakiRoutes
   ? NowakiRoutes[P]
   : Record<string, string | string[]>;
 
-/** パラメータの無い静的ルートだけの合併（Link の href に直接使える）。 */
+/** Union of static routes without params (usable directly as a Link href). */
 type StaticRoutePath = [Keys] extends [never]
   ? string
   : { [P in Keys]: {} extends ParamsOf<P> ? P : never }[Keys];
 
-/** route() が返す、検証済み href のブランド型。 */
+/** Branded type for a validated href returned by route(). */
 export type Href = string & { readonly __nowaki: "href" };
 
 /**
- * 動的ルートの href を型安全に組む。
- *   route("/about")                       // パラメータ不要
- *   route("/blog/[slug]", { slug: "hi" }) // 必須パラメータ
- *   route("/files/[...path]", { path: ["a", "b"] }) // catch-all は配列
- * 不明なルート・パラメータ不足・キー違いはコンパイルエラー。
+ * Builds a type-safe href for a dynamic route.
+ *   route("/about")                       // no params
+ *   route("/blog/[slug]", { slug: "hi" }) // required params
+ *   route("/files/[...path]", { path: ["a", "b"] }) // catch-all takes an array
+ * Unknown routes, missing params, and wrong keys are compile errors.
  */
 export function route<P extends RoutePath>(
   pattern: P,
@@ -36,17 +36,17 @@ export function route<P extends RoutePath>(
 ): Href;
 
 export interface LinkProps {
-  /** 静的ルート（型チェックあり）、または route() で組んだ href。 */
+  /** A static route (type-checked), or an href built with route(). */
   href: StaticRoutePath | Href;
   class?: string;
   className?: string;
   target?: string;
   rel?: string;
-  /** SPA 遷移を無効にして通常の遷移にする。 */
+  /** Disables SPA navigation and falls back to a full page load. */
   "data-no-router"?: boolean;
   children?: unknown;
   [key: string]: unknown;
 }
 
-/** 型付きの <a>。クライアントルーターが SPA 遷移として扱う。 */
+/** A typed <a>. The client router handles it as an SPA navigation. */
 export function Link(props: LinkProps): VNode;

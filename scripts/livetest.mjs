@@ -1,14 +1,14 @@
-// Jetstream の WS e2e（join/presence/event→patch/切断）。Node 22+ の global WebSocket を使う。
-// 使い方: node scripts/livetest.mjs <baseUrl>   例: node scripts/livetest.mjs http://127.0.0.1:3300
+// Jetstream WS e2e (join/presence/event->patch/disconnect). Uses Node 22+'s global WebSocket.
+// Usage: node scripts/livetest.mjs <baseUrl>   e.g. node scripts/livetest.mjs http://127.0.0.1:3300
 
 const base = process.argv[2] ?? "http://127.0.0.1:3300";
 const wsUrl = base.replace(/^http/, "ws") + "/__nowaki/live";
 
-// sig は HMAC 署名で、join 時にサーバーが検証する（無いと弾かれる）。属性順に依らず抽出。
+// sig is an HMAC signature the server verifies on join (rejected without it). Extracted regardless of attribute order.
 const html = await (await fetch(base + "/live")).text();
 const tag = html.match(/<nowaki-live\b[^>]*>/)?.[0];
 if (!tag || !/name="LiveCounter"/.test(tag)) {
-  console.error("FAIL: <nowaki-live name=LiveCounter> が /live に見つかりません");
+  console.error("FAIL: <nowaki-live name=LiveCounter> not found on /live");
   process.exit(1);
 }
 const attr = (n) => tag.match(new RegExp(`${n}="([^"]*)"`))?.[1];

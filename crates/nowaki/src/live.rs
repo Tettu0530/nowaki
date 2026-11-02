@@ -1,7 +1,7 @@
-//! サーバーリアクティブ島（Jetstream）の WS セッション。dev/prod 共通。
+//! WS session for server-reactive islands (Jetstream). Shared by dev and prod.
 //!
-//! 状態は Rust 側（この接続）が nid→(name, state) で持ち、Node サイドカーの
-//! `/__nowaki/live-render` は純粋な再評価関数。結果の html を `patch` として push する。
+//! State lives on the Rust side (this connection) as nid→(name, state); the Node sidecar's
+//! `/__nowaki/live-render` is a pure re-evaluation function. The resulting html is pushed as a `patch`.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -11,11 +11,11 @@ use axum::extract::ws::{Message, WebSocket};
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
 
-/// ハートビート間隔とアイドルタイムアウト（pong/メッセージがこの間無ければ切断）。
+/// Heartbeat interval and idle timeout (disconnect if no pong/message within it).
 const PING_INTERVAL: Duration = Duration::from_secs(30);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(75);
 
-/// 全接続を束ねるハブ。同時接続の上限と presence（接続数）のブロードキャストを担う。
+/// Hub for all connections. Enforces the concurrent connection cap and broadcasts presence (connection count).
 pub struct LiveHub {
     active: AtomicUsize,
     max: usize,
@@ -37,7 +37,7 @@ impl LiveHub {
         })
     }
 
-    /// 接続を1つ受け入れる。上限超過なら None（呼び出し側が拒否する）。
+    /// Accept one connection. None if over the cap (the caller rejects it).
     fn join(&self) -> Option<usize> {
         let prev = self.active.fetch_add(1, Ordering::SeqCst);
         if prev + 1 > self.max {
@@ -66,7 +66,7 @@ pub async fn handle(
     sidecar_port: u16,
     version: String,
 ) {
-    // 上限超過なら error を送ってから閉じる（クライアントは初期 SSR のまま劣化動作）。
+    // Over the cap: send an error, then close (the client degrades to the initial SSR).
     let Some(count) = hub.join() else {
         let _ = socket
             .send(Message::Text(
@@ -88,24 +88,24 @@ pub async fn handle(
         ))
         .await;
 
-    // nid -> (island name, 現在の state, state の署名)
+    // nid -> (island name, current state, state signature)
     let mut islands: std::collections::HashMap<String, (String, Value, String)> =
         std::collections::HashMap::new();
     let mut last_seen = Instant::now();
     let mut ping = tokio::time::interval(PING_INTERVAL);
-    ping.tick().await; // 最初の即時 tick を捨てる
+    ping.tick().await; // discard the immediate first tick
 
     loop {
         tokio::select! {
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
-                last_seen = Instant::now(); // 任意の受信で生存更新（pong 含む）
+                last_seen = Instant::now(); // any received message (incl. pong) marks liveness
                 if let Message::Text(txt) = msg {
                     if !handle_text(&mut socket, &mut islands, &http, sidecar_port, &version, txt.as_str()).await {
                         break;
                     }
                 }
-                // Ping/Pong/Binary/Close は last_seen 更新のみ（Close は recv が None になる）。
+                // Ping/Pong/Binary/Close only update last_seen (Close makes recv return None).
             }
             p = presence_rx.recv() => {
                 let n = match p {
@@ -131,7 +131,7 @@ pub async fn handle(
     hub.leave();
 }
 
-/// Text メッセージ（join/event）を処理する。接続継続なら true、切断すべきなら false。
+/// Handle a Text message (join/event). true to keep the connection, false to disconnect.
 async fn handle_text(
     socket: &mut WebSocket,
     islands: &mut std::collections::HashMap<String, (String, Value, String)>,
@@ -157,7 +157,7 @@ async fn handle_text(
                         .unwrap_or("")
                         .to_string();
                     let st = it.get("state").cloned().unwrap_or_else(|| json!({}));
-                    // 初期 state の署名（SSR で発行）。サイドカーがハンドラ実行前に検証する。
+                    // Signature of the initial state (issued at SSR). The sidecar verifies it before running handlers.
                     let sig = it
                         .get("sig")
                         .and_then(|x| x.as_str())
@@ -193,19 +193,19 @@ async fn handle_text(
                 .send()
                 .await;
             let Ok(r) = resp else {
-                eprintln!("[nowaki live] サイドカー再描画に失敗");
+                eprintln!("[nowaki live] sidecar re-render failed");
                 return true;
             };
             let Ok(txt) = r.text().await else { return true };
             let Ok(rv) = serde_json::from_str::<Value>(&txt) else {
                 return true;
             };
-            // 署名検証失敗などで html が無い（サイドカーがエラーを返した）場合は
-            // state を更新せず patch も送らない（偽造 state を持たせない / 空描画を防ぐ）。
+            // No html (the sidecar returned an error, e.g. failed signature check):
+            // don't update state or send a patch (never keep forged state / avoid empty renders).
             let Some(html) = rv.get("html").and_then(|h| h.as_str()) else {
                 return true;
             };
-            // 次イベントでも検証できるよう新しい署名も保持する。
+            // Keep the new signature too so the next event can be verified.
             if let Some(ns) = rv.get("state") {
                 let nsig = rv
                     .get("sig")

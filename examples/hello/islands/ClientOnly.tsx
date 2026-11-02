@@ -1,4 +1,4 @@
-// client:only 用の島。SSR されず、クライアントだけで描画される（window を直接読む）。
+// Island for client:only. Not SSR'd; rendered on the client only (reads window directly).
 import { useState, useEffect } from "preact/hooks";
 
 export default function ClientOnly() {

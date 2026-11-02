@@ -2,20 +2,20 @@ use std::path::Path;
 
 use xxhash_rust::xxh3::xxh3_64;
 
-/// サーバー側で .css import を無効化するための空モジュール（CSS はクライアント専用）。
+/// Empty module that neutralizes .css imports on the server (CSS is client-only).
 pub const CSS_NOOP_SPECIFIER: &str = "data:text/javascript,";
 
 pub fn is_css(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()) == Some("css")
 }
 
-/// CSS Modules（`*.module.css`）。ローカルクラス名をスコープ化し、JS へ名前マップを export する。
+/// CSS Modules (`*.module.css`): scopes local class names and exports a name map to JS.
 pub fn is_css_module(path: &Path) -> bool {
     path.to_str().is_some_and(|s| s.ends_with(".module.css"))
 }
 
-/// クラスセレクタ `.name` を `.name_<suffix>` にスコープ化し、(スコープ済CSS, 元名→新名) を返す。
-/// suffix は id 由来で安定（dev/build・client/SSR で一致）。フル CSS パーサは使わない簡易スキャナ。
+/// Scopes class selectors `.name` to `.name_<suffix>`; returns (scoped CSS, original→new names).
+/// The suffix derives from id, so it is stable (matches across dev/build and client/SSR). A simple scanner, not a full CSS parser.
 pub fn scope_css(id: &str, css: &str) -> (String, Vec<(String, String)>) {
     let suffix = format!("{:08x}", xxh3_64(id.as_bytes()) as u32);
     let bytes = css.as_bytes();
@@ -24,7 +24,7 @@ pub fn scope_css(id: &str, css: &str) -> (String, Vec<(String, String)>) {
     let mut i = 0;
     while i < bytes.len() {
         let c = bytes[i];
-        // クラスセレクタ開始: '.' の直後が ident-start（a-zA-Z_ または -<letter>）
+        // Class selector start: '.' followed by an ident-start (a-zA-Z_ or -<letter>)
         if c == b'.' && i + 1 < bytes.len() && is_ident_start(bytes[i + 1]) {
             let start = i + 1;
             let mut j = start;
@@ -54,14 +54,14 @@ fn is_ident_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'-'
 }
 
-/// 元名→スコープ名のマップを JS オブジェクトリテラルにする。
+/// Renders the original→scoped name map as a JS object literal.
 pub fn mapping_object(map: &[(String, String)]) -> String {
     let fields: Vec<String> = map.iter().map(|(k, v)| format!("{k:?}:{v:?}")).collect();
     format!("{{{}}}", fields.join(","))
 }
 
-/// クライアント向け CSS Modules モジュール: スコープ済 CSS を `<style>` 注入し、
-/// クラス名マップを default export する。
+/// Client CSS Modules module: injects the scoped CSS via `<style>` and
+/// default-exports the class name map.
 pub fn css_module_client_js(style_id: &str, scoped_css: &str, map: &[(String, String)]) -> String {
     format!(
         "{}export default {};\n",
@@ -70,13 +70,13 @@ pub fn css_module_client_js(style_id: &str, scoped_css: &str, map: &[(String, St
     )
 }
 
-/// SSR / サーバービルド向け: DOM が無いので注入はせず、クラス名マップだけ export する。
+/// For SSR / server builds: no DOM, so no injection; exports only the class name map.
 pub fn css_module_mapping_js(map: &[(String, String)]) -> String {
     format!("export default {};\n", mapping_object(map))
 }
 
-/// .css を「<style> を注入する JS モジュール」のソースへ変換する（dev/build 共通）。
-/// 同じ id の style は使い回す（重複注入・HMR再注入を避ける）。
+/// Converts .css into the source of a JS module that injects a <style> (shared by dev/build).
+/// Reuses the style with the same id (avoids duplicate injection and HMR re-injection).
 pub fn css_shim(id: &str, css: &str) -> String {
     let css_lit = format!("{css:?}");
     let id_lit = format!("{id:?}");
@@ -107,7 +107,7 @@ mod tests {
         let (scoped, map) = scope_css("/app/Badge.module.css", css);
         assert!(scoped.contains(".badge_"));
         assert!(scoped.contains(".badge-x_"));
-        // 値の中の数字付きドット（0.5rem）はクラスと誤認しない
+        // Dots with digits inside values (0.5rem) are not mistaken for classes
         assert!(scoped.contains("0.5rem"));
         assert_eq!(map.len(), 2);
         assert_eq!(map[0].0, "badge");
@@ -120,7 +120,10 @@ mod tests {
         let css = ".x { color: blue }";
         let (a, _) = scope_css("id-a", css);
         let (a2, _) = scope_css("id-a", css);
-        assert_eq!(a, a2, "same id+css must be stable (dev/build/SSR 一致)");
+        assert_eq!(
+            a, a2,
+            "same id+css must be stable (match across dev/build/SSR)"
+        );
         let (_, mb) = scope_css("id-b", css);
         let (_, ma) = scope_css("id-a", css);
         assert_ne!(ma[0].1, mb[0].1, "different id → different scoped name");

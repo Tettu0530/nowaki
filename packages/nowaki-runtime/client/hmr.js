@@ -1,5 +1,5 @@
-// HMRクライアント + エラーオーバーレイ (dev)。islands/ の変更は島だけを再import・再renderするため
-// 島のローカルstateはリセットされる（prefresh相当のstate保持は未対応）。
+// HMR client + error overlay (dev). Changes under islands/ re-import and re-render only the island,
+// so island local state is reset (prefresh-style state preservation isn't supported).
 
 import { h, render } from "preact";
 
@@ -17,7 +17,7 @@ async function hotUpdateIslands() {
       const mod = await import(src);
       render(h(mod.default, props), el);
     } catch (err) {
-      console.error(`[nowaki] island再読み込み失敗 ${rawSrc}:`, err);
+      console.error(`[nowaki] failed to reload island ${rawSrc}:`, err);
     }
   }
 }
@@ -80,7 +80,7 @@ ws.addEventListener("message", (e) => {
 });
 
 ws.addEventListener("close", () => {
-  // devサーバー再起動を待って再接続する
+  // wait for the dev server to restart, then reconnect
   const timer = setInterval(async () => {
     try {
       await fetch("/", { method: "HEAD" });

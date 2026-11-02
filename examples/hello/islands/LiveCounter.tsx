@@ -1,6 +1,6 @@
-// サーバーリアクティブ島（Jetstream）。`export const live` を持つ島は、コンポーネント JS を
-// クライアントに送らない。状態はサーバー（接続ごと）にあり、イベントで再描画 → HTML パッチを push。
-// ボタンに onClick は無い。`data-live="ハンドラ名"` がサーバーのハンドラを指す。
+// Server-reactive island (Jetstream). An island with `export const live` sends no component JS
+// to the client. State lives on the server (per connection); events re-render -> an HTML patch is pushed.
+// Buttons have no onClick. `data-live="handlerName"` points at a server handler.
 
 export const live = {
   state: () => ({ count: 0 }),

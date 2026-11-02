@@ -2,7 +2,7 @@ use std::path::Path;
 
 use oxc_resolver::{ResolveOptions, Resolver};
 
-/// ブラウザ向けESM解決のためのリゾルバ。
+/// Resolver for browser ESM resolution.
 pub fn make_resolver() -> Resolver {
     Resolver::new(ResolveOptions {
         extensions: vec![
@@ -25,9 +25,9 @@ pub fn make_resolver() -> Resolver {
     })
 }
 
-/// React 系の bare import を Preact 互換へ読み替える。Next.js から移ってきた
-/// コードや React 前提のライブラリを、`react`→`preact/compat` のまま動かすための層。
-/// 戻り値が Some ならその指定子に差し替える（解決前の specifier レベルで適用する）。
+/// Maps React bare imports to Preact-compatible ones. A layer that lets code ported from
+/// Next.js and React-dependent libraries run as is via `react`→`preact/compat`.
+/// If it returns Some, use that specifier instead (applied at the specifier level, before resolution).
 pub fn alias_specifier(spec: &str) -> Option<&'static str> {
     match spec {
         "react" | "react-dom" | "react-dom/client" => Some("preact/compat"),
@@ -38,9 +38,9 @@ pub fn alias_specifier(spec: &str) -> Option<&'static str> {
     }
 }
 
-/// 解決済み絶対パスをdevサーバーのURLへマップする。
-/// - アプリルート配下 → ルート相対URL (/islands/Counter.tsx)
-/// - ルート外 (pnpmストア等のrealpath) → /@fs/<絶対パス>
+/// Maps a resolved absolute path to a dev server URL.
+/// - Under the app root → root-relative URL (/islands/Counter.tsx)
+/// - Outside the root (realpaths into the pnpm store etc.) → /@fs/<absolute path>
 pub fn fs_path_to_url(root: &Path, abs: &Path) -> String {
     match abs.strip_prefix(root) {
         Ok(rel) => format!("/{}", rel.to_string_lossy()),
@@ -74,7 +74,7 @@ mod tests {
         assert_eq!(alias_specifier("preact/hooks"), None);
         assert_eq!(alias_specifier("./local.tsx"), None);
         assert_eq!(alias_specifier("lodash"), None);
-        // 部分一致では読み替えない
+        // no aliasing on partial matches
         assert_eq!(alias_specifier("react-icons"), None);
     }
 

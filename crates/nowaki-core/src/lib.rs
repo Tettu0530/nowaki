@@ -18,38 +18,38 @@ use xxhash_rust::xxh3::xxh3_64;
 
 pub use cache::Mode;
 
-/// プラグインの仮想モジュールを置く合成ディレクトリ名（ディスクには存在しない）。
-/// `resolveId` が返した仮想 id は `<root>/__nowaki_virtual__/<hash>.js` にマップされ、
-/// `read_source` が registry から元 id を引いて `load` フックでソースを得る。
+/// Synthetic directory name for plugin virtual modules (doesn't exist on disk).
+/// A virtual id returned by `resolveId` maps to `<root>/__nowaki_virtual__/<hash>.js`;
+/// `read_source` looks up the original id in the registry and gets the source from the `load` hook.
 pub const VIRTUAL_DIR: &str = "__nowaki_virtual__";
 
-/// プラグインの変換フックを Rust から呼ぶための橋渡し。実装は CLI 側が
-/// Node プラグインホスト（`nowaki.config` を読み込む）へ HTTP で委譲する。
-/// nowaki-core 自体は JS を実行しないので、この trait 経由で疎結合に保つ。
+/// Bridge for calling plugin transform hooks from Rust. The CLI implements it by delegating
+/// over HTTP to the Node plugin host (which loads `nowaki.config`).
+/// nowaki-core itself runs no JS, so this trait keeps them loosely coupled.
 pub trait PluginBridge: Send + Sync {
-    /// 変換可能なソース（ts/tsx/js/jsx/mjs）に対する `transform(code, id)` フック。
-    /// どのプラグインも変更しなければ None。
+    /// The `transform(code, id)` hook for transformable sources (ts/tsx/js/jsx/mjs).
+    /// None if no plugin changed it.
     fn transform(&self, id: &str, code: &str) -> Option<String>;
 
-    /// `.tsrx` ソースを `@tsrx/preact` で標準 JSX へコンパイルする。出力はそのあと
-    /// oxc の JSX→preact パイプラインにかかる。コンパイラ未導入なら None。
+    /// Compiles `.tsrx` source to standard JSX with `@tsrx/preact`. The output then goes
+    /// through oxc's JSX→preact pipeline. None if the compiler isn't installed.
     fn compile_tsrx(&self, id: &str, code: &str) -> Option<String>;
 
-    /// 仮想モジュールの `resolveId(source, importer)`。プラグインが指定子を引き受けるなら
-    /// 解決済み id（実パス or 仮想 id 文字列）を返す。誰も引き受けなければ None。
-    /// 通常の解決が失敗したときだけ呼ばれる（＝ディスク上のモジュールには触らない）。
+    /// `resolveId(source, importer)` for virtual modules. If a plugin claims the specifier, returns
+    /// the resolved id (a real path or a virtual id string). None if no plugin claims it.
+    /// Called only when normal resolution fails (= never touches on-disk modules).
     fn resolve_id(&self, _source: &str, _importer: &str) -> Option<String> {
         None
     }
 
-    /// 仮想モジュールの `load(id)`。`resolveId` が返した仮想 id のソースを返す。None なら未対応。
+    /// `load(id)` for virtual modules. Returns the source for a virtual id from `resolveId`. None if unsupported.
     fn load(&self, _id: &str) -> Option<String> {
         None
     }
 }
 
-/// 変換対象の拡張子。これ以外 (css, 画像など) は素通しで配信する。
-/// `.tsrx` はプラグインホストで `@tsrx/preact` により JSX へコンパイルしてから oxc にかける。
+/// Extensions to transform. Anything else (css, images, etc.) is served as is.
+/// `.tsrx` is compiled to JSX by `@tsrx/preact` in the plugin host, then run through oxc.
 pub fn is_transformable(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()),
@@ -57,8 +57,8 @@ pub fn is_transformable(path: &Path) -> bool {
     )
 }
 
-/// import 時に URL 文字列として扱うアセット（画像・フォント・メディア）。
-/// `import logo from "./logo.png"` の logo は配信URLになる。
+/// Assets treated as URL strings on import (images, fonts, media).
+/// In `import logo from "./logo.png"`, logo is the served URL.
 pub fn is_asset(path: &Path) -> bool {
     matches!(
         path.extension()
@@ -91,25 +91,25 @@ pub fn is_asset(path: &Path) -> bool {
     )
 }
 
-/// バンドラーコア。devサーバー/buildの両方から使う。
+/// Bundler core. Used by both the dev server and build.
 pub struct NowakiCore {
     pub root: PathBuf,
     resolver: Resolver,
     cache: cache::ModuleCache,
-    /// 再起動をまたぐ永続キャッシュ
+    /// Persistent cache that survives restarts
     disk_cache: cache::DiskCache,
-    /// import.meta.env.PUBLIC_* / MODE のクライアント向け定数置換ペア（.envから）
+    /// Client constant-replacement pairs for import.meta.env.PUBLIC_* / MODE (from .env)
     pub(crate) client_defines: Vec<(String, String)>,
-    /// プラグインの変換フック（任意）。未設定なら素のファイル読込のまま。
+    /// Plugin transform hooks (optional). If unset, files are read as is.
     plugins: Option<Arc<dyn PluginBridge>>,
-    /// 仮想モジュールの合成パス → 元 id（`resolveId` が返した id）。`load` で引くために保持。
+    /// Virtual module synthetic path → original id (as returned by `resolveId`). Kept for lookup in `load`.
     virtual_ids: Mutex<HashMap<PathBuf, String>>,
 }
 
 impl NowakiCore {
     pub fn new(root: PathBuf) -> Self {
         let client_defines = env::load_client_defines(&root);
-        // salt = nowakiバージョン + defines。アップグレード/env変更でディスクキャッシュを失効。
+        // salt = nowaki version + defines. Upgrades/env changes invalidate the disk cache.
         let mut salt_buf = env!("CARGO_PKG_VERSION").as_bytes().to_vec();
         for (k, v) in &client_defines {
             salt_buf.extend_from_slice(k.as_bytes());
@@ -127,9 +127,9 @@ impl NowakiCore {
         }
     }
 
-    /// 指定子を解決して絶対パスを返す。通常の oxc 解決が失敗したときだけプラグインの
-    /// `resolveId` を試し、仮想 id は合成パスにマップして `read_source` 用に registry へ登録する。
-    /// プラグイン無しなら素の解決と同一（オーバーヘッドゼロ）。
+    /// Resolves a specifier to an absolute path. Tries the plugin `resolveId` only when normal oxc
+    /// resolution fails; virtual ids map to a synthetic path registered for `read_source`.
+    /// Without plugins this is identical to plain resolution (zero overhead).
     pub fn resolve_spec(&self, dir: &Path, spec: &str) -> Option<PathBuf> {
         if let Ok(r) = self.resolver.resolve(dir, spec) {
             return Some(r.full_path());
@@ -150,7 +150,7 @@ impl NowakiCore {
         Some(synthetic)
     }
 
-    /// 合成パスなら元の仮想 id を返す。
+    /// Returns the original virtual id if this is a synthetic path.
     pub(crate) fn virtual_id_of(&self, abs: &Path) -> Option<String> {
         if !abs.components().any(|c| c.as_os_str() == VIRTUAL_DIR) {
             return None;
@@ -158,31 +158,31 @@ impl NowakiCore {
         self.virtual_ids.lock().unwrap().get(abs).cloned()
     }
 
-    /// プラグインの変換ブリッジを設定する（CLI が nowaki.config 検出時に呼ぶ）。
+    /// Sets the plugin transform bridge (called by the CLI when it detects nowaki.config).
     pub fn set_plugins(&mut self, bridge: Arc<dyn PluginBridge>) {
         self.plugins = Some(bridge);
     }
 
-    /// モジュールのソースを取得する（ファイル読込 + プラグイン transform フック）。
-    /// プラグイン未設定なら素のファイル読込と同一（＝挙動不変）。dev/build/chunk の
-    /// 全ソース読込はここを通すことで、変換フックを一貫適用する。
+    /// Gets a module's source (file read + plugin transform hook).
+    /// Without plugins this is identical to a plain file read (= unchanged behavior). All source
+    /// reads in dev/build/chunk go through here so transform hooks apply consistently.
     pub fn read_source(&self, abs: &Path) -> Result<String> {
         if let Some(vid) = self.virtual_id_of(abs) {
             let bridge = self
                 .plugins
                 .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("仮想モジュールだがプラグイン未設定: {vid}"))?;
+                .ok_or_else(|| anyhow::anyhow!("virtual module but no plugin configured: {vid}"))?;
             let mut source = bridge
                 .load(&vid)
-                .ok_or_else(|| anyhow::anyhow!("仮想モジュールの load 失敗: {vid}"))?;
-            // 生成ソースにも transform フックを通す（プラグイン間の合成を許す）。
+                .ok_or_else(|| anyhow::anyhow!("failed to load virtual module: {vid}"))?;
+            // Run generated source through the transform hook too (lets plugins compose).
             if let Some(code) = bridge.transform(&vid, &source) {
                 source = code;
             }
             return Ok(source);
         }
         let source = std::fs::read_to_string(abs)
-            .with_context(|| format!("読み込み失敗: {}", abs.display()))?;
+            .with_context(|| format!("failed to read: {}", abs.display()))?;
         let Some(bridge) = &self.plugins else {
             return Ok(source);
         };
@@ -199,11 +199,11 @@ impl NowakiCore {
         Ok(source)
     }
 
-    /// ファイルを読み、コンテンツハッシュでキャッシュ照合し、必要なら変換する。
-    /// メモリ → ディスク（再起動をまたぐ）→ 変換 の順で照合する。
+    /// Reads the file, checks the cache by content hash, and transforms if needed.
+    /// Checks memory → disk (survives restarts) → transform, in that order.
     pub fn load_module(&self, abs: &Path, mode: Mode) -> Result<String> {
-        // read_source はプラグイン transform 適用後のソースを返す。ハッシュもその後の
-        // 内容で取るので、ファイル変更・プラグイン出力変更のどちらでもキャッシュが正しく失効する。
+        // read_source returns the source after plugin transforms. The hash is taken from that
+        // content too, so either a file change or a plugin output change correctly invalidates the cache.
         let source = self.read_source(abs)?;
         let hash = xxh3_64(source.as_bytes());
         let key = (abs.to_path_buf(), mode);
@@ -246,16 +246,16 @@ impl NowakiCore {
         Ok(code)
     }
 
-    /// 本番ビルド: クライアントグラフを dist/client/ へ、サーバーモジュールを
-    /// dist/server/ へ出力する。
+    /// Production build: writes the client graph to dist/client/ and server modules
+    /// to dist/server/.
     pub fn build(&self, dist: &Path) -> Result<build::BuildReport> {
         let (mut report, assets) = build::build_client(self, dist)?;
         report.server_modules = build::build_server(self, dist, &assets)?;
         Ok(report)
     }
 
-    /// 仮想モジュールなら、Node が直接 import できる data: モジュールにして返す（SSR 用）。
-    /// 実モジュール（通常解決できる）なら None。build_server からも使う。
+    /// For a virtual module, returns it as a data: module Node can import directly (for SSR).
+    /// None for a real module (normally resolvable). Also used by build_server.
     pub(crate) fn virtual_ssr_module(&self, dir: &Path, spec: &str) -> Option<String> {
         let p = self.resolve_spec(dir, spec)?;
         self.virtual_id_of(&p)?;
@@ -290,13 +290,13 @@ mod tests {
     #[test]
     fn asset_extensions_case_insensitive() {
         assert!(is_asset(Path::new("logo.svg")));
-        assert!(is_asset(Path::new("photo.PNG"))); // 大文字でも
+        assert!(is_asset(Path::new("photo.PNG"))); // uppercase too
         assert!(is_asset(Path::new("font.woff2")));
         assert!(!is_asset(Path::new("mod.ts")));
-        assert!(!is_asset(Path::new("style.css"))); // css はアセット扱いしない
+        assert!(!is_asset(Path::new("style.css"))); // css is not an asset
     }
 
-    // 仮想モジュール（resolveId/load）を Node ホスト無しで検証するためのモックブリッジ。
+    // Mock bridge for testing virtual modules (resolveId/load) without the Node host.
     struct MockBridge;
     impl PluginBridge for MockBridge {
         fn transform(&self, _id: &str, _code: &str) -> Option<String> {
@@ -319,7 +319,7 @@ mod tests {
         core.set_plugins(Arc::new(MockBridge));
         let dir = core.root.clone();
 
-        // 通常解決できない仮想 id は resolveId で合成パスへ。
+        // A virtual id that can't be resolved normally goes to a synthetic path via resolveId.
         let p = core
             .resolve_spec(&dir, "virtual:greeting")
             .expect("virtual id should resolve via the plugin");
@@ -328,10 +328,10 @@ mod tests {
             "virtual id should map under the synthetic dir: {}",
             p.display()
         );
-        // read_source は load フックの中身を返す（ディスクは読まない）。
+        // read_source returns the load hook's content (doesn't read disk).
         let src = core.read_source(&p).expect("virtual load");
         assert!(src.contains("hello"), "load() source expected: {src}");
-        // 引き受けないものは None（＝通常解決の失敗）。
+        // Unclaimed specifiers yield None (= normal resolution failure).
         assert!(core.resolve_spec(&dir, "virtual:unknown").is_none());
     }
 }

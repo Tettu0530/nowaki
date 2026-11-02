@@ -1,5 +1,5 @@
-// プラグイン変換フックのデモ。nowaki.config.mjs の mark-replace が、ビルド/dev 変換時に
-// ソース中の "__PLUGIN_MARK__" を "transformed-by-plugin" へ置換する。
+// Plugin transform hook demo. mark-replace in nowaki.config.mjs replaces "__PLUGIN_MARK__"
+// in source with "transformed-by-plugin" during build/dev transforms.
 export default function PluginDemo() {
   const mark = "__PLUGIN_MARK__";
   return (

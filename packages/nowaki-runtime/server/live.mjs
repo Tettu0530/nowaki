@@ -1,13 +1,13 @@
-// サーバーリアクティブ島のサーバー側ヘルパ。状態は Rust(WS) が接続ごとに保持し、
-// Node は純粋な再評価だけを担う。返す html はラッパ無しの中身（クライアントが morph で適用する）。
+// Server-side helper for server-reactive islands. Rust (WS) holds state per connection;
+// Node only does pure re-evaluation. The returned html is the unwrapped content (the client morphs it in).
 
 import { h } from "preact";
 import { renderToStringAsync } from "preact-render-to-string";
 
 import { sign, verify } from "./live-sign.mjs";
 
-// Rust の /__nowaki/live WS から呼ばれる。`handler` が無ければ状態そのままで再描画する。
-// state 偽造を防ぐためハンドラ実行の前に必ず sig を検証し、新 state には新しい署名を付けて返す。
+// Called from Rust's /__nowaki/live WS. Without a `handler`, re-renders with the state unchanged.
+// To prevent state forgery, always verifies sig before running the handler, and signs the new state on return.
 export async function liveRender(mod, state, handler, payload, name, sig) {
   if (!verify(name, state, sig)) {
     throw new Error("live state signature invalid");

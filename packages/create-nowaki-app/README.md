@@ -1,14 +1,14 @@
 # create-nowaki-app
 
-`npx create-nowaki-app my-app` 向けの薄いエイリアスです。中身は
-[`create-nowaki`](https://www.npmjs.com/package/create-nowaki) に委譲します。
+A thin alias for `npx create-nowaki-app my-app`. It delegates to
+[`create-nowaki`](https://www.npmjs.com/package/create-nowaki).
 
-正規コマンドは `npm create nowaki my-app` ですが、Next.js / React からの
-移行者向けに `create-nowaki-app` という名前も用意しています。
+The canonical command is `npm create nowaki my-app`, but the
+`create-nowaki-app` name is also provided for people coming from Next.js / React.
 
 ```bash
 npx create-nowaki-app@latest my-app
 # = npm create nowaki@latest my-app
 ```
 
-[Nowaki 本体のリポジトリ](https://github.com/nowaki-dev/nowaki) を参照してください。
+See the [main Nowaki repository](https://github.com/nowaki-dev/nowaki).

@@ -1,8 +1,8 @@
-// クライアントルーターの純粋ロジック（DOM 非依存・単体テスト可能）。
-// router.js から使う。ここには window/document への参照を一切置かない。
+// Pure client router logic (DOM-free, unit-testable).
+// Used by router.js. Never reference window/document here.
 
-// pathname に最もよく一致する境界（最長 prefix）を返す。prefix "" は全体に一致。
-// loading/error 境界はネスト可能で、より深いディレクトリの境界が優先される。
+// Returns the boundary that best matches pathname (longest prefix). prefix "" matches everything.
+// loading/error boundaries nest; boundaries in deeper directories win.
 export function matchBoundary(list, pathname) {
   let best = null;
   for (const b of list || []) {
@@ -14,7 +14,7 @@ export function matchBoundary(list, pathname) {
   return best;
 }
 
-// TTL + LRU の小さなページキャッシュ（Router Cache）。値は不透明（router.js では {doc,finalUrl}）。
+// Small TTL + LRU page cache (Router Cache). Values are opaque ({doc,finalUrl} in router.js).
 export function createPageCache({ ttlMs = 30000, max = 32, now = () => Date.now() } = {}) {
   const map = new Map(); // key -> { value, at }
   const fresh = (e) => e && now() - e.at < ttlMs;
@@ -25,7 +25,7 @@ export function createPageCache({ ttlMs = 30000, max = 32, now = () => Date.now(
         if (e) map.delete(key);
         return undefined;
       }
-      map.delete(key); // LRU: 触れたものを末尾へ
+      map.delete(key); // LRU: move touched entry to the end
       map.set(key, e);
       return e.value;
     },

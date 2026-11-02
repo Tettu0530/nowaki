@@ -1,8 +1,8 @@
-// アプリ層セキュリティの回帰スイート。防御のリグレッションを決定的に検証する(Chrome 不要)。CI の e2e から呼ぶ。
+// App-layer security regression suite. Deterministically checks defenses for regressions (no Chrome). Called from CI e2e.
 //   node scripts/security-e2e.mjs dev  <devBase>  <appRoot>
 //   node scripts/security-e2e.mjs prod <prodBase>
-// 検証対象: 任意ファイル読取(@fs/ssr-module/.env/virtual ..)、RPC CSRF、CSWSH、
-//           live state 偽造、ISR クロスユーザー隔離・クエリ氾濫集約。
+// Covers: arbitrary file read (@fs/ssr-module/.env/virtual ..), RPC CSRF, CSWSH,
+//         forged live state, ISR cross-user isolation and query-flood collapsing.
 
 import http from "node:http";
 
@@ -15,7 +15,7 @@ const check = (label, cond) => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const statusOf = async (url, opts) => (await fetch(url, opts)).status;
 
-// パスをそのまま送る GET（fetch は `..` を正規化するので生 http を使う）。
+// GET that sends the path verbatim (fetch normalizes `..`, so use raw http).
 function rawGet(b, path) {
   const u = new URL(b);
   return new Promise((resolve) => {
@@ -28,7 +28,7 @@ function rawGet(b, path) {
   });
 }
 
-// WebSocket upgrade を試みる。101=昇格、403等=拒否。Origin を任意に指定できる。
+// Attempts a WebSocket upgrade. 101=upgraded, 403 etc.=rejected. Origin can be set freely.
 function wsUpgrade(b, path, origin) {
   const u = new URL(b);
   return new Promise((resolve) => {
@@ -47,8 +47,8 @@ function wsUpgrade(b, path, origin) {
   });
 }
 
-// 偽造 live join が patch を返さない（署名検証で弾かれる）ことを確認。
-// global WebSocket は Origin 無しで張る(=ws_origin_ok 許可)→ 署名のみを検証。
+// Checks that a forged live join gets no patch (rejected by signature verification).
+// The global WebSocket connects without Origin (ws_origin_ok allows it) -> tests the signature alone.
 async function liveForgeryRejected(b) {
   const html = await (await fetch(`${b}/live`)).text();
   const tag = html.match(/<nowaki-live\b[^>]*>/)?.[0];
@@ -76,7 +76,7 @@ async function liveForgeryRejected(b) {
 
 if (mode === "dev") {
   const enc = encodeURIComponent;
-  // 任意ファイル読取面（canonicalize + allow-root + deny + transformable ゲート）
+  // Arbitrary file read surface (canonicalize + allow-root + deny + transformable gates)
   check("@fs arbitrary read blocked (/etc/passwd → 403)",
     (await statusOf(`${base}/@fs/etc/passwd`)) === 403);
   check("@fs .env blocked (403)",
@@ -94,7 +94,7 @@ if (mode === "dev") {
   check("virtual-module traversal rejected (.. → 404)",
     (await rawGet(base, "/__nowaki_virtual__/../../../../../../../etc/hosts")) === 404);
 
-  // サーバー関数 RPC の CSRF ゲート
+  // CSRF gate for server function RPC
   const fn = `${base}/__nowaki/fn`;
   const post = (h) =>
     fetch(fn, { method: "POST", headers: h, body: JSON.stringify({ id: "6c90d7dc921a9a3f", args: [] }) })
@@ -105,7 +105,7 @@ if (mode === "dev") {
   check("RPC cross-origin rejected (403)",
     (await post({ "content-type": "application/json", "x-nowaki-rpc": "1", origin: "http://evil.test" })) === 403);
 
-  // CSWSH（WS upgrade の Origin 検証）
+  // CSWSH (Origin check on WS upgrade)
   check("CSWSH /__nowaki/live cross-origin upgrade rejected (403)",
     (await wsUpgrade(base, "/__nowaki/live", "http://evil.test")) === 403);
   check("CSWSH /__nowaki/hmr cross-origin upgrade rejected (403)",
@@ -113,15 +113,15 @@ if (mode === "dev") {
   check("WS same-origin upgrade allowed (101)",
     (await wsUpgrade(base, "/__nowaki/live", base)) === 101);
 
-  // live state 偽造
+  // forged live state
   check("forged live join is rejected (no patch)", await liveForgeryRejected(base));
 }
 
 if (mode === "prod") {
-  // ISR クロスユーザー隔離（accept-language 依存ルート /vary）
+  // ISR cross-user isolation (accept-language-dependent route /vary)
   const get = (lang) =>
     fetch(`${base}/vary`, { headers: { "accept-language": lang } });
-  await get("de-DE"); // 1回目: de variant を学習・保存
+  await get("de-DE"); // first request: learns and stores the de variant
   const en = await get("en-US");
   const enBody = await en.text();
   const de2 = await get("de-DE");
@@ -130,7 +130,7 @@ if (mode === "prod") {
   check("ISR variant is cached on repeat (HIT/STALE)",
     /HIT|STALE/.test(de2.headers.get("x-nowaki-cache") || ""));
 
-  // ISR クエリ氾濫集約（/isr はクエリを読まない→ ?cb は単一エントリに集約）
+  // ISR query-flood collapsing (/isr doesn't read the query -> ?cb collapses into one entry)
   await fetch(`${base}/isr`); // populate
   const f1 = (await fetch(`${base}/isr?cb=1`)).headers.get("x-nowaki-cache");
   const f2 = (await fetch(`${base}/isr?cb=2`)).headers.get("x-nowaki-cache");

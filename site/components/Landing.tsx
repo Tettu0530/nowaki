@@ -8,7 +8,7 @@ export default function Landing({ locale }: { locale: Locale }) {
   const s = STRINGS[locale];
   const home = locale === "ja" ? "/ja" : "/";
 
-  // 風のマーキーに流すキーワード（両ロケール共通の技術用語）
+  // Keywords for the wind marquee (technical terms shared by both locales)
   const winds = [
     "Rust toolchain", "oxc", "islands", "zero JS by default", "server loaders",
     "actions", "middleware", "API routes", "scope-hoisted", "SSR", "npm install", "source maps",
@@ -132,7 +132,7 @@ export default function Landing({ locale }: { locale: Locale }) {
           <p style="margin-top:1.5rem;font-size:.88rem;color:var(--muted);max-width:60ch">{s.ship.note}</p>
         </section>
 
-        {/* Speed — 嵐バンド（前線） */}
+        {/* Speed — storm band (front) */}
         <section class="storm">
           <div class="section wrap z1">
             <h2 class="h-sec" data-rise style="max-width:18ch">{s.speed.h2}</h2>
@@ -153,7 +153,7 @@ export default function Landing({ locale }: { locale: Locale }) {
           </div>
         </section>
 
-        {/* How it works — 本物の3ステップ（順次表示） */}
+        {/* How it works — the real 3 steps (revealed in sequence) */}
         <section class="section wrap">
           <h2 class="h-sec" data-rise style="max-width:18ch">{s.how.h2}</h2>
           <div style="margin-top:2.8rem;display:grid;gap:2.4rem" class="grid-cols-1 md:grid-cols-3" data-steps>

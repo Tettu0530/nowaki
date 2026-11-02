@@ -39,7 +39,7 @@ jobs:
         with:
           version: 11
       - run: pnpm install
-      # JS の本番依存の既知脆弱性を継続監査（推移的な警告ではジョブを落とさない）。
+      # Ongoing audit of known vulnerabilities in JS prod deps (transitive warnings don't fail the job).
       - run: pnpm audit --prod || true
 
   e2e:
@@ -102,7 +102,7 @@ jobs:
           # layouts (root + nested) and dynamic param
           curl -sf $B/ | grep -q 'href="/todos"'
           curl -sf $B/blog/hello | grep -q "blog section"
-          curl -sf $B/blog/hello | grep -q "記事: hello"
+          curl -sf $B/blog/hello | grep -q "Post: hello"
           curl -sf $B/blog/hello | grep -q 'href="/about"'
 
           # catch-all routes ([...path]): /files/a/b/c binds the rest as an array,
@@ -119,7 +119,7 @@ jobs:
 
           # 404 / 500 conventions
           test "$(status $B/nope)" = "404"
-          curl -s $B/nope | grep -q "見つかりません"
+          curl -s $B/nope | grep -q "Page not found"
           test "$(status "$B/boom?boom=1")" = "500"
 
           # API: legacy default, method dispatch, 405, streaming
@@ -350,8 +350,8 @@ jobs:
           version: 11
       - run: pnpm install
       - run: cargo build -p nowaki
-      # 送信 JS は決定的。benchmarks/baseline.json から +12% を超えたら fail。
-      # head-to-head（Next/Astro 比較）は手元/別ジョブで実行（重い依存のため CI 既定では走らせない）。
+      # Shipped JS is deterministic; fail if it exceeds benchmarks/baseline.json by more than +12%.
+      # Head-to-head (Next/Astro comparison) runs locally or in a separate job (heavy deps, so not in default CI).
       - run: node benchmarks/check-regression.mjs
 
   npm-cli:
@@ -367,7 +367,7 @@ jobs:
       - name: Assemble host package + resolve through JS shim
         run: |
           node scripts/build-npm.mjs linux-x64-gnu
-          # 実 install 相当のレイアウト（実ファイル）を作り、wrapper シム経由で --version
+          # Build a layout equivalent to a real install (real files), then --version via the wrapper shim
           ROOT=$(mktemp -d)
           mkdir -p "$ROOT/node_modules/nowaki" "$ROOT/node_modules/@nowaki-dev"
           cp packages/nowaki-cli/package.json "$ROOT/node_modules/nowaki/"

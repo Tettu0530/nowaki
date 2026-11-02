@@ -1,5 +1,5 @@
-// Edge 向けの Web 標準 fetch ハンドラファクトリ。node:http も実行時ファイル import も使わず、
-// ルート/島/manifest はビルド時に静的 import 済みのマップとして受け取る。
+// Web-standard fetch handler factory for Edge. Uses neither node:http nor runtime file imports;
+// routes/islands/manifest arrive as maps statically imported at build time.
 
 import { options } from "preact";
 import { handleRequest } from "./handler.mjs";
@@ -35,12 +35,12 @@ function installIslandHook(registry) {
   };
 }
 
-/// Edge 用の fetch ハンドラを作る。
-///   manifest         : クライアント manifest（islands/runtime/preload）
-///   modules          : ルートテーブルの file キー → 静的 import 済みモジュール名前空間
-///   islandComponents : island 名 → コンポーネント実体（default export）
-///   routeTable       : scanRoutes 相当（file は modules のキー）
-/// 返り値は `(request) => Promise<Response>`。
+/// Creates a fetch handler for Edge.
+///   manifest         : client manifest (islands/runtime/preload)
+///   modules          : route table file key → statically imported module namespace
+///   islandComponents : island name → component (default export)
+///   routeTable       : scanRoutes equivalent (file is a key of modules)
+/// Returns `(request) => Promise<Response>`.
 export function createFetchHandler({
   manifest,
   modules,

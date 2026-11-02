@@ -87,8 +87,8 @@ curls the example app. Match it locally before pushing.
 
 ## Conventions
 
-- Comments and user-facing strings in this repo are largely Japanese; match the
-  surrounding file. Code identifiers stay English.
+- This repo is English-only: comments, docs, and user-facing strings are
+  written in English, as are code identifiers.
 - Keep comments minimal: write only the non-obvious *why* (ordering
   constraints, workarounds, perf reasons) and security/trust-boundary
   invariants. Don't restate the code, add section banners, narrate history, or

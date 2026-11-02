@@ -1,16 +1,16 @@
-// loader/描画が投げたときに表示されるエラーページ（500）。
-// dev では error.message にスタックが入る（直すと自動リロード）。prod はメッセージのみ。
+// Error page (500) shown when a loader/render throws.
+// In dev, error.message includes the stack (auto-reloads once fixed). In prod, the message only.
 export const title = "500 — Nowaki";
 
 export default function ErrorPage({ error }: { error: { message: string } }) {
   return (
     <main>
       <h1>500</h1>
-      <p>サーバーエラーが発生しました。</p>
+      <p>A server error occurred.</p>
       <pre style="white-space:pre-wrap;background:#f6f6f6;padding:1rem;border-radius:6px;overflow:auto">
         {error?.message}
       </pre>
-      <a href="/">home に戻る</a>
+      <a href="/">Back to home</a>
     </main>
   );
 }

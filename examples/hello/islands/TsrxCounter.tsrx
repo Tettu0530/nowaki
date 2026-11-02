@@ -1,5 +1,5 @@
-// TSRX (.tsrx) で書いた島。`@{ ... }` の statement-container 本体に JSX を置く。
-// @tsrx/preact が標準 Preact コンポーネントへコンパイルし、Nowaki の oxc パイプラインに合流する。
+// An island written in TSRX (.tsrx). JSX goes in the `@{ ... }` statement-container body.
+// @tsrx/preact compiles it to a standard Preact component, which then joins Nowaki's oxc pipeline.
 import { useState } from "preact/hooks";
 
 export default function TsrxCounter({ start = 0 }) @{

@@ -1,4 +1,4 @@
-// docs の共有レイアウト。島を使わずクライアント JS ゼロにする（Nowaki のドッグフーディング）。
+// Shared docs layout. No islands, so zero client JS (Nowaki dogfooding).
 
 const NAV = [
   { href: "/docs", label: "Overview" },

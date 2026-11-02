@@ -1,7 +1,7 @@
 "use server";
 
-// "use server" モジュール。ここの export はサーバーにだけ残る RPC エンドポイントになる。
-// クライアントへは fetch する極小プロキシだけが届く（SERVER_SECRET や store はバンドルに含まれない）。
+// "use server" module. Its exports become RPC endpoints that stay on the server.
+// The client only gets a tiny fetch proxy (SERVER_SECRET and store are not in the bundle).
 
 import { getContext } from "@nowaki-dev/runtime";
 
@@ -19,15 +19,15 @@ export async function addTodo(text: string): Promise<string[]> {
   return store.slice();
 }
 
-// form の action に渡すバージョン。`<form action={addTodoForm}>` の submit で FormData →
-// { text } を受け取り、サーバー側で store を更新する。
+// Version to pass as a form action. Submitting `<form action={addTodoForm}>` turns FormData into
+// { text } and updates the store on the server.
 export async function addTodoForm(form: { text?: string }): Promise<string[]> {
   const t = String(form?.text ?? "").trim();
   if (t) store.push(t);
   return store.slice();
 }
 
-// getContext() は RPC 実行中だけ有効。cookie/header からセッションを読める（認証など）。
+// getContext() is valid only during an RPC. It can read the session from cookies/headers (auth, etc.).
 export async function whoami(): Promise<string> {
   const ctx = getContext();
   const user = ctx?.cookies?.user ?? "anonymous";

@@ -1,4 +1,4 @@
-// 島の props を決定的にシリアライズする（キー順固定で挿入順に依存しない）。
+// Deterministically serializes island props (fixed key order, independent of insertion order).
 
 export function stableStringify(value) {
   return stringify(value);
@@ -15,7 +15,7 @@ function stringify(v) {
   const parts = [];
   for (const k of keys) {
     const val = v[k];
-    if (val === undefined) continue; // JSON と同じく undefined は省く
+    if (val === undefined) continue; // omit undefined, like JSON
     parts.push(JSON.stringify(k) + ":" + stringify(val));
   }
   return "{" + parts.join(",") + "}";

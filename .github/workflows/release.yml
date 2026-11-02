@@ -1,9 +1,9 @@
 name: Release
 
-# v* タグを push すると、5プラットフォーム分のネイティブバイナリをビルドし、
-# 各 @nowaki-dev/cli-<key> を publish したのち、wrapper パッケージ `nowaki` を publish する。
-# 事前に repo Secrets に NPM_TOKEN（npm の Automation token）を設定すること。
-# 手動実行 (workflow_dispatch) で dry_run=true にするとビルドのみ・publish なし。
+# Pushing a v* tag builds native binaries for 5 platforms, publishes each
+# @nowaki-dev/cli-<key>, then publishes the wrapper package `nowaki`.
+# Set NPM_TOKEN (an npm Automation token) in repo Secrets beforehand.
+# A manual run (workflow_dispatch) with dry_run=true only builds; nothing is published.
 
 on:
   push:
@@ -94,8 +94,8 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-      # プラットフォームパッケージ公開後に wrapper を publish する
-      # (optionalDependencies が解決可能になっている)。
+      # Publish the wrapper after the platform packages
+      # (so its optionalDependencies are resolvable).
       - name: Publish wrapper
         run: npm publish --access public
         working-directory: packages/nowaki-cli

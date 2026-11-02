@@ -1,7 +1,7 @@
-//! プラグインホスト連携。nowaki-core は JS を実行しないので、フックは Node のホストへ HTTP で委譲する。
+//! Plugin host integration. nowaki-core runs no JS, so hooks are delegated to a Node host over HTTP.
 //!
-//! 通信は自前 TcpStream の素朴な HTTP/1.1。reqwest::blocking は dev の tokio ランタイム内で
-//! ランタイム衝突を起こすため使わない。
+//! Transport is plain HTTP/1.1 over a hand-rolled TcpStream. reqwest::blocking isn't used because it
+//! conflicts with the dev tokio runtime.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use nowaki_core::PluginBridge;
 
-/// Node プラグインホストへ `transform` / `.tsrx` / `resolveId` / `load` を委譲する PluginBridge。
+/// PluginBridge that delegates `transform` / `.tsrx` / `resolveId` / `load` to the Node plugin host.
 struct HttpPluginBridge {
     port: u16,
     has_resolve_id: bool,
@@ -55,7 +55,7 @@ impl PluginBridge for HttpPluginBridge {
     }
 }
 
-/// 起動中のプラグインホスト。drop で子プロセスを落とす。
+/// A running plugin host. Drop kills the child process.
 pub struct PluginHost {
     child: Child,
     pub bridge: Arc<dyn PluginBridge>,
@@ -68,12 +68,12 @@ impl Drop for PluginHost {
     }
 }
 
-/// 設定・フック・ランタイムのいずれかが無ければ None（ホストを起動せずオーバーヘッドゼロ）。
+/// None if the config, hooks, or runtime is missing (no host is started, zero overhead).
 pub fn start(root: &Path) -> Result<Option<PluginHost>> {
     let has_config = ["nowaki.config.mjs", "nowaki.config.js"]
         .iter()
         .any(|n| root.join(n).exists());
-    // @tsrx/preact があれば設定が無くても .tsrx のためにホストを起動する。
+    // If @tsrx/preact is present, start the host for .tsrx even without a config.
     let has_tsrx = root.join("node_modules/@tsrx/preact").is_dir();
     if !has_config && !has_tsrx {
         return Ok(None);
@@ -81,7 +81,7 @@ pub fn start(root: &Path) -> Result<Option<PluginHost>> {
     let script = root.join("node_modules/@nowaki-dev/runtime/server/plugin-host.mjs");
     if !script.exists() {
         eprintln!(
-            "[nowaki] nowaki.config はあるが @nowaki-dev/runtime が無くプラグインを読み込めません"
+            "[nowaki] nowaki.config found, but @nowaki-dev/runtime is missing, so plugins can't be loaded"
         );
         return Ok(None);
     }
@@ -92,7 +92,7 @@ pub fn start(root: &Path) -> Result<Option<PluginHost>> {
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .context("plugin host (node) の起動に失敗")?;
+        .context("failed to start plugin host (node)")?;
 
     let stdout = child.stdout.take().expect("piped stdout");
     let mut reader = BufReader::new(stdout);
@@ -104,13 +104,13 @@ pub fn start(root: &Path) -> Result<Option<PluginHost>> {
             break;
         }
         if let Some(rest) = line.trim().strip_prefix("NOWAKI_PLUGIN_HOST_READY ") {
-            port = Some(rest.parse::<u16>().context("ポート解析失敗")?);
+            port = Some(rest.parse::<u16>().context("failed to parse port")?);
             break;
         }
     }
-    let port = port.ok_or_else(|| anyhow!("plugin host が READY を報告しませんでした"))?;
+    let port = port.ok_or_else(|| anyhow!("plugin host did not report READY"))?;
 
-    // transform フックも tsrx も無ければブリッジは不要（ホストは落とす）。
+    // No transform hook and no tsrx means no bridge is needed (kill the host).
     let caps_body = http_get(port, "/caps")?;
     let caps: serde_json::Value = serde_json::from_str(&caps_body).unwrap_or_default();
     let cap = |k: &str| caps.get(k).and_then(|b| b.as_bool()).unwrap_or(false);
@@ -131,22 +131,19 @@ pub fn start(root: &Path) -> Result<Option<PluginHost>> {
     });
     let mut feats = Vec::new();
     if has_transform {
-        feats.push("transform フック");
+        feats.push("transform hook");
     }
     if has_tsrx {
         feats.push(".tsrx (@tsrx/preact)");
     }
     if has_resolve_id || has_load {
-        feats.push("仮想モジュール (resolveId/load)");
+        feats.push("virtual modules (resolveId/load)");
     }
-    println!(
-        "[nowaki] プラグインを読み込みました（{}）",
-        feats.join(" + ")
-    );
+    println!("[nowaki] loaded plugins ({})", feats.join(" + "));
     Ok(Some(PluginHost { child, bridge }))
 }
 
-// Connection: close なのでボディは EOF まで読めばよい。
+// Connection: close, so reading the body to EOF is enough.
 
 fn http_post(port: u16, path: &str, body: &str) -> Result<String> {
     request(port, "POST", path, Some(body))

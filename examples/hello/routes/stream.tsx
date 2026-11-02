@@ -1,10 +1,10 @@
-// ストリーミング SSR のデモ。`streaming = true` でシェルを即送出し、本文をストリームする。
+// Streaming SSR demo. `streaming = true` sends the shell immediately and streams the body.
 import Counter from "../islands/Counter.tsx";
 
 export const streaming = true;
 
 export const loader = async () => {
-  // 実アプリの「遅いデータ取得」を模す。シェルは待たずに先に届く。
+  // Simulates a real app's slow data fetch. The shell arrives first without waiting.
   await new Promise((r) => setTimeout(r, 40));
   return { mode: "streamed" };
 };

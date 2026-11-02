@@ -279,7 +279,7 @@ export const STRINGS = {
   },
 } as const;
 
-// 共有の <head> 中身（locale非依存）: フォント, Tailwind, デザインのCSSトークン/スタイル。
+// Shared <head> contents (locale-independent): fonts, Tailwind, design CSS tokens/styles.
 const HEAD_STYLE = `
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -303,9 +303,9 @@ const HEAD_STYLE = `
   };
 </script>
 <script>
-  /* ヒーローの導入モーション用クラスを描画前に付ける（チラつき防止）。
-     JS が動くブラウザだけが付与し、静的HTML/クローラ/JS無効では付かない＝常に見える。
-     Animator が起動したら .anim-on を付け、起動しなければ保険で .anim を外して全表示。 */
+  /* Add the hero intro-motion class before first paint (prevents flicker).
+     Only browsers running JS add it; static HTML/crawlers/JS off never get it, so content stays visible.
+     Animator adds .anim-on when it starts; if it doesn't, a fallback removes .anim and shows everything. */
   (function () {
     var d = document.documentElement;
     try { if (matchMedia("(prefers-reduced-motion: reduce)").matches) return; } catch (e) { return; }
@@ -341,8 +341,8 @@ const HEAD_STYLE = `
     font-family:"Bricolage Grotesque", system-ui, sans-serif;
     font-optical-sizing:auto; -webkit-font-smoothing:antialiased;
     font-size:1.0625rem; line-height:1.62; overflow-x:hidden;
-    /* 日本語は文節境界で折り返す（CJK のみ作用、英語は normal と同じ）。
-       未対応ブラウザは無視。ヒーロー等は読点で改行点も明示している。 */
+    /* Wrap Japanese at phrase boundaries (affects CJK only; English behaves like normal).
+       Unsupported browsers ignore it. The hero etc. also mark break points explicitly at commas. */
     word-break: auto-phrase; line-break: strict;
   }
   h1,h2,h3{ font-weight:800; letter-spacing:-0.038em; line-height:1.04; text-wrap:balance; margin:0 }
@@ -352,7 +352,7 @@ const HEAD_STYLE = `
   ::selection{ background: oklch(0.52 0.17 256 / 0.22) }
   :focus-visible{ outline:2px solid var(--primary); outline-offset:2px; border-radius:3px }
 
-  /* スクロール進捗の細い風の線（装飾。JS無効なら scaleX(0) のまま不可視） */
+  /* Thin wind line for scroll progress (decorative; with JS off it stays invisible at scaleX(0)) */
   .progressbar{ position:fixed; inset:0 0 auto 0; height:2px; z-index:50; transform:scaleX(0);
     transform-origin:0 50%; background:linear-gradient(90deg, var(--primary), var(--cyan)); }
 
@@ -366,7 +366,7 @@ const HEAD_STYLE = `
   .kicker{ font-family:"JetBrains Mono",monospace; font-size:.76rem; letter-spacing:.12em; text-transform:uppercase;
     color:var(--primary-strong); font-weight:600 }
 
-  /* 嵐バンド。ヒーロー・速度・フッターに前線のように差し込む。 */
+  /* Storm band. Cuts into the hero, speed section, and footer like a weather front. */
   .storm{ background:
     radial-gradient(80% 90% at 88% -20%, var(--storm-2), transparent 55%),
     radial-gradient(60% 70% at 12% 120%, oklch(0.3 0.06 262 / 0.6), transparent 60%),
@@ -378,7 +378,7 @@ const HEAD_STYLE = `
   }
   .storm__scrim{ position:absolute; inset:0; z-index:0; pointer-events:none;
     background:linear-gradient(94deg, oklch(0.16 0.035 264 / 0.9) 0%, oklch(0.16 0.035 264 / 0.55) 50%, transparent 78%); }
-  /* ヒーロー背後の巨大な透かし「野分」。視差で流れる。 */
+  /* Giant "野分" watermark behind the hero. Drifts with parallax. */
   .watermark{ position:absolute; z-index:0; right:clamp(-3rem,-4vw,-1rem); top:50%; translate:0 -50%;
     font-weight:800; font-size:min(48vw,40rem); line-height:.8; letter-spacing:-0.04em;
     color:oklch(1 0 0 / 0.038); pointer-events:none; user-select:none; white-space:nowrap }
@@ -389,7 +389,7 @@ const HEAD_STYLE = `
   .lang a{ color:var(--on-storm-muted) }
   .lang a[aria-current="true"]{ color:var(--on-storm); font-weight:600 }
 
-  /* 導入モーションで隠すのはヒーローだけ（折り返し以降は常時表示） */
+  /* The intro motion hides only the hero (everything below the fold is always shown) */
   .anim [data-hero] [data-reveal], .anim [data-hero-title] > span{ opacity:0 }
 
   .copybar{ display:inline-flex; align-items:center; gap:.7rem; width:100%;
@@ -406,7 +406,7 @@ const HEAD_STYLE = `
   .copybar__cmd{ flex:1; font-size:.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
   .copybar__state{ font-size:.7rem; letter-spacing:.09em; text-transform:uppercase; color:var(--on-storm-muted) }
 
-  /* 風のマーキー（キーワードが読み方向に流れる） */
+  /* Wind marquee (keywords flow in reading direction) */
   .marquee{ overflow:hidden; border-block:1px solid var(--line); background:var(--surface) }
   .marquee__track{ display:inline-flex; align-items:center; white-space:nowrap; padding-block:1.05rem; will-change:transform }
   .marquee__item{ display:inline-flex; align-items:center; gap:2.6rem; padding-inline:1.3rem;
@@ -422,11 +422,11 @@ const HEAD_STYLE = `
   .link-u{ color:var(--primary-strong); text-decoration:underline; text-underline-offset:3px; text-decoration-thickness:1px }
   .link-u:hover{ text-decoration-thickness:2px }
 
-  /* 本文中のインラインコード（明るいセクション）。pre.code とコピーバーは別扱い。 */
+  /* Inline code in body text (light sections). pre.code and the copy bar are handled separately. */
   p code{ color:var(--ink); font-weight:560; font-size:.94em }
   .lead code{ color:var(--ink); font-weight:560 }
 
-  /* ship: バンドルサイズの棒（scaleX で伸ばす。transform-origin は左） */
+  /* ship: bundle-size bars (grown with scaleX; transform-origin is left) */
   .bar-row{ display:grid; grid-template-columns:1fr; gap:.5rem; padding-block:1.25rem; border-top:1px solid var(--line) }
   .bar-row:last-child{ border-bottom:1px solid var(--line) }
   .bar-top{ display:flex; align-items:baseline; justify-content:space-between; gap:1rem }
@@ -438,7 +438,7 @@ const HEAD_STYLE = `
   .bar-fill--accent{ background:linear-gradient(90deg, var(--ember), var(--ember-strong)) }
   .bar-fill--muted{ background:oklch(0.74 0.02 258) }
 
-  /* compare: テーブル */
+  /* compare: table */
   .ctable{ width:100%; border-collapse:collapse; font-size:.95rem }
   .ctable th, .ctable td{ text-align:left; padding:1rem 1.05rem; border-top:1px solid var(--line); vertical-align:top }
   .ctable thead th{ border-top:0; font-family:"JetBrains Mono",monospace; font-size:.78rem; letter-spacing:.04em;
@@ -451,7 +451,7 @@ const HEAD_STYLE = `
   .ctable-scroll{ overflow-x:auto; margin-top:1.6rem; border-radius:.9rem; border:1px solid var(--line) }
   .ctable td, .ctable th{ min-width:9rem }
   .ctable td:first-child, .ctable th:first-child{ min-width:13rem }
-  /* Jetstream の差別化行を立てる */
+  /* Highlight the Jetstream differentiator row */
   .ctable tr.is-jet td, .ctable tr.is-jet th{ background:oklch(0.87 0.1 228 / 0.10) }
   .ctable tr.is-jet th[scope=row]{ color:var(--ink); font-weight:700 }
   .jet-tag{ display:inline-block; margin-top:.4rem; font-family:"JetBrains Mono",monospace; font-size:.64rem;

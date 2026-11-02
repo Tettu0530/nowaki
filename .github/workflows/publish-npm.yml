@@ -1,15 +1,15 @@
 name: Publish npm packages
 
-# プラットフォーム非依存の npm パッケージ（runtime / create-nowaki / create-nowaki-app）を
-# publish する。プラットフォーム別 CLI バイナリは release.yml が担当。
-# 事前に package.json の version を上げてからこのワークフローを手動実行すること。
-# NPM_TOKEN（2FAバイパスの Automation/Granular トークン）を repo Secrets に設定済みであること。
+# Publishes the platform-independent npm packages (runtime / create-nowaki / create-nowaki-app).
+# Per-platform CLI binaries are handled by release.yml.
+# Bump the version in package.json first, then run this workflow manually.
+# Requires NPM_TOKEN (a 2FA-bypass Automation/Granular token) in repo Secrets.
 
 on:
   workflow_dispatch:
     inputs:
       package:
-        description: "publish するパッケージ"
+        description: "Package to publish"
         type: choice
         default: all
         options:

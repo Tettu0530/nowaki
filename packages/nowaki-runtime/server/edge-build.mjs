@@ -1,7 +1,7 @@
-// Cloudflare Workers アダプタのビルド時生成器（Node で実行）。Workers は実行時の
-// ファイル import を許さないため、全サーバーモジュールを静的 import した worker エントリを出力する。
+// Build-time generator for the Cloudflare Workers adapter (runs on Node). Workers disallow runtime
+// file imports, so this emits a worker entry that statically imports every server module.
 //
-// 使い方: node edge-build.mjs <serverDir> <clientDir> <workerDir> [appName]
+// Usage: node edge-build.mjs <serverDir> <clientDir> <workerDir> [appName]
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -18,7 +18,7 @@ const manifest = JSON.parse(await readFile(path.join(clientDir, "manifest.json")
 const table = await scanRoutes(serverDir);
 
 const keyOf = (abs) => path.relative(serverDir, abs).split(path.sep).join("/");
-// dist/worker/index.js からの相対指定子
+// specifiers relative to dist/worker/index.js
 const specOf = (key) => `../server/${key}`;
 
 const order = [];
@@ -70,8 +70,8 @@ for (const entry of Object.values(serverFnTable)) {
 const moduleImports = order.map((key) => `import * as ${seen.get(key)} from ${JSON.stringify(specOf(key))};`);
 const moduleEntries = order.map((key) => `  ${JSON.stringify(key)}: ${seen.get(key)},`);
 
-const worker = `// 自動生成: Cloudflare Workers（Edge）アダプタの worker エントリ。
-// 全サーバーモジュールを静的 import し、@nowaki-dev/runtime の web ハンドラに渡す。
+const worker = `// Generated: worker entry for the Cloudflare Workers (Edge) adapter.
+// Statically imports every server module and passes them to the @nowaki-dev/runtime web handler.
 import { createFetchHandler } from "@nowaki-dev/runtime/server/web.mjs";
 ${moduleImports.join("\n")}
 ${islandImports.join("\n")}
@@ -91,7 +91,7 @@ const handler = createFetchHandler({ manifest, modules, islandComponents, routeT
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    // 静的アセットは Assets binding（dist/client）へ。/_nowaki/<f> → /<f> に書き換えて取得。
+    // Static assets go to the Assets binding (dist/client), fetched with /_nowaki/<f> rewritten to /<f>.
     if (url.pathname.startsWith("/_nowaki/") && env.ASSETS) {
       const assetUrl = new URL(url);
       assetUrl.pathname = url.pathname.slice("/_nowaki".length);

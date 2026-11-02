@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// `.env` / `.env.local` を読み、クライアントへ安全に露出できる定数置換ペアを作る。
-/// - `PUBLIC_` 接頭辞の変数のみ `import.meta.env.PUBLIC_X` として露出（秘密は出さない）
-/// - `import.meta.env.MODE` / `DEV` / `PROD` も付与
+/// Reads `.env` / `.env.local` and builds constant-replacement pairs safe to expose to the client.
+/// - Only `PUBLIC_`-prefixed variables are exposed, as `import.meta.env.PUBLIC_X` (secrets never are)
+/// - Also adds `import.meta.env.MODE` / `DEV` / `PROD`
 ///
-/// 戻り値は ReplaceGlobalDefines 用の `(キー, JSリテラル)` ペア。
+/// Returns `(key, JS literal)` pairs for ReplaceGlobalDefines.
 pub fn load_client_defines(root: &Path) -> Vec<(String, String)> {
     let mut vars: BTreeMap<String, String> = BTreeMap::new();
     for file in [".env", ".env.local"] {
@@ -35,7 +35,7 @@ pub fn load_client_defines(root: &Path) -> Vec<(String, String)> {
     let mut defines = Vec::new();
     for (k, v) in &vars {
         if k.starts_with("PUBLIC_") {
-            // {:?} で JS/JSON 互換の文字列リテラルにエスケープ
+            // {:?} escapes into a JS/JSON-compatible string literal
             defines.push((format!("import.meta.env.{k}"), format!("{v:?}")));
         }
     }

@@ -1,13 +1,13 @@
-// ISR デモ。`export const revalidate = <秒>` でオプトインすると、`nowaki start` は HTML を
-// path 単位でキャッシュし、鮮度切れは「古いものを即返し → 裏で再生成」する。
-// CDN/エッジ配備でも Cache-Control(s-maxage + stale-while-revalidate) で同じ挙動になる。
+// ISR demo. Opt in with `export const revalidate = <seconds>` and `nowaki start` caches HTML
+// per path; when stale, it serves the old copy immediately and regenerates in the background.
+// CDN/edge deployments get the same behavior via Cache-Control (s-maxage + stale-while-revalidate).
 import type { PageProps } from "@nowaki-dev/runtime";
 
 export const revalidate = 2;
 
 export const title = "ISR — Nowaki";
 
-// モジュールスコープのカウンタ。再生成（loader 実行）のたびに増える。
+// Module-scoped counter. Increments on each regeneration (loader run).
 let renders = 0;
 
 export const loader = async () => {
@@ -20,18 +20,18 @@ export default function Isr({ data }: PageProps<typeof loader>) {
     <main style="font-family:sans-serif;max-width:640px;margin:4rem auto">
       <h1>ISR demo</h1>
       <p>
-        このページは <code>export const revalidate = 2</code> でキャッシュされます。リロードしても
-        2 秒以内は同じ HTML（キャッシュ HIT）。2 秒経つと古い HTML を返しつつ裏で再生成します。
+        This page is cached with <code>export const revalidate = 2</code>. Reloading within
+        2 seconds returns the same HTML (cache HIT). After 2 seconds it serves the old HTML while regenerating in the background.
       </p>
       <p>
         render #<strong data-testid="isr-renders">{data.renders}</strong> · generated at{" "}
         <code data-testid="isr-at">{data.at}</code>
       </p>
       <p>
-        応答の <code>x-nowaki-cache</code> ヘッダ（HIT / STALE / MISS）と{" "}
-        <code>Cache-Control</code> を確認してみてください。
+        Check the response's <code>x-nowaki-cache</code> header (HIT / STALE / MISS) and{" "}
+        <code>Cache-Control</code>.
       </p>
-      <a href="/">戻る</a>
+      <a href="/">Back</a>
     </main>
   );
 }

@@ -1,5 +1,5 @@
-// `nowaki start` のエントリ（cwd=アプリルート）。
-// ローカルの `nowaki start` は 127.0.0.1 に固定（配備用エントリだけ 0.0.0.0）。
+// Entry for `nowaki start` (cwd = app root).
+// Local `nowaki start` binds to 127.0.0.1 (only the deploy entry uses 0.0.0.0).
 
 import path from "node:path";
 import { startServer } from "./app.mjs";

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use dashmap::DashMap;
 use xxhash_rust::xxh3::xxh3_64;
 
-/// 変換モード。Browser はbare importをURLへ書き換え、Ssr はNode解決に任せる。
+/// Transform mode. Browser rewrites bare imports to URLs; Ssr leaves them to Node resolution.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Mode {
     Browser,
@@ -20,33 +20,33 @@ impl Mode {
 }
 
 pub struct CachedModule {
-    /// 変換元ソースの xxh3 ハッシュ。ファイル再読込時の鮮度判定に使う。
+    /// xxh3 hash of the source. Used to check freshness when the file is re-read.
     pub source_hash: u64,
     pub code: String,
 }
 
-/// (絶対パス, モード) → 変換結果。コンテンツハッシュで自動失効するため
-/// watcherによる明示的なinvalidationを必要としない。
+/// (absolute path, mode) → transform result. Content hashes invalidate entries automatically,
+/// so no explicit invalidation by the watcher is needed.
 pub type ModuleCache = DashMap<(PathBuf, Mode), CachedModule>;
 
-/// 再起動をまたぐ永続変換キャッシュ。content-addressed なので mtime に依存せず、
-/// ソース・モード・(nowakiバージョン+defines の)salt が同じなら再利用する。
-/// 保存先は `node_modules/.cache/nowaki/`（無ければ無効化してフォールバック）。
+/// Persistent transform cache that survives restarts. Content-addressed, so it doesn't depend on mtime;
+/// entries are reused when source, mode, and salt (nowaki version + defines) match.
+/// Stored in `node_modules/.cache/nowaki/` (disabled with a fallback if unavailable).
 pub struct DiskCache {
     dir: Option<PathBuf>,
     salt: u64,
 }
 
 impl DiskCache {
-    /// salt には nowaki バージョン + client_defines のハッシュを混ぜる
-    /// （アップグレードや env 変更でキャッシュが自動失効するように）。
+    /// The salt mixes in the nowaki version + a hash of client_defines
+    /// (so upgrades and env changes invalidate the cache automatically).
     pub fn new(root: &Path, salt: u64) -> Self {
         let dir = root.join("node_modules/.cache/nowaki");
         let dir = std::fs::create_dir_all(&dir).ok().map(|_| dir);
         Self { dir, salt }
     }
 
-    /// (絶対パス, モード, ソースハッシュ) からキャッシュキーを作る。
+    /// Builds a cache key from (absolute path, mode, source hash).
     pub fn key(&self, abs: &Path, mode: Mode, source_hash: u64) -> u64 {
         let mut buf = Vec::with_capacity(64);
         buf.extend_from_slice(&self.salt.to_le_bytes());
@@ -63,7 +63,7 @@ impl DiskCache {
 
     pub fn put(&self, key: u64, code: &str) {
         if let Some(dir) = &self.dir {
-            // 書き込み失敗は致命的でない（キャッシュ無し相当に劣化するだけ）
+            // A write failure isn't fatal (it just degrades to no cache)
             let _ = std::fs::write(dir.join(format!("{key:016x}.js")), code);
         }
     }

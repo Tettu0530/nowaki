@@ -1,6 +1,6 @@
-// 本番ドキュメント組み立て。node 依存のない純粋な文字列処理なので Edge でも使える。
+// Production document assembly. Pure string processing with no node deps, so it works on Edge too.
 
-// loader 後に解決したメタを優先し、無ければ route の静的 export にフォールバックする。
+// Prefers meta resolved after the loader, falling back to the route's static export.
 export function pageMeta(meta, mod) {
   const str = (v) => (typeof v === "string" ? v : undefined);
   return {
@@ -10,7 +10,7 @@ export function pageMeta(meta, mod) {
   };
 }
 
-// 非ストリーミング: body 全体を見て、使われた island の preload を <head> に入れる（ウォーターフォール回避）。
+// Non-streaming: scan the whole body and put preloads for used islands in <head> (avoids waterfalls).
 export function prodDocument(manifest, { mod, body, meta }) {
   const m = pageMeta(meta, mod);
   const islandNames = [...body.matchAll(/<nowaki-island name="([^"]+)"/g)].map((m) => m[1]);
@@ -63,8 +63,8 @@ ${live}
 </html>`;
 }
 
-// ストリーミング: シェル送出時点で島が未確定なので per-island preload は省き、
-// runtime チャンクだけ preload する（runtime が <nowaki-island> を見て各島を取得する）。
+// Streaming: islands aren't known when the shell is sent, so skip per-island preloads
+// and preload only the runtime chunk (the runtime finds <nowaki-island> and fetches each island).
 export function prodShell(manifest, mod, meta) {
   const m = pageMeta(meta, mod);
   const runtimeChunk = manifest.runtime;
@@ -91,7 +91,7 @@ ${runtimeScript}
   return { head, tail };
 }
 
-// islands.js が idle 時にこの URL から SPA ルーターを遅延 import する。
+// islands.js lazily imports the SPA router from this URL when idle.
 function dataRouter(manifest) {
   return manifest.routerRuntime ? ` data-router="/_nowaki/${manifest.routerRuntime}"` : "";
 }

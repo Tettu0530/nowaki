@@ -1,4 +1,4 @@
-// アセット import のデモ。photo.png は build 時に自動最適化（PNG ロスレス再圧縮）される。
+// Asset import demo. photo.png is optimized automatically at build time (lossless PNG recompression).
 import photo from "../photo.png";
 
 export default function Photo() {

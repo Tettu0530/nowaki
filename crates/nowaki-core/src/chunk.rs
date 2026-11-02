@@ -1,11 +1,11 @@
-//! スコープホイスティング型のチャンク生成。
+//! Scope-hoisting chunk generation.
 //!
-//! 各 island から到達する「アプリ側モジュール（プロジェクト配下・node_modules でない）で、
-//! その island だけが使うもの」を1つのスコープへ連結する（= スコープホイスティング）。
-//! トップレベルのバインディングはグローバル一意名にリネームし、チャンク内 import は直接参照に、
-//! チャンク外（node_modules / 共有モジュール）への import は ESM import のまま残す。
-//! node_modules は別チャンクとして分離・共有するので preact のインスタンスは1つに保たれる。
-//! 連結後にチャンク全体を minify する。
+//! The "app modules (under the project, not node_modules) reachable from an island and used
+//! only by that island" are concatenated into one scope (= scope hoisting).
+//! Top-level bindings are renamed to globally unique names; in-chunk imports become direct references,
+//! and imports outside the chunk (node_modules / shared modules) stay as ESM imports.
+//! node_modules are split into separate shared chunks, so there is only one preact instance.
+//! The whole chunk is minified after concatenation.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -26,14 +26,14 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use crate::NowakiCore;
 
-/// アプリ側の変換対象モジュールか（プロジェクト配下・node_modules でない）。
+/// Whether this is an app-side module to transform (under the project, not node_modules).
 pub fn is_app_module(core: &NowakiCore, abs: &Path) -> bool {
     crate::is_transformable(abs)
         && abs.starts_with(&core.root)
         && !abs.components().any(|c| c.as_os_str() == "node_modules")
 }
 
-/// 1モジュールの直接依存（解決済み絶対パス）を返す。
+/// Returns a module's direct deps (resolved absolute paths).
 pub fn module_deps(core: &NowakiCore, abs: &Path) -> Result<Vec<PathBuf>> {
     Ok(extract_meta(core, abs, 0)?
         .deps
@@ -42,7 +42,7 @@ pub fn module_deps(core: &NowakiCore, abs: &Path) -> Result<Vec<PathBuf>> {
         .collect())
 }
 
-/// entry から到達するアプリ側モジュール（entry を含む）を集める。node_modules には入らない。
+/// Collects app-side modules reachable from entry (including entry). Doesn't descend into node_modules.
 pub fn collect_app_modules(core: &NowakiCore, entry: &Path) -> HashSet<PathBuf> {
     let mut set = HashSet::new();
     let mut stack = vec![entry.to_path_buf()];
@@ -61,23 +61,23 @@ pub fn collect_app_modules(core: &NowakiCore, entry: &Path) -> HashSet<PathBuf> 
     set
 }
 
-/// このモジュールが連結に未対応の構文（`export *` 等）を含むか。
+/// Whether this module contains syntax concatenation doesn't support (`export *` etc.).
 pub fn needs_fallback(core: &NowakiCore, abs: &Path) -> bool {
     extract_meta(core, abs, 0)
         .map(|m| m.fallback)
         .unwrap_or(true)
 }
 
-/// 1モジュールの import / export メタデータ（AST は持たない）。
+/// A module's import / export metadata (no AST kept).
 struct ModuleMeta {
-    /// (解決済み絶対パス, 元の指定子)
+    /// (resolved absolute path, original specifier)
     deps: Vec<(PathBuf, String)>,
-    /// export 名 → ローカルのバインディング名（`export {a as b}` は b→a）
+    /// export name → local binding name (`export {a as b}` gives b→a)
     exports: Vec<(String, String)>,
     imports: Vec<ImportInfo>,
-    /// リネーム接尾辞に使うグローバルインデックス
+    /// Global index used for the rename suffix
     idx: usize,
-    /// 未対応構文を含むので単体 emit にフォールバックする
+    /// Contains unsupported syntax, so fall back to standalone emit
     fallback: bool,
 }
 
@@ -92,13 +92,13 @@ enum ImportItem {
     Named { imported: String, local: String },
     /// `import local`（default import）
     Default { local: String },
-    /// `import "x"`（副作用のみ）
+    /// `import "x"` (side effects only)
     SideEffect,
 }
 
-/// island チャンクのコードを生成する。`internal` はこのチャンクに連結するアプリモジュール集合
-/// （entry を含む）。`external_name` は「チャンク外モジュール abs → 別途 emit 済みのファイル名」。
-/// 返り値はチャンクのソース（未 minify）。entry の default export をチャンクの default にする。
+/// Generates an island chunk's code. `internal` is the set of app modules concatenated into this chunk
+/// (including entry). `external_name` maps "out-of-chunk module abs → its separately emitted file name".
+/// Returns the chunk source (not minified). The entry's default export becomes the chunk's default.
 #[allow(clippy::too_many_arguments)]
 pub fn hoist_chunk(
     core: &NowakiCore,
@@ -113,7 +113,7 @@ pub fn hoist_chunk(
         metas.insert(abs.clone(), meta);
     }
 
-    // 連結順: 依存を先に（後順DFS）。循環は訪問済みで打ち切る。
+    // Concatenation order: deps first (post-order DFS). Cycles stop at visited nodes.
     let mut order: Vec<PathBuf> = Vec::new();
     let mut visited: HashSet<PathBuf> = HashSet::new();
     let mut stack: HashSet<PathBuf> = HashSet::new();
@@ -188,12 +188,8 @@ pub fn hoist_chunk(
         bodies.push(body);
     }
 
-    let entry_default = renamed_export(entry, "default").ok_or_else(|| {
-        anyhow!(
-            "island が default export を持っていません: {}",
-            entry.display()
-        )
-    })?;
+    let entry_default = renamed_export(entry, "default")
+        .ok_or_else(|| anyhow!("island has no default export: {}", entry.display()))?;
 
     let mut out = String::new();
     for imp in &ext_imports {
@@ -210,7 +206,7 @@ pub fn hoist_chunk(
 
 #[derive(Default)]
 struct ImportWiring {
-    /// 元のローカル名 → リネーム後の名前（内部なら依存先のグローバル名、外部なら自分の接尾辞付き名）
+    /// Original local name → renamed name (internal: the dep's global name; external: our own suffixed name)
     rename_local: HashMap<String, String>,
 }
 
@@ -220,12 +216,12 @@ fn ext_imports_push(list: &mut Vec<String>, seen: &mut HashSet<String>, line: St
     }
 }
 
-/// import/export のメタデータだけ抽出する（連結順・配線計算に使う）。
+/// Extracts only import/export metadata (used for concatenation order and wiring).
 fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta> {
     let allocator = Allocator::default();
     let source = core.read_source(abs)?;
-    // サーバーモジュール（`"use server"`）はクライアントの連結境界。依存を辿らず（サーバー専用
-    // 依存をクライアントへ引き込まない）、連結対象にもしない（emit がプロキシを別チャンク化する）。
+    // Server modules (`"use server"`) are a client concatenation boundary. Don't follow their deps (keeps
+    // server-only deps off the client) and don't concatenate them (emit makes the proxy a separate chunk).
     if crate::server_fn::has_use_server(&source) {
         return Ok(ModuleMeta {
             deps: Vec::new(),
@@ -282,7 +278,7 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
                                 });
                             }
                             ImportDeclarationSpecifier::ImportNamespaceSpecifier(_) => {
-                                meta.fallback = true; // `import * as` は未対応
+                                meta.fallback = true; // `import * as` unsupported
                             }
                         }
                     }
@@ -300,7 +296,7 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
                         meta.exports.push((name.clone(), name));
                     }
                 } else if d.source.is_some() {
-                    meta.fallback = true; // `export {..} from` 再export は未対応
+                    meta.fallback = true; // `export {..} from` re-export unsupported
                 } else {
                     for sp in &d.specifiers {
                         let local = export_name_str(&sp.local);
@@ -315,7 +311,7 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
                         meta.exports
                             .push(("default".to_string(), i.name.to_string()));
                     } else {
-                        meta.fallback = true; // 無名 default は未対応
+                        meta.fallback = true; // anonymous default unsupported
                     }
                 }
                 ExportDefaultDeclarationKind::ClassDeclaration(c) => {
@@ -326,10 +322,10 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
                         meta.fallback = true;
                     }
                 }
-                _ => meta.fallback = true, // 式の default export は未対応
+                _ => meta.fallback = true, // expression default export unsupported
             },
             Statement::ExportAllDeclaration(_) => {
-                meta.fallback = true; // `export *` は未対応
+                meta.fallback = true; // `export *` unsupported
             }
             _ => {}
         }
@@ -337,7 +333,7 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
     Ok(meta)
 }
 
-/// モジュール本体を、リネーム + import/export 除去して codegen した文字列にする。
+/// Renames and strips import/export from a module body, then codegens it to a string.
 fn render_body(core: &NowakiCore, abs: &Path, idx: usize, wiring: &ImportWiring) -> Result<String> {
     let allocator = Allocator::default();
     let source = core.read_source(abs)?;
@@ -363,7 +359,7 @@ fn render_body(core: &NowakiCore, abs: &Path, idx: usize, wiring: &ImportWiring)
         &core.client_defines,
     );
 
-    // import の local 名集合（own バインディングと区別する）
+    // Set of import local names (to tell them apart from own bindings)
     let mut import_locals: HashSet<String> = HashSet::new();
     for stmt in &program.body {
         if let Statement::ImportDeclaration(d) = stmt {
@@ -375,8 +371,8 @@ fn render_body(core: &NowakiCore, abs: &Path, idx: usize, wiring: &ImportWiring)
         }
     }
 
-    // ルートスコープのバインディングをリネーム:
-    //   import binding -> wiring.rename_local（依存先のグローバル名 or 外部 import の別名）
+    // Rename root-scope bindings:
+    //   import binding -> wiring.rename_local (the dep's global name or the external import's alias)
     //   own binding    -> `<name>$<idx>`
     let mut scoping = scoping;
     let root = scoping.root_scope_id();
@@ -397,17 +393,17 @@ fn render_body(core: &NowakiCore, abs: &Path, idx: usize, wiring: &ImportWiring)
         }
     }
 
-    // import を除去し、export を裸の宣言に変換する。
+    // Strip imports and turn exports into bare declarations.
     let mut new_body = oxc::allocator::Vec::new_in(&allocator);
     for stmt in program.body.drain(..) {
         match stmt {
-            Statement::ImportDeclaration(_) => { /* 除去 */ }
+            Statement::ImportDeclaration(_) => { /* removed */ }
             Statement::ExportNamedDeclaration(d) => {
                 let d = d.unbox();
                 if let Some(decl) = d.declaration {
                     new_body.push(Statement::from(decl));
                 }
-                // specifiers のみ（`export {a}`）はバインディングが既にあるので捨てる
+                // Specifiers only (`export {a}`): the binding already exists, so drop it
             }
             Statement::ExportDefaultDeclaration(d) => {
                 let d = d.unbox();
@@ -418,7 +414,7 @@ fn render_body(core: &NowakiCore, abs: &Path, idx: usize, wiring: &ImportWiring)
                     ExportDefaultDeclarationKind::ClassDeclaration(c) => {
                         new_body.push(Statement::ClassDeclaration(c));
                     }
-                    // 式の default export は extract_meta で fallback 済みなので到達しない。
+                    // Unreachable: expression default exports already fell back in extract_meta.
                     _ => {}
                 }
             }
@@ -439,7 +435,7 @@ fn resolve(core: &NowakiCore, dir: &Path, spec: &str) -> Option<PathBuf> {
         return None;
     }
     let spec = crate::resolve::alias_specifier(spec).unwrap_or(spec);
-    // resolve_spec は通常解決→（失敗時）プラグイン resolveId（仮想モジュール）の順。
+    // resolve_spec tries normal resolution, then (on failure) plugin resolveId (virtual modules).
     core.resolve_spec(dir, spec)
 }
 
@@ -502,13 +498,13 @@ fn order_modules(
     order.push(abs.to_path_buf());
 }
 
-/// `Scoping` を所有権ごと取り出すためのダミー（apply_client_defines が値を要求するため）。
+/// Dummy for taking ownership of `Scoping` (apply_client_defines needs it by value).
 fn scoping_take(s: &mut oxc::semantic::Scoping) -> oxc::semantic::Scoping {
     std::mem::take(s)
 }
 
-/// 連結済みチャンクソースを再パースして minify + codegen（外部ソースマップ付き）する。
-/// 返り値: (最終コード, ソースマップ JSON)。
+/// Re-parses the concatenated chunk source, then minifies + codegens it (with an external source map).
+/// Returns (final code, source map JSON).
 pub fn minify_chunk(name: &str, source: &str) -> Result<(String, Option<String>)> {
     let allocator = Allocator::default();
     let source_type = SourceType::mjs();
@@ -516,7 +512,7 @@ pub fn minify_chunk(name: &str, source: &str) -> Result<(String, Option<String>)
     if !parsed.errors.is_empty() {
         let msgs: Vec<String> = parsed.errors.iter().map(|e| e.to_string()).collect();
         return Err(anyhow!(
-            "連結チャンク {name} の再パース失敗: {}",
+            "failed to re-parse concatenated chunk {name}: {}",
             msgs.join("; ")
         ));
     }

@@ -1,15 +1,15 @@
-// ファイルベースルーティング: routes/ をスキャンしてルートテーブルへ変換する。
+// File-based routing: scans routes/ into a route table.
 //   routes/index.tsx        → /
 //   routes/about.tsx        → /about
 //   routes/blog/[slug].tsx  → /blog/:slug
 //   routes/api/hello.ts     → /api/hello (handler)
-// 規約ファイル（通常ルートにはしない）:
-//   _layout.tsx     そのディレクトリ配下のページを包む（ネスト可）
-//   _middleware.ts  そのディレクトリ配下のリクエスト前処理（ネスト可）
-//   _404.tsx        未一致時のページ
-//   _500.tsx /_error.tsx  描画失敗時のページ
-//   loading.tsx     クライアント遷移中に出すローディングUI（ネスト可）
-//   error.tsx       クライアント遷移失敗時のフォールバックUI（ネスト可）
+// Convention files (not regular routes):
+//   _layout.tsx     wraps pages under its directory (nestable)
+//   _middleware.ts  pre-processes requests under its directory (nestable)
+//   _404.tsx        page for unmatched paths
+//   _500.tsx /_error.tsx  page for render failures
+//   loading.tsx     loading UI shown during client navigation (nestable)
+//   error.tsx       fallback UI when client navigation fails (nestable)
 
 import { readdir } from "node:fs/promises";
 import path from "node:path";
@@ -57,7 +57,7 @@ export async function scanRoutes(appRoot) {
       errorRoute = abs;
       continue;
     }
-    if (base.startsWith("_")) continue; // 予約
+    if (base.startsWith("_")) continue; // reserved
 
     const isApi = rel === "api" || rel.startsWith("api/");
     let urlPath = "/" + rel.replace(ROUTE_EXT, "");
@@ -82,9 +82,9 @@ export async function scanRoutes(appRoot) {
     });
   }
 
-  // 静的 > 動的 > catch-all。specificity（リテラル数）降順、同点なら catch-all を後に。
+  // static > dynamic > catch-all. Descending specificity (literal count); on ties, catch-all goes last.
   routes.sort((a, b) => b.specificity - a.specificity || (a.rest ? 1 : 0) - (b.rest ? 1 : 0));
-  // root→leaf 順（短い prefix を先に）
+  // root→leaf order (shorter prefixes first)
   layouts.sort((a, b) => a.prefix.length - b.prefix.length);
   middleware.sort((a, b) => a.prefix.length - b.prefix.length);
 
@@ -98,7 +98,7 @@ export function matchRoute(routesOrTable, pathname) {
     const segs = route.segments;
     const rest = segs.length > 0 && segs[segs.length - 1].rest;
     if (rest) {
-      // 末尾の catch-all は残り（≥1）を束ねる。固定部 = segs.length - 1。
+      // A trailing catch-all collects the rest (≥1). Fixed part = segs.length - 1.
       if (parts.length < segs.length) continue;
     } else if (segs.length !== parts.length) {
       continue;
@@ -115,7 +115,7 @@ export function matchRoute(routesOrTable, pathname) {
       }
     }
     if (rest) {
-      // catch-all param は残りセグメントの配列。
+      // A catch-all param is an array of the remaining segments.
       params[segs[segs.length - 1].param] = parts.slice(fixed).map((p) => decodeURIComponent(p));
     }
     return { file: route.file, params, isApi: route.isApi };
@@ -123,7 +123,7 @@ export function matchRoute(routesOrTable, pathname) {
   return null;
 }
 
-// "." → ""(ルート)
+// "." → "" (root)
 function dirToPrefix(dir) {
   if (!dir || dir === ".") return "";
   return "/" + dir.split(path.sep).join("/");

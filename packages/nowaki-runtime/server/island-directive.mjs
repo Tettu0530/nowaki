@@ -1,6 +1,6 @@
-// client:* 遅延ハイドレーション指令（load/idle/visible/media/only、既定 load）の解釈と
-// <nowaki-island> ラップ。dev / prod / edge で共有する。oxc は名前空間付き JSX 属性を
-// `"client:visible"` のような prop キーとして渡すので、変換側の改修は不要。
+// Parses client:* lazy-hydration directives (load/idle/visible/media/only, default load) and
+// wraps in <nowaki-island>. Shared by dev / prod / edge. oxc passes namespaced JSX attributes
+// as prop keys like `"client:visible"`, so the transform needs no changes.
 
 import { h } from "preact";
 
@@ -8,7 +8,7 @@ import { stableStringify } from "./serialize.mjs";
 
 const STRATEGIES = new Set(["load", "idle", "visible", "media", "only"]);
 
-// 指令キーはシリアライズ対象から除外し、島へ prop としては渡さない。
+// Directive keys are excluded from serialization and not passed to the island as props.
 function extractClient(props) {
   let strategy = null;
   let media = null;
@@ -27,7 +27,7 @@ function extractClient(props) {
   return { strategy, media, rest };
 }
 
-// client:only はクライアント専用 API を使う島向けに SSR しない。
+// client:only skips SSR, for islands that use client-only APIs.
 export function wrapIsland(island, props, Original) {
   const { __nowakiInner, ...raw } = props;
   void __nowakiInner;

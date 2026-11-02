@@ -1,9 +1,9 @@
-// Nowaki の素朴で再現可能なベンチ（dev ready cold/warm、build、shipped JS gzip、TTFB）。
-// 使い方: node benchmarks/bench.mjs [appDir] [nowakiBin]
-//   appDir   既定 examples/hello
-//   nowakiBin 既定 ./target/release/nowaki（無ければ ./target/debug/nowaki）
-// 注意: examples/hello は .tsrx・プラグイン・ライブ島まで含む全部入りなので、
-// 数字は plugin host 起動なども含む上限寄りになる。
+// Simple, reproducible Nowaki benchmark (dev ready cold/warm, build, shipped JS gzip, TTFB).
+// Usage: node benchmarks/bench.mjs [appDir] [nowakiBin]
+//   appDir    default examples/hello
+//   nowakiBin default ./target/release/nowaki (falls back to ./target/debug/nowaki)
+// Note: examples/hello includes everything (.tsrx, plugins, live islands),
+// so numbers lean toward the upper bound, including plugin host startup etc.
 
 import { spawn, spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, existsSync, rmSync } from "node:fs";
@@ -21,7 +21,7 @@ const bin =
 const now = () => Number(process.hrtime.bigint() / 1000000n); // ms
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// 子プロセスを起動し、stdout に `marker` が出るまでの時間を測る。kill して返す。
+// Spawns a child process and times until `marker` appears on stdout, then kills it.
 function timeUntil(args, marker, env = {}) {
   return new Promise((resolve, reject) => {
     const t0 = now();
@@ -88,7 +88,7 @@ async function ttfb() {
   const { child } = await timeUntil(["start", appDir, "--port", "8799"], "NOWAKI_START_READY").catch(
     () => ({ child: null }),
   );
-  // start は ready 後も走り続けるので、timeUntil の kill 後に別途起動して測る
+  // start keeps running after ready, so after timeUntil kills it, launch it again separately to measure
   const server = spawn(bin, ["start", appDir, "--port", "8799"], { cwd: ROOT });
   let ready = false;
   server.stdout.on("data", (b) => {

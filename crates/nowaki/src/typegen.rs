@@ -1,5 +1,5 @@
-//! 型付きルートの生成。`routes/` から `.nowaki/types.d.ts`（`NowakiRoutes` の拡張）を書き出し、
-//! `route()` / `Link` を型安全にする。dev 起動時・routes 変更時・build 時にも自動で走る。
+//! Typed route generation. Writes `.nowaki/types.d.ts` (augmenting `NowakiRoutes`) from `routes/`
+//! to make `route()` / `Link` type-safe. Also runs automatically on dev startup, routes changes, and build.
 
 use std::path::{Path, PathBuf};
 
@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 
 const ROUTE_EXT: [&str; 4] = ["tsx", "ts", "jsx", "js"];
 
-/// routes/ を走査し「URL パターン → パラメータ型」を返す（パス昇順・重複排除）。
+/// Walk routes/ and return "URL pattern → param type" (sorted by path, deduplicated).
 fn scan(routes_dir: &Path) -> Vec<(String, String)> {
     let mut files = Vec::new();
     walk(routes_dir, &mut files);
@@ -28,8 +28,8 @@ fn scan(routes_dir: &Path) -> Vec<(String, String)> {
     out
 }
 
-/// routes/ 相対パス（例 "blog/[slug].tsx"）から (URL パターン, パラメータ型) を求める。
-/// ルートにならないもの（規約ファイル・boundary・API・非対象拡張子）は None。
+/// Derive (URL pattern, param type) from a routes/-relative path (e.g. "blog/[slug].tsx").
+/// None for non-routes (convention files, boundaries, API, unsupported extensions).
 fn route_entry(rel: &str) -> Option<(String, String)> {
     let rel = rel.replace('\\', "/");
     let (stem_path, ext) = rel.rsplit_once('.')?;
@@ -37,7 +37,7 @@ fn route_entry(rel: &str) -> Option<(String, String)> {
         return None;
     }
     let base = stem_path.rsplit('/').next().unwrap_or(stem_path);
-    // 規約ファイル（_layout/_middleware/_404/_500/_error）と boundary、API は除外。
+    // Exclude convention files (_layout/_middleware/_404/_500/_error), boundaries, and API.
     if base.starts_with('_') || base == "loading" || base == "error" {
         return None;
     }
@@ -84,7 +84,7 @@ fn render(routes: &[(String, String)]) -> String {
     s
 }
 
-/// 内容が同じなら書かない（dev のファイル監視を無駄に発火させない）。
+/// Skip the write if unchanged (avoids needlessly triggering the dev file watcher).
 pub fn write(root: &Path) -> Result<()> {
     let routes_dir = root.join("routes");
     if !routes_dir.is_dir() {
@@ -93,12 +93,12 @@ pub fn write(root: &Path) -> Result<()> {
     let routes = scan(&routes_dir);
     let out_dir = root.join(".nowaki");
     std::fs::create_dir_all(&out_dir)
-        .with_context(|| format!("作成失敗: {}", out_dir.display()))?;
+        .with_context(|| format!("failed to create: {}", out_dir.display()))?;
     let content = render(&routes);
     let path = out_dir.join("types.d.ts");
     if std::fs::read_to_string(&path).ok().as_deref() != Some(content.as_str()) {
         std::fs::write(&path, &content)
-            .with_context(|| format!("書き込み失敗: {}", path.display()))?;
+            .with_context(|| format!("failed to write: {}", path.display()))?;
     }
     Ok(())
 }
@@ -106,7 +106,7 @@ pub fn write(root: &Path) -> Result<()> {
 pub fn run(root: PathBuf) -> Result<()> {
     let routes_dir = root.join("routes");
     if !routes_dir.is_dir() {
-        anyhow::bail!("routes/ が見つかりません（{}）。", root.display());
+        anyhow::bail!("routes/ not found ({}).", root.display());
     }
     let n = scan(&routes_dir).len();
     write(&root)?;
@@ -176,7 +176,7 @@ mod tests {
         assert_eq!(entry("error.tsx"), None);
         assert_eq!(entry("api/hello.ts"), None);
         assert_eq!(entry("api/posts/[id].ts"), None);
-        assert_eq!(entry("readme.md"), None); // 非対象拡張子
+        assert_eq!(entry("readme.md"), None); // unsupported extension
     }
 
     #[test]

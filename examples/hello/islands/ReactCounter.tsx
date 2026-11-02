@@ -1,5 +1,5 @@
-// Next.js から持ち込んだ「そのまま」の React コード。
-// Nowaki が react/react-dom を preact/compat へ読み替えるので無改変で動く。
+// React code brought over from Next.js as-is.
+// Nowaki aliases react/react-dom to preact/compat, so it runs unmodified.
 import { useState } from "react";
 
 export default function ReactCounter({ start = 0 }: { start?: number }) {

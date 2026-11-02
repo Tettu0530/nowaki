@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
 
-// クライアントでハイドレートする唯一のコンポーネント（島）。スタイルは routes/index.tsx の <style> に。
+// The only component (island) hydrated on the client. Styles live in the <style> in routes/index.tsx.
 export default function Counter({ start = 0 }: { start?: number }) {
   const [count, setCount] = useState(start);
   return (
