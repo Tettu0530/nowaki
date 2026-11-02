@@ -1,6 +1,8 @@
 // Jetstream client runtime. Sends data-live events over WS and morphs in the returned HTML patches.
 // If the WS can't connect or drops, the initial SSR stays intact (graceful degradation only).
 
+const MAX_RETRIES = 8;
+
 function lives() {
   return [...document.querySelectorAll("nowaki-live")];
 }
@@ -49,8 +51,10 @@ function connect() {
         console.warn("[nowaki live] server at capacity; staying on the initial SSR view");
       }
     };
-    // Reconnect (exponential backoff, capped). Re-joining restores state.
+    // Reconnect (exponential backoff, capped). Re-joining restores state. Give up after
+    // MAX_RETRIES failures in a row (~1 min) so a host without a live endpoint isn't hammered.
     ws.onclose = () => {
+      if (retry >= MAX_RETRIES) return;
       const delay = Math.min(1000 * 2 ** retry++, 10000);
       setTimeout(open, delay);
     };
