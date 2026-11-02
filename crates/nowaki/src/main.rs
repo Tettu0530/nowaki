@@ -3,6 +3,7 @@ mod dev;
 mod live;
 mod plugins;
 mod prerender;
+mod shutdown;
 mod sidecar;
 mod start;
 mod typegen;

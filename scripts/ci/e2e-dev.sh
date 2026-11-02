@@ -136,3 +136,4 @@ node scripts/security-e2e.mjs dev "$B" "$(pwd)/examples/hello"
 rm -f examples/hello/.env
 
 kill $SERVER_PID
+bash scripts/ci/assert-no-orphans.sh $SERVER_PID
