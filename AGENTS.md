@@ -100,10 +100,12 @@ these properties. Full context and the defenses table live in
 - **Do not weaken default CSRF / CSWSH gates** without an explicit opt-in API and
   ROADMAP/SECURITY updates: JSON + `x-nowaki-rpc` + Origin/Host for RPC;
   Origin checks on `/__nowaki/live` and `/__nowaki/hmr` upgrades.
-- **Jetstream join requires verified state signatures**; do not apply client-supplied
-  state without the live signing path in `live.rs` / `live.mjs`.
-- **ISR keys must include learned `Vary` inputs** so cached pages cannot bleed
-  across users; see `isr_key` in `start.rs`.
+- **Client-supplied Jetstream state is used only after its signature verifies**
+  (`live.mjs` checks before every render and handler run); do not skip or bypass
+  that path.
+- **ISR keys must include learned `Vary` inputs** (`context.mjs` `__vary()` →
+  `x-nowaki-vary`, folded in `isr_key` in `start.rs`) so cached pages cannot
+  bleed across users.
 - **Only `PUBLIC_*` (and `MODE`) reach client bundles** via env inlining; never
   ship secrets or raw `.env` contents to the browser.
 - **Regressions need tests.** If you add or change a default defense, extend

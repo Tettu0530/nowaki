@@ -7,7 +7,7 @@ and defenses the framework applies by default.
 
 ## Supported versions
 
-Nowaki is in alpha; only the latest release (and `main`) receive security fixes.
+Nowaki is in alpha; only the latest release (and `main`) receives security fixes.
 
 ## Reporting a vulnerability
 
@@ -91,11 +91,11 @@ column.
 | Server function allowlist | Calling arbitrary server exports | `nowaki-core` + `dist/server/functions.json` + `functions.mjs` | e2e scripts (`/__nowaki/fn` unknown id → 404) |
 | RPC CSRF gate (JSON + `x-nowaki-rpc` + Origin/Host) | Cross-site POST with victim cookies | `packages/nowaki-runtime/server/functions.mjs`; Rust sets `x-forwarded-host` from browser `Host` on the sidecar hop | `scripts/security-e2e.mjs` (dev) |
 | WebSocket Origin check (CSWSH) | Cross-origin upgrades to HMR / Jetstream | `crates/nowaki/src/dev.rs`, `crates/nowaki/src/start.rs` | `scripts/security-e2e.mjs` (dev) |
-| Jetstream join state signature | Forged live state on join | `crates/nowaki/src/live.rs` + `server/live.mjs` | `scripts/security-e2e.mjs` (dev) |
-| ISR cache key + `Vary` learning | Cross-user HTML cache bleed | `crates/nowaki/src/start.rs`, route `export const vary` | `scripts/security-e2e.mjs` (prod) |
+| Jetstream state signature | Forged live state used in render/handlers | `server/live.mjs` (verify before each render/handler); `crates/nowaki/src/live.rs` (holds state per session) | `scripts/security-e2e.mjs` (dev) |
+| ISR cache key + `Vary` learning | Cross-user HTML cache bleed | `server/context.mjs` (`__vary()`), `server/handler.mjs` (`x-nowaki-vary`); `crates/nowaki/src/start.rs` (`isr_key`); e.g. `examples/hello/routes/vary.tsx` | `scripts/security-e2e.mjs` (prod) |
 | ISR query folding | Cache flood via distinct query strings | `crates/nowaki/src/start.rs` | `scripts/security-e2e.mjs` (prod) |
-| Static client assets by basename | Path traversal on `/_nowaki/*` | `crates/nowaki/src/start.rs` | Covered by prod e2e / manual review |
-| Dependency advisories | Known-vulnerable crates/packages | `.github/workflows/ci.yml` | `cargo audit`, `pnpm audit` job |
+| Static client assets by basename | Path traversal on `/_nowaki/*` | `crates/nowaki/src/start.rs` | Not covered by CI yet (planned v0.14) |
+| Dependency advisories | Known-vulnerable crates/packages | `.github/workflows/ci.yml` | `cargo audit`, `cargo-deny`, `pnpm audit` jobs |
 
 **Planned (not yet default):** inbound proxy header sanitization (`NOWAKI_TRUST_PROXY`),
 default security headers (CSP, `X-Frame-Options`, etc.), and broader
@@ -103,7 +103,8 @@ default security headers (CSP, `X-Frame-Options`, etc.), and broader
 
 ## Dependency auditing
 
-CI runs `cargo audit` (RustSec) and `pnpm audit` on every push. Locally:
+CI runs `cargo audit`, `cargo-deny`, and `pnpm audit` on pushes (and on a daily
+schedule). Locally:
 
 ```bash
 cargo audit
