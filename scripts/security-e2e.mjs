@@ -144,6 +144,7 @@ if (mode === "prod") {
   // Prod static assets: /_nowaki/* resolves by basename under dist/client only (start.rs serve_static).
   const home = await (await fetch(`${base}/`)).text();
   const hashed = home.match(/\/_nowaki\/([A-Za-z0-9_.-]+\.js)/)?.[1];
+  check("home page references a /_nowaki/*.js asset", Boolean(hashed));
   if (hashed) {
     check("legit /_nowaki client asset (200)", (await statusOf(`${base}/_nowaki/${hashed}`)) === 200);
   }
