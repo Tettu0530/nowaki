@@ -250,11 +250,9 @@ fn transform_for_server(
 
     let parsed = Parser::new(&allocator, source, source_type).parse();
     if !parsed.errors.is_empty() {
-        let msgs: Vec<String> = parsed.errors.iter().map(|e| e.to_string()).collect();
         return Err(anyhow!(
-            "parse error in {}: {}",
-            path.display(),
-            msgs.join("; ")
+            "parse error\n{}",
+            crate::transform::render_diagnostics(path, source, &parsed.errors)
         ));
     }
     let mut program = parsed.program;
@@ -276,11 +274,9 @@ fn transform_for_server(
     let ret =
         Transformer::new(&allocator, path, &options).build_with_scoping(scoping, &mut program);
     if !ret.errors.is_empty() {
-        let msgs: Vec<String> = ret.errors.iter().map(|e| e.to_string()).collect();
         return Err(anyhow!(
-            "transform error in {}: {}",
-            path.display(),
-            msgs.join("; ")
+            "transform error\n{}",
+            crate::transform::render_diagnostics(path, source, &ret.errors)
         ));
     }
 
@@ -313,7 +309,7 @@ fn transform_for_server(
                 let full = resolution.full_path();
                 if let Ok(css) = fs::read_to_string(&full) {
                     // Scope with the same id as the client so class names match.
-                    let id = css_scope_id(&core.root, &full);
+                    let id = crate::css::css_scope_id(&core.root, &full);
                     let (_scoped, map) = crate::css::scope_css(&id, &css);
                     let body = format!("export default {}", crate::css::mapping_object(&map));
                     let data = crate::transform::data_module(&body);
@@ -416,16 +412,6 @@ struct EmitCtx {
     asset_out: u64,
 }
 
-/// CSS scope ID. It ships to the client, so to avoid exposing absolute paths (OS user name, internal layout)
-/// it is made root-relative, and out-of-root paths (pnpm store etc.) become a stable hash.
-/// SSR (transform_for_server) and the client must use the same id.
-fn css_scope_id(root: &Path, abs: &Path) -> String {
-    match abs.strip_prefix(root) {
-        Ok(rel) => rel.to_string_lossy().replace('\\', "/"),
-        Err(_) => format!("ext/{:016x}", xxh3_64(abs.to_string_lossy().as_bytes())),
-    }
-}
-
 /// Name to put in the source map's `sources`. Made root-relative so the client .map doesn't
 /// expose absolute paths (OS user name, home directory layout). Out-of-root paths
 /// (pnpm store etc.) are trimmed to `node_modules/...` onward, or to just the file name otherwise.
@@ -474,7 +460,7 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
     if crate::css::is_css(abs) {
         let css = fs::read_to_string(abs)
             .with_context(|| format!("failed to read: {}", abs.display()))?;
-        let id = css_scope_id(&core.root, abs);
+        let id = crate::css::css_scope_id(&core.root, abs);
         let code = if crate::css::is_css_module(abs) {
             let (scoped, map) = crate::css::scope_css(&id, &css);
             crate::css::css_module_client_js(&id, &scoped, &map)
@@ -571,6 +557,10 @@ fn emit_island(
     out_dir: &Path,
     ctx: &mut EmitCtx,
 ) -> Result<String> {
+    // Hoisting would drop what it can't concatenate (e.g. `import * as`), so such islands stay unbundled.
+    if crate::chunk::needs_fallback(core, island) {
+        return emit(core, island, out_dir, ctx);
+    }
     let mut internal: Vec<PathBuf> = vec![island.to_path_buf()];
     for m in app_set {
         if m == island {
@@ -657,11 +647,9 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
 
     let parsed = Parser::new(&allocator, source, source_type).parse();
     if !parsed.errors.is_empty() {
-        let msgs: Vec<String> = parsed.errors.iter().map(|e| e.to_string()).collect();
         return Err(anyhow!(
-            "parse error in {}: {}",
-            path.display(),
-            msgs.join("; ")
+            "parse error\n{}",
+            crate::transform::render_diagnostics(path, source, &parsed.errors)
         ));
     }
     let mut program = parsed.program;
@@ -683,11 +671,9 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
     let ret =
         Transformer::new(&allocator, path, &options).build_with_scoping(scoping, &mut program);
     if !ret.errors.is_empty() {
-        let msgs: Vec<String> = ret.errors.iter().map(|e| e.to_string()).collect();
         return Err(anyhow!(
-            "transform error in {}: {}",
-            path.display(),
-            msgs.join("; ")
+            "transform error\n{}",
+            crate::transform::render_diagnostics(path, source, &ret.errors)
         ));
     }
 
