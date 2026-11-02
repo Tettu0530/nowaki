@@ -1,33 +1,113 @@
 name: Bug report
-description: Report a problem with Nowaki
-labels: ["bug", "triage"]
+description: Something in Nowaki doesn't work as documented
+labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to file a bug! Nowaki is alpha, so please
-        include enough detail to reproduce.
+        Thanks for filing a bug. Nowaki is alpha, so a small reproduction helps a lot.
+        **Security issues:** don't file them here. Use [private vulnerability reporting](https://github.com/Tettu0530/nowaki/security/advisories/new).
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Routing / layouts / middleware
+        - Islands / hydration
+        - Jetstream (live islands)
+        - Server functions ("use server")
+        - Plugins / TSRX / virtual modules
+        - Build / bundling / assets / CSS
+        - Dev server / HMR
+        - nowaki start (production server, ISR)
+        - Deploy adapter
+        - create-nowaki (scaffolding)
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: command
+    attributes:
+      label: Command
+      multiple: true
+      options:
+        - nowaki dev
+        - nowaki build
+        - nowaki start
+        - nowaki prerender
+        - nowaki upgrade / typegen
+        - npm create nowaki
+        - Deployed output (adapter)
+    validations:
+      required: true
+  - type: dropdown
+    id: adapter
+    attributes:
+      label: Deploy adapter
+      description: Only if the bug involves `nowaki build --adapter ...` or its output.
+      options:
+        - Not relevant
+        - node
+        - static
+        - bun
+        - deno
+        - cloudflare
+        - vercel
   - type: textarea
     id: what-happened
     attributes:
-      label: What happened?
-      description: A clear description of the bug, and what you expected instead.
+      label: What happened, and what did you expect?
     validations:
       required: true
   - type: textarea
     id: repro
     attributes:
       label: Steps to reproduce
+      description: Ideally a minimal app (a repo link or the smallest `routes/` / `islands/` files that show it).
       placeholder: |
-        1. `nowaki dev examples/hello`
-        2. Edit routes/index.tsx
-        3. ...
+        1. npm create nowaki@latest my-app
+        2. Add routes/foo.tsx with ...
+        3. pnpm dev, open /foo
     validations:
       required: true
   - type: textarea
-    id: env
+    id: logs
     attributes:
-      label: Environment
-      description: OS, Node version (`node -v`), Rust version (`rustc --version`), Nowaki commit.
+      label: Logs / error output
+      description: Terminal output, the dev error overlay, or browser console. Pasted text is formatted as code.
+      render: shell
+  - type: input
+    id: nowaki-version
+    attributes:
+      label: Nowaki version
+      description: Output of `npx nowaki --version`, plus `@nowaki-dev/runtime` from package.json if it differs.
+      placeholder: nowaki 0.12.1, @nowaki-dev/runtime 0.11.1
     validations:
       required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      placeholder: "22.11.0"
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
