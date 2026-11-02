@@ -18,6 +18,13 @@ milestone's worth of work; the codename is noted per entry.
   apps from `npm create nowaki` get `preact-render-to-string@^6.8.2`.
 
 ### Fixed
+- React libraries now SSR: `react` / `react-dom` imports inside node_modules
+  resolve to `preact/compat` on the server (a Node resolve hook in the dev and
+  production sidecars and the node adapter), instead of loading real React and
+  failing every hook call. The client alias table also maps
+  `react-dom/client`, `react-dom/server`, `react/compiler-runtime`, and
+  `scheduler` to their `preact/compat` counterparts, and
+  `process.env.NODE_ENV` is defined for client code.
 - Windows: `nowaki dev` / `nowaki build` work (verbatim `\\?\` paths, SSR loader
   file URLs, and `/@fs/` drive-letter URLs).
 - `nowaki dev` / `nowaki start` kill their Node children on SIGTERM instead of
