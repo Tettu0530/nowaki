@@ -134,7 +134,7 @@ async function benchNext() {
   const html = path.join(dir, ".next/server/app/index.html");
   if (existsSync(html)) {
     // noModule polyfills aren't fetched by modern browsers, so they don't count.
-    const tags = readFileSync(html, "utf8").match(/<script\b[^>]*>/g) ?? [];
+    const tags = readFileSync(html, "utf8").match(/<script\b[^>]*>/gi) ?? [];
     const srcs = new Set(
       tags
         .filter((t) => !/\bnomodule\b/i.test(t))
