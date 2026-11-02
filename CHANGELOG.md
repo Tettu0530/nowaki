@@ -18,6 +18,9 @@ milestone's worth of work; the codename is noted per entry.
   apps from `npm create nowaki` get `preact-render-to-string@^6.8.2`.
 
 ### Fixed
+- Statically prerendered sites (`nowaki prerender`, the static adapter) include
+  `__nowaki/boundaries` (served as JSON via `_headers`), so the SPA router's
+  loading/error boundaries work and no longer 404 on static hosts (#19).
 - Windows: `nowaki dev` / `nowaki build` work (verbatim `\\?\` paths, SSR loader
   file URLs, and `/@fs/` drive-letter URLs).
 - `nowaki dev` / `nowaki start` kill their Node children on SIGTERM instead of

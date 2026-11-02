@@ -78,12 +78,23 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         count += 1;
     }
 
+    // The SPA router fetches this once; a static host has no server to answer it.
+    let boundaries = client
+        .get(format!("http://127.0.0.1:{port}/__nowaki/boundaries"))
+        .send()
+        .await?;
+    if boundaries.status().is_success() {
+        let dir = out.join("__nowaki");
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(dir.join("boundaries"), boundaries.text().await?)?;
+    }
+
     let assets = out.join("_nowaki");
     std::fs::create_dir_all(&assets)?;
     copy_dir(&root.join("dist/client"), &assets)?;
     std::fs::write(
         out.join("_headers"),
-        "/_nowaki/*\n  Cache-Control: public, max-age=31536000, immutable\n",
+        "/_nowaki/*\n  Cache-Control: public, max-age=31536000, immutable\n/__nowaki/boundaries\n  Content-Type: application/json\n",
     )?;
 
     drop(child);
