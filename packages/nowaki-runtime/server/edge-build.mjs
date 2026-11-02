@@ -3,7 +3,7 @@
 //
 // Usage: node edge-build.mjs <serverDir> <clientDir> <workerDir> [appName]
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { scanRoutes } from "./router.mjs";
 
@@ -116,6 +116,7 @@ const wrangler = `{
 }
 `;
 
+await rm(workerDir, { recursive: true, force: true });
 await mkdir(workerDir, { recursive: true });
 await writeFile(path.join(workerDir, "index.js"), worker);
 await writeFile(path.join(workerDir, "wrangler.jsonc"), wrangler);

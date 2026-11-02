@@ -39,6 +39,11 @@ pub fn build_client(
     dist: &Path,
 ) -> Result<(BuildReport, HashMap<PathBuf, String>)> {
     let client_dir = dist.join("client");
+    // Start empty so deleted islands/modules from a previous build don't ship.
+    if client_dir.exists() {
+        fs::remove_dir_all(&client_dir)
+            .with_context(|| format!("failed to clear {}", client_dir.display()))?;
+    }
     fs::create_dir_all(&client_dir)
         .with_context(|| format!("failed to create dist: {}", client_dir.display()))?;
 
@@ -167,6 +172,10 @@ pub fn build_server(
     use rayon::prelude::*;
 
     let server_dir = dist.join("server");
+    if server_dir.exists() {
+        fs::remove_dir_all(&server_dir)
+            .with_context(|| format!("failed to clear {}", server_dir.display()))?;
+    }
     let mut files = Vec::new();
     for sub in ["routes", "islands", "components", "lib", "actions"] {
         let src_root = core.root.join(sub);
