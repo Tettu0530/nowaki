@@ -24,6 +24,9 @@ milestone's worth of work; the codename is noted per entry.
   leaving them orphaned.
 - The node/bun/deno adapter deploy hint and `start` script work from
   `dist/server`.
+- Islands that use `import * as` (or other forms scope hoisting can't
+  concatenate) are emitted unbundled instead of losing the import and throwing
+  `ReferenceError` in the browser (#24).
 
 ## [0.11.0] — 2026-06-13 · scaffold templates
 
