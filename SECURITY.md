@@ -1,5 +1,11 @@
 # Security Policy
 
+<div align="right">
+
+[**Japanese version →**](./SECURITY-Ja.md)
+
+</div>
+
 Nowaki is a full-stack framework with a **Rust HTTP front** (dev/start) and **Node
 sidecars** (SSR, plugins). Production traffic should hit `nowaki start` or a deploy
 adapter output — not `nowaki dev`. This document covers reporting, trust boundaries,

@@ -1,5 +1,5 @@
 [files]
-extend-exclude = ["*.lock", "pnpm-lock.yaml", "*.svg"]
+extend-exclude = ["*.lock", "pnpm-lock.yaml", "*.svg", "SECURITY-Ja.md"]
 
 [default]
 # Hex ids in server-function fixtures, and plurals of acronyms the word splitter cuts up.

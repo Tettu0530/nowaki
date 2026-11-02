@@ -6,9 +6,13 @@ import { readFileSync } from "node:fs";
 const ALLOWED_WORDS = /野分/g;
 const CJK = /[぀-ヿ㐀-䶿一-鿿ｦ-ﾟ]/;
 
+// Intentional translations (AGENTS.md: English elsewhere in the repo).
+const ENGLISH_ONLY_SKIP = new Set(["SECURITY-Ja.md"]);
+
 const files = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
 const hits = [];
 for (const file of files) {
+  if (ENGLISH_ONLY_SKIP.has(file)) continue;
   let text;
   try {
     text = readFileSync(file, "utf8");
