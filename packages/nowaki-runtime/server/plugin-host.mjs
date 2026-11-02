@@ -1,7 +1,5 @@
-// プラグインホスト。Rust（dev/build）から起動され、アプリの nowaki.config を読み込んで
-// プラグインの変換フックを HTTP で提供する。Rust は変換可能モジュールのソースをここへ渡し、
-// 変換後コードを受け取る（マッチしなければ素通し）。起動完了は stdout の
-// "NOWAKI_PLUGIN_HOST_READY <port>" で通知する。
+// プラグインホスト。Rust（dev/build）から起動され、nowaki.config のプラグインフックを
+// HTTP で提供する。起動完了は stdout の "NOWAKI_PLUGIN_HOST_READY <port>" で通知する。
 //
 // nowaki.config.mjs（または .js）:
 //   export default {
@@ -35,19 +33,17 @@ const transformers = plugins.filter((p) => typeof p.transform === "function");
 const resolvers = plugins.filter((p) => typeof p.resolveId === "function");
 const loaders = plugins.filter((p) => typeof p.load === "function");
 
-// TSRX: アプリに @tsrx/preact があれば .tsrx を標準 JSX へコンパイルできる。
-// 解決は「アプリの node_modules」基準（このホスト自体は runtime パッケージ配下にあるため）。
+// アプリに @tsrx/preact があれば .tsrx を JSX へコンパイルする。このホストは runtime
+// パッケージ配下にあるので、解決はアプリの node_modules 基準で行う。
 let tsrxCompile = null;
 try {
   const appRequire = createRequire(path.join(appRoot, "package.json"));
   const resolved = appRequire.resolve("@tsrx/preact");
   const mod = await import(pathToFileURL(resolved).href);
   if (typeof mod.compile === "function") tsrxCompile = mod.compile;
-} catch {
-  // 未導入なら .tsrx 非対応（hasTsrx=false）
-}
+} catch {}
 
-// 各プラグインの transform を順に適用（前段の出力を次段へ）。誰も変えなければ null。
+// 前段の出力を次段へ渡す。誰も変えなければ null。
 async function runTransform(id, code) {
   let current = code;
   let changed = false;
@@ -63,7 +59,7 @@ async function runTransform(id, code) {
   return changed ? current : null;
 }
 
-// resolveId: 最初に id を返したプラグインが勝つ。誰も引き受けなければ null。
+// 最初に id を返したプラグインが勝つ。
 async function runResolveId(source, importer) {
   for (const p of resolvers) {
     const out = await p.resolveId(source, importer);
@@ -74,7 +70,7 @@ async function runResolveId(source, importer) {
   return null;
 }
 
-// load: 最初にソースを返したプラグインが勝つ。誰も持たなければ null。
+// 最初にソースを返したプラグインが勝つ。
 async function runLoad(id) {
   for (const p of loaders) {
     const out = await p.load(id);
@@ -85,7 +81,7 @@ async function runLoad(id) {
   return null;
 }
 
-// Content-Length を明示して送る（Rust 側の素朴な HTTP クライアントが chunked を扱わずに済む）。
+// Rust 側の素朴な HTTP クライアントが chunked を扱わずに済むよう Content-Length を明示する。
 function sendJson(res, status, obj) {
   const json = JSON.stringify(obj);
   res.writeHead(status, {

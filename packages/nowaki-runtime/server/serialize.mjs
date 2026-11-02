@@ -1,6 +1,4 @@
-// 島の props を決定的（安定）にシリアライズする。
-// キー順を固定するので、同じ props は挿入順に関わらず常に同じ文字列になる。
-// これは将来の差分検出（Jetstream の morph）・遅延ハイドレーション・キャッシュの基盤。
+// 島の props を決定的にシリアライズする（キー順固定で挿入順に依存しない）。
 
 export function stableStringify(value) {
   return stringify(value);
@@ -12,7 +10,6 @@ function stringify(v) {
   if (Array.isArray(v)) {
     return "[" + v.map(stringify).join(",") + "]";
   }
-  // toJSON を尊重（Date 等）
   if (typeof v.toJSON === "function") return stringify(v.toJSON());
   const keys = Object.keys(v).sort();
   const parts = [];

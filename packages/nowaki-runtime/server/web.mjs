@@ -1,15 +1,11 @@
-// Web 標準（fetch / Request / Response）のリクエストハンドラ工場。Edge（Cloudflare Workers
-// 等）向け。node:http も実行時ファイル import も使わない。ルート/島/manifest は
-// ビルド時に静的 import 済みのマップとして渡される（worker は全モジュールをバンドルする）。
-//
-// 共有ロジックは handler.mjs（runtime 非依存）と document.mjs（純粋文字列）に集約済み。
+// Edge 向けの Web 標準 fetch ハンドラ工場。node:http も実行時ファイル import も使わず、
+// ルート/島/manifest はビルド時に静的 import 済みのマップとして受け取る。
 
 import { options } from "preact";
 import { handleRequest } from "./handler.mjs";
 import { wrapIsland } from "./island-directive.mjs";
 import { prodDocument, prodShell } from "./document.mjs";
 
-// handler.mjs の結果 {status,headers,body,stream} を Web Response へ。
 export function resultToResponse(result) {
   const headers = new Headers();
   for (const [k, v] of Object.entries(result.headers ?? {})) {
@@ -23,7 +19,6 @@ export function resultToResponse(result) {
   return new Response(body, { status: result.status ?? 200, headers });
 }
 
-// 描画中の island を <nowaki-island> で包む options.vnode フックを差し込む（1回）。
 function installIslandHook(registry) {
   const prev = options.vnode;
   options.vnode = (vnode) => {
@@ -61,7 +56,6 @@ export function createFetchHandler({
   }
   installIslandHook(registry);
 
-  // サーバー関数（`"use server"`）: id→{module,export} を静的 import 済み modules で引く。
   const serverFunctions =
     serverFnTable && Object.keys(serverFnTable).length
       ? {

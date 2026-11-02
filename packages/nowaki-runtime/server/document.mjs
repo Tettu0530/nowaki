@@ -1,8 +1,6 @@
-// 本番ドキュメント組み立て（純粋な文字列処理。node 依存なし＝Node でも Edge でも使える）。
-// 描画済み body を完成 HTML に包む / ストリーミング用に head と tail へ分ける。
+// 本番ドキュメント組み立て。node 依存のない純粋な文字列処理なので Edge でも使える。
 
-// 解決済みメタ（handler が loader 後に算出した {title,head,lang}）を優先し、無ければ
-// route の静的 export（mod.title 等）にフォールバックする。
+// loader 後に解決したメタを優先し、無ければ route の静的 export にフォールバックする。
 export function pageMeta(meta, mod) {
   const str = (v) => (typeof v === "string" ? v : undefined);
   return {
@@ -43,7 +41,6 @@ export function prodDocument(manifest, { mod, body, meta }) {
   const runtime = hasIslands
     ? `<script id="nowaki-runtime" type="module" src="/_nowaki/${manifest.runtime}"${dataRouter(manifest)}></script>`
     : "";
-  // サーバーリアクティブ島があれば live.js（WS + morph）を読み込む。
   const live =
     body.includes("<nowaki-live") && manifest.liveRuntime
       ? `<script type="module" src="/_nowaki/${manifest.liveRuntime}"></script>`
@@ -94,7 +91,7 @@ ${runtimeScript}
   return { head, tail };
 }
 
-// 遅延 SPA ルーターチャンクの URL を data-router 属性として返す（islands.js が idle で import）。
+// islands.js が idle 時にこの URL から SPA ルーターを遅延 import する。
 function dataRouter(manifest) {
   return manifest.routerRuntime ? ` data-router="/_nowaki/${manifest.routerRuntime}"` : "";
 }

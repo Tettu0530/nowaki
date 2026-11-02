@@ -1,7 +1,5 @@
-// Edge（Cloudflare Workers）アダプタのビルド時生成器。Node で実行される（fs あり）。
-// dist/server を走査し、全サーバーモジュールを「静的 import」した worker エントリと
-// wrangler 設定を dist/worker に出力する。Workers は実行時のファイル import を許さないため、
-// ルート/レイアウト/middleware/島/manifest/ルートテーブルを全てバンドル前提で埋め込む。
+// Cloudflare Workers アダプタのビルド時生成器（Node で実行）。Workers は実行時の
+// ファイル import を許さないため、全サーバーモジュールを静的 import した worker エントリを出力する。
 //
 // 使い方: node edge-build.mjs <serverDir> <clientDir> <workerDir> [appName]
 
@@ -19,12 +17,10 @@ const appName = appNameArg || "nowaki-app";
 const manifest = JSON.parse(await readFile(path.join(clientDir, "manifest.json"), "utf8"));
 const table = await scanRoutes(serverDir);
 
-// 絶対ファイルパス → ルートテーブル用キー（serverDir からの相対, posix）
 const keyOf = (abs) => path.relative(serverDir, abs).split(path.sep).join("/");
-// worker(dist/worker/index.js) から dist/server/<key> への相対 import 指定子
+// dist/worker/index.js からの相対指定子
 const specOf = (key) => `../server/${key}`;
 
-// 重複なくモジュールを集める（順序安定）。import 変数名を割り当てる。
 const order = [];
 const seen = new Map(); // key -> varName
 const addModule = (abs) => {
@@ -37,7 +33,6 @@ const addModule = (abs) => {
   return seen.get(key);
 };
 
-// ルートテーブルの file をキーへ差し替えつつ、モジュールを登録する。
 const routeTable = {
   routes: table.routes.map((r) => ({
     file: (addModule(r.file), keyOf(r.file)),
@@ -54,7 +49,6 @@ const routeTable = {
   errorRoute: table.errorRoute ? (addModule(table.errorRoute), keyOf(table.errorRoute)) : null,
 };
 
-// 島のサーバーモジュール（manifest.islands の名前 → dist/server/islands/<name>.js）
 const islandImports = [];
 const islandEntries = [];
 let islIdx = 0;
@@ -65,13 +59,10 @@ for (const name of Object.keys(manifest.islands ?? {})) {
   islandEntries.push(`  ${JSON.stringify(name)}: ${v}.default,`);
 }
 
-// サーバー関数（`"use server"`）モジュールを静的 import に含める（実行時 import 不可なため）。
 let serverFnTable = {};
 try {
   serverFnTable = JSON.parse(await readFile(path.join(serverDir, "functions.json"), "utf8"));
-} catch {
-  // functions.json が無ければサーバー関数なし
-}
+} catch {}
 for (const entry of Object.values(serverFnTable)) {
   addModule(path.join(serverDir, entry.module));
 }

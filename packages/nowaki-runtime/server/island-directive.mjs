@@ -1,10 +1,5 @@
-// client:* 遅延ハイドレーション指令の解釈と <nowaki-island> ラップを集約する。
-// dev(render.mjs) / prod(app.mjs) / edge(web.mjs) で共有する。
-//
-// 使い方（オーサリング）: <Counter client:visible />, <Counter client:idle />,
-//   <Counter client:media="(min-width: 768px)" />, <Counter client:only />。
-// 指令が無ければ client:load（ページ読み込み時にハイドレート）と同じ。
-// Astro の `client:*` と同じ書き味。oxc は名前空間付き JSX 属性を
+// client:* 遅延ハイドレーション指令（load/idle/visible/media/only、既定 load）の解釈と
+// <nowaki-island> ラップ。dev / prod / edge で共有する。oxc は名前空間付き JSX 属性を
 // `"client:visible"` のような prop キーとして渡すので、変換側の改修は不要。
 
 import { h } from "preact";
@@ -13,7 +8,6 @@ import { stableStringify } from "./serialize.mjs";
 
 const STRATEGIES = new Set(["load", "idle", "visible", "media", "only"]);
 
-// props から client:<strategy> を取り出す（client:media は値=メディアクエリ）。
 // 指令キーはシリアライズ対象から除外し、島へ prop としては渡さない。
 function extractClient(props) {
   let strategy = null;
@@ -33,8 +27,7 @@ function extractClient(props) {
   return { strategy, media, rest };
 }
 
-// island を <nowaki-island> で包む。Original は SSR 用の元コンポーネント。
-// client:only は SSR を行わず（クライアント専用 API を使う島向け）、クライアントで render する。
+// client:only はクライアント専用 API を使う島向けに SSR を行わない。
 export function wrapIsland(island, props, Original) {
   const { __nowakiInner, ...raw } = props;
   void __nowakiInner;
@@ -45,7 +38,6 @@ export function wrapIsland(island, props, Original) {
     props: stableStringify(rest),
     style: "display:contents",
   };
-  // client:load は既定（属性なし）。それ以外はクライアントへ戦略を伝える。
   if (strategy && strategy !== "load") attrs.client = strategy;
   if (media) attrs["client-media"] = media;
   const inner = strategy === "only" ? null : h(Original, { ...rest, __nowakiInner: true });

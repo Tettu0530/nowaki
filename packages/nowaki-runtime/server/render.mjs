@@ -1,7 +1,5 @@
-// Islands対応SSRレンダラー。
-// preactのoptions.vnodeフックで「islands/配下のコンポーネント」を検知し、
-// <nowaki-island> マーカーで包んでハイドレーション情報を埋め込む。
-// Rust側のAST加工を不要にするためのランタイム方式 (Fresh classicと同系)。
+// dev の Islands 対応 SSR レンダラー。Rust 側の AST 加工を不要にするため、
+// options.vnode フックで islands/ 配下のコンポーネントを検知して <nowaki-island> で包む。
 
 import { readdir } from "node:fs/promises";
 import path from "node:path";
@@ -15,10 +13,9 @@ import { pageMeta } from "./document.mjs";
 
 const ISLAND_EXT = /\.(tsx|jsx|ts|js|tsrx)$/;
 
-// コンポーネント実体 → { name, src(ブラウザURL), live?, mod? }
 let registry = new Map();
 let registryVersion = null;
-let liveCounter = 0; // ライブ島インスタンスの一意 id（ページ内で衝突しなければよい）
+let liveCounter = 0; // ページ内で衝突しなければよい
 
 export async function loadIslandRegistry(appRoot, version) {
   if (registryVersion === version) return registry;
@@ -27,9 +24,7 @@ export async function loadIslandRegistry(appRoot, version) {
   let files = [];
   try {
     files = await readdir(dir);
-  } catch {
-    // islands/ なしでも動く
-  }
+  } catch {}
   for (const f of files) {
     if (!ISLAND_EXT.test(f)) continue;
     const abs = path.join(dir, f);
@@ -59,8 +54,7 @@ options.vnode = (vnode) => {
     const island = registry.get(vnode.type);
     const Original = vnode.type;
     if (island.live) {
-      // サーバーリアクティブ島: <nowaki-live> で包み、初期状態を埋め込む。
-      // コンポーネント JS はクライアントに送らない（サーバーが再描画して patch を push）。
+      // ライブ島の JS はクライアントに送らない（サーバーが再描画して patch を push）。
       vnode.type = (props) => {
         const { state: propState, ...rest } = props;
         const state = propState ?? liveInitialState(island.mod, rest);
@@ -79,8 +73,7 @@ options.vnode = (vnode) => {
   if (prevVnodeHook) prevVnodeHook(vnode);
 };
 
-// 完成 HTML の head（…<body>）と tail（</body>…）を返す。dev 用。
-// 非ストリーミングは renderDocument が body を挟むだけ、ストリーミングは handler が本文を流し込む。
+// head（…<body>）と tail（</body>…）を返す。ストリーミング時は handler が間に本文を流し込む。
 export function renderShell({ mod, meta }) {
   const m = pageMeta(meta, mod);
   const head = `<!DOCTYPE html>
@@ -100,19 +93,15 @@ ${devScripts()}
   return { head, tail };
 }
 
-// 描画済み body を完成 HTML に包む（dev 用: islands.js + クライアントルーター + hmr.js）。
-// 実際のページ描画・loader 実行は handler.mjs が担当する。
 export function renderDocument({ mod, body, meta }) {
   const { head, tail } = renderShell({ mod, meta });
   return `${head}${body}${tail}`;
 }
 
 function devScripts() {
-  // eager ランタイム = islands.js（ハイドレーションのみ）。SPA ルーターは data-router で渡し、
-  // islands.js がハイドレート後に idle で遅延 import する（dev も本番と同じ経路）。
+  // SPA ルーターは本番と同じく、islands.js がハイドレート後に data-router から遅延 import する。
   const router =
     '<script id="nowaki-runtime" type="module" src="/node_modules/@nowaki-dev/runtime/client/islands.js" data-router="/node_modules/@nowaki-dev/runtime/client/router.js"></script>\n';
-  // live.js はサーバーリアクティブ島（<nowaki-live>）用。島が無ければ何もしない。
   const live =
     '<script type="module" src="/node_modules/@nowaki-dev/runtime/client/live.js"></script>\n';
   const hmr =
@@ -128,7 +117,7 @@ function escapeHtml(s) {
     .replaceAll('"', "&quot;");
 }
 
-// dev: SSR エラーを表示する 500 ページ。hmr.js を含むので修正後に自動リロードする。
+// hmr.js を含むので修正後に自動リロードする。
 export function errorPage(message) {
   return `<!DOCTYPE html>
 <html lang="en">
