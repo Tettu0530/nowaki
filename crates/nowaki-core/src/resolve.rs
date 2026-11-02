@@ -43,8 +43,33 @@ pub fn alias_specifier(spec: &str) -> Option<&'static str> {
 /// - Outside the root (realpaths into the pnpm store etc.) → /@fs/<absolute path>
 pub fn fs_path_to_url(root: &Path, abs: &Path) -> String {
     match abs.strip_prefix(root) {
-        Ok(rel) => format!("/{}", rel.to_string_lossy()),
-        Err(_) => format!("/@fs{}", abs.to_string_lossy()),
+        Ok(rel) => format!("/{}", url_slashes(rel)),
+        // POSIX paths start with `/`; Windows ones (`D:/...`) don't.
+        Err(_) => format!("/@fs/{}", url_slashes(abs).trim_start_matches('/')),
+    }
+}
+
+/// Inverse of the `/@fs/` mapping for the part after `/@fs/`.
+pub fn fs_url_to_path(rest: &str) -> std::path::PathBuf {
+    if cfg!(windows) && has_drive_prefix(rest) {
+        std::path::PathBuf::from(rest)
+    } else {
+        std::path::PathBuf::from(format!("/{rest}"))
+    }
+}
+
+fn has_drive_prefix(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\')
+}
+
+fn url_slashes(p: &Path) -> String {
+    let s = p.to_string_lossy();
+    // A backslash is a valid filename character on POSIX, so only Windows separators are rewritten.
+    if cfg!(windows) {
+        s.replace('\\', "/")
+    } else {
+        s.into_owned()
     }
 }
 
@@ -88,6 +113,43 @@ mod tests {
         assert_eq!(
             fs_path_to_url(&root, &PathBuf::from("/store/preact/index.js")),
             "/@fs/store/preact/index.js"
+        );
+    }
+
+    #[test]
+    fn drive_prefix_detection() {
+        assert!(has_drive_prefix("D:/a/node_modules/x.js"));
+        assert!(has_drive_prefix("c:\\x"));
+        assert!(!has_drive_prefix("store/preact/index.js"));
+        assert!(!has_drive_prefix("D:"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn fs_url_round_trips_on_posix() {
+        let root = PathBuf::from("/app");
+        let url = fs_path_to_url(&root, &PathBuf::from("/store/p.js"));
+        assert_eq!(
+            fs_url_to_path(url.strip_prefix("/@fs/").unwrap()),
+            PathBuf::from("/store/p.js")
+        );
+        // A drive-looking path is not special on POSIX.
+        assert_eq!(fs_url_to_path("C:/x"), PathBuf::from("/C:/x"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn fs_url_round_trips_on_windows() {
+        let root = PathBuf::from(r"D:\app");
+        assert_eq!(
+            fs_path_to_url(&root, &PathBuf::from(r"D:\app\islands\Counter.tsx")),
+            "/islands/Counter.tsx"
+        );
+        let url = fs_path_to_url(&root, &PathBuf::from(r"D:\store\p.js"));
+        assert_eq!(url, "/@fs/D:/store/p.js");
+        assert_eq!(
+            fs_url_to_path(url.strip_prefix("/@fs/").unwrap()),
+            PathBuf::from("D:/store/p.js")
         );
     }
 }
