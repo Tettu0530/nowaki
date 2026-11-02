@@ -115,6 +115,8 @@ packages/nowaki-runtime  @nowaki-dev/runtime (islands client / SSR sidecar / Nod
 examples/hello           Example app
 ```
 
+The nowaki.dev landing page and docs live in [Tettu0530/nowaki-site](https://github.com/Tettu0530/nowaki-site), built with the published packages.
+
 See [DESIGN.md](./DESIGN.md) for design details and architecture diagrams, and [ROADMAP.md](./ROADMAP.md) for what's planned.
 
 ## Contributing

@@ -37,11 +37,12 @@ impl Adapter {
         }
     }
 
+    /// Command that serves the build, run from inside `dist/server/`.
     fn run_cmd(self) -> &'static str {
         match self {
-            Adapter::Bun => "bun dist/server/index.mjs",
-            Adapter::Deno => "deno run -A dist/server/index.mjs",
-            _ => "node dist/server/index.mjs",
+            Adapter::Bun => "bun index.mjs",
+            Adapter::Deno => "deno run -A index.mjs",
+            _ => "node index.mjs",
         }
     }
 }
@@ -60,7 +61,7 @@ pub fn emit_server(root: &Path, dist: &Path, adapter: Adapter) -> Result<()> {
 
     let index = format!(
         r#"// nowaki deploy entry ({label} adapter, generated).
-// `{run}` alone serves production. No nowaki binary needed.
+// `{run}` in this directory serves production. No nowaki binary needed.
 // Deps: @nowaki-dev/runtime / preact / preact-render-to-string (package.json in this dir).
 import path from "node:path";
 import {{ fileURLToPath }} from "node:url";
@@ -85,7 +86,7 @@ await startServer({{
   "private": true,
   "type": "module",
   "scripts": {{
-    "start": "node index.mjs"
+    "start": "{run}"
   }},
   "dependencies": {{
     "@nowaki-dev/runtime": "^{runtime_ver}",
@@ -94,6 +95,7 @@ await startServer({{
   }}
 }}
 "#,
+        run = adapter.run_cmd(),
     );
     std::fs::write(server_dir.join("package.json"), pkg)?;
 

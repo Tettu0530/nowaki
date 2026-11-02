@@ -9,9 +9,6 @@ dist/
 # vercel build output (nowaki build --adapter vercel)
 .vercel/
 
-# prerendered landing output (regenerate with site/scripts/prerender.sh)
-site/public/
-
 # generated platform binary packages (built by scripts/build-npm.mjs in CI)
 packages/nowaki-cli/npm/
 

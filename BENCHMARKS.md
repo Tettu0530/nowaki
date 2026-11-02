@@ -9,7 +9,8 @@ Reproduce:
 
 ```bash
 cargo build --release -p nowaki
-node benchmarks/bench.mjs site            # a clean content-first app
+git clone https://github.com/Tettu0530/nowaki-site ../nowaki-site && (cd ../nowaki-site && pnpm install)
+node benchmarks/bench.mjs ../nowaki-site  # a clean content-first app
 node benchmarks/bench.mjs examples/hello  # a kitchen-sink app
 node benchmarks/head-to-head.mjs          # Nowaki vs Next vs Astro (same counter app)
 ```
@@ -45,7 +46,7 @@ A CI job (`bench-regression`) also gates the deterministic part — the gzipped
 client JS of `nowaki-counter` — against `benchmarks/baseline.json`, failing the
 build if a change inflates the bundle by more than 12 %.
 
-## `site/` — 2 pages, no plugins (typical content-first app)
+## [nowaki.dev](https://github.com/Tettu0530/nowaki-site) — 2 pages, no plugins (typical content-first app)
 
 | metric | value |
 |---|---|
@@ -71,7 +72,7 @@ content app boots in well under 100 ms.
 The kitchen-sink app is slower to boot because it also starts the Node **plugin
 host** (it has a config plugin and `.tsrx` islands compiled by `@tsrx/preact`).
 That overhead only applies to apps that use plugins or TSRX — a plain app pays
-none of it (see `site/` above).
+none of it (see the nowaki.dev site above).
 
 ## Methodology
 

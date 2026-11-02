@@ -25,15 +25,22 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: cargo build --release -p nowaki --locked
+      # The nowaki.dev site is the "typical content-first app" in BENCHMARKS.md.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Tettu0530/nowaki-site
+          path: nowaki-site
+          persist-credentials: false
       - name: Install the comparison apps
         run: |
+          (cd nowaki-site && pnpm install --frozen-lockfile)
           for app in benchmarks/apps/*-counter; do
             (cd "$app" && npm install --no-audit --no-fund --loglevel=error)
           done
       - name: Run benchmarks
         run: |
           {
-            echo '## bench.mjs (site)'; echo '```'; node benchmarks/bench.mjs site; echo '```'
+            echo '## bench.mjs (nowaki.dev)'; echo '```'; node benchmarks/bench.mjs nowaki-site; echo '```'
             echo '## bench.mjs (examples/hello)'; echo '```'; node benchmarks/bench.mjs examples/hello; echo '```'
             echo '## head-to-head'; echo '```'; node benchmarks/head-to-head.mjs; echo '```'
           } | tee bench.md
