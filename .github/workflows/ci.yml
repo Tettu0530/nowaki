@@ -149,7 +149,7 @@ jobs:
           set -e
           ./target/debug/nowaki build examples/hello
           ./target/debug/nowaki start examples/hello --port 8241 &
-          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8241/ >/dev/null && break; sleep 1; done
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8241/ >/dev/null && break; sleep 1; done
           BASE=http://127.0.0.1:8241 node scripts/lazy-hydration-test.mjs
           BASE=http://127.0.0.1:8241 node scripts/router-browser-test.mjs
 
@@ -167,7 +167,7 @@ jobs:
           set -e
           ./target/debug/nowaki build examples/hello
           ./target/debug/nowaki start examples/hello --port 8200 &
-          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8200/ >/dev/null && break; sleep 1; done
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8200/ >/dev/null && break; sleep 1; done
           RUST_PID=$(pgrep -f 'nowaki start examples/hello' | head -1)
           SIDECAR_PID=$(pgrep -f 'prod-sidecar.mjs' | head -1)
           node scripts/live-loadtest.mjs http://127.0.0.1:8200 1000 "$RUST_PID" "$SIDECAR_PID" > loadtest.txt
