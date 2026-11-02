@@ -14,6 +14,12 @@ on:
         description: "Build only, skip npm publish"
         type: boolean
         default: false
+  # weekly.yml calls this with dry_run=true to catch cross-build breakage before a tag.
+  workflow_call:
+    inputs:
+      dry_run:
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -47,21 +53,22 @@ jobs:
             triple: x86_64-pc-windows-msvc
             cross: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
           targets: ${{ matrix.triple }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.triple }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+          package-manager-cache: false
 
       - name: Install cross
         if: matrix.cross
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
         with:
           tool: cross
 
@@ -89,11 +96,14 @@ jobs:
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+          package-manager-cache: false
       # Publish the wrapper after the platform packages
       # (so its optionalDependencies are resolvable).
       - name: Publish wrapper
