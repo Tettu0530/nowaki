@@ -1,6 +1,6 @@
 import { useEffect } from "preact/hooks";
 
-// ページのモーションを束ねる「指揮役」の島。自分自身は何も描画しない。
+// ページのモーションをまとめて制御する島。自分自身は何も描画しない。
 // 「最小JSを自分で証明する」サイトなので外部依存は載せない（WAAPI + IntersectionObserver + rAF だけ）。
 // 隠すのはヒーローだけで、prefers-reduced-motion では何もしない。
 const EXPO = "cubic-bezier(0.16,1,0.3,1)";

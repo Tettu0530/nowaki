@@ -1,5 +1,5 @@
 // ISR + ヘッダ依存ルート。security e2e がクロスユーザーのキャッシュ隔離を検証するために使う。
-// accept-language を読むので、Vary 学習でその値がキャッシュキーに織り込まれ、
+// accept-language を読むので、Vary 学習でその値がキャッシュキーに含まれ、
 // 別言語のリクエストが他言語のキャッシュ済み内容を受け取らない。
 export const revalidate = 30;
 

@@ -64,7 +64,7 @@ function whenMedia(query, go) {
 }
 
 // `<form action={serverFn}>` の傍受。preact は server fn の toString（"__nowaki_action:<id>"）を
-// action 属性に入れるので、submit をここで拾って FormData を server fn へ送る（ページ遷移しない）。
+// action 属性に入れるので、submit をここで横取りして FormData を server fn へ送る（ページ遷移しない）。
 // 結果は form に `nowaki:action` イベント（detail: { id, ok, result, error }）で通知する。
 const ACTION_PREFIX = "__nowaki_action:";
 document.addEventListener("submit", async (ev) => {

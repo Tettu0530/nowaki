@@ -46,7 +46,7 @@ function resolveBinary() {
   }
 
   try {
-    // 各プラットフォームパッケージは exports を持たない素のファイル袋なので、
+    // 各プラットフォームパッケージは exports を持たない素のファイルの集まりなので、
     // bin/<name> をサブパス解決できる（esbuild と同方式）。
     return require.resolve(`${pkg}/bin/${binName}`);
   } catch {

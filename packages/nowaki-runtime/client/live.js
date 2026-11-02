@@ -1,5 +1,5 @@
 // Jetstream のクライアントランタイム。data-live のイベントを WS で送り、返る HTML パッチを morph で当てる。
-// WS が張れない/落ちても初期 SSR のまま表示は壊れない（劣化のみ）。
+// WS が張れない/落ちても初期 SSR のまま表示はおかしくならない（劣化のみ）。
 
 function lives() {
   return [...document.querySelectorAll("nowaki-live")];
@@ -129,7 +129,7 @@ function morphAttrs(from, to) {
   for (const a of to.attributes) {
     if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
   }
-  // value はプロパティも合わせる（フォーカス/入力を壊さないよう値のみ）
+  // value はプロパティも合わせる（フォーカス/入力をおかしくしないよう値のみ）
   if ("value" in from && to.hasAttribute("value")) {
     const v = to.getAttribute("value");
     if (from.value !== v) from.value = v;

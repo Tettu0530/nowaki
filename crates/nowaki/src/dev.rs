@@ -256,7 +256,7 @@ async fn ssr_module(
     transform_response(state, canon, Mode::Ssr).await
 }
 
-/// /@fs/<絶対パス> — アプリルート外 (pnpmストア等) のファイル配信。`rest` はユーザー入力なので
+/// /@fs/<絶対パス>: アプリルート外 (pnpmストア等) のファイル配信。`rest` はユーザー入力なので
 /// 実体パスへ正規化してから許可ルート配下・非機微を検証する（パストラバーサル防止）。
 async fn serve_fs(
     State(state): State<Arc<DevState>>,

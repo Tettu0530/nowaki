@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // `npm create nowaki` のスキャフォールダ。依存ゼロ（Node 組み込みのみ）。
 // 対話ウィザード（TTY 時）: プロジェクト名・パッケージマネージャ・git・依存インストール。
-// 非対話（CI / `-y` / パイプ）では既定値で黙って生成する。
+// 非対話（CI / `-y` / パイプ）では質問せずに既定値で生成する。
 //
 // フラグ: -t/--template <basics|minimal>, -y/--yes（質問を飛ばす）,
 //         --install（非対話でも入れる）, --no-install, --no-git, --pm <npm|pnpm|yarn|bun>

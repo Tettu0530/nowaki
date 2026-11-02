@@ -1,4 +1,4 @@
-//! `nowaki upgrade` — 既存アプリの nowaki(CLI) と @nowaki-dev/runtime を最新へ更新する。
+//! `nowaki upgrade`: 既存アプリの nowaki(CLI) と @nowaki-dev/runtime を最新へ更新する。
 //!
 //! caret(`^0.x`)は 0.x 系ではマイナーをロックするため `npm update` では 0.10 → 0.11 に
 //! 上がらない。明示的に `@latest`（または `--to`）を入れて package.json のレンジごと更新する。

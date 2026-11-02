@@ -74,7 +74,7 @@ mod tests {
         assert_eq!(alias_specifier("preact/hooks"), None);
         assert_eq!(alias_specifier("./local.tsx"), None);
         assert_eq!(alias_specifier("lodash"), None);
-        // 部分一致で誤爆しない
+        // 部分一致では読み替えない
         assert_eq!(alias_specifier("react-icons"), None);
     }
 

@@ -136,7 +136,7 @@ async function renderRoute(env, table, match, mod, ctx, version) {
   const meta = await resolveMeta(mod, { data, params: ctx.params, url: ctx.url });
   let node = h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url });
 
-  // leaf→root の順で外側に巻く
+  // leaf→root の順で外側に包む
   const layouts = layoutChain(table, match.file);
   for (let i = layouts.length - 1; i >= 0; i--) {
     const lmod = await env.importModule(layouts[i], version);
@@ -273,7 +273,7 @@ async function render500(env, table, ctx, version, err) {
         return { status: 500, headers: HTML, body: env.renderDocument({ mod, body }) };
       }
     } catch {
-      // ユーザー 500 自体が壊れたら下の組み込み表示にフォールバック
+      // ユーザー 500 自体が落ちたら下の組み込み表示にフォールバック
     }
   }
   return env.renderError(err);

@@ -490,7 +490,7 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
         return Ok(filename);
     }
     // 循環: 既に DFS スタック上にあるモジュールへの back-edge。暫定名を返し、
-    // 相手を cyclic 印にして、相手の最終名を暫定名に固定させる。
+    // 相手を cyclic に加えて、相手の最終名を暫定名に固定させる。
     if ctx.visiting.contains(abs) {
         ctx.cyclic.insert(abs.to_path_buf());
         return Ok(ctx
@@ -751,7 +751,7 @@ fn is_live_island(core: &NowakiCore, abs: &Path) -> bool {
 }
 
 /// manifest.json を手書きで生成（依存を増やさないため serde 不使用。ファイル名は ascii のみ）。
-/// `preload`: 各エントリチャンク → 推移的依存チャンク。瀑布リクエストを避けるため、
+/// `preload`: 各エントリチャンク → 推移的依存チャンク。リクエストのウォーターフォールを避けるため、
 /// ページは島チャンクとその全依存を一括で `<link rel=modulepreload>` する。
 fn render_manifest(
     runtime: Option<&str>,

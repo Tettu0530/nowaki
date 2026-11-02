@@ -59,7 +59,7 @@ struct IsrCache {
     max: usize,                              // エントリ数の上限（超過時は最古を追い出す）
 }
 
-/// ルートの描画が依存する入力（Vary）。x-nowaki-vary から学習してキャッシュキーへ織り込み、
+/// ルートの描画が依存する入力（Vary）。x-nowaki-vary から学習してキャッシュキーに含め、
 /// ヘッダ依存ページのクロスユーザー漏れと未使用クエリによるキャッシュ氾濫を防ぐ。
 #[derive(Default, Clone)]
 struct VarySpec {

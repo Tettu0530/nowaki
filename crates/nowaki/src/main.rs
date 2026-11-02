@@ -75,7 +75,7 @@ enum Command {
         /// アプリのルートディレクトリ
         #[arg(default_value = ".")]
         dir: PathBuf,
-        /// 上げ先バージョン（既定: latest）。例: --to 0.11.0
+        /// 更新先のバージョン（既定: latest）。例: --to 0.11.0
         #[arg(long)]
         to: Option<String>,
     },

@@ -1,4 +1,4 @@
-// アプリ層セキュリティの回帰スイート。防御の退行を決定的に検証する(Chrome 不要)。CI の e2e から呼ぶ。
+// アプリ層セキュリティの回帰スイート。防御のリグレッションを決定的に検証する(Chrome 不要)。CI の e2e から呼ぶ。
 //   node scripts/security-e2e.mjs dev  <devBase>  <appRoot>
 //   node scripts/security-e2e.mjs prod <prodBase>
 // 検証対象: 任意ファイル読取(@fs/ssr-module/.env/virtual ..)、RPC CSRF、CSWSH、

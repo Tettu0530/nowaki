@@ -1,4 +1,4 @@
-// クライアント JS サイズの回帰ゲート（送信 JS は決定的なのでゲートにできる）。
+// クライアント JS サイズのリグレッションゲート（送信 JS は決定的なのでゲートにできる）。
 // 時間系はマシン依存でブレるのでゲートにしない（head-to-head.mjs で参考値として測る）。
 // 使い方:
 //   node benchmarks/check-regression.mjs           # baseline.json と比較（超過で exit 1）

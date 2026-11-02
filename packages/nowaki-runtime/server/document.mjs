@@ -10,7 +10,7 @@ export function pageMeta(meta, mod) {
   };
 }
 
-// 非ストリーミング: body 全体を見て、使われた island の preload を <head> に入れる（瀑布回避）。
+// 非ストリーミング: body 全体を見て、使われた island の preload を <head> に入れる（ウォーターフォール回避）。
 export function prodDocument(manifest, { mod, body, meta }) {
   const m = pageMeta(meta, mod);
   const islandNames = [...body.matchAll(/<nowaki-island name="([^"]+)"/g)].map((m) => m[1]);

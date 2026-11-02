@@ -36,7 +36,7 @@ export function makeContext(info) {
       } else if (target.search && !(typeof prop === "string" && QUERY_FREE.has(prop))) {
         queryAccessed = true;
       }
-      // getter / メソッドは実体(target)を receiver にして呼ぶ（URL の private field を壊さない）。
+      // getter / メソッドは実体(target)を receiver にして呼ぶ（URL の private field が使えなくならないよう）。
       const v = Reflect.get(target, prop, target);
       return typeof v === "function" ? v.bind(target) : v;
     },

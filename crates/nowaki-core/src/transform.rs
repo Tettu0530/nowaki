@@ -16,7 +16,7 @@ use crate::cache::Mode;
 use crate::resolve::fs_path_to_url;
 
 /// プラグインの仮想モジュール解決。通常の解決が失敗した指定子に対して呼ばれる。
-/// Browser とSSR で出力先が違う（dev URL か data: モジュールか）ため2口に分ける。
+/// Browser とSSR で出力先が違う（dev URL か data: モジュールか）ため2つのメソッドに分ける。
 pub trait VirtualResolve {
     /// Browser: 仮想モジュールの合成パス（呼び出し側が dev URL 化する）。
     fn virtual_browser(&self, dir: &Path, spec: &str) -> Option<PathBuf>;

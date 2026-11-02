@@ -24,7 +24,7 @@ export async function dispatchServerFn(ctx, info, sf) {
   if (ctx.method !== "POST") {
     return errBody(405, "Method Not Allowed");
   }
-  // CSRF 対策。他オリジンのページから victim の cookie 付きで呼ばれないよう三重に塞ぐ:
+  // CSRF 対策。他オリジンのページから victim の cookie 付きで呼ばれるのを三重に防ぐ:
   //  (1) Content-Type は application/json 必須（text/plain 等の "単純リクエスト" を排除）
   //  (2) カスタムヘッダ x-nowaki-rpc 必須（プリフライトが要るが CORS 許可を返さないので弾かれる）
   //  (3) Origin があれば Host と同一オリジンのみ許可

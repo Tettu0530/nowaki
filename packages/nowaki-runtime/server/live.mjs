@@ -1,5 +1,5 @@
 // サーバーリアクティブ島のサーバー側ヘルパ。状態は Rust(WS) が接続ごとに保持し、
-// Node は純粋な再評価だけを行う。返す html はラッパ無しの中身（クライアントが morph で当てる）。
+// Node は純粋な再評価だけを担う。返す html はラッパ無しの中身（クライアントが morph で適用する）。
 
 import { h } from "preact";
 import { renderToStringAsync } from "preact-render-to-string";

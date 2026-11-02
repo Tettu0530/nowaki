@@ -93,7 +93,7 @@ export default function WindHero() {
             const dist = Math.hypot(dx, dy);
             if (dist < R) {
               const f = 1 - dist / R;
-              s.y += (py - s.y) * 0.045 * f; // カーソルの高さへ静かに引き寄せる（風が曲がる）
+              s.y += (py - s.y) * 0.045 * f; // カーソルの高さへゆっくり引き寄せる（風が曲がる）
               s.x += s.speed * f * 1.7; // 近づくほど加速（突風）
               s.boost = Math.max(s.boost, f);
             }

@@ -30,7 +30,7 @@ const nodeModules = path.join(funcDir, "node_modules");
 for (const dep of ["@nowaki-dev/runtime", "preact", "preact-render-to-string"]) {
   const src = path.join(appRoot, "node_modules", dep);
   // 依存パッケージの「ネストした node_modules」は取り込まない。取り込むと preact が
-  // 二重になり（runtime の devDep）、フックが別インスタンスになって SSR が壊れる。
+  // 二重になり（runtime の devDep）、フックが別インスタンスになって SSR が正しく動かなくなる。
   // Node は上位 node_modules を辿るので、トップレベルの単一 preact に解決される。
   await cp(src, path.join(nodeModules, dep), {
     recursive: true,

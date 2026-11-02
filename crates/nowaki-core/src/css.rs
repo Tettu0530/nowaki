@@ -107,7 +107,7 @@ mod tests {
         let (scoped, map) = scope_css("/app/Badge.module.css", css);
         assert!(scoped.contains(".badge_"));
         assert!(scoped.contains(".badge-x_"));
-        // 値の中の数字付きドット（0.5rem）はクラスとして誤爆しない
+        // 値の中の数字付きドット（0.5rem）はクラスと誤認しない
         assert!(scoped.contains("0.5rem"));
         assert_eq!(map.len(), 2);
         assert_eq!(map[0].0, "badge");

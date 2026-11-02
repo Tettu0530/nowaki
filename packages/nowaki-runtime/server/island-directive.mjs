@@ -27,7 +27,7 @@ function extractClient(props) {
   return { strategy, media, rest };
 }
 
-// client:only はクライアント専用 API を使う島向けに SSR を行わない。
+// client:only はクライアント専用 API を使う島向けに SSR しない。
 export function wrapIsland(island, props, Original) {
   const { __nowakiInner, ...raw } = props;
   void __nowakiInner;
