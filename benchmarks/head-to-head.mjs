@@ -7,7 +7,8 @@
 // Metrics:
 //   dev ready (cold)  — wall time from dev server start to the ready line
 //   build            — wall time of the production build
-//   client JS (gzip) — gzip total of client JS the page loads (smaller is better)
+//   first-load JS    — the JS `/` fetches on load (raw and gzip; lazy chunks such as Nowaki's
+//                      idle-loaded SPA router are excluded)
 
 import { spawn, spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, existsSync, rmSync } from "node:fs";
@@ -44,8 +45,9 @@ function jsSize(dir, keep = () => true) {
   return { rawKB: raw / 1024, gzKB: gz / 1024 };
 }
 
-// Spawns cmd and returns the wall time (ms) until marker appears on stdout/stderr, then kills it.
-function timeUntil(cmd, args, opts, marker, timeoutMs = 90000) {
+// Spawns cmd and returns the wall time (ms) until a marker appears on stdout/stderr, then kills it.
+function timeUntil(cmd, args, opts, markers, timeoutMs = 90000) {
+  const wanted = [markers].flat().map((m) => m.toLowerCase());
   return new Promise((resolve) => {
     const t0 = now();
     const child = spawn(cmd, args, { ...opts, env: { ...process.env, ...(opts.env ?? {}) } });
@@ -59,13 +61,26 @@ function timeUntil(cmd, args, opts, marker, timeoutMs = 90000) {
       resolve(ms);
     };
     const onData = (buf) => {
-      if (!done && buf.toString().toLowerCase().includes(marker.toLowerCase())) finish(now() - t0);
+      const text = buf.toString().toLowerCase();
+      if (!done && wanted.some((m) => text.includes(m))) finish(now() - t0);
     };
     child.stdout?.on("data", onData);
     child.stderr?.on("data", onData);
     child.on("exit", () => finish(null));
     setTimeout(() => finish(null), timeoutMs);
   });
+}
+
+// Sums the given files (raw and gzip).
+function filesSize(files) {
+  let raw = 0;
+  let gz = 0;
+  for (const f of files) {
+    const data = readFileSync(f);
+    raw += data.length;
+    gz += gzipSync(data).length;
+  }
+  return { rawKB: raw / 1024, gzKB: gz / 1024 };
 }
 
 // Runs cmd to completion and returns { ms, stdout } (ms=null on failure).
@@ -95,7 +110,11 @@ async function benchNowaki() {
   const dev = await timeUntil(nowakiBin, ["dev", dir, "--port", "0"], { cwd: ROOT }, "ready in");
   clean(dir, ["dist", "node_modules/.cache/nowaki"]);
   const build = timeRun(nowakiBin, ["build", dir], { cwd: ROOT });
-  const js = jsSize(path.join(dir, "dist/client"));
+  // Same rule as check-regression.mjs: the SPA router and its deps load on idle, not on first load.
+  const clientDir = path.join(dir, "dist/client");
+  const manifest = JSON.parse(readFileSync(path.join(clientDir, "manifest.json"), "utf8"));
+  const lazy = new Set([manifest.routerRuntime, ...(manifest.preload?.[manifest.routerRuntime] ?? [])]);
+  const js = jsSize(clientDir, (p) => !lazy.has(path.basename(p)));
   clean(dir, ["dist"]);
   return { name: "Nowaki", dev, build: build.ms, rawKB: js.rawKB, gzKB: js.gzKB };
 }
@@ -110,17 +129,22 @@ async function benchNext() {
   const dev = await timeUntil(bin, ["dev", "-p", "8911"], { cwd: dir, env }, "ready in");
   clean(dir, [".next"]);
   const build = timeRun(bin, ["build"], { cwd: dir, env });
-  // first-load JS is the last column of the `/` row in `next build`'s route table (Next's official figure, uncompressed).
-  let firstLoadKB = null;
-  const m = build.stdout.match(/[┌├└]\s*[○●ƒλ]?\s*\/\s+\S+\s+(?:k?B\s+)?([\d.]+)\s*kB/);
-  if (m) firstLoadKB = parseFloat(m[1]);
-  else {
-    const shared = build.stdout.match(/First Load JS shared by all\s+([\d.]+)\s*kB/);
-    if (shared) firstLoadKB = parseFloat(shared[1]);
+  // Next 16 no longer prints per-route sizes, so count the <script src> chunks the prerendered `/` loads.
+  let js = { rawKB: null, gzKB: null };
+  const html = path.join(dir, ".next/server/app/index.html");
+  if (existsSync(html)) {
+    // noModule polyfills aren't fetched by modern browsers, so they don't count.
+    const tags = readFileSync(html, "utf8").match(/<script\b[^>]*>/g) ?? [];
+    const srcs = new Set(
+      tags
+        .filter((t) => !/\bnomodule\b/i.test(t))
+        .map((t) => t.match(/src="\/_next\/(static\/[^"]+\.js)"/)?.[1])
+        .filter(Boolean),
+    );
+    js = filesSize([...srcs].map((s) => path.join(dir, ".next", s)));
   }
   clean(dir, [".next"]);
-  // It's uncompressed, so it goes in rawKB (no gzip figure).
-  return { name: "Next.js", dev, build: build.ms, rawKB: firstLoadKB, gzKB: null, rawNote: "Next-reported First Load JS" };
+  return { name: "Next.js", dev, build: build.ms, rawKB: js.rawKB, gzKB: js.gzKB };
 }
 
 async function benchAstro() {
@@ -129,7 +153,9 @@ async function benchAstro() {
   if (!existsSync(bin)) return { name: "Astro", skip: "not installed (`pnpm -C benchmarks/apps/astro-counter install`)" };
 
   clean(dir, ["dist", ".astro"]);
-  const dev = await timeUntil(bin, ["dev", "--port", "8912"], { cwd: dir }, "ready in");
+  // Astro 7 may start dev as a background daemon (prints "Dev server running at"); stop it either way.
+  const dev = await timeUntil(bin, ["dev", "--port", "8912"], { cwd: dir }, ["ready in", "dev server running at"]);
+  spawnSync(bin, ["dev", "stop"], { cwd: dir, stdio: "ignore" });
   clean(dir, ["dist", ".astro"]);
   const build = timeRun(bin, ["build"], { cwd: dir });
   const js = jsSize(path.join(dir, "dist")); // Astro emits only island JS, into dist/_astro
@@ -156,14 +182,11 @@ for (const r of results) {
   if (r.skip) {
     console.log(`| ${r.name} | _${r.skip}_ | | | |`);
   } else {
-    const raw = r.rawKB == null ? "n/a" : `${r.rawKB.toFixed(1)} KB${r.rawNote ? "*" : ""}`;
-    const gz = r.gzKB == null ? "—" : `${r.gzKB.toFixed(1)} KB`;
+    const raw = r.rawKB == null ? "n/a" : `${r.rawKB.toFixed(1)} KB`;
+    const gz = r.gzKB == null ? "n/a" : `${r.gzKB.toFixed(1)} KB`;
     console.log(`| ${r.name} | ${fmt(r.dev, "ms")} | ${fmt(r.build, "ms")} | ${raw} | ${gz} |`);
   }
 }
 console.log("");
-if (results.some((r) => r.rawNote)) {
-  console.log("\\* Next-reported First Load JS (parsed, uncompressed) from `next build`; gzip not summed for Next.\n");
-}
 console.log("Reproduce: install the peers, then `node benchmarks/head-to-head.mjs`.");
 process.exit(0);
