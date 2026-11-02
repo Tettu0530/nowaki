@@ -557,6 +557,10 @@ fn emit_island(
     out_dir: &Path,
     ctx: &mut EmitCtx,
 ) -> Result<String> {
+    // Hoisting would drop what it can't concatenate (e.g. `import * as`), so such islands stay unbundled.
+    if crate::chunk::needs_fallback(core, island) {
+        return emit(core, island, out_dir, ctx);
+    }
     let mut internal: Vec<PathBuf> = vec![island.to_path_buf()];
     for m in app_set {
         if m == island {
