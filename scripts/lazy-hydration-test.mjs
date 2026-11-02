@@ -69,14 +69,16 @@ try {
     "about:blank",
   ]);
   let targets;
-  for (let i = 0; i < 40; i++) {
+  // Chrome can take a while to start on CI runners; wait up to 30s for a page target.
+  for (let i = 0; i < 120; i++) {
     try {
       targets = await (await fetch(`http://127.0.0.1:${PORT}/json`)).json();
-      if (targets.length) break;
+      if (targets.some((t) => t.type === "page")) break;
     } catch {}
     await sleep(250);
   }
-  const page = targets.find((t) => t.type === "page");
+  const page = targets?.find((t) => t.type === "page");
+  if (!page) throw new Error(`Chrome exposed no page target over CDP within 30s (CHROME=${CHROME})`);
   const cdp = new CDP(page.webSocketDebuggerUrl);
   await cdp.ready;
   await cdp.send("Page.enable");
