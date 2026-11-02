@@ -8,7 +8,6 @@ use tokio::process::Command;
 
 /// 静的サイト生成: ビルド → 本番サーバーを一時起動 → 静的ルートを各HTML化 → 出力。
 pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
-    // 1. build (client + server)。nowaki.config / @tsrx/preact があればプラグインホストを起動して注入。
     let _plugin_host = crate::plugins::start(&root)?;
     let mut core = NowakiCore::new(root.clone());
     if let Some(host) = &_plugin_host {
@@ -28,7 +27,6 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         ));
     }
 
-    // 2. 本番サーバーをエフェメラルポートで起動
     let mut child = Command::new("node")
         .arg("--enable-source-maps")
         .arg(&entry)
@@ -51,13 +49,12 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     }
     let port = port.ok_or_else(|| anyhow!("本番サーバーが READY を報告せず終了しました"))?;
 
-    // 3. 静的ルートを列挙（api/ と動的[param]は除外）
     let routes = enumerate_routes(&root.join("dist/server/routes"))?;
     if routes.is_empty() {
         return Err(anyhow!("プリレンダ対象の静的ルートがありません"));
     }
 
-    // 4. 各ルートを fetch して書き出し（リダイレクトは追従せず、非200はスキップ）
+    // リダイレクトは追従せず、非200はスキップする。
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
@@ -81,7 +78,6 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         count += 1;
     }
 
-    // 5. クライアントアセットを /_nowaki へコピー + キャッシュヘッダ
     let assets = out.join("_nowaki");
     std::fs::create_dir_all(&assets)?;
     copy_dir(&root.join("dist/client"), &assets)?;
@@ -95,7 +91,6 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// dist/server/routes を走査し、静的に出力できる URL を列挙する。
 fn enumerate_routes(routes_dir: &Path) -> Result<Vec<String>> {
     let mut urls = Vec::new();
     if !routes_dir.is_dir() {

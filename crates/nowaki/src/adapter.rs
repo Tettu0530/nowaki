@@ -1,11 +1,7 @@
 //! デプロイアダプタ。ビルド出力 `dist/` を各ターゲット向けの配備物に仕上げる。
 //!
-//! - `node` / `bun` / `deno`: 自己完結のサーバーエントリ `dist/server/index.mjs` を出力。
-//!   `node dist/server/index.mjs`（または bun/deno）だけで本番配信でき、nowaki バイナリは不要。
-//!   中核は `@nowaki-dev/runtime` の app.mjs（node:http 互換、Bun/Deno の node 互換でも動く）。
-//! - `static`: 事前レンダリング（SSG）。main 側で prerender に委譲する。
-//! - `cloudflare`: Edge（Cloudflare Workers）向け。全サーバーモジュールを静的バンドルした
-//!   fetch ハンドラ worker と wrangler 設定を `dist/worker/` に生成する（emit_cloudflare）。
+//! node/bun/deno の出力は `@nowaki-dev/runtime` の app.mjs だけで動き、nowaki バイナリは不要。
+//! `static` は main 側で prerender に委譲する。
 
 use std::path::Path;
 
@@ -41,7 +37,6 @@ impl Adapter {
         }
     }
 
-    /// 起動コマンドのヒント（出力メッセージ用）。
     fn run_cmd(self) -> &'static str {
         match self {
             Adapter::Bun => "bun dist/server/index.mjs",
@@ -110,8 +105,7 @@ await startServer({{
     Ok(())
 }
 
-/// Cloudflare Workers（Edge）の配備物を `dist/worker/` に生成する。
-/// 実体は runtime の Node 生成器 `server/edge-build.mjs`（dist/server を走査し worker を静的バンドル化）。
+/// `dist/worker/` を生成する。実体は runtime の `server/edge-build.mjs`。
 pub fn emit_cloudflare(root: &Path, dist: &Path) -> Result<()> {
     let script = root.join("node_modules/@nowaki-dev/runtime/server/edge-build.mjs");
     if !script.exists() {
@@ -138,8 +132,7 @@ pub fn emit_cloudflare(root: &Path, dist: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Vercel（Build Output API v3）の配備物を `.vercel/output/` に生成する。
-/// 実体は runtime の Node 生成器 `server/vercel-build.mjs`（static + Node serverless function）。
+/// `.vercel/output/` を生成する。実体は runtime の `server/vercel-build.mjs`。
 pub fn emit_vercel(root: &Path, dist: &Path) -> Result<()> {
     let script = root.join("node_modules/@nowaki-dev/runtime/server/vercel-build.mjs");
     if !script.exists() {

@@ -1,9 +1,7 @@
 //! `nowaki upgrade` — 既存アプリの nowaki(CLI) と @nowaki-dev/runtime を最新へ更新する。
 //!
-//! caret(`^0.x`)は 0.x 系ではマイナーをロックするため、`npm update` だけでは
-//! 0.10 → 0.11 のようなマイナー跨ぎに上がらない。このコマンドは明示的に `@latest`
-//! （または `--to <version>`）を入れ、package.json のレンジごと更新する。
-//! パッケージマネージャはロックファイルから自動検出する（npm/pnpm/yarn/bun）。
+//! caret(`^0.x`)は 0.x 系ではマイナーをロックするため `npm update` では 0.10 → 0.11 に
+//! 上がらない。明示的に `@latest`（または `--to`）を入れて package.json のレンジごと更新する。
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -70,7 +68,6 @@ pub fn run(root: PathBuf, to: Option<String>) -> Result<()> {
         run_pm(&root, &pm, cli_is_dev, &format!("{CLI}@{spec}"))?;
     }
 
-    // 更新後のレンジを表示する。
     if let Some(after) = std::fs::read_to_string(&pkg_path)
         .ok()
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())

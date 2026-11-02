@@ -1,12 +1,7 @@
 //! サーバーリアクティブ島（Jetstream）の WS セッション。dev/prod 共通。
 //!
-//! Rust が `/__nowaki/live` の WebSocket を保持し、接続ごとに nid→(name, state) を持つ。
-//! クライアントの "event" を Node サイドカーの `/__nowaki/live-render` へ橋渡しし、
-//! 返ってきた新 state を保持・新 html を `patch` としてクライアントへ push する。
-//! 状態は Rust 側（このプロセス・この接続）にあり、Node は純粋な再評価関数。
-//!
-//! 接続スケール: `LiveHub` が全接続を束ね、(1) 同時接続の上限、(2) presence（接続数）の
-//! ブロードキャスト、(3) ハートビート（ping/pong + アイドルタイムアウト）でゾンビ接続を掃除する。
+//! 状態は Rust 側（この接続）が nid→(name, state) で持ち、Node サイドカーの
+//! `/__nowaki/live-render` は純粋な再評価関数。結果の html を `patch` として push する。
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -20,7 +15,7 @@ use tokio::sync::broadcast;
 const PING_INTERVAL: Duration = Duration::from_secs(30);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(75);
 
-/// 全 Jetstream 接続を束ねるハブ（dev/prod に1つ）。接続数の上限と presence を管理する。
+/// 全接続を束ねるハブ。同時接続の上限と presence（接続数）のブロードキャストを担う。
 pub struct LiveHub {
     active: AtomicUsize,
     max: usize,
@@ -85,7 +80,6 @@ pub async fn handle(
     };
 
     let mut presence_rx = hub.presence.subscribe();
-    // 接続直後に現在の presence を送る。
     let _ = socket
         .send(Message::Text(
             json!({ "type": "presence", "count": count })
@@ -113,7 +107,6 @@ pub async fn handle(
                 }
                 // Ping/Pong/Binary/Close は last_seen 更新のみ（Close は recv が None になる）。
             }
-            // 他接続の presence 変化を転送する。
             p = presence_rx.recv() => {
                 let n = match p {
                     Ok(n) => n,
@@ -124,7 +117,6 @@ pub async fn handle(
                     break;
                 }
             }
-            // ハートビート: アイドル超過なら切断、さもなくば ping。
             _ = ping.tick() => {
                 if last_seen.elapsed() > IDLE_TIMEOUT {
                     break;
@@ -213,7 +205,7 @@ async fn handle_text(
             let Some(html) = rv.get("html").and_then(|h| h.as_str()) else {
                 return true;
             };
-            // 新 state とその新しい署名を保持（次イベントで検証が続くように）。
+            // 次イベントでも検証できるよう新しい署名も保持する。
             if let Some(ns) = rv.get("state") {
                 let nsig = rv
                     .get("sig")

@@ -1,9 +1,7 @@
-//! プラグインホスト連携。`nowaki.config.{mjs,js}` があれば Node のプラグインホストを起動し、
-//! その transform フックを nowaki-core の `PluginBridge` 経由で dev/build に注入する。
-//! nowaki-core は JS を実行しないので、変換は HTTP でこのホストへ委譲する。
+//! プラグインホスト連携。nowaki-core は JS を実行しないので、フックは Node のホストへ HTTP で委譲する。
 //!
-//! 通信は localhost への素朴な HTTP/1.1（自前 TcpStream）。reqwest::blocking を使うと
-//! tokio ランタイム内（dev）でランタイム衝突を起こすため、ランタイム非依存にしている。
+//! 通信は自前 TcpStream の素朴な HTTP/1.1。reqwest::blocking は dev の tokio ランタイム内で
+//! ランタイム衝突を起こすため使わない。
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -27,7 +25,6 @@ impl HttpPluginBridge {
         self.post_field(path, &body, "code")
     }
 
-    /// JSON ボディを POST し、レスポンスの `field` を文字列で取り出す（null なら None）。
     fn post_field(&self, path: &str, body: &str, field: &str) -> Option<String> {
         let resp = http_post(self.port, path, body).ok()?;
         let v: serde_json::Value = serde_json::from_str(&resp).ok()?;
@@ -71,8 +68,7 @@ impl Drop for PluginHost {
     }
 }
 
-/// nowaki.config があり transform フックを持つならプラグインホストを起動してブリッジを返す。
-/// 設定が無い / フックが無い / ランタイム未導入なら None（＝オーバーヘッドゼロ）。
+/// 設定・フック・ランタイムのいずれかが無ければ None（ホストを起動せずオーバーヘッドゼロ）。
 pub fn start(root: &Path) -> Result<Option<PluginHost>> {
     let has_config = ["nowaki.config.mjs", "nowaki.config.js"]
         .iter()
@@ -150,7 +146,7 @@ pub fn start(root: &Path) -> Result<Option<PluginHost>> {
     Ok(Some(PluginHost { child, bridge }))
 }
 
-// --- 最小 HTTP/1.1（localhost, Connection: close でボディは EOF まで） ---
+// Connection: close なのでボディは EOF まで読めばよい。
 
 fn http_post(port: u16, path: &str, body: &str) -> Result<String> {
     request(port, "POST", path, Some(body))
