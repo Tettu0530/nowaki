@@ -1,5 +1,5 @@
 // Real-browser behavior test for lazy hydration (client:* directives).
-// Not run in CI (no Chrome); for local verification. Drives Chrome directly over CDP (no puppeteer).
+// Runs in CI (browser job) and locally. Drives Chrome directly over CDP (no puppeteer).
 // Usage: BASE=http://127.0.0.1:8241 node scripts/lazy-hydration-test.mjs
 import { spawn } from "node:child_process";
 

@@ -4,366 +4,231 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
+  # Daily, so new advisories and upstream breakage show up without a push.
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  rust:
-    name: Rust (fmt, clippy, build)
+  lint:
+    name: Rust lint (fmt, clippy)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+          install: "false"
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo build --workspace
-      # unit + transform tests run here; the CLI integration test skips without
-      # the example app's node_modules (it runs fully in the e2e job's build).
-      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: Rust test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # pnpm install too, so the CLI integration test builds the example app instead of skipping.
+      - uses: ./.github/actions/setup
+      - run: cargo test --workspace --locked
+
+  msrv:
+    name: MSRV (Rust 1.94)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          rust: "1.94"
+          install: "false"
+      - run: cargo check --workspace --all-targets --locked
+
+  semver:
+    name: Semver (nowaki-core)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
+        with:
+          package: nowaki-core
 
   security:
     name: Security audit
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          tool: cargo-audit
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
+        with:
+          tool: cargo-audit,cargo-deny
       - run: cargo audit
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-      - run: pnpm install
-      # Ongoing audit of known vulnerabilities in JS prod deps (transitive warnings don't fail the job).
-      - run: pnpm audit --prod || true
+      - run: cargo deny check licenses bans sources
+      - run: pnpm audit --prod --audit-level=high
 
   e2e:
-    name: End-to-end (example app)
-    runs-on: ubuntu-latest
+    name: E2E (${{ matrix.os }}, node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, node: "22" }
+          - { os: ubuntu-latest, node: "24" }
+          - { os: macos-latest, node: "22" }
+          - { os: windows-latest, node: "22" }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
-      - uses: pnpm/action-setup@v4
+          persist-credentials: false
+      - uses: ./.github/actions/setup
         with:
-          version: 11
-      - run: pnpm install
-      - run: cargo build -p nowaki
+          node: ${{ matrix.node }}
+      - run: cargo build -p nowaki --locked
       - name: Router snapshot/unit test (scanRoutes + matchRoute)
         run: node scripts/router-test.mjs
       - name: Client router-cache unit test (matchBoundary + Router Cache TTL/LRU)
         run: node scripts/router-cache-test.mjs
-      - name: nowaki upgrade — command surface + non-app guard (no network)
-        run: |
-          set -e
-          ./target/debug/nowaki --help | grep -q upgrade
-          ./target/debug/nowaki upgrade --help | grep -q -- '--to'
-          # a non-Nowaki package.json is rejected without touching the network
-          TMP=$(mktemp -d); echo '{"name":"x","dependencies":{}}' > "$TMP/package.json"
-          ! ./target/debug/nowaki upgrade "$TMP" 2>/dev/null
-          rm -rf "$TMP"
-      - name: Typed routes — typegen writes .nowaki/types.d.ts
-        run: |
-          set -e
-          ./target/debug/nowaki typegen examples/hello | grep -q 'typegen'
-          test -f examples/hello/.nowaki/types.d.ts
-          grep -q '"/blog/\[slug\]": { slug: string }' examples/hello/.nowaki/types.d.ts
-          grep -q '"/files/\[\.\.\.path\]": { path: string\[\] }' examples/hello/.nowaki/types.d.ts
-          # API routes and convention files are NOT navigable → excluded
-          ! grep -q '"/api/' examples/hello/.nowaki/types.d.ts
-          ! grep -q '_404\|_layout\|loading\|error' examples/hello/.nowaki/types.d.ts
-      - name: Start dev server and verify SSR, islands, API, and v0.3 routing
-        run: |
-          set -e
-          ./target/debug/nowaki dev examples/hello &
-          SERVER_PID=$!
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:3000/ >/dev/null && break
-            sleep 1
-          done
-          B=http://127.0.0.1:3000
-          status() { echo "$(curl -s -o /dev/null -w '%{http_code}' "$@")"; }
+      - name: nowaki upgrade (command surface + non-app guard)
+        run: bash scripts/ci/e2e-upgrade.sh
+      - name: Typed routes (typegen)
+        run: bash scripts/ci/e2e-typegen.sh
+      - name: Dev server (SSR, islands, API, routing, security)
+        run: bash scripts/ci/e2e-dev.sh
+      - name: Production build + nowaki start (hoisting, ISR, Jetstream, security)
+        run: bash scripts/ci/e2e-prod.sh
+      - name: Deploy adapters (node, static, cloudflare, vercel)
+        run: bash scripts/ci/e2e-adapters.sh
 
-          # SSR + islands + transform. The eager runtime is islands.js; the SPA router
-          # is lazy-loaded via the data-router attribute (kept out of first-load JS).
-          curl -sf $B/ | grep -q "nowaki-island"
-          curl -sf $B/ | grep -q 'id="nowaki-runtime"'
-          curl -sf $B/ | grep -q 'data-router=.*client/router.js'
-          curl -sf "$B/islands/Counter.tsx" | grep -q "jsx-runtime"
-
-          # layouts (root + nested) and dynamic param
-          curl -sf $B/ | grep -q 'href="/todos"'
-          curl -sf $B/blog/hello | grep -q "blog section"
-          curl -sf $B/blog/hello | grep -q "Post: hello"
-          curl -sf $B/blog/hello | grep -q 'href="/about"'
-
-          # catch-all routes ([...path]): /files/a/b/c binds the rest as an array,
-          # /files (no trailing segment) does not match.
-          curl -sf $B/files/a/b/c | grep -q 'a / b / c (3)'
-          test "$(status $B/files)" = "404"
-          # async/dynamic metadata: export function meta() computes <title> from params
-          curl -sf $B/files/a/b/c | grep -q '<title>files/a/b/c'
-
-          # middleware: header + auth redirect
-          curl -s -D - -o /dev/null $B/ | grep -qi "x-nowaki-mw: 1"
-          test "$(status $B/secret)" = "302"
-          test "$(status "$B/secret?key=ok")" = "200"
-
-          # 404 / 500 conventions
-          test "$(status $B/nope)" = "404"
-          curl -s $B/nope | grep -q "Page not found"
-          test "$(status "$B/boom?boom=1")" = "500"
-
-          # API: legacy default, method dispatch, 405, streaming
-          curl -sf $B/api/hello | grep -q '"hello":"nowaki"'
-          curl -sf "$B/api/echo?q=hi" | grep -q '"q":"hi"'
-          curl -sf -X POST -H 'content-type: application/json' -d '{"a":1}' $B/api/echo | grep -q '"received":{"a":1}'
-          test "$(status -X DELETE $B/api/echo)" = "405"
-          test "$(curl -s $B/api/stream | tr -d '\n')" = "chunk1chunk2"
-
-          # action (form submission) via cookie PRG
-          CJ=$(mktemp)
-          test "$(status -c $CJ -X POST -d 'text=ci-todo' $B/todos)" = "302"
-          curl -s -b $CJ $B/todos | grep -q "ci-todo"
-
-          # v0.4 bundler features (rendered on the home page)
-          curl -sf $B/ | grep -q 'class="badge_'          # CSS Modules scoped class
-          curl -sf $B/ | grep -q 'src="/logo.svg"'        # asset import URL
-          curl -sf $B/ | grep -q '<code>a→b</code>'       # cyclic dependency resolves
-          curl -sf "$B/islands/Counter.tsx" | grep -q 'sourceMappingURL=data'  # dev source map
-
-          # v0.5 plugin transform hook (nowaki.config.mjs rewrites a token before oxc)
-          curl -sf $B/plugin | grep -q 'transformed-by-plugin'
-          ! curl -sf $B/plugin | grep -q '__PLUGIN_MARK__'
-
-          # v0.5 TSRX: a .tsrx island compiled to Preact via @tsrx/preact, SSR + island wrap
-          curl -sf $B/tsrx | grep -q 'nowaki-island name="TsrxCounter"'
-          curl -sf $B/tsrx | grep -q 'tsrx: 5'
-
-          # v0.6 Jetstream: server-reactive island SSRs as <nowaki-live> with initial state,
-          # loads live.js, and coexists with a client island on the same page
-          curl -sf $B/live | grep -q 'nowaki-live name="LiveCounter"'
-          curl -sf $B/live | grep -q 'live: 0'
-          curl -sf $B/live | grep -q 'client/live.js'
-          curl -sf $B/live | grep -q 'nowaki-island name="Counter"'
-
-          # v0.8 server functions: "use server" RPC. The browser gets a fetch proxy
-          # (no impl/secret); POST /__nowaki/fn runs the real function server-side,
-          # and getContext() reads the request cookie. Unknown id is rejected.
-          curl -sf "$B/actions/todos.ts" | grep -q '__nowakiCall'
-          ! curl -sf "$B/actions/todos.ts" | grep -q 'nowaki-server-only-secret'
-          curl -sf "$B/__nowaki/server-functions" | grep -q '"export":"listTodos"'
-          curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-rpc: 1' -d '{"id":"6c90d7dc921a9a3f","args":[]}' $B/__nowaki/fn | grep -q 'learn nowaki'
-          curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-rpc: 1' -H 'cookie: user=alice' -d '{"id":"781de5a7f5ba2469","args":[]}' $B/__nowaki/fn | grep -q 'alice'
-          test "$(status -XPOST -H 'content-type: application/json' -H 'x-nowaki-rpc: 1' -d '{"id":"deadbeefdeadbeef","args":[]}' $B/__nowaki/fn)" = "404"
-          # (RPC CSRF gate — missing header / cross-origin — is covered by security-e2e.mjs below.)
-          curl -sf $B/server-fn | grep -q 'nowaki-island name="ServerTodos"'
-
-          # server fn as a <form action>: the islands runtime intercepts the submit and
-          # posts the form to the fn. Here we exercise the server side (addTodoForm) and
-          # confirm the runtime ships the form interceptor.
-          curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-rpc: 1' -d '{"id":"5591e6fc8d31a200","args":[{"text":"ci-form-action"}]}' $B/__nowaki/fn >/dev/null
-          curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-rpc: 1' -d '{"id":"6c90d7dc921a9a3f","args":[]}' $B/__nowaki/fn | grep -q 'ci-form-action'
-          curl -sf "$B/server-fn" | grep -q 'fa-form'
-
-          # v0.9 virtual modules: a plugin resolveId/load provides virtual:build-info,
-          # imported by an island. SSR renders it (inlined as a data: module) and the
-          # island's browser JS loads the generated source from a /__nowaki_virtual__/ URL.
-          curl -sf $B/virtual | grep -q 'VIRTUAL_OK · nowaki-plugin'
-          curl -sf $B/virtual | grep -q 'nowaki-island name="VirtualBadge"'
-
-          # lazy hydration (Astro-style client:* directives): the island wrapper sets a
-          # `client` attribute and the directive is NOT serialized into the island props.
-          # client:only renders no SSR content (hydrates client-side only).
-          # typed navigation: <Link href> renders an <a href>, route() builds dynamic
-          # hrefs (encoded params, catch-all joined with /).
-          curl -sf $B/nav | grep -q '<a href="/about" data-testid="link-about">'
-          curl -sf $B/nav | grep -q 'href="/blog/hello" data-testid="link-blog"'
-          curl -sf $B/nav | grep -q 'href="/files/docs/intro" data-testid="link-files"'
-
-          curl -sf $B/lazy | grep -q 'name="Counter"[^>]*client="idle"'
-          # the directive is stripped from the serialized props (props has only start)
-          curl -sf $B/lazy | grep -q 'props="{&quot;start&quot;:100}"[^>]*client="visible"'
-          curl -sf $B/lazy | grep -q 'name="ClientOnly"[^>]*client="only"></nowaki-island>'
-          # client:load is the default → first Counter has no client attribute
-          curl -sf $B/lazy | grep -q 'name="Counter" src="[^"]*" props="{&quot;start&quot;:0}" style="display:contents">'
-
-          # loading/error boundaries: the client router fetches /__nowaki/boundaries
-          # for the SSR'd loading + error UIs (nwk-pulse = loading skeleton,
-          # data-nowaki-reset = error retry). They are conventions, not routes, so
-          # /loading and /error are 404. (DOM behavior is covered by router-browser-test.)
-          curl -sf $B/__nowaki/boundaries | grep -q 'nwk-pulse'
-          curl -sf $B/__nowaki/boundaries | grep -q 'data-nowaki-reset'
-          test "$(status $B/loading)" = "404"
-          test "$(status $B/error)" = "404"
-          curl -sf "$B/slow?ms=0" | grep -q 'data-testid="slow"'
-
-          # --- application-security regressions (guards for the multi-round audit fixes):
-          # arbitrary file read (@fs / ssr-module / .env / virtual ..), RPC CSRF,
-          # CSWSH (WS Origin), and live state forgery. A sentinel .env proves file-read
-          # denial without leaking; it is removed right after.
-          printf 'DATABASE_URL=postgres://u:supersecretpw@db/prod\nSESSION_SECRET=ci-do-not-leak\n' > examples/hello/.env
-          node scripts/security-e2e.mjs dev "$B" "$(pwd)/examples/hello"
-          rm -f examples/hello/.env
-
-          kill $SERVER_PID
-
-      - name: Production build + scope hoisting + preload + serve
+  browser:
+    name: Browser (router, lazy hydration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: cargo build -p nowaki --locked
+      - name: Headless Chrome against nowaki start
+        env:
+          CHROME: /usr/bin/google-chrome
         run: |
           set -e
           ./target/debug/nowaki build examples/hello
-          test -f examples/hello/dist/client/manifest.json
-          grep -q '"preload"' examples/hello/dist/client/manifest.json
-          # asset optimization: the sub-optimal source photo.png (~256 KB, stored zlib)
-          # is losslessly re-compressed to a fraction of its size in dist/client.
-          PHOTO=$(ls examples/hello/dist/client/photo.*.png | head -1)
-          test "$(wc -c < "$PHOTO")" -lt "$(wc -c < examples/hello/photo.png)"
-          test "$(wc -c < "$PHOTO")" -lt 50000   # 256 KB → a few KB
-          # scope hoisting: the cyclic lib modules are concatenated into the Cycle
-          # island chunk, not emitted as separate files, and the chunk has no
-          # internal ./cycle- import (the cycle is resolved within one scope).
-          ! ls examples/hello/dist/client/cycle-a.*.js >/dev/null 2>&1
-          CY=$(ls examples/hello/dist/client/Cycle.*.js | head -1)
-          ! grep -q './cycle-' "$CY"
-          # v0.6 Jetstream build: the live island ships NO client component JS (only live.js),
-          # is listed in the manifest, and is still built as a server module for rendering.
-          grep -q '"liveIslands": \["LiveCounter"\]' examples/hello/dist/client/manifest.json
-          ! ls examples/hello/dist/client/LiveCounter.*.js >/dev/null 2>&1
-          ls examples/hello/dist/client/live.*.js >/dev/null 2>&1
-          test -f examples/hello/dist/server/islands/LiveCounter.js
-          # nowaki start (Rust front) serves the live island, assembled with live.js
-          ./target/debug/nowaki start examples/hello --port 3300 &
-          START_PID=$!
-          for i in $(seq 1 20); do curl -sf http://127.0.0.1:3300/ >/dev/null && break; sleep 1; done
-          curl -sf http://127.0.0.1:3300/ | grep -q "modulepreload"
-          curl -sf http://127.0.0.1:3300/ | grep -q '<code>a→b</code>'
-          # lazy SPA router: runtime script carries data-router, and the router chunk is
-          # NOT eagerly preloaded (it loads on idle, keeping first-load JS small).
-          curl -sf http://127.0.0.1:3300/ | grep -q 'id="nowaki-runtime"[^>]*data-router='
-          ! curl -s http://127.0.0.1:3300/ | grep -qE 'modulepreload[^>]*/router\.[0-9a-f]+\.js'
-          curl -sf http://127.0.0.1:3300/live | grep -q 'nowaki-live name="LiveCounter"'
-          curl -sf http://127.0.0.1:3300/live | grep -q 'live\.'  # live.js script
-          # v0.8 server functions in production: allowlist written, no impl leaked to
-          # the client, and the Rust front proxies /__nowaki/fn to the renderer.
-          test -f examples/hello/dist/server/functions.json
-          grep -q '"export": "addTodo"' examples/hello/dist/server/functions.json
-          ! grep -rl 'nowaki-server-only-secret' examples/hello/dist/client >/dev/null 2>&1
-          curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-rpc: 1' -d '{"id":"6c90d7dc921a9a3f","args":[]}' http://127.0.0.1:3300/__nowaki/fn | grep -q 'learn nowaki'
-          # v0.9 virtual modules: SSR inlines the plugin-generated module (data:)
-          curl -sf http://127.0.0.1:3300/virtual | grep -q 'VIRTUAL_OK · nowaki-plugin'
-          # ISR (export const revalidate=2): the Rust front caches assembled HTML and
-          # regenerates it in the background once stale. Cold hit MISSes & populates;
-          # the next is a HIT with the same render number; after the 2s window a STALE
-          # response is served (old HTML) while a fresh render runs in the background;
-          # the following hit is fresh (render number incremented).
-          ISR=http://127.0.0.1:3300/isr
-          chit() { curl -s -D - -o /tmp/isr.html "$ISR" | grep -i '^x-nowaki-cache:' | tr -d '\r' | awk '{print $2}'; }
-          rnum() { grep -o 'isr-renders">[0-9]*' /tmp/isr.html | grep -o '[0-9]*'; }
-          test "$(chit)" = "MISS"; R1=$(rnum)
-          curl -s -D - -o /dev/null "$ISR" | grep -qi 'cache-control: public, s-maxage=2, stale-while-revalidate'
-          test "$(chit)" = "HIT"; test "$(rnum)" = "$R1"
-          sleep 3
-          test "$(chit)" = "STALE"; test "$(rnum)" = "$R1"   # stale HTML served immediately
-          sleep 1                                            # let background revalidation finish
-          test "$(chit)" = "HIT"; test "$(rnum)" -gt "$R1"   # regenerated
-          # a cookie-setting response is per-user and must never be ISR-cached
-          test -z "$(curl -s -D - -o /dev/null "$ISR" | grep -i '^set-cookie:')"
-          # loading/error boundaries are served through the Rust front too
-          curl -sf http://127.0.0.1:3300/__nowaki/boundaries | grep -q 'data-nowaki-reset'
-          # v0.9 Jetstream presence + connection scaling: WS join->presence,
-          # event->patch round-trip, presence rises/falls across two connections.
-          node scripts/livetest.mjs http://127.0.0.1:3300
-          # --- application-security regressions (prod): no absolute build-machine path
-          # leaks into client assets (#9), and ISR keys isolate per-header (no cross-user
-          # leak) and collapse unused-query floods (#6/#7).
-          ! grep -rl "$HOME" examples/hello/dist/client
-          node scripts/security-e2e.mjs prod http://127.0.0.1:3300
-          kill $START_PID
+          ./target/debug/nowaki start examples/hello --port 8241 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8241/ >/dev/null && break; sleep 1; done
+          BASE=http://127.0.0.1:8241 node scripts/lazy-hydration-test.mjs
+          BASE=http://127.0.0.1:8241 node scripts/router-browser-test.mjs
 
-      - name: Deploy adapters — self-contained node entry + static + streaming SSR
-        run: |
+  jetstream-load:
+    name: Jetstream load (1000 connections)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: cargo build -p nowaki --locked
+      - run: |
           set -e
-          # node adapter: build emits a self-contained server entry runnable WITHOUT the nowaki binary
-          ./target/debug/nowaki build examples/hello --adapter node
-          test -f examples/hello/dist/server/index.mjs
-          test -f examples/hello/dist/server/package.json
-          PORT=3310 node examples/hello/dist/server/index.mjs &
-          NODE_PID=$!
-          for i in $(seq 1 20); do curl -sf http://127.0.0.1:3310/ >/dev/null && break; sleep 1; done
-          curl -sf http://127.0.0.1:3310/ | grep -q "nowaki-island"   # SSR + island marker
-          curl -sf http://127.0.0.1:3310/api/hello | grep -q '"hello":"nowaki"'
-          # streaming SSR route (export const streaming = true) renders a complete document
-          curl -sf http://127.0.0.1:3310/stream | grep -q "Streaming SSR"
-          curl -sf http://127.0.0.1:3310/stream | grep -q "nowaki-island"
-          # ISR signal is universal: the node adapter emits the same Cache-Control,
-          # so the page gets stale-while-revalidate on any CDN/edge without the Rust front.
-          curl -s -D - -o /dev/null http://127.0.0.1:3310/isr | grep -qi 'cache-control: public, s-maxage=2, stale-while-revalidate'
-          kill $NODE_PID
-          # static adapter: prerender to dist/static
-          ./target/debug/nowaki build examples/hello --adapter static
-          test -f examples/hello/dist/static/index.html
-          test -f examples/hello/dist/static/about/index.html
-          # cloudflare (edge) adapter: generates a bundled fetch-handler worker + wrangler config
-          ./target/debug/nowaki build examples/hello --adapter cloudflare
-          test -f examples/hello/dist/worker/index.js
-          test -f examples/hello/dist/worker/wrangler.jsonc
-          grep -q "createFetchHandler" examples/hello/dist/worker/index.js
-          grep -q '"binding": "ASSETS"' examples/hello/dist/worker/wrangler.jsonc
-          # vercel adapter: Build Output API v3 (.vercel/output): config + static + a
-          # self-contained Node serverless function. Run the function (Vercel's launcher
-          # invokes its default (req,res) handler) and confirm SSR + islands + API work.
-          ./target/debug/nowaki build examples/hello --adapter vercel
-          test -f examples/hello/.vercel/output/config.json
-          grep -q '"version": 3' examples/hello/.vercel/output/config.json
-          test -f examples/hello/.vercel/output/functions/index.func/.vc-config.json
-          grep -q '"launcherType": "Nodejs"' examples/hello/.vercel/output/functions/index.func/.vc-config.json
-          test -d examples/hello/.vercel/output/static/_nowaki
-          # the function must NOT carry a nested preact (would double-instance and break hooks)
-          ! test -d examples/hello/.vercel/output/functions/index.func/node_modules/@nowaki-dev/runtime/node_modules
-          ( cd examples/hello/.vercel/output/functions/index.func \
-            && node -e 'import("./index.mjs").then(m=>require("http").createServer(m.default).listen(3320))' & )
-          for i in $(seq 1 20); do curl -sf http://127.0.0.1:3320/ >/dev/null && break; sleep 1; done
-          curl -sf http://127.0.0.1:3320/ | grep -q "nowaki-island"
-          curl -sf http://127.0.0.1:3320/api/hello | grep -q '"hello":"nowaki"'
-          curl -sf http://127.0.0.1:3320/nav | grep -q 'href="/blog/hello"'
+          ./target/debug/nowaki build examples/hello
+          ./target/debug/nowaki start examples/hello --port 8200 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8200/ >/dev/null && break; sleep 1; done
+          RUST_PID=$(pgrep -f 'nowaki start examples/hello' | head -1)
+          SIDECAR_PID=$(pgrep -f 'prod-sidecar.mjs' | head -1)
+          node scripts/live-loadtest.mjs http://127.0.0.1:8200 1000 "$RUST_PID" "$SIDECAR_PID" > loadtest.txt
+          { echo '```'; cat loadtest.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  scaffold:
+    name: Scaffold (create-nowaki templates)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: cargo build -p nowaki --locked
+      - run: bash scripts/ci/e2e-scaffold.sh
+
+  runtimes:
+    name: Adapter runtime (${{ matrix.runtime }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [bun, deno, cloudflare]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - if: matrix.runtime == 'bun'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - if: matrix.runtime == 'deno'
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+      - run: cargo build -p nowaki --locked
+      - run: bash scripts/ci/e2e-runtimes.sh ${{ matrix.runtime }}
 
   bench-regression:
     name: Client JS size (regression gate)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-      - run: pnpm install
-      - run: cargo build -p nowaki
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: cargo build -p nowaki --locked
       # Shipped JS is deterministic; fail if it exceeds benchmarks/baseline.json by more than +12%.
-      # Head-to-head (Next/Astro comparison) runs locally or in a separate job (heavy deps, so not in default CI).
       - run: node benchmarks/check-regression.mjs
 
   npm-cli:
     name: npm CLI wrapper (smoke)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          install: "false"
       - name: Assemble host package + resolve through JS shim
         run: |
           node scripts/build-npm.mjs linux-x64-gnu
@@ -377,3 +242,70 @@ jobs:
           OUT=$(node "$ROOT/node_modules/nowaki/bin/nowaki.js" --version)
           echo "shim output: '$OUT' (expected 'nowaki $VER')"
           test "$OUT" = "nowaki $VER"
+
+  docs:
+    name: Docs (site build, links, typos, English-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: cargo build -p nowaki --locked
+      - run: ./target/debug/nowaki build site
+      - run: node scripts/ci/check-english.mjs
+      - uses: crate-ci/typos@7f9d0819ca1c008ade73f4b41fa9d258d48f605b # v1.51.1
+      # Offline on PRs (relative links and anchors only); external links are checked weekly.
+      - uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: --offline --no-progress --include-fragments './**/*.md' --exclude-path node_modules --exclude-path target
+          fail: true
+
+  workflows:
+    name: Workflow lint (actionlint, zizmor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
+        with:
+          tool: actionlint,zizmor
+      - run: actionlint
+      - run: zizmor --persona=regular --min-severity=medium .github/workflows .github/actions
+
+  pr-size:
+    name: PR size
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: node scripts/ci/pr-size.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+
+  # The single required status check: green only when every job above passed
+  # (pr-size is skipped outside pull requests).
+  ci-ok:
+    name: CI OK
+    if: always()
+    needs: [lint, test, msrv, semver, security, e2e, browser, jetstream-load, scaffold, runtimes, bench-regression, npm-cli, docs, workflows, pr-size]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "results: $RESULTS"
+          if echo "$RESULTS" | grep -qE 'failure|cancelled'; then exit 1; fi
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}

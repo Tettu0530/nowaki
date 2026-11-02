@@ -1,0 +1,12 @@
+[files]
+extend-exclude = ["*.lock", "pnpm-lock.yaml", "*.svg", "site/lib/i18n.ts"]
+
+[default]
+# Hex ids in server-function fixtures, and plurals of acronyms the word splitter cuts up.
+extend-ignore-re = ["[0-9a-f]{16}", "PNGs", "MISSes"]
+
+[default.extend-identifiers]
+als = "als" # AsyncLocalStorage instance
+
+[default.extend-words]
+Vor = "Vor" # VorEdge

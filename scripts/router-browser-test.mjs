@@ -1,5 +1,5 @@
 // Client router behavior test in a real browser (Chrome).
-// Not run in CI (no Chrome); for local verification. Drives Chrome directly over CDP (no puppeteer).
+// Runs in CI (browser job) and locally. Drives Chrome directly over CDP (no puppeteer).
 // Usage: BASE=http://127.0.0.1:8233 node scripts/router-browser-test.mjs
 import { spawn } from "node:child_process";
 

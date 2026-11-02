@@ -5,7 +5,7 @@
 A full-stack web framework built around a Rust toolchain
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![Status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)](#status)
+[![Status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)](./ROADMAP.md#where-we-are)
 
 Zero client JS by default. The dev server is a Rust binary that starts instantly. Designed as an answer to the structural slowness of Next.js.
 

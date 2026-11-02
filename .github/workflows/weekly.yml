@@ -1,0 +1,57 @@
+name: Weekly
+
+on:
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-dry-run:
+    name: Release dry run
+    uses: ./.github/workflows/release.yml
+    with:
+      dry_run: true
+
+  bench:
+    name: Benchmarks (Nowaki vs Next vs Astro)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: cargo build --release -p nowaki --locked
+      - name: Install the comparison apps
+        run: |
+          for app in benchmarks/apps/*-counter; do
+            (cd "$app" && npm install --no-audit --no-fund --loglevel=error)
+          done
+      - name: Run benchmarks
+        run: |
+          {
+            echo '## bench.mjs (site)'; echo '```'; node benchmarks/bench.mjs site; echo '```'
+            echo '## bench.mjs (examples/hello)'; echo '```'; node benchmarks/bench.mjs examples/hello; echo '```'
+            echo '## head-to-head'; echo '```'; node benchmarks/head-to-head.mjs; echo '```'
+          } | tee bench.md
+          cat bench.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench
+          path: bench.md
+
+  links:
+    name: External links
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: --no-progress './**/*.md' --exclude-path node_modules --exclude-path target
+          fail: true
