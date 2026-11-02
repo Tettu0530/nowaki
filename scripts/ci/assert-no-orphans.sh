@@ -13,8 +13,10 @@ if kill -0 "$pid" 2>/dev/null; then
   exit 1
 fi
 sleep 0.5
-if pgrep -f 'nowaki-dev/runtime/server/' >/dev/null; then
+# Only this checkout's example app, so other Nowaki apps running on the machine don't count.
+pattern="$(cd "$(dirname "$0")/../.." && pwd)/examples/hello/node_modules/@nowaki-dev/runtime/server/"
+if pgrep -f "$pattern" >/dev/null; then
   echo "orphaned Node children after SIGTERM:" >&2
-  pgrep -fl 'nowaki-dev/runtime/server/' >&2
+  pgrep -fl "$pattern" >&2
   exit 1
 fi

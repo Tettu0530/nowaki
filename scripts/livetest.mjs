@@ -59,8 +59,10 @@ a.send(JSON.stringify({ type: "event", nid, handler: "inc" }));
 const patch = await recvUntil(a, (m) => m.type === "patch" && m.nid === nid);
 check(/live:\s*1/.test(patch.html), `patch reflects incremented count (html has "live: 1")`);
 
+// Listen before b connects: the broadcast can reach a before b's open event resolves.
+const p2Wait = recvUntil(a, (m) => m.type === "presence" && m.count >= 2);
 const b = await open(wsUrl);
-const p2 = await recvUntil(a, (m) => m.type === "presence" && m.count >= 2);
+const p2 = await p2Wait;
 check(p2.count >= 2, `presence rises on second connect (count=${p2.count})`);
 
 b.close();
