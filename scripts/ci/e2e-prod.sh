@@ -72,3 +72,4 @@ node scripts/livetest.mjs http://127.0.0.1:3300
 ! grep -rl "$HOME" examples/hello/dist/client
 node scripts/security-e2e.mjs prod http://127.0.0.1:3300
 kill $START_PID
+bash scripts/ci/assert-no-orphans.sh $START_PID

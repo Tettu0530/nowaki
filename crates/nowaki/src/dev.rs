@@ -91,7 +91,11 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         crate::ui::open_browser(&format!("http://localhost:{port}/"));
     }
 
-    axum::serve(listener, app).await?;
+    // Don't wait for open HMR/live sockets on shutdown; just stop serving and drop the children.
+    tokio::select! {
+        r = std::future::IntoFuture::into_future(axum::serve(listener, app)) => r?,
+        _ = crate::shutdown::signal() => {}
+    }
     drop(plugin_host);
     drop(sidecar);
     Ok(())
