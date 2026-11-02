@@ -7,6 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use anyhow::{anyhow, Context, Result};
 use oxc::allocator::Allocator;
@@ -180,6 +181,10 @@ pub fn build_server(
         }
     }
 
+    let server_assets = ServerAssets {
+        client_dir: dist.join("client"),
+        urls: Mutex::new(assets.clone()),
+    };
     // Server modules are independent (no naming dependencies), so transform them in parallel with rayon.
     let results: Vec<Result<(PathBuf, String)>> = files
         .par_iter()
@@ -189,7 +194,7 @@ pub fn build_server(
                 .with_context(|| format!("failed to relativize: {}", path.display()))?;
             let out_path = server_dir.join(with_js_ext(rel));
             let source = core.read_source(path)?;
-            let code = transform_for_server(path, &source, core, assets)?;
+            let code = transform_for_server(path, &source, core, &server_assets)?;
             Ok((out_path, code))
         })
         .collect();
@@ -239,11 +244,31 @@ fn with_js_suffix(rel: &str) -> String {
 
 /// SSR transform: TS stripping + JSX (automatic, preact) + relative imports to .js.
 /// Not minified (keeps SSR stack traces readable).
+/// Asset URLs for the server build: the client build's, plus assets that only server modules
+/// import, which are emitted to dist/client on first use (rayon threads share this).
+struct ServerAssets {
+    client_dir: PathBuf,
+    urls: Mutex<HashMap<PathBuf, String>>,
+}
+
+impl ServerAssets {
+    fn url_for(&self, abs: &Path) -> Result<String> {
+        let mut urls = self.urls.lock().unwrap();
+        if let Some(url) = urls.get(abs) {
+            return Ok(url.clone());
+        }
+        let (name, _, _) = write_asset(abs, &self.client_dir)?;
+        let url = format!("/_nowaki/{name}");
+        urls.insert(abs.to_path_buf(), url.clone());
+        Ok(url)
+    }
+}
+
 fn transform_for_server(
     path: &Path,
     source: &str,
     core: &NowakiCore,
-    assets: &HashMap<PathBuf, String>,
+    assets: &ServerAssets,
 ) -> Result<String> {
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(path).unwrap_or_else(|_| SourceType::tsx());
@@ -323,17 +348,12 @@ fn transform_for_server(
             }
             continue;
         }
-        // Assets: point at the client build's hashed URL (basename if missing).
+        // Assets: the hashed URL the client build emitted, or emit it now (server-only imports).
         if !spec.starts_with('/') && !spec.contains("://") && !spec.starts_with("data:") {
             if let Ok(resolution) = core.resolver.resolve(dir, spec) {
                 let full = resolution.full_path();
                 if crate::is_asset(&full) {
-                    let url = assets.get(&full).cloned().unwrap_or_else(|| {
-                        format!(
-                            "/_nowaki/{}",
-                            full.file_name().and_then(|n| n.to_str()).unwrap_or("asset")
-                        )
-                    });
+                    let url = assets.url_for(&full)?;
                     let data = crate::transform::asset_module_data_url(&url);
                     lit.value = allocator.alloc_str(&data).into();
                     lit.raw = None;
@@ -450,16 +470,11 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
     // Assets (images, fonts, etc.): copy raw with a content hash and
     // emit a tiny JS module that default-exports the served URL (no deps).
     if crate::is_asset(abs) {
-        let raw = fs::read(abs).with_context(|| format!("failed to read: {}", abs.display()))?;
-        let ext = abs.extension().and_then(|e| e.to_str()).unwrap_or("bin");
+        let (asset_name, size_in, size_out) = write_asset(abs, out_dir)?;
+        ctx.asset_in += size_in;
+        ctx.asset_out += size_out;
         let stem = abs.file_stem().and_then(|s| s.to_str()).unwrap_or("asset");
-        let (bytes, out_ext) =
-            crate::asset::optimize(&raw, ext, &crate::asset::Transform::default());
-        ctx.asset_in += raw.len() as u64;
-        ctx.asset_out += bytes.len() as u64;
-        let asset_hash = xxh3_64(&bytes) as u32;
-        let asset_name = format!("{stem}.{asset_hash:08x}.{out_ext}");
-        fs::write(out_dir.join(&asset_name), &bytes)?;
+        let out_ext = asset_name.rsplit('.').next().unwrap_or("bin");
         let url = format!("/_nowaki/{asset_name}");
         ctx.assets.insert(abs.to_path_buf(), url.clone());
         let code = format!("export default \"{url}\";\n");
@@ -616,6 +631,19 @@ fn emit_island(
         }
         Err(_) => emit(core, island, out_dir, ctx),
     }
+}
+
+/// Optimizes an asset and writes it under a content-hashed name. Returns (name, bytes in, bytes out).
+fn write_asset(abs: &Path, out_dir: &Path) -> Result<(String, u64, u64)> {
+    let raw = fs::read(abs).with_context(|| format!("failed to read: {}", abs.display()))?;
+    let ext = abs.extension().and_then(|e| e.to_str()).unwrap_or("bin");
+    let stem = abs.file_stem().and_then(|s| s.to_str()).unwrap_or("asset");
+    let (bytes, out_ext) = crate::asset::optimize(&raw, ext, &crate::asset::Transform::default());
+    let hash = xxh3_64(&bytes) as u32;
+    let name = format!("{stem}.{hash:08x}.{out_ext}");
+    fs::create_dir_all(out_dir)?;
+    fs::write(out_dir.join(&name), &bytes)?;
+    Ok((name, raw.len() as u64, bytes.len() as u64))
 }
 
 /// Returns a chunk's transitive deps (excluding itself, deduped). For preload chains.

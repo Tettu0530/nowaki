@@ -18,6 +18,10 @@ milestone's worth of work; the codename is noted per entry.
   apps from `npm create nowaki` get `preact-render-to-string@^6.8.2`.
 
 ### Fixed
+- Assets imported only from server code (e.g. a font URL in a server-side style
+  module) are emitted to `dist/client` with a content-hashed name. They used to
+  be referenced as `/_nowaki/<name>` without being written, and without a hash
+  despite the immutable cache header (#17).
 - Windows: `nowaki dev` / `nowaki build` work (verbatim `\\?\` paths, SSR loader
   file URLs, and `/@fs/` drive-letter URLs).
 - `nowaki dev` / `nowaki start` kill their Node children on SIGTERM instead of
