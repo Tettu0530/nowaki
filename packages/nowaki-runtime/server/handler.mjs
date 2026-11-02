@@ -1,6 +1,4 @@
-// dev(sidecar.mjs) と prod(start.mjs) が共有するリクエストハンドラ。
-// ルーティング・ミドルウェア・レイアウト・loader/action・404/500 をここに集約し、
-// 環境差分（モジュールの読み込み方、島の解決、ドキュメント組み立て）は env で注入する。
+// dev / prod / edge が共有するリクエストハンドラ。環境差分は env で注入する。
 
 import { Readable } from "node:stream";
 import { h } from "preact";
@@ -14,7 +12,6 @@ import { dispatchServerFn, SERVER_FN_PATH } from "./functions.mjs";
 // クライアントルーターが loading/error の境界 HTML を一度だけ取りに来る内部パス。
 export const BOUNDARIES_PATH = "/__nowaki/boundaries";
 
-// handleRequest の結果を Node のレスポンスへ書き出す（stream 対応）。
 export async function sendResult(res, result) {
   res.writeHead(result.status ?? 200, result.headers ?? {});
   if (result.stream) {
@@ -39,38 +36,33 @@ export async function handleRequest(env, info) {
   const match = matchRoute(table.routes, url.pathname);
   const ctx = makeContext({ ...info, params: match?.params ?? {} });
 
-  // サーバー関数 RPC（`"use server"`）。ルーティングより前に処理する。
+  // サーバー関数 RPC はルーティングより前に処理する。
   if (env.serverFunctions && url.pathname === SERVER_FN_PATH) {
     return finalize(ctx, await dispatchServerFn(ctx, info, env.serverFunctions));
   }
 
-  // クライアントルーター用: loading/error 境界の SSR HTML を JSON で返す。
   if (method === "GET" && url.pathname === BOUNDARIES_PATH) {
     return finalize(ctx, await renderBoundaries(env, table, version));
   }
 
   try {
-    // 1. ミドルウェア（root → leaf）。Response を返したら短絡。
+    // ミドルウェアは 404 判定より前に走り、Response を返したら短絡する。
     const short = await runMiddleware(env, table, ctx, version);
     if (short) return finalize(ctx, short);
 
-    // 2. 未一致 → 404 規約
     if (!match) return finalize(ctx, await render404(env, table, ctx, version));
 
     const mod = await env.importModule(match.file, version);
 
-    // 3. API ルート（メソッド分岐 + Response/streaming 対応）
     if (match.isApi) return finalize(ctx, await handleApi(mod, ctx));
 
-    // 4. action（非 GET/HEAD で action を持つ）
     if (method !== "GET" && method !== "HEAD" && typeof mod.action === "function") {
       const out = await mod.action(ctx);
       const res = toResult(out);
-      if (res) return finalize(ctx, res); // Response/redirect を返したら確定
+      if (res) return finalize(ctx, res);
       ctx.actionData = out; // データならページ再描画へ
     }
 
-    // 5. レイアウト + loader + ページ描画
     return finalize(ctx, await renderRoute(env, table, match, mod, ctx, version));
   } catch (err) {
     if (ctx._redirect) return finalize(ctx, ctx._redirect); // ctx.redirect() の throw 経路
@@ -78,7 +70,6 @@ export async function handleRequest(env, info) {
   }
 }
 
-// ctx に溜めた status / ヘッダ / Set-Cookie を結果へ反映する。
 function finalize(ctx, result) {
   if (!result) return { status: 500, headers: HTML, body: "Internal Error" };
   const headers = { ...(result.headers ?? {}) };
@@ -95,7 +86,7 @@ function finalize(ctx, result) {
   return { status, headers, body: result.body, stream: result.stream };
 }
 
-// ミドルウェアを root→leaf で実行。Response 相当を返した時点で短絡。
+// table.middleware は root→leaf 順。
 async function runMiddleware(env, table, ctx, version) {
   for (const entry of table.middleware ?? []) {
     if (!underPrefix(ctx.url.pathname, entry.prefix)) continue;
@@ -128,7 +119,6 @@ async function handleApi(mod, ctx) {
   return { status: 200, headers: JSON_CT, body: JSON.stringify(out ?? null) };
 }
 
-// default / GET / POST / ... のメソッド別 export を選ぶ。
 function pickMethodHandler(mod, method) {
   const named = mod[method] ?? mod[method?.toLowerCase?.()];
   if (typeof named === "function") return named;
@@ -136,7 +126,6 @@ function pickMethodHandler(mod, method) {
   return null;
 }
 
-// レイアウト合成 + loader 実行 + ページ描画。
 async function renderRoute(env, table, match, mod, ctx, version) {
   await env.ensureIslands(version);
   const Page = mod.default;
@@ -144,12 +133,10 @@ async function renderRoute(env, table, match, mod, ctx, version) {
     throw new Error(`ルートがコンポーネントを default export していません: ${ctx.url.pathname}`);
   }
   const data = mod.loader ? await mod.loader(ctx) : undefined;
-  // 動的・非同期メタデータ: `export function meta({data,params,url})` があれば await して
-  // title/head/lang を算出。無ければ静的 export（mod.title 等）にフォールバック。
   const meta = await resolveMeta(mod, { data, params: ctx.params, url: ctx.url });
   let node = h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url });
 
-  // レイアウトを leaf→root で外側に巻く
+  // leaf→root の順で外側に巻く
   const layouts = layoutChain(table, match.file);
   for (let i = layouts.length - 1; i >= 0; i--) {
     const lmod = await env.importModule(layouts[i], version);
@@ -159,14 +146,11 @@ async function renderRoute(env, table, match, mod, ctx, version) {
     node = h(Layout, { data: ldata, params: ctx.params, url: ctx.url, children: node });
   }
 
-  // ISR（stale-while-revalidate）。ルートが `export const revalidate = <秒>` でオプトイン。
-  // 共有 Cache-Control を出すので CDN/エッジ（Cloudflare/Vercel）はそのまま ISR になる。
-  // `nowaki start` の Rust フロントは x-nowaki-revalidate を見てメモリキャッシュする。
+  // 共有 Cache-Control で CDN はそのまま ISR になる。`nowaki start` の Rust フロントは
+  // x-nowaki-revalidate を見てメモリキャッシュする。
   const revalidate = isrSeconds(mod);
 
-  // ストリーミング SSR（ルートが `export const streaming = true` でオプトイン）。
-  // シェル(head) を即送出 → 本文をストリーム → tail(runtime script)。TTFB を縮める。
-  // env.renderShell を持つ環境のみ。preload はシェル送出時に島が未確定なので最小化する。
+  // ストリーミング SSR はシェルを即送出して TTFB を縮める（env.renderShell を持つ環境のみ）。
   if (mod.streaming === true && typeof env.renderShell === "function") {
     const { head, tail } = env.renderShell({ mod, meta });
     const bodyStream = await renderToReadableStream(node);
@@ -181,8 +165,7 @@ async function renderRoute(env, table, match, mod, ctx, version) {
   const body = await renderToStringAsync(node);
   let headers = HTML;
   if (revalidate) {
-    // ISR: 描画が依存したリクエストヘッダ / クエリを Vary として伝える。Rust フロント
-    // (start.rs) がこれをキャッシュキーに織り込み、クロスユーザー漏れ・クエリ氾濫を防ぐ。
+    // start.rs が Vary をキャッシュキーに織り込み、クロスユーザー漏れ・クエリ氾濫を防ぐ。
     const vary = ctx.__vary();
     headers = {
       ...HTML,
@@ -195,20 +178,17 @@ async function renderRoute(env, table, match, mod, ctx, version) {
   return { status: 200, headers, body: env.renderDocument({ mod, body, meta }) };
 }
 
-// `export const revalidate` を正の秒数に正規化（無効なら null = ISR 無効）。
 function isrSeconds(mod) {
   const r = Number(mod?.revalidate);
   return Number.isFinite(r) && r > 0 ? Math.floor(r) : null;
 }
 
-// ISR ページの Cache-Control。共有キャッシュ(CDN)は s-maxage 後に stale を出しつつ裏で再検証する。
 function swr(seconds) {
   return `public, s-maxage=${seconds}, stale-while-revalidate`;
 }
 
-// loading/error 境界を SSR して { loading:[{prefix,html}], error:[{prefix,html}] } を返す。
-// クライアントルーターが起動時に一度だけ取得し、遷移中のUI（loading）と失敗時UI（error）に使う。
-// error 境界はメッセージを data-nowaki-error スロットに、reset を data-nowaki-reset で受ける。
+// クライアントルーターが起動時に一度だけ取得する。error 境界は data-nowaki-error /
+// data-nowaki-reset スロットでメッセージと reset を受ける。
 async function renderBoundaries(env, table, version) {
   await env.ensureIslands(version);
   const renderOne = async (entry, props) => {
@@ -234,7 +214,6 @@ async function renderBoundaries(env, table, version) {
   return { status: 200, headers: JSON_CT, body: JSON.stringify({ loading, error }) };
 }
 
-// route のメタを解決する。`mod.meta` は関数（async 可）で {title,head,lang} を返す。
 async function resolveMeta(mod, info) {
   let dyn = null;
   if (typeof mod.meta === "function") {
@@ -252,7 +231,6 @@ async function resolveMeta(mod, info) {
   };
 }
 
-// head → 本文ストリーム → tail を1つの Web ReadableStream に連結する。
 function streamedDocument(head, bodyStream, tail) {
   const enc = new TextEncoder();
   const reader = bodyStream.getReader();
@@ -301,9 +279,7 @@ async function render500(env, table, ctx, version, err) {
   return env.renderError(err);
 }
 
-// --- ルートテーブル補助 ---
-
-// あるルートファイルに掛かるレイアウトを root→leaf 順で返す。
+// root→leaf 順で返す。
 function layoutChain(table, file) {
   const chain = [];
   for (const entry of table.layouts ?? []) {
@@ -318,14 +294,13 @@ function routeUrlOf(table, file) {
   return "/" + r.segments.map((s) => (s.lit ?? `:${s.param}`)).join("/");
 }
 
-// pathname が prefix 配下か（prefix="" は全体）。
+// prefix="" は全体にマッチする。
 function underPrefix(pathname, prefix) {
   if (!prefix) return true;
   return pathname === prefix || pathname.startsWith(prefix.endsWith("/") ? prefix : prefix + "/");
 }
 
-// loader/action/middleware の戻り値を結果に正規化する。
-// Response → 取り込み、{status,headers,body} → そのまま、それ以外 → null（＝データ扱い）。
+// null を返したら戻り値はデータとして扱う。
 function toResult(out) {
   if (out == null) return null;
   if (typeof Response !== "undefined" && out instanceof Response) {

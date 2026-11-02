@@ -123,7 +123,7 @@ export function matchRoute(routesOrTable, pathname) {
   return null;
 }
 
-// "." → ""(ルート), "blog" → "/blog", "blog/2024" → "/blog/2024"
+// "." → ""(ルート)
 function dirToPrefix(dir) {
   if (!dir || dir === ".") return "";
   return "/" + dir.split(path.sep).join("/");

@@ -1,5 +1,4 @@
-// `nowaki start` のエントリ。cwd=アプリルートで起動され、dist/ を本番配信する。
-// 実体は app.mjs の startServer。アダプタが出力する dist/server/index.mjs と同じ中核を共有する。
+// `nowaki start` のエントリ（cwd=アプリルート）。
 // ローカルの `nowaki start` は 127.0.0.1 に固定（配備用エントリだけ 0.0.0.0）。
 
 import path from "node:path";

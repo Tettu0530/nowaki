@@ -1,6 +1,5 @@
-// Node module loader hooks (module.register で別スレッドに登録される)
-// 役割: .tsx/.ts を Rust devサーバーの変換エンドポイントから取得してESMとして返す。
-// 変換器をRust一本に統一するための仕掛け (vite-node方式)。
+// Node module loader hooks。変換器を Rust 一本に統一するため、.tsx/.ts を
+// Rust dev サーバーの変換エンドポイントから取得して ESM として返す (vite-node 方式)。
 
 const RUST = `http://127.0.0.1:${process.env.NOWAKI_RUST_PORT ?? "3000"}`;
 const TS_RE = /\.(tsx|ts|jsx|tsrx)$/;

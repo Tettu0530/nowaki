@@ -1,6 +1,4 @@
 // LoaderContext: loader / action / middleware / API ハンドラに渡る共通コンテキスト。
-// リクエスト（url, params, method, headers, cookies, body）と、レスポンスへの
-// 書き込み（status, header, cookie, redirect, json, …）をまとめる。
 
 export function makeContext(info) {
   const { url, params = {}, method = "GET", req } = info;
@@ -10,21 +8,16 @@ export function makeContext(info) {
   const resHeaders = new Map();
   const setCookies = [];
 
-  // ISR の Vary 追跡: この描画が「どのリクエストヘッダ / クエリ」に依存したかを記録し、
-  // ctx.__vary() で公開する。start.rs はこれをキャッシュキーへ織り込み、(a) ヘッダ依存ページが
-  // クロスユーザーに漏れる #6 と、(b) 未使用クエリ氾濫でキャッシュが追い出される #7 を防ぐ。
+  // ISR の Vary 追跡: この描画が依存したリクエストヘッダ / クエリを記録する。start.rs が
+  // キャッシュキーへ織り込み、ヘッダ依存ページのクロスユーザー漏れと、クエリ氾濫による追い出しを防ぐ。
   const accessedHeaders = new Set();
   let queryAccessed = false;
   let reqAccessed = false; // 生 req に触れたら粒度不明なのでキャッシュ無効化（"*"）扱い
   const noteHeader = (name) => accessedHeaders.add(String(name).toLowerCase());
 
-  // url は「クエリを露出し得る」あらゆる参照で「クエリ依存」を記録する Proxy で包む。
-  // 許可リスト方式（href/toString/… を列挙）は toLocaleString のような継承メソッドを
-  // 取りこぼし、クエリ依存ページがクエリ無視キーで共有されてクロスユーザー漏れになる。
-  // そこで「クエリを露出しないと確定したメンバ(QUERY_FREE)以外は、クエリが存在する限り
-  // 全てクエリ依存とみなす」安全側デフォルトにする（未知メソッド/Symbol も網羅）。
-  // 内部のルート一致(matchRoute)は生の info.url を使い、フレームワークは ctx.url を
-  // .pathname でしか参照しないので、記録されるのはユーザーコードのクエリ露出のみ。
+  // クエリを露出する参照の許可リスト方式は toLocaleString 等の継承メソッドを取りこぼし、
+  // クロスユーザー漏れになる。そこで QUERY_FREE 以外は全てクエリ依存とみなす（安全側）。
+  // フレームワーク内部は生の info.url / .pathname しか使わないので、記録されるのはユーザーコード分のみ。
   const QUERY_FREE = new Set([
     "pathname",
     "hostname",
@@ -41,8 +34,6 @@ export function makeContext(info) {
       if (prop === "search" || prop === "searchParams") {
         queryAccessed = true;
       } else if (target.search && !(typeof prop === "string" && QUERY_FREE.has(prop))) {
-        // クエリ有り + query-free 確定メンバ以外（href/toString/toLocaleString/`${url}`/
-        // toJSON/未知メソッド/Symbol）→ クエリ依存とみなす。
         queryAccessed = true;
       }
       // getter / メソッドは実体(target)を receiver にして呼ぶ（URL の private field を壊さない）。
@@ -74,19 +65,17 @@ export function makeContext(info) {
       noteHeader("cookie");
       return cookiesCache;
     },
-    resHeaders, // レスポンスヘッダ（書き込み用）
+    resHeaders,
     resStatus: undefined,
     actionData: undefined,
     state: {}, // ミドルウェアが loader/ページへ渡す任意データ
 
-    // この描画の Vary 情報（handler.mjs が ISR 応答ヘッダへ載せる）。
-    // 生 req に触れていたら "*"（全依存）を立てて Rust 側で no_cache にさせる。
+    // handler.mjs が ISR 応答ヘッダへ載せる。"*" なら Rust 側で no_cache になる。
     __vary() {
       const headers = reqAccessed ? ["*"] : [...accessedHeaders];
       return { query: queryAccessed, headers };
     },
 
-    // リクエスト側
     get(name) {
       noteHeader(name);
       return reqHeaders[String(name).toLowerCase()];
@@ -106,7 +95,6 @@ export function makeContext(info) {
       return s ? JSON.parse(s) : null;
     },
 
-    // レスポンス側（チェーン可能）
     status(code) {
       ctx.resStatus = code;
       return ctx;
@@ -127,7 +115,6 @@ export function makeContext(info) {
       return setCookies;
     },
 
-    // 結果ヘルパ（loader/action/middleware/API から返す）
     redirect(to, status = 302) {
       const res = { __nowakiResult: true, status, headers: { location: to }, body: "" };
       ctx._redirect = res; // throw 経路でも拾えるよう保持
@@ -174,7 +161,6 @@ function serializeCookie(name, value, opts) {
   return s;
 }
 
-// Node の IncomingMessage からボディを集める（Edge は info.readBody を注入する）。
 function readBodyNode(req) {
   return new Promise((resolve, reject) => {
     if (!req || typeof req.on !== "function") return resolve(new Uint8Array(0));
@@ -185,13 +171,12 @@ function readBodyNode(req) {
   });
 }
 
-// Buffer / Uint8Array / string いずれも UTF-8 文字列へ（Edge には Buffer が無い）。
+// Edge には Buffer が無いので TextDecoder で復号する。
 function decodeBody(buf) {
   if (typeof buf === "string") return buf;
   return new TextDecoder().decode(buf);
 }
 
-// application/x-www-form-urlencoded を URLSearchParams で返す。multipart は未対応。
 function parseFormBody(buf, contentType) {
   const text = decodeBody(buf);
   if (contentType.includes("multipart/form-data")) {

@@ -1,5 +1,4 @@
-// 軽量 .env ローダー: cwd の .env と .env.local を読み、未設定の process.env へ流し込む。
-// （依存を増やさないための最小実装。SSR/loader はこれで process.env.X を読める）
+// 依存を増やさないための最小 .env ローダー（cwd の .env / .env.local → 未設定の process.env）。
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -31,7 +30,7 @@ export function loadEnv(root = process.cwd()) {
     try {
       content = readFileSync(path.join(root, file), "utf8");
     } catch {
-      continue; // ファイルが無ければスキップ
+      continue;
     }
     for (const [k, v] of Object.entries(parse(content))) {
       if (process.env[k] === undefined) process.env[k] = v;

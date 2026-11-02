@@ -1,8 +1,6 @@
-// 本番 SSR サイドカー。`nowaki start`（Rust axum フロント）から起動され、内部ポートで待つ。
-// Rust が静的配信と HTML 組み立て（island 配線・preload）を担い、Node は「コンポーネント描画」だけ。
-// そのため、ページルートは完成 HTML ではなく「描画済み body + メタ」を返す（Rust が組み立てる）。
-// API/リダイレクト/ストリーミングは従来どおりの応答を返し、Rust はそのまま素通しする。
-// 起動完了は stdout の "NOWAKI_START_READY <port>" で Rust へ通知する。
+// 本番 SSR サイドカー。`nowaki start`（Rust axum フロント）から起動され、Node はコンポーネント
+// 描画だけを担う（静的配信と HTML 組み立ては Rust）。起動完了は stdout の
+// "NOWAKI_START_READY <port>" で Rust へ通知する。
 
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
@@ -18,15 +16,13 @@ const { env, liveRegistry } = await createApp({
   serverDir: path.join(appRoot, "dist/server"),
 });
 
-// ページは完成 HTML ではなく body+メタのマーカーを返す（Rust 側で組み立てる）。
-// ストリーミング（renderShell 経由）はマーカーを通らず stream 応答 → 素通し。
+// ページは完成 HTML ではなく body+メタのマーカーを返す。ストリーミングはマーカーを通らず素通し。
 env.renderDocument = ({ mod, body, meta }) => {
   const m = pageMeta(meta, mod);
   return { __nowakiPage: true, body, title: m.title, head: m.head, lang: m.lang };
 };
 
 const server = createServer(async (req, res) => {
-  // サーバーリアクティブ島の再描画（Rust の /__nowaki/live WS から呼ばれる）。
   if (req.method === "POST" && req.url.startsWith("/__nowaki/live-render")) {
     try {
       const chunks = [];
@@ -55,8 +51,7 @@ const server = createServer(async (req, res) => {
     const result = await handleRequest(env, { method: req.method, url, version: "prod", req });
     const b = result.body;
     if (b && typeof b === "object" && b.__nowakiPage) {
-      // ページ: body と meta を JSON で返す。Rust が doctype/head/preload/runtime を巻く。
-      // （cookie 等の応答ヘッダは保ったまま、x-nowaki-page で Rust に「組み立てて」と伝える）
+      // 応答ヘッダ（cookie 等）は保ったまま、x-nowaki-page で Rust に HTML の組み立てを伝える。
       res.writeHead(result.status ?? 200, {
         ...(result.headers ?? {}),
         "content-type": "application/json; charset=utf-8",
@@ -64,7 +59,6 @@ const server = createServer(async (req, res) => {
       });
       res.end(JSON.stringify({ body: b.body, title: b.title, head: b.head, lang: b.lang }));
     } else {
-      // 素通し: API / redirect / stream / streaming SSR / 組み込み 404・500。
       res.writeHead(result.status ?? 200, result.headers ?? {});
       if (result.stream) {
         Readable.fromWeb(result.stream).pipe(res);
