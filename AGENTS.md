@@ -24,7 +24,6 @@ packages/nowaki-runtime/   JS the framework runs: server/ (SSR sidecar, handler,
                       app, functions, plugin-host) + client/ (islands, router, live, hmr).
 packages/create-nowaki, create-nowaki-app   scaffolders (npm create nowaki).
 packages/nowaki-cli   the `nowaki` npm wrapper (prebuilt binary shim).
-site/                 nowaki.dev — landing + /docs, built WITH Nowaki (dogfood).
 examples/hello/       kitchen-sink app used by CLI tests + e2e.
 benchmarks/           bench.mjs, head-to-head.mjs (Next/Astro), check-regression.mjs.
 ```

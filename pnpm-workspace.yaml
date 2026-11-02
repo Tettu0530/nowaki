@@ -5,7 +5,6 @@ packages:
   # Publishing is done directly by scripts/build-npm.mjs + release CI via npm publish.
   - "!packages/nowaki-cli"
   - "examples/*"
-  - "site"
   # Only the Nowaki benchmark comparison app is in the workspace (links runtime/preact).
   # The next/astro comparison apps are excluded (keeps heavy deps out of the default install; install them yourself).
   - "benchmarks/apps/nowaki-counter"
