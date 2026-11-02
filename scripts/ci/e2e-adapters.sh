@@ -20,6 +20,14 @@ curl -sf http://127.0.0.1:3310/stream | grep -q "nowaki-island"
 # so the page gets stale-while-revalidate on any CDN/edge without the Rust front.
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr | grep -qi 'cache-control: public, s-maxage=2, stale-while-revalidate'
 kill $NODE_PID
+# the printed deploy command (`cd dist/server && ... && npm start`) works as written
+grep -q '"start": "node index.mjs"' examples/hello/dist/server/package.json
+(cd examples/hello/dist/server && PORT=3311 npm start --silent) &
+NPM_PID=$!
+for _ in $(seq 1 20); do curl -sf http://127.0.0.1:3311/ >/dev/null && break; sleep 1; done
+curl -sf http://127.0.0.1:3311/ | grep -q "nowaki-island"
+kill $NPM_PID 2>/dev/null || true
+pkill -f 'node index.mjs' 2>/dev/null || true
 # static adapter: prerender to dist/static
 ./target/debug/nowaki build examples/hello --adapter static
 test -f examples/hello/dist/static/index.html
