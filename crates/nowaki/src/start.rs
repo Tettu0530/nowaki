@@ -18,7 +18,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
 use axum::Router;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::Command;
 
 #[derive(serde::Deserialize, Default)]
 struct Manifest {
@@ -48,7 +48,6 @@ struct ProdState {
     manifest: Manifest,
     live_hub: Arc<crate::live::LiveHub>,
     isr: IsrCache,
-    _child: Child, // kill_on_drop kills the sidecar on exit
 }
 
 /// In-memory ISR cache (routes with `export const revalidate = <seconds>`, stale-while-revalidate).
@@ -156,7 +155,6 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         manifest,
         live_hub: crate::live::LiveHub::new(),
         isr: IsrCache::new(),
-        _child: child,
     });
 
     let app = Router::new()
@@ -175,7 +173,12 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         &["Rust front", "Node renderer"],
         expose || host == "0.0.0.0",
     );
-    axum::serve(listener, app).await?;
+    // The sidecar lives outside the shared state (request tasks hold that), so it is killed here on shutdown.
+    tokio::select! {
+        r = std::future::IntoFuture::into_future(axum::serve(listener, app)) => r?,
+        _ = crate::shutdown::signal() => {}
+    }
+    let _ = child.kill().await;
     Ok(())
 }
 
