@@ -1,17 +1,52 @@
 name: Feature request
-description: Suggest an idea or improvement for Nowaki
+description: Suggest a new capability or an improvement
 labels: ["enhancement"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [roadmap](https://github.com/Tettu0530/nowaki/blob/main/ROADMAP.md) first; it may already be planned.
+        Open-ended ideas and questions fit better in [Discussions](https://github.com/Tettu0530/nowaki/discussions).
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Routing / layouts / middleware
+        - Islands / hydration
+        - Jetstream (live islands)
+        - Server functions ("use server")
+        - Plugins / TSRX / virtual modules
+        - Build / bundling / assets / CSS
+        - Dev server / HMR / DX
+        - nowaki start (production server, ISR)
+        - Deploy adapters
+        - create-nowaki (scaffolding)
+        - Security defaults
+        - Other
+    validations:
+      required: true
   - type: textarea
     id: problem
     attributes:
       label: What problem are you trying to solve?
-      description: Describe the use case before the solution.
+      description: Describe the use case before the solution. What do you do today, and why doesn't it work well?
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
       label: Proposed solution
-    validations:
-      required: false
+      description: The API or behavior you have in mind, if any. A code sketch is welcome.
+      render: tsx
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you use now, or how Next.js / Astro / others handle it.
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I'd like to work on this myself (we'll agree on the approach in this issue first).

@@ -1,5 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/nowaki-dev/nowaki/security/policy
-    about: Please report security issues privately, not as a public issue.
+    url: https://github.com/Tettu0530/nowaki/security/advisories/new
+    about: Report privately. Please don't open a public issue.
+  - name: Question or idea
+    url: https://github.com/Tettu0530/nowaki/discussions
+    about: Ask how to do something, or float an idea before it becomes a feature request.
+  - name: Website / docs (nowaki.dev)
+    url: https://github.com/Tettu0530/nowaki-site/issues
+    about: Problems with the landing page or the /docs pages live in the site repo.
