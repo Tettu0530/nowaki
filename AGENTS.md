@@ -76,6 +76,40 @@ required check is `CI OK`.
   specifiers are aliased to `preact/compat` across every transform path
   (`resolve.rs::alias_specifier`).
 
+## Security invariants
+
+When you change dev/start, sidecars, Jetstream, or server functions, preserve
+these properties. Full context and the defenses table live in
+[SECURITY.md](./SECURITY.md).
+
+- **`nowaki-core` stays JS-free.** Security logic belongs in the CLI (`dev.rs`,
+  `start.rs`, `live.rs`), runtime (`packages/nowaki-runtime/server`), or
+  build-time artifacts (`functions.json`) — not embedded JS execution inside
+  core.
+- **Sidecars stay on localhost.** Do not bind SSR, prod-sidecar, plugin host, or
+  live-render to public interfaces; the Rust binary is the only intended entry.
+- **Production never exposes dev file surfaces.** No `/@fs/`, dev-only
+  `ssr-module` shortcuts, or arbitrary project reads on `nowaki start` / adapter
+  paths — only `dist/` (static basenames under `/_nowaki/`).
+- **Single read chokepoint.** Sensitive detection (`"use server"`, plugins,
+  virtual loads) must go through `NowakiCore::read_source`; do not bypass it with
+  ad-hoc `fs::read` for app sources in core.
+- **Server functions are allowlist-only.** Clients send an opaque id; never accept
+  module paths or export names from the browser. Keep dispatch in
+  `functions.mjs` aligned with `dist/server/functions.json`.
+- **Do not weaken default CSRF / CSWSH gates** without an explicit opt-in API and
+  ROADMAP/SECURITY updates: JSON + `x-nowaki-rpc` + Origin/Host for RPC;
+  Origin checks on `/__nowaki/live` and `/__nowaki/hmr` upgrades.
+- **Jetstream join requires verified state signatures**; do not apply client-supplied
+  state without the live signing path in `live.rs` / `live.mjs`.
+- **ISR keys must include learned `Vary` inputs** so cached pages cannot bleed
+  across users; see `isr_key` in `start.rs`.
+- **Only `PUBLIC_*` (and `MODE`) reach client bundles** via env inlining; never
+  ship secrets or raw `.env` contents to the browser.
+- **Regressions need tests.** If you add or change a default defense, extend
+  `scripts/security-e2e.mjs` and/or `scripts/ci/e2e-*.sh` when CI does not already
+  cover the behavior (see SECURITY.md “Defenses enabled by default”).
+
 ## Feature map (where things live)
 
 - **Server functions (`"use server"`)** — `crates/nowaki-core/src/server_fn.rs`
