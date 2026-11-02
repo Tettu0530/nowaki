@@ -96,14 +96,14 @@ fn main() -> anyhow::Result<()> {
             host,
             open,
         } => {
-            let root = dir.canonicalize()?;
+            let root = dunce::canonicalize(&dir)?;
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
                 .block_on(dev::run(root, port, host, open))
         }
         Command::Build { dir, adapter } => {
-            let root = dir.canonicalize()?;
+            let root = dunce::canonicalize(&dir)?;
             typegen::write(&root)?;
             // The static adapter delegates to prerender (build → temporary server → render each route).
             if adapter == Adapter::Static {
@@ -141,7 +141,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Start { dir, port, host } => {
-            let root = dir.canonicalize()?;
+            let root = dunce::canonicalize(&dir)?;
             // Rust (axum) serves static files + assembles HTML; the Node prod-sidecar renders components.
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -149,7 +149,7 @@ fn main() -> anyhow::Result<()> {
                 .block_on(start::run(root, port, host))
         }
         Command::Prerender { dir, out } => {
-            let root = dir.canonicalize()?;
+            let root = dunce::canonicalize(&dir)?;
             let out = if out.is_absolute() {
                 out
             } else {
@@ -161,11 +161,11 @@ fn main() -> anyhow::Result<()> {
                 .block_on(prerender::run(root, out))
         }
         Command::Upgrade { dir, to } => {
-            let root = dir.canonicalize()?;
+            let root = dunce::canonicalize(&dir)?;
             upgrade::run(root, to)
         }
         Command::Typegen { dir } => {
-            let root = dir.canonicalize()?;
+            let root = dunce::canonicalize(&dir)?;
             typegen::run(root)
         }
     }

@@ -247,7 +247,7 @@ async fn ssr_module(
     State(state): State<Arc<DevState>>,
     Query(q): Query<SsrModuleQuery>,
 ) -> Response {
-    let Ok(canon) = tokio::fs::canonicalize(&q.path).await else {
+    let Ok(canon) = dunce::canonicalize(&q.path) else {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     };
     if !fs_path_allowed(&canon, &state.fs_allow) || !is_transformable(&canon) {
@@ -263,7 +263,7 @@ async fn serve_fs(
     axum::extract::Path(rest): axum::extract::Path<String>,
 ) -> Response {
     let requested = PathBuf::from(format!("/{rest}"));
-    let Ok(canon) = tokio::fs::canonicalize(&requested).await else {
+    let Ok(canon) = dunce::canonicalize(&requested) else {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     };
     if !fs_path_allowed(&canon, &state.fs_allow) {
@@ -288,7 +288,7 @@ async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Res
         if candidate.is_file() {
             // Check the real path hasn't escaped the root via `..`/symlinks, and never serve sensitive paths
             // (root is already canonicalized in main.rs).
-            match candidate.canonicalize() {
+            match dunce::canonicalize(&candidate) {
                 Ok(canon) if canon.starts_with(&state.core.root) && !is_denied_fs_path(&canon) => {
                     return serve_file(state, candidate).await;
                 }
@@ -430,11 +430,11 @@ async fn proxy_to_sidecar(state: Arc<DevState>, req: Request) -> Response {
 /// Anything else (`/etc`, home, `.env` outside the root, etc.) is rejected.
 fn compute_fs_allow(root: &Path) -> Vec<PathBuf> {
     let mut allow = Vec::new();
-    if let Ok(c) = root.canonicalize() {
+    if let Ok(c) = dunce::canonicalize(root) {
         allow.push(c);
     }
     if let Some(ws) = workspace_root(root) {
-        if let Ok(c) = ws.canonicalize() {
+        if let Ok(c) = dunce::canonicalize(&ws) {
             if !allow.contains(&c) {
                 allow.push(c);
             }
