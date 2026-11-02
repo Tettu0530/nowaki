@@ -14,11 +14,11 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/nowaki-runtime
       preact:
-        specifier: ^10.25.4
-        version: 10.29.2
+        specifier: ^11.1.0
+        version: 11.1.0(preact-render-to-string@6.8.2)
       preact-render-to-string:
         specifier: ^6.8.2
-        version: 6.8.2(preact@10.29.2)
+        version: 6.8.2(preact@11.1.0)
 
   examples/hello:
     dependencies:
@@ -27,13 +27,13 @@ importers:
         version: link:../../packages/nowaki-runtime
       '@tsrx/preact':
         specifier: ^0.3.5
-        version: 0.3.5(preact@10.29.2)
+        version: 0.3.5(preact@11.1.0)
       preact:
-        specifier: ^10.25.4
-        version: 10.29.2
+        specifier: ^11.1.0
+        version: 11.1.0(preact-render-to-string@6.8.2)
       preact-render-to-string:
         specifier: ^6.8.2
-        version: 6.8.2(preact@10.29.2)
+        version: 6.8.2(preact@11.1.0)
 
   packages/create-nowaki: {}
 
@@ -46,11 +46,11 @@ importers:
   packages/nowaki-runtime:
     devDependencies:
       preact:
-        specifier: ^10.25.4
-        version: 10.29.2
+        specifier: ^11.1.0
+        version: 11.1.0(preact-render-to-string@6.8.2)
       preact-render-to-string:
         specifier: ^6.8.2
-        version: 6.8.2(preact@10.29.2)
+        version: 6.8.2(preact@11.1.0)
 
 packages:
 
@@ -113,8 +113,13 @@ packages:
     peerDependencies:
       preact: '>=10 || >= 11.0.0-0'
 
-  preact@10.29.2:
-    resolution: {integrity: sha512-7tNmwg/7mzzAoB/8kSg6Hl37JraAZw3Z3A0JSY7VXlZwo82Xn0G7wKbNNs2qoF4ZEEsQGTwDAroNdqKs1ofJxQ==}
+  preact@11.1.0:
+    resolution: {integrity: sha512-hz1VsjWx5pSYPDVEzb9w+XyOmQpP1qW/ZEaMiYm+C8ykJr8KP+TKGZIbCW0QmZ/Yr/jg3XkZoziEWn9iWHZ9Mw==}
+    peerDependencies:
+      preact-render-to-string: '>=6.7.0'
+    peerDependenciesMeta:
+      preact-render-to-string:
+        optional: true
 
   resolve-pkg-maps@1.0.0:
     resolution: {integrity: sha512-seS2Tj26TBVOC2NIc2rOe2y2ZO7efxITtLZcGSOnHHNOQ7CkiUBfw0Iw2ck6xkIhPwLhKNLS8BO+hEpngQlqzw==}
@@ -148,17 +153,17 @@ snapshots:
     transitivePeerDependencies:
       - '@typescript-eslint/types'
 
-  '@tsrx/preact-runtime@0.1.12(preact@10.29.2)':
+  '@tsrx/preact-runtime@0.1.12(preact@11.1.0)':
     dependencies:
       '@tsrx/runtime': 0.2.4
-      preact: 10.29.2
+      preact: 11.1.0(preact-render-to-string@6.8.2)
 
-  '@tsrx/preact@0.3.5(preact@10.29.2)':
+  '@tsrx/preact@0.3.5(preact@11.1.0)':
     dependencies:
       '@tsrx/core': 0.5.5
-      '@tsrx/preact-runtime': 0.1.12(preact@10.29.2)
+      '@tsrx/preact-runtime': 0.1.12(preact@11.1.0)
       esrap: 2.4.0
-      preact: 10.29.2
+      preact: 11.1.0(preact-render-to-string@6.8.2)
       zimmerframe: 1.1.4
     transitivePeerDependencies:
       - '@typescript-eslint/types'
@@ -185,11 +190,13 @@ snapshots:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  preact-render-to-string@6.8.2(preact@10.29.2):
+  preact-render-to-string@6.8.2(preact@11.1.0):
     dependencies:
-      preact: 10.29.2
+      preact: 11.1.0(preact-render-to-string@6.8.2)
 
-  preact@10.29.2: {}
+  preact@11.1.0(preact-render-to-string@6.8.2):
+    optionalDependencies:
+      preact-render-to-string: 6.8.2(preact@11.1.0)
 
   resolve-pkg-maps@1.0.0: {}
 
