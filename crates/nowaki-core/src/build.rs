@@ -250,11 +250,9 @@ fn transform_for_server(
 
     let parsed = Parser::new(&allocator, source, source_type).parse();
     if !parsed.errors.is_empty() {
-        let msgs: Vec<String> = parsed.errors.iter().map(|e| e.to_string()).collect();
         return Err(anyhow!(
-            "parse error in {}: {}",
-            path.display(),
-            msgs.join("; ")
+            "parse error\n{}",
+            crate::transform::render_diagnostics(path, source, &parsed.errors)
         ));
     }
     let mut program = parsed.program;
@@ -276,11 +274,9 @@ fn transform_for_server(
     let ret =
         Transformer::new(&allocator, path, &options).build_with_scoping(scoping, &mut program);
     if !ret.errors.is_empty() {
-        let msgs: Vec<String> = ret.errors.iter().map(|e| e.to_string()).collect();
         return Err(anyhow!(
-            "transform error in {}: {}",
-            path.display(),
-            msgs.join("; ")
+            "transform error\n{}",
+            crate::transform::render_diagnostics(path, source, &ret.errors)
         ));
     }
 
@@ -657,11 +653,9 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
 
     let parsed = Parser::new(&allocator, source, source_type).parse();
     if !parsed.errors.is_empty() {
-        let msgs: Vec<String> = parsed.errors.iter().map(|e| e.to_string()).collect();
         return Err(anyhow!(
-            "parse error in {}: {}",
-            path.display(),
-            msgs.join("; ")
+            "parse error\n{}",
+            crate::transform::render_diagnostics(path, source, &parsed.errors)
         ));
     }
     let mut program = parsed.program;
@@ -683,11 +677,9 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
     let ret =
         Transformer::new(&allocator, path, &options).build_with_scoping(scoping, &mut program);
     if !ret.errors.is_empty() {
-        let msgs: Vec<String> = ret.errors.iter().map(|e| e.to_string()).collect();
         return Err(anyhow!(
-            "transform error in {}: {}",
-            path.display(),
-            msgs.join("; ")
+            "transform error\n{}",
+            crate::transform::render_diagnostics(path, source, &ret.errors)
         ));
     }
 
