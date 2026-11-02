@@ -4,8 +4,6 @@ Thanks for your interest in contributing. Nowaki is in alpha and the
 architecture is still settling, so opening an issue to discuss your idea
 before writing code is the best way to avoid wasted effort.
 
-Issues and PRs in Japanese are also welcome.
-
 ## Development setup
 
 Prerequisites:
