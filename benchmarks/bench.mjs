@@ -2,7 +2,7 @@
 // 使い方: node benchmarks/bench.mjs [appDir] [nowakiBin]
 //   appDir   既定 examples/hello
 //   nowakiBin 既定 ./target/release/nowaki（無ければ ./target/debug/nowaki）
-// 注意: examples/hello は .tsrx・プラグイン・ライブ島まで含むキッチンシンクなので、
+// 注意: examples/hello は .tsrx・プラグイン・ライブ島まで含む全部入りなので、
 // 数字は plugin host 起動なども含む上限寄りになる。
 
 import { spawn, spawnSync } from "node:child_process";

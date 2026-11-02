@@ -34,7 +34,7 @@ const resolvers = plugins.filter((p) => typeof p.resolveId === "function");
 const loaders = plugins.filter((p) => typeof p.load === "function");
 
 // アプリに @tsrx/preact があれば .tsrx を JSX へコンパイルする。このホストは runtime
-// パッケージ配下にあるので、解決はアプリの node_modules 基準で行う。
+// パッケージ配下にあるので、アプリの node_modules を基準に解決する。
 let tsrxCompile = null;
 try {
   const appRequire = createRequire(path.join(appRoot, "package.json"));
@@ -59,7 +59,7 @@ async function runTransform(id, code) {
   return changed ? current : null;
 }
 
-// 最初に id を返したプラグインが勝つ。
+// 最初に id を返したプラグインが優先される。
 async function runResolveId(source, importer) {
   for (const p of resolvers) {
     const out = await p.resolveId(source, importer);
@@ -70,7 +70,7 @@ async function runResolveId(source, importer) {
   return null;
 }
 
-// 最初にソースを返したプラグインが勝つ。
+// 最初にソースを返したプラグインが優先される。
 async function runLoad(id) {
   for (const p of loaders) {
     const out = await p.load(id);

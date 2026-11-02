@@ -24,7 +24,7 @@ function parse(content) {
 }
 
 export function loadEnv(root = process.cwd()) {
-  // .env.local が .env を上書きする慣例だが、既存の process.env は尊重する
+  // .env.local が .env を上書きする慣例だが、既存の process.env は上書きしない
   for (const file of [".env", ".env.local"]) {
     let content;
     try {

@@ -84,7 +84,7 @@ fn render(routes: &[(String, String)]) -> String {
     s
 }
 
-/// 内容が同じなら書かない（dev のファイル監視を無駄に起こさない）。
+/// 内容が同じなら書かない（dev のファイル監視を無駄に発火させない）。
 pub fn write(root: &Path) -> Result<()> {
     let routes_dir = root.join("routes");
     if !routes_dir.is_dir() {

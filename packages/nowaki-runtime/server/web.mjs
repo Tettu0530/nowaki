@@ -1,4 +1,4 @@
-// Edge 向けの Web 標準 fetch ハンドラ工場。node:http も実行時ファイル import も使わず、
+// Edge 向けの Web 標準 fetch ハンドラファクトリ。node:http も実行時ファイル import も使わず、
 // ルート/島/manifest はビルド時に静的 import 済みのマップとして受け取る。
 
 import { options } from "preact";

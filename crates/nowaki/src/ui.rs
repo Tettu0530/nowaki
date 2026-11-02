@@ -190,7 +190,7 @@ pub fn server_banner(
     println!();
 }
 
-/// 既定ブラウザで URL を開く（OS 別。失敗は黙って無視）。
+/// 既定ブラウザで URL を開く（OS 別。失敗しても何も出さずに無視）。
 pub fn open_browser(url: &str) {
     let mut cmd = if cfg!(target_os = "macos") {
         let mut c = std::process::Command::new("open");

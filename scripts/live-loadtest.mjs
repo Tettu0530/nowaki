@@ -23,7 +23,7 @@ const rssKB = () => {
   return total;
 };
 
-// /live から LiveCounter の nid / 初期 state / 署名(sig)を拾う（属性順に依らず）。
+// /live から LiveCounter の nid / 初期 state / 署名(sig)を取り出す（属性順に依らず）。
 const html = await (await fetch(base + "/live")).text();
 const tag = html.match(/<nowaki-live\b[^>]*>/)?.[0];
 if (!tag || !/name="LiveCounter"/.test(tag)) {

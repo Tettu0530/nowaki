@@ -6,7 +6,7 @@ use nowaki_core::NowakiCore;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-/// 静的サイト生成: ビルド → 本番サーバーを一時起動 → 静的ルートを各HTML化 → 出力。
+/// 静的サイト生成: ビルド → 本番サーバーを一時起動 → 各静的ルートをHTML化 → 出力。
 pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     let _plugin_host = crate::plugins::start(&root)?;
     let mut core = NowakiCore::new(root.clone());

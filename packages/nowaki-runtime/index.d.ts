@@ -119,7 +119,7 @@ export type PageProps<L extends Loader<any> = Loader<unknown>> = RouteProps<Awai
 
 /**
  * `routes/loading.tsx` の default export。クライアント遷移が 150ms を超えると、
- * 最寄りの loading 境界（ネスト可）が遷移先 HTML が届くまで表示される。島は不要。
+ * 遷移先 HTML が届くまで最寄りの loading 境界（ネスト可）が表示される。島は不要。
  */
 export type LoadingComponent = () => unknown;
 

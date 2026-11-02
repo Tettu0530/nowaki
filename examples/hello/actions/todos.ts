@@ -19,7 +19,7 @@ export async function addTodo(text: string): Promise<string[]> {
   return store.slice();
 }
 
-// form の action に渡す版。`<form action={addTodoForm}>` の submit で FormData →
+// form の action に渡すバージョン。`<form action={addTodoForm}>` の submit で FormData →
 // { text } を受け取り、サーバー側で store を更新する。
 export async function addTodoForm(form: { text?: string }): Promise<string[]> {
   const t = String(form?.text ?? "").trim();

@@ -66,7 +66,7 @@ pub async fn handle(
     sidecar_port: u16,
     version: String,
 ) {
-    // 上限超過なら丁重に断って閉じる（クライアントは初期 SSR のまま劣化動作）。
+    // 上限超過なら error を送ってから閉じる（クライアントは初期 SSR のまま劣化動作）。
     let Some(count) = hub.join() else {
         let _ = socket
             .send(Message::Text(
@@ -201,7 +201,7 @@ async fn handle_text(
                 return true;
             };
             // 署名検証失敗などで html が無い（サイドカーがエラーを返した）場合は
-            // state を更新せず patch も送らない（偽造 state を握らせない / 空描画を防ぐ）。
+            // state を更新せず patch も送らない（偽造 state を持たせない / 空描画を防ぐ）。
             let Some(html) = rv.get("html").and_then(|h| h.as_str()) else {
                 return true;
             };

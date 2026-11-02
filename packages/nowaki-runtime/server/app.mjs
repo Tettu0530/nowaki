@@ -174,7 +174,7 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
 }
 
 /// node:http でリッスンする。アダプタ/`nowaki start` の共通ランチャ。
-/// 配備物（dist/server/index.mjs）は host=0.0.0.0 でコンテナから到達可能にする。
+/// 配備物（dist/server/index.mjs）では host=0.0.0.0 にしてコンテナから到達可能にする。
 export async function startServer({
   clientDir,
   serverDir,
