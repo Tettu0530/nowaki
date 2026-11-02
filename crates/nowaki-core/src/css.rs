@@ -14,6 +14,18 @@ pub fn is_css_module(path: &Path) -> bool {
     path.to_str().is_some_and(|s| s.ends_with(".module.css"))
 }
 
+/// Stable scope id for CSS Modules and plain CSS shims. Used as the input to [`scope_css`].
+///
+/// Shipped to the client (style `data-nowaki-css`, scoped class suffix). Root-relative paths
+/// avoid leaking absolute paths; files outside the app root (pnpm store etc.) hash stably.
+/// Dev SSR, dev browser (`serve_file`), and production build must all use this function.
+pub fn css_scope_id(root: &Path, abs: &Path) -> String {
+    match abs.strip_prefix(root) {
+        Ok(rel) => rel.to_string_lossy().replace('\\', "/"),
+        Err(_) => format!("ext/{:016x}", xxh3_64(abs.to_string_lossy().as_bytes())),
+    }
+}
+
 /// Scopes class selectors `.name` to `.name_<suffix>`; returns (scoped CSS, original→new names).
 /// The suffix derives from id, so it is stable (matches across dev/build and client/SSR). A simple scanner, not a full CSS parser.
 pub fn scope_css(id: &str, css: &str) -> (String, Vec<(String, String)>) {
@@ -99,6 +111,34 @@ mod tests {
         assert!(!is_css(Path::new("a.ts")));
         assert!(is_css_module(Path::new("Badge.module.css")));
         assert!(!is_css_module(Path::new("global.css")));
+    }
+
+    #[test]
+    fn css_scope_id_root_relative_and_out_of_root() {
+        let root = Path::new("/app");
+        assert_eq!(
+            css_scope_id(root, Path::new("/app/islands/Badge.module.css")),
+            "islands/Badge.module.css"
+        );
+        let ext = css_scope_id(root, Path::new("/pnpm/store/pkg/Badge.module.css"));
+        assert!(ext.starts_with("ext/"));
+        assert_eq!(ext.len(), "ext/".len() + 16);
+    }
+
+    #[test]
+    fn css_scope_id_aligns_scoped_names_across_call_sites() {
+        let root = Path::new("/proj/hello");
+        let abs = Path::new("/proj/hello/islands/Badge.module.css");
+        let css = ".badge { color: red }";
+        let id = css_scope_id(root, abs);
+        let (_, from_id) = scope_css(&id, css);
+        let (_, from_abs_path) = scope_css(&abs.to_string_lossy(), css);
+        assert_ne!(
+            from_id[0].1, from_abs_path[0].1,
+            "absolute path must not be used as scope id when root-relative id exists"
+        );
+        let (_, from_id_again) = scope_css(&css_scope_id(root, abs), css);
+        assert_eq!(from_id[0].1, from_id_again[0].1);
     }
 
     #[test]

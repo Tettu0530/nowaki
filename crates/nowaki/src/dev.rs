@@ -309,7 +309,7 @@ async fn serve_file(state: Arc<DevState>, abs: PathBuf) -> Response {
     if nowaki_core::css::is_css(&abs) {
         return match tokio::fs::read_to_string(&abs).await {
             Ok(css) => {
-                let id = abs.to_string_lossy();
+                let id = nowaki_core::css::css_scope_id(&state.core.root, &abs);
                 let shim = if nowaki_core::css::is_css_module(&abs) {
                     let (scoped, map) = nowaki_core::css::scope_css(&id, &css);
                     nowaki_core::css::css_module_client_js(&id, &scoped, &map)
