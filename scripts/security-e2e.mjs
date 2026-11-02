@@ -2,7 +2,8 @@
 //   node scripts/security-e2e.mjs dev  <devBase>  <appRoot>
 //   node scripts/security-e2e.mjs prod <prodBase>
 // Covers: arbitrary file read (@fs/ssr-module/.env/virtual ..), RPC CSRF, CSWSH,
-//         forged live state, ISR cross-user isolation and query-flood collapsing.
+//         forged live state, ISR cross-user isolation and query-flood collapsing,
+//         prod /_nowaki/* basename static serving (path traversal).
 
 import http from "node:http";
 
@@ -139,6 +140,23 @@ if (mode === "prod") {
   const f2 = (await fetch(`${base}/isr?cb=2`)).headers.get("x-nowaki-cache");
   check("ISR query-flood collapses (distinct ?cb served from one entry)",
     /HIT|STALE/.test(f1 || "") && /HIT|STALE/.test(f2 || ""));
+
+  // Prod static assets: /_nowaki/* resolves by basename under dist/client only (start.rs serve_static).
+  const home = await (await fetch(`${base}/`)).text();
+  const hashed = home.match(/\/_nowaki\/([A-Za-z0-9_.-]+\.js)/)?.[1];
+  check("home page references a /_nowaki/*.js asset", Boolean(hashed));
+  if (hashed) {
+    check("legit /_nowaki client asset (200)", (await statusOf(`${base}/_nowaki/${hashed}`)) === 200);
+  }
+  for (const p of [
+    "/_nowaki/../../../etc/passwd",
+    "/_nowaki/foo/../../../../etc/passwd",
+    "/_nowaki/%2e%2e/%2e%2e/%2e%2e/etc/passwd",
+    "/_nowaki/../../server/functions.json",
+  ]) {
+    const st = await rawGet(base, p);
+    check(`/_nowaki traversal blocked (${p} → ${st})`, st === 404);
+  }
 }
 
 console.log(fails ? `\nSECURITY-E2E FAILED (${fails})` : "\nSECURITY-E2E PASSED");
