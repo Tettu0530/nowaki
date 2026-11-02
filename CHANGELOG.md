@@ -18,6 +18,11 @@ milestone's worth of work; the codename is noted per entry.
   apps from `npm create nowaki` get `preact-render-to-string@^6.8.2`.
 
 ### Fixed
+- Client navigation applies the target page's `<style>` / `<link>` / `<meta>`
+  and `<html lang>` / `dir`, and drops the previous page's. The server marks
+  each page's own head content (`<meta name="nowaki-head">` start/end) and the
+  router swaps only that region, so styles injected at runtime by CSS-in-JS
+  libraries survive navigation (#21).
 - Windows: `nowaki dev` / `nowaki build` work (verbatim `\\?\` paths, SSR loader
   file URLs, and `/@fs/` drive-letter URLs).
 - `nowaki dev` / `nowaki start` kill their Node children on SIGTERM instead of
