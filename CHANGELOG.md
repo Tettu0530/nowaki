@@ -8,6 +8,23 @@ breaking changes (documented per entry), patch versions do not.
 The npm version and the milestone codename are offset — each release bundles a
 milestone's worth of work; the codename is noted per entry.
 
+## [Unreleased]
+
+### Changed
+- `@nowaki-dev/runtime` accepts **preact 11** (`peerDependencies.preact` is now
+  `^10.25.0 || ^11.1.0`) and requires `preact-render-to-string` **6.8.2 or
+  later**. preact 11 with an older `preact-render-to-string` renders every page
+  to an empty string, so the peer floor now rules that combination out. New
+  apps from `npm create nowaki` get `preact-render-to-string@^6.8.2`.
+
+### Fixed
+- Windows: `nowaki dev` / `nowaki build` work (verbatim `\\?\` paths, SSR loader
+  file URLs, and `/@fs/` drive-letter URLs).
+- `nowaki dev` / `nowaki start` kill their Node children on SIGTERM instead of
+  leaving them orphaned.
+- The node/bun/deno adapter deploy hint and `start` script work from
+  `dist/server`.
+
 ## [0.11.0] — 2026-06-13 · scaffold templates
 
 ### Added
