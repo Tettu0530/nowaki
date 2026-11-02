@@ -89,6 +89,12 @@ curls the example app. Match it locally before pushing.
 
 - Comments and user-facing strings in this repo are largely Japanese; match the
   surrounding file. Code identifiers stay English.
+- Keep comments minimal: write only the non-obvious *why* (ordering
+  constraints, workarounds, perf reasons) and security/trust-boundary
+  invariants. Don't restate the code, add section banners, narrate history, or
+  leave commented-out code. Public API docs (`///` on `pub` items in
+  `nowaki-core`, JSDoc in `*.d.ts`, clap `///` that becomes `--help`) and
+  comments in scaffold templates / `examples/` that teach conventions stay.
 - Keep changes minimal and idiomatic to the surrounding code.
 - Don't commit secrets or `.env`. Only `PUBLIC_*` env reaches the client.
 - Commit messages end with a `Co-Authored-By:` trailer (see git history).
