@@ -1,2 +1,2 @@
-// @nowaki-dev/runtime のバレル（公開型は index.d.ts）。getContext はサーバー専用。
+// Barrel for @nowaki-dev/runtime (public types live in index.d.ts). getContext is server-only.
 export { getContext } from "./server/functions.mjs";

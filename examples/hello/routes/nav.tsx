@@ -1,5 +1,5 @@
-// 型安全なナビゲーションのデモ。Link は型付きの <a>、route() は動的ルートの href を組む。
-// ルート型は `nowaki typegen`（dev/build が自動生成）の .nowaki/types.d.ts による。
+// Type-safe navigation demo. Link is a typed <a>; route() builds hrefs for dynamic routes.
+// Route types come from .nowaki/types.d.ts via `nowaki typegen` (generated automatically by dev/build).
 import { route, Link } from "@nowaki-dev/runtime/navigation";
 import Photo from "../islands/Photo.tsx";
 
@@ -14,17 +14,17 @@ export default function Nav() {
       <ul>
         <li>
           <Link href="/about" data-testid="link-about">
-            About（静的・型チェックあり）
+            About (static, type-checked)
           </Link>
         </li>
         <li>
           <a href={route("/blog/[slug]", { slug: "hello" })} data-testid="link-blog">
-            最初の記事（route で組む）
+            First post (built with route)
           </a>
         </li>
         <li>
           <a href={route("/files/[...path]", { path: ["docs", "intro"] })} data-testid="link-files">
-            ファイル（catch-all）
+            Files (catch-all)
           </a>
         </li>
       </ul>

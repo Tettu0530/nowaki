@@ -1,10 +1,10 @@
-// 型安全なナビゲーション（@nowaki-dev/runtime/navigation）。バレルから分離してあるので
-// クライアント島から import しても node:async_hooks を巻き込まない。
+// Type-safe navigation (@nowaki-dev/runtime/navigation). Kept separate from the barrel so
+// importing it from a client island doesn't pull in node:async_hooks.
 
 import { h } from "preact";
 
 // route("/blog/[slug]", { slug: "x" }) → "/blog/x"。
-// catch-all（[...path]）は配列を "/" で連結する。各セグメントは encodeURIComponent。
+// A catch-all ([...path]) joins its array with "/". Each segment is encodeURIComponent'd.
 export function route(pattern, params = {}) {
   return pattern.replace(/\[\.\.\.([^\]]+)\]|\[([^\]]+)\]/g, (_, rest, one) => {
     if (rest) {
@@ -15,7 +15,7 @@ export function route(pattern, params = {}) {
   });
 }
 
-// 型付き <a>。SPA 遷移はクライアントルーターがクリックを横取りして行う（通常の <a> と同じ）。
+// Typed <a>. The client router intercepts clicks for SPA navigation (same as a plain <a>).
 export function Link(props) {
   return h("a", props);
 }

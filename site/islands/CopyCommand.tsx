@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
 
-// クリックでコマンドをクリップボードにコピーする。SSR時はそのままコマンドが読める。
+// Copies the command to the clipboard on click. Under SSR the command is readable as-is.
 export default function CopyCommand({
   cmd,
   primary = false,
@@ -20,7 +20,7 @@ export default function CopyCommand({
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
     } catch {
-      /* clipboard 不可の環境では何もしない */
+      /* do nothing where the clipboard is unavailable */
     }
   };
 
@@ -29,7 +29,7 @@ export default function CopyCommand({
       type="button"
       onClick={copy}
       class={`copybar${primary ? " copybar--primary" : ""}`}
-      aria-label={`コマンドをコピー: ${cmd}`}
+      aria-label={`Copy command: ${cmd}`}
     >
       <span class="copybar__prompt" aria-hidden="true">
         $

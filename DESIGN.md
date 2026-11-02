@@ -1,150 +1,150 @@
-# Nowaki (野分) 設計書
+# Nowaki Design Document
 
-> Rust製ツールチェーンを核とする、爆速フルスタックWebフレームワーク
+> A blazing-fast full-stack web framework built around a Rust toolchain
 
-## 0. コンテキスト: なぜ作るのか
+## 0. Context: why build this
 
-Next.js の体感的な遅さには構造的な原因がある。
+Next.js feels slow for structural reasons.
 
-| Next.js の問題 | 原因 | Nowaki の回答 |
+| Next.js problem | Cause | Nowaki's answer |
 |---|---|---|
-| `next dev` の起動が遅い | JSベースの初期化、巨大な内部グラフ構築 | Rustバイナリが即起動、オンデマンド変換 |
-| HMR が重くなる | グラフ再計算とJSプラグインパイプライン | oxcによるms級の単一ファイル再変換 + 無効化のみ |
-| ページのJSが肥大化 | 全コンポーネントをハイドレート | **Islands**: 明示した「島」以外はJSゼロ |
-| ビルドが遅い | webpack互換層・JS最適化パス | oxc minifier、rayon並列、コンテンツハッシュキャッシュ |
+| `next dev` starts slowly | JS-based initialization, building a huge internal graph | Rust binary starts instantly, transforms on demand |
+| HMR gets heavy | Graph recomputation and a JS plugin pipeline | Millisecond-scale single-file re-transform with oxc + invalidation only |
+| Page JS bloats | Every component is hydrated | **Islands**: zero JS outside explicitly marked "islands" |
+| Builds are slow | webpack compatibility layer, JS optimization passes | oxc minifier, rayon parallelism, content-hash cache |
 
-**目標性能 (MVP基準)**: dev起動 < 300ms / HMR反映 < 100ms / カウンター1個のページのクライアントJS < 15KB (gzip)。
+**Performance targets (MVP baseline)**: dev startup < 300ms / HMR update < 100ms / client JS for a page with one counter < 15KB (gzip).
 
-## 1. 確定した設計判断
+## 1. Settled design decisions
 
-1. UIランタイム: **Preact** (3KB, ESM配布, React互換hooks)。ESM配布なのでdev時のCJS prebundle工程が不要になり、バンドラーが単純化する。
-2. オーサリング構文: `.tsx` (oxcネイティブ・最速パス) + **TSRX** (`.tsrx`, Phase 2)。TSRXはRipple作者によるステートメントベースのJSX後継構文。コンパイラ(`@tsrx/core`)はJS実装のため、Nodeコンパイルブリッジ経由でPreactターゲットにコンパイルし、oxcパイプラインに合流させる。現状alphaのためMVPには含めず、差し込み口(TransformBridge)のみ確保。
-3. レンダリングモデル: **Islands Architecture** (Astro/Fresh方式)。ページはサーバーでHTML化し、`islands/` ディレクトリ配下のコンポーネントだけがクライアントでハイドレートされる。
-4. バンドラー土台: **oxcクレート群** (oxc_parser / oxc_transformer / oxc_codegen / oxc_minifier / oxc_resolver)。モジュールグラフ、HMR、キャッシュ、チャンク戦略は自作する。ここが「バンドラー開発」の本体で、TurbopackがSWC上に構築されたのと同じ構図。
-5. SSR実行: **Nodeサイドカー**。Rustがアセット配信/変換/HMRを担い、コンポーネント描画はRustが管理するNodeワーカーへ委譲。npmエコシステムがそのまま動く。
+1. UI runtime: **Preact** (3KB, ships as ESM, React-compatible hooks). Because it ships as ESM, there is no CJS prebundle step in dev, which keeps the bundler simple.
+2. Authoring syntax: `.tsx` (oxc-native, fastest path) + **TSRX** (`.tsrx`, Phase 2). TSRX is a statement-based JSX successor syntax by the author of Ripple. Its compiler (`@tsrx/core`) is written in JS, so we compile to a Preact target through a Node compile bridge and feed the result into the oxc pipeline. It is alpha for now, so it is not in the MVP; only the plug-in point (TransformBridge) is reserved.
+3. Rendering model: **Islands Architecture** (Astro/Fresh style). Pages are rendered to HTML on the server, and only components under the `islands/` directory are hydrated on the client.
+4. Bundler foundation: **the oxc crates** (oxc_parser / oxc_transformer / oxc_codegen / oxc_minifier / oxc_resolver). The module graph, HMR, cache, and chunking strategy are our own. That is the core of the "bundler work", the same setup as Turbopack being built on SWC.
+5. SSR execution: **Node sidecar**. Rust handles asset serving, transforms, and HMR, and delegates component rendering to a Node worker that Rust manages. The npm ecosystem works as is.
 
-## 2. 全体アーキテクチャ
+## 2. Overall architecture
 
 ```
-┌─────────────────────────── nowaki dev (Rustバイナリ) ───────────────────────────┐
+┌────────────────────────── nowaki dev (Rust binary) ───────────────────────────┐
 │                                                                               │
 │  axum HTTP server (:3000)                                                     │
-│  ├─ GET /__nowaki/hmr ............ WebSocket (HMRクライアント接続)                │
-│  ├─ GET /__nowaki/ssr-module ..... SSR用変換モジュール配信 (Nodeローダーフック向け) │
-│  ├─ GET /@modules/* ............ node_modules ESM配信 (resolver + 変換)        │
-│  ├─ GET /*.tsx, /*.ts .......... プロジェクトファイルのオンデマンド変換配信       │
-│  └─ GET /* (それ以外) .......... Nodeサイドカーへリバースプロキシ (SSR HTML)     │
+│  ├─ GET /__nowaki/hmr ............ WebSocket (HMR client connection)          │
+│  ├─ GET /__nowaki/ssr-module ..... SSR-transformed modules (Node loader hook) │
+│  ├─ GET /@modules/* ............ node_modules ESM (resolver + transform)      │
+│  ├─ GET /*.tsx, /*.ts .......... on-demand transform of project files         │
+│  └─ GET /* (everything else) ... reverse proxy to Node sidecar (SSR HTML)     │
 │                                                                               │
-│  nowaki-core (lib)                                                              │
+│  nowaki-core (lib)                                                            │
 │  ├─ Transformer: oxc parse → TS strip + JSX(automatic, preact) → codegen      │
-│  ├─ Resolver: oxc_resolver (bare import → 実ファイル → /@modules/ URL)         │
+│  ├─ Resolver: oxc_resolver (bare import → real file → /@modules/ URL)         │
 │  ├─ ModuleCache: DashMap<(path, mode), (content_hash, output)>                │
-│  └─ Watcher: notify → 無効化 + HMRブロードキャスト + SSRバージョン更新            │
+│  └─ Watcher: notify → invalidate + HMR broadcast + bump SSR version           │
 │                                                                               │
-│  Sidecar Manager: Node子プロセスの起動/監視/再起動                              │
+│  Sidecar Manager: spawns/monitors/restarts the Node child process             │
 └───────────────────────────────────┬───────────────────────────────────────────┘
-                                    │ HTTP (127.0.0.1:エフェメラル)
+                                    │ HTTP (127.0.0.1:ephemeral)
 ┌───────────────────────────────────▼───────────────────────────────────────────┐
-│  Nodeサイドカー (packages/nowaki-runtime/server)                                  │
-│  ├─ ルートスキャン: routes/ → URLパターン (index/[slug]/api)                    │
-│  ├─ loader実行 → preact-render-to-string でページ描画                           │
-│  ├─ Islands検出: options.vnodeフックで島コンポーネントをマーカーで包む            │
-│  └─ moduleローダーフック: .tsx/.ts は /__nowaki/ssr-module から変換済JSを取得      │
-└────────────────────────────────────────────────────────────────────────────────┘
+│  Node sidecar (packages/nowaki-runtime/server)                                │
+│  ├─ Route scan: routes/ → URL patterns (index/[slug]/api)                     │
+│  ├─ Run loader → render page with preact-render-to-string                     │
+│  ├─ Island detection: options.vnode hook wraps island components in markers   │
+│  └─ Loader hook: .tsx/.ts get transformed JS from /__nowaki/ssr-module        │
+└───────────────────────────────────────────────────────────────────────────────┘
 
-ブラウザ: SSR HTML + <script type="module" src="/@nowaki-dev/client.js">
-          → マーカー走査 → 島モジュールをdynamic import → hydrate(props)
+Browser: SSR HTML + <script type="module" src="/@nowaki-dev/client.js">
+         → scan markers → dynamic import island modules → hydrate(props)
 ```
 
-### リポジトリ構成
+### Repository layout
 
 ```
 nowaki/
 ├── Cargo.toml                  # workspace
 ├── crates/
-│   ├── nowaki-core/              # バンドラー本体 (transform / resolve / graph / cache)
-│   └── nowaki/                   # CLIバイナリ (dev / build / start) + devサーバー + sidecar管理
+│   ├── nowaki-core/              # bundler core (transform / resolve / graph / cache)
+│   └── nowaki/                   # CLI binary (dev / build / start) + dev server + sidecar management
 ├── packages/
 │   └── nowaki-runtime/           # npm: @nowaki-dev/runtime
-│       ├── client/             #   islandsハイドレーション + HMRクライアント
-│       └── server/             #   SSRサイドカー + Nodeローダーフック
+│       ├── client/             #   islands hydration + HMR client
+│       └── server/             #   SSR sidecar + Node loader hooks
 ├── examples/
-│   └── hello/                  #   サンプルアプリ (検証用)
+│   └── hello/                  #   sample app (for verification)
 │       ├── routes/index.tsx
 │       └── islands/Counter.tsx
 └── DESIGN.md
 ```
 
-## 3. Rustバンドラー (nowaki-core) の設計
+## 3. Rust bundler (nowaki-core) design
 
-### 3.1 変換パイプライン
+### 3.1 Transform pipeline
 
 ```
-ソース読込 → xxhashでcontent_hash → キャッシュHIT? → 返却
+read source → content_hash via xxhash → cache HIT? → return
                                    ↓ MISS
-oxc_parser (TSX) → oxc_transformer { TS型剥がし, JSX automatic (importSource: "preact") }
-                 → import書き換え (browserモードのみ)
+oxc_parser (TSX) → oxc_transformer { strip TS types, JSX automatic (importSource: "preact") }
+                 → rewrite imports (browser mode only)
                  → oxc_codegen (+ inline sourcemap)
-                 → キャッシュ格納 → 返却
+                 → store in cache → return
 ```
 
-- 2モード: `mode=browser` はbare import (`preact` 等) を `/@modules/...` URLへ書き換える。`mode=ssr` はimportを書き換えない（Node解決に任せる）。キャッシュキーは `(絶対パス, mode)`、値に `content_hash` を持ち、変更を検知する。
-- bare import解決: oxc_resolver で実ファイルに解決し、`/@modules/<pkg>/<entryからの相対>` にマップ。node_modules内のESMファイル自体も同パイプラインを通す（preact/hooks が内部でbare import `preact` を持つため再帰的に書き換えが必要）。
-- 並列性: 状態は `DashMap`。HTTPハンドラごとに `tokio::task::spawn_blocking` でoxc変換（CPUバウンド）を実行。
+- Two modes: `mode=browser` rewrites bare imports (`preact`, etc.) to `/@modules/...` URLs. `mode=ssr` leaves imports untouched (Node resolution handles them). The cache key is `(absolute path, mode)`, and the value carries a `content_hash` to detect changes.
+- Bare import resolution: oxc_resolver resolves to a real file, which maps to `/@modules/<pkg>/<path relative to entry>`. ESM files inside node_modules go through the same pipeline too (preact/hooks has an internal bare import of `preact`, so rewriting must be recursive).
+- Parallelism: state lives in a `DashMap`. Each HTTP handler runs the oxc transform (CPU-bound) via `tokio::task::spawn_blocking`.
 
-### 3.2 HMR (MVP → 将来)
+### 3.2 HMR (MVP → future)
 
-- プロトコル: WebSocket、JSONメッセージ `{type: "reload"}` / `{type: "update", path, version}` / `{type: "error", message}`。
-- MVP: notifyでの変更検知 → 該当キャッシュ無効化 + グローバル `ssr_version` インクリメント → `reload` をブロードキャスト（フルリロード。SSRが速いので体感は十分速い）。変換エラーはオーバーレイ表示用に `error` を送る。
-- Phase 3: モジュールグラフの逆依存辺を保持し、島モジュール単位の `update` + prefresh (Preact Fast Refresh) によるステート保持ホットスワップ。
+- Protocol: WebSocket with JSON messages `{type: "reload"}` / `{type: "update", path, version}` / `{type: "error", message}`.
+- MVP: notify detects a change → invalidate the affected cache entry + increment the global `ssr_version` → broadcast `reload` (a full reload; SSR is fast, so it feels fast enough). Transform errors send `error` for the overlay.
+- Phase 3: keep reverse-dependency edges in the module graph, and do per-island-module `update` + state-preserving hot swap with prefresh (Preact Fast Refresh).
 
-### 3.3 本番ビルド (`nowaki build`): 段階的戦略
+### 3.3 Production build (`nowaki build`): staged strategy
 
-- Phase 1 (MVP+、実装済み、`crates/nowaki-core/src/build.rs`): エントリ（islandsランタイム + 各island）から後順DFSでグラフを辿り、各モジュールを変換 + codegen minify + import指定子をコンテンツハッシュ付ファイル名に書き換えて `dist/client/` へ出力（unbundled ESM emit）。共有依存（preact等）はパス単位でdedup。`manifest.json`（runtime + island名→ハッシュ名）を生成。後順DFSなので依存のハッシュ確定後に親を確定し、コンテンツハッシュが最終内容と一致する。サーバー側は `build_server` が routes/ と islands/ を SSRモード変換（相対importの.tsx→.js書き換え）して `dist/server/` へ出力。配信では `nowaki start`（`packages/nowaki-runtime/server/start.mjs`）が `/_nowaki/` で静的配信しつつ、`dist/server` の built ルートで prod SSR、manifest経由でislandを正しいハッシュ済みクライアントファイルへ配線する。**既知の残り**: 循環依存は現状エラー、`modulepreload` マニフェスト出力、islandの無いページでのruntime省略。
-- Phase 3: スコープホイスティングによる真のチャンクバンドリング（island単位エントリチャンク + 共有チャンク）。rayonでチャンク並列コード生成。
+- Phase 1 (MVP+, implemented, `crates/nowaki-core/src/build.rs`): walks the graph in post-order DFS from the entries (islands runtime + each island), transforms each module + codegen minify + rewrites import specifiers to content-hashed filenames, and emits to `dist/client/` (unbundled ESM emit). Shared dependencies (preact, etc.) are deduped by path. Generates `manifest.json` (runtime + island name → hashed name). Because the DFS is post-order, a parent is finalized only after its dependencies' hashes are, so each content hash matches the final content. On the server side, `build_server` transforms routes/ and islands/ in SSR mode (rewriting relative `.tsx` imports to `.js`) and emits to `dist/server/`. For serving, `nowaki start` (`packages/nowaki-runtime/server/start.mjs`) serves static files under `/_nowaki/`, does prod SSR with the built routes in `dist/server`, and wires islands to the correct hashed client files through the manifest. **Known remaining work**: circular dependencies currently error, `modulepreload` manifest output, omitting the runtime on pages without islands.
+- Phase 3: true chunk bundling with scope hoisting (per-island entry chunks + shared chunks). Parallel chunk codegen with rayon.
 
-## 4. フレームワーク規約 (ユーザーから見た姿)
+## 4. Framework conventions (the user's view)
 
-### ルーティング (ファイルベース)
+### Routing (file-based)
 
-| ファイル | URL |
+| File | URL |
 |---|---|
 | `routes/index.tsx` | `/` |
 | `routes/about.tsx` | `/about` |
 | `routes/blog/[slug].tsx` | `/blog/:slug` |
-| `routes/api/hello.ts` | `/api/hello` (handler関数をexport) |
+| `routes/api/hello.ts` | `/api/hello` (exports a handler function) |
 
-`_` で始まるファイルは URL にならず、規約ファイルとして次の役割を持つ。
+Files starting with `_` do not become URLs; they are convention files with the following roles.
 
-| ファイル | 役割 |
+| File | Role |
 |---|---|
-| `_layout.tsx` | そのディレクトリ配下のページを包む（ネスト可、`children` を受け取る） |
-| `_middleware.ts` | そのディレクトリ配下のリクエスト前処理（ネスト可、`Response` を返すと短絡） |
-| `_404.tsx` | 未一致時のページ（status 404） |
-| `_500.tsx` / `_error.tsx` | loader/描画が投げたときのページ（`{ error }` を受け取る、status 500） |
+| `_layout.tsx` | Wraps pages under its directory (nestable, receives `children`) |
+| `_middleware.ts` | Pre-processes requests under its directory (nestable, returning a `Response` short-circuits) |
+| `_404.tsx` | Page for unmatched routes (status 404) |
+| `_500.tsx` / `_error.tsx` | Page for when a loader/render throws (receives `{ error }`, status 500) |
 
-### データ取得 (Remix風loader)
+### Data loading (Remix-style loader)
 
 ```tsx
-// routes/index.tsx — サーバーでのみ実行される
+// routes/index.tsx — runs only on the server
 export const loader = async (ctx: LoaderContext) => {
-  return { message: "こんにちは", time: Date.now() };
+  return { message: "Hello", time: Date.now() };
 };
 
 export default function Home({ data }: PageProps<typeof loader>) {
   return <main>
     <h1>{data.message}</h1>
-    <Counter start={5} />   {/* islands/Counter.tsx → これだけハイドレート */}
+    <Counter start={5} />   {/* islands/Counter.tsx → only this hydrates */}
   </main>;
 }
 ```
 
-### LoaderContext と action
+### LoaderContext and action
 
-loader / action / middleware / API ハンドラには共通の `LoaderContext` が渡る。リクエスト側（`url`, `params`, `method`, `headers`, `cookies`, `formData()`, `bodyJson()`）と、レスポンスへの書き込み（`status()`, `setHeader()`, `setCookie()`, `redirect()`, `json()`, `html()`, `text()`）を持つ。
+Loaders, actions, middleware, and API handlers all receive the same `LoaderContext`. It has the request side (`url`, `params`, `method`, `headers`, `cookies`, `formData()`, `bodyJson()`) and response writers (`status()`, `setHeader()`, `setCookie()`, `redirect()`, `json()`, `html()`, `text()`).
 
 ```tsx
-// routes/todos.tsx: action は非 GET（form submission 等）で実行される
+// routes/todos.tsx: action runs on non-GET requests (form submissions, etc.)
 export const loader = (ctx) => ({ todos: readTodos(ctx) });
 export async function action(ctx) {
   const form = await ctx.formData();
@@ -153,44 +153,44 @@ export async function action(ctx) {
 }
 ```
 
-API ルートは `default` に加え `GET` / `POST` 等のメソッド別 export で分岐でき、web の `Response`（ストリーミング含む）をそのまま返せる。
+Besides `default`, API routes can branch on per-method exports such as `GET` / `POST`, and can return a web `Response` (including streaming) directly.
 
-### レンダリングとクライアントルーター
+### Rendering and the client router
 
-dev/prod で共通の `handler.mjs` が「ルート照合 → ミドルウェア → action → loader → レイアウト合成 → 描画 → 404/500」を担う。環境差分（モジュール読み込み・島解決・ドキュメント組み立て）だけを注入する。
+A `handler.mjs` shared by dev and prod handles "route matching → middleware → action → loader → layout composition → render → 404/500". Only the environment-specific parts (module loading, island resolution, document assembly) are injected.
 
-クライアントルーターは島ランタイムに同梱され、島のあるページで内部 `<a>` を横取りして遷移先 HTML を fetch、`<body>` を差し替え、新しい島だけを再ハイドレートする（prefetch・スクロール復元・popstate 対応）。JSゼロのページは素のフルナビゲーションのまま。DOM 差し替え機構は将来の Jetstream（サーバーリアクティブ島）と共有する。
+The client router ships with the islands runtime. On pages with islands, it intercepts internal `<a>` clicks, fetches the destination HTML, swaps `<body>`, and re-hydrates only the new islands (with prefetch, scroll restoration, and popstate support). Zero-JS pages keep plain full navigation. The DOM swap mechanism will be shared with the future Jetstream (server-reactive islands).
 
 ### Islands
 
-- `islands/` 配下のコンポーネントだけがクライアントJSを持つ。ページ本体・loaderのコードはブラウザに一切送られない。
-- 検出はランタイム方式: サイドカーが `islands/` をスキャンして「コンポーネント実体 → 島名」のレジストリを作り、Preactの `options.vnode` フックで描画中の島を `<nowaki-island data-island data-props>` でラップ。Rust側のAST加工が不要でMVPが単純になる。
-- propsはJSONシリアライズ可能であること（境界の規約として明示）。
+- Only components under `islands/` have client JS. Page bodies and loader code are never sent to the browser.
+- Detection happens at runtime: the sidecar scans `islands/` to build a registry of "component → island name", and Preact's `options.vnode` hook wraps islands being rendered in `<nowaki-island data-island data-props>`. No AST rewriting is needed on the Rust side, which keeps the MVP simple.
+- Props must be JSON-serializable (stated explicitly as the boundary contract).
 
-## 5. SSRサイドカーの設計
+## 5. SSR sidecar design
 
-- Rustが `node .../server/sidecar.mjs --port 0` を起動し、stdoutの `NOWAKI_SIDECAR_READY <port>` で接続先を得る。クラッシュ時は自動再起動。
-- TSXのSSR実行: Node単体はJSXを解釈できないため、`module.registerHooks` のloadフックで `.tsx/.ts` を Rust devサーバーの `/__nowaki/ssr-module?path=...&v=<ssr_version>` から変換済ESMとして取得する（vite-node方式。変換器をRust一本に統一するのが狙い）。
-- HMR時の再評価: ESMキャッシュは無効化できないため、ルートモジュールを `?v=<ssr_version>` 付きでdynamic importし、resolveフックが相対importにも同じversionを伝播させる。devでの旧バージョンのメモリ残留は許容（Viteと同様のトレードオフ）。
-- 本番では loader hooksは使わず、ビルド済み `dist/server/` を直接実行する。
+- Rust launches `node .../server/sidecar.mjs --port 0` and gets the address from `NOWAKI_SIDECAR_READY <port>` on stdout. It restarts automatically on crash.
+- Running TSX for SSR: Node alone cannot interpret JSX, so a `module.registerHooks` load hook fetches `.tsx/.ts` as transformed ESM from the Rust dev server's `/__nowaki/ssr-module?path=...&v=<ssr_version>` (the vite-node approach; the goal is a single transformer, in Rust).
+- Re-evaluation on HMR: the ESM cache cannot be invalidated, so route modules are dynamically imported with `?v=<ssr_version>`, and the resolve hook propagates the same version to relative imports. Old versions lingering in memory during dev is accepted (the same tradeoff as Vite).
+- In production, loader hooks are not used; the built `dist/server/` runs directly.
 
-## 6. TSRX統合 (Phase 2)
+## 6. TSRX integration (Phase 2)
 
-- `.tsrx` ファイルはRust側で検知し、Nodeコンパイルワーカー（`@tsrx/core` でparse → Preactターゲットへcodegen）に委譲。出力TS/JSXをoxcパイプラインに合流させる。content_hashキャッシュにより編集1回につきJSコンパイル1回で済む。
-- alphaでAPIが変動するため、`TransformBridge` trait（`fn compile(path, source) -> Result<String>`）の背後に隔離し、コアから疎結合に保つ。
+- Rust detects `.tsrx` files and delegates them to a Node compile worker (parse with `@tsrx/core` → codegen to a Preact target). The output TS/JSX feeds into the oxc pipeline. The content_hash cache means one JS compile per edit.
+- The API is in flux while alpha, so it is isolated behind a `TransformBridge` trait (`fn compile(path, source) -> Result<String>`) to keep it loosely coupled from the core.
 
-## 7. ロードマップ
+## 7. Roadmap
 
-> 完全版・マイルストーン定義・ローンチチェックリストは [ROADMAP.md](./ROADMAP.md) を参照。本節はフェーズの要約。
+> See [ROADMAP.md](./ROADMAP.md) for the full version, milestone definitions, and launch checklist. This section summarizes the phases.
 
-- Phase 1 (MVP): 本書 §2〜§5 の dev 体験一式。`nowaki dev`, oxc変換, /@modules/, Islands SSR, loader, live-reload HMR, サンプルアプリ
-- Phase 1.5: `nowaki build`（client hashed ESM + manifest / server SSR ESM）, `nowaki start`（静的配信 + prod SSR、manifest駆動でislandをハイドレート）, `create-nowaki` scaffolding は実装済み。残り: エラーオーバーレイ, islandの無いページでのruntime省略最適化, modulepreload
-- Phase 2: TSRXブリッジ, API routes拡充, ミドルウェア, 環境変数
-- Phase 3: チャンクバンドリング(スコープホイスティング), prefresh部分HMR, 永続ディスクキャッシュ, クライアントルーター(島間SPA遷移)
-- Phase 4: Bun/Denoサイドカー対応, Edgeランタイムビルド, RSC的サーバー関数 (`"use server"` RPC)
-- Phase 5 (Jetstream): サーバーリアクティブ島。サーバーデータ駆動の更新を、クライアントJSを増やさず Rust サーバーが HTML パッチで押し出す（持続チャンネル + morph ランタイム）。`export const live` / `export const on` でクライアント島と書き分け。LiveView/Hotwire を JSX島 + Rust に融合する Nowaki の差別化軸。詳細は [ROADMAP.md](./ROADMAP.md) の v0.6 を参照
+- Phase 1 (MVP): the full dev experience from §2–§5 of this document. `nowaki dev`, oxc transform, /@modules/, Islands SSR, loader, live-reload HMR, sample app
+- Phase 1.5: `nowaki build` (client hashed ESM + manifest / server SSR ESM), `nowaki start` (static serving + prod SSR, manifest-driven island hydration), and `create-nowaki` scaffolding are implemented. Remaining: error overlay, omitting the runtime on pages without islands, modulepreload
+- Phase 2: TSRX bridge, expanded API routes, middleware, environment variables
+- Phase 3: chunk bundling (scope hoisting), prefresh partial HMR, persistent disk cache, client router (SPA navigation between island pages)
+- Phase 4: Bun/Deno sidecar support, Edge runtime builds, RSC-style server functions (`"use server"` RPC)
+- Phase 5 (Jetstream): server-reactive islands. The Rust server pushes server-data-driven updates as HTML patches without adding client JS (persistent channel + morph runtime). Written separately from client islands via `export const live` / `export const on`. Nowaki's differentiator: fusing LiveView/Hotwire with JSX islands + Rust. See v0.6 in [ROADMAP.md](./ROADMAP.md) for details
 
-## 8. 主要依存
+## 8. Key dependencies
 
 - Rust: oxc (umbrella, features: transformer/codegen/minifier), oxc_resolver, axum, tokio, tower-http, notify, dashmap, clap, xxhash-rust, serde/serde_json
-- npm: preact, preact-render-to-string (devDependenciesは無し。ランタイムを薄く保つ)
+- npm: preact, preact-render-to-string (no devDependencies, to keep the runtime thin)

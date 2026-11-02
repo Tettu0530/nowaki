@@ -2,66 +2,66 @@
 
 # Nowaki (野分)
 
-Rust製ツールチェーンを核とするフルスタックWebフレームワーク
+A full-stack web framework built around a Rust toolchain
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)](#status)
 
-クライアントJSはデフォルトでゼロです。開発サーバーはRustバイナリで即起動します。Next.js の構造的な遅さへの答えとして設計しました。
+Zero client JS by default. The dev server is a Rust binary that starts instantly. Designed as an answer to the structural slowness of Next.js.
 
 </div>
 
 ---
 
-## Nowaki とは
+## What is Nowaki?
 
-Nowaki（野分 = 台風の古語）は、Next.js の構造的な遅さを出発点に設計したフルスタックフレームワークです。バンドラー・変換・開発サーバーを Rust と [oxc](https://oxc.rs) で書き、レンダリングには Islands Architecture を採りました。ページのクライアントJSは「島」の分だけに収まります。
+Nowaki (野分, an archaic Japanese word for a typhoon) is a full-stack framework designed from the ground up around the structural causes of Next.js's slowness. The bundler, transforms, and dev server are written in Rust on top of [oxc](https://oxc.rs), and rendering uses the Islands Architecture. A page's client JS is limited to its "islands".
 
-| Next.js の課題 | Nowaki の回答 |
+| Next.js pain point | Nowaki's answer |
 |---|---|
-| `next dev` の起動が遅い | Rustバイナリが即起動し、オンデマンドで変換する（例アプリで起動およそ90ms） |
-| HMR が重い | oxc が単一ファイルをミリ秒級で再変換する |
-| ページのJSが肥大化 | Islands により、明示した島以外はクライアントJSがゼロ |
-| ビルドが遅い | oxc minifier とコンテンツハッシュキャッシュ |
+| `next dev` starts slowly | A Rust binary starts instantly and transforms on demand (about 90ms to start the example app) |
+| HMR is heavy | oxc re-transforms a single file in milliseconds |
+| Page JS bloats | With Islands, there is zero client JS outside the islands you mark explicitly |
+| Builds are slow | oxc minifier plus a content-hash cache |
 
 > [!WARNING]
-> **Status: alpha.** 設計は固まりつつありますが、APIは予告なく変わります。本番利用はまだ推奨しません。
+> **Status: alpha.** The design is settling, but the API may change without notice. Production use is not yet recommended.
 
-## 特徴
+## Features
 
-- oxc（parser / transformer / codegen / resolver）の上に、オンデマンド変換パイプラインを Rust で組んでいる。
-- Islands Architecture を採用。デフォルトでクライアントJSはゼロで、`islands/` 配下のコンポーネントだけがハイドレートされる。
-- ファイルベースルーティングと、Remix 風の `loader`。
-- npm エコシステムはそのまま使える。SSR は Rust が管理する Node サイドカー（Preact）に委譲する。
+- An on-demand transform pipeline in Rust, built on oxc (parser / transformer / codegen / resolver).
+- Islands Architecture: zero client JS by default; only components under `islands/` are hydrated.
+- File-based routing and Remix-style `loader`s.
+- Use the npm ecosystem as is. SSR is delegated to a Rust-managed Node sidecar (Preact).
 
-## クイックスタート
+## Quick start
 
-前提は Node.js 22 以上と pnpm です（npm や yarn でも動きます）。Rust は要りません。CLI はプリビルドのネイティブバイナリを npm から取得します。
+You need Node.js 22+ and pnpm (npm and yarn work too). Rust is not required: the CLI fetches a prebuilt native binary from npm.
 
 ```bash
-# 新しいアプリを作成
+# Create a new app
 npm create nowaki@latest my-app
 cd my-app
 
-pnpm install   # nowaki CLI（ネイティブバイナリ）+ ランタイムを取得
+pnpm install   # fetches the nowaki CLI (native binary) + runtime
 pnpm dev       # → http://127.0.0.1:3000
 ```
 
-scaffold 済みアプリの npm scripts は次のとおりです。
+A scaffolded app comes with these npm scripts:
 
 ```bash
-pnpm dev         # 開発サーバー (HMR + Islands)
-pnpm build       # 本番ビルド (client + server)
-pnpm start       # ビルド済みアプリを配信
-pnpm prerender   # 静的サイト生成 (SSG)
+pnpm dev         # Dev server (HMR + Islands)
+pnpm build       # Production build (client + server)
+pnpm start       # Serve the built app
+pnpm prerender   # Static site generation (SSG)
 ```
 
-CLI を直接入れたい場合は `npm i -g nowaki`、ソースから入れたい場合は `cargo install nowaki` も使えます。
+To install the CLI directly, use `npm i -g nowaki`; to install from source, use `cargo install nowaki`.
 
 <details>
-<summary>このリポジトリで開発する（コントリビューター向け）</summary>
+<summary>Developing in this repository (for contributors)</summary>
 
-前提: Rust (stable), Node.js >= 22, pnpm
+Prerequisites: Rust (stable), Node.js >= 22, pnpm
 
 ```bash
 git clone https://github.com/nowaki-dev/nowaki
@@ -69,60 +69,60 @@ cd nowaki
 pnpm install
 cargo build -p nowaki
 
-# サンプルアプリで開発サーバー起動
+# Start the dev server on the example app
 ./target/debug/nowaki dev examples/hello
 # → http://127.0.0.1:3000
 
-# 本番用にビルド（client: content-hash付きESM + manifest / server: SSR用ESM）
+# Production build (client: content-hashed ESM + manifest / server: ESM for SSR)
 ./target/debug/nowaki build examples/hello
-# → examples/hello/dist/{client,server}/ に出力
+# → output in examples/hello/dist/{client,server}/
 
-# ビルド済みアプリを本番モードで配信
+# Serve the built app in production mode
 ./target/debug/nowaki start examples/hello --port 3000
-# → http://127.0.0.1:3000 （静的配信 + prod SSR、HMRなし）
+# → http://127.0.0.1:3000 (static serving + prod SSR, no HMR)
 ```
 
 </details>
 
-## 書き味
+## What it looks like
 
 ```tsx
-// routes/index.tsx — loader はサーバーでのみ実行される
+// routes/index.tsx — the loader runs only on the server
 import Counter from "../islands/Counter.tsx";
 
 export const loader = async () => {
-  return { message: "Nowaki へようこそ" };
+  return { message: "Welcome to Nowaki" };
 };
 
 export default function Home({ data }) {
   return (
     <main>
       <h1>{data.message}</h1>
-      <Counter start={5} />   {/* この島だけがクライアントでハイドレートされる */}
+      <Counter start={5} />   {/* only this island is hydrated on the client */}
     </main>
   );
 }
 ```
 
-ページ本体と `loader` のコードはブラウザに送られません。`islands/Counter.tsx` のJSだけが配信されます。
+The page body and `loader` code never reach the browser. Only the JS for `islands/Counter.tsx` is shipped.
 
-## プロジェクト構成
+## Project layout
 
 ```
-crates/nowaki-core       バンドラーコア (変換 / 解決 / キャッシュ)
-crates/nowaki            CLI + 開発サーバー (axum) + HMR + サイドカー管理
-packages/nowaki-runtime  @nowaki-dev/runtime (islandsクライアント / SSRサイドカー / Nodeローダーフック)
-examples/hello           サンプルアプリ
+crates/nowaki-core       Bundler core (transform / resolve / cache)
+crates/nowaki            CLI + dev server (axum) + HMR + sidecar management
+packages/nowaki-runtime  @nowaki-dev/runtime (islands client / SSR sidecar / Node loader hooks)
+examples/hello           Example app
 ```
 
-設計の詳細とアーキテクチャ図は [DESIGN.md](./DESIGN.md)、今後の計画は [ROADMAP.md](./ROADMAP.md) を参照してください。
+See [DESIGN.md](./DESIGN.md) for design details and architecture diagrams, and [ROADMAP.md](./ROADMAP.md) for what's planned.
 
-## コントリビュート
+## Contributing
 
-歓迎します。まずは [CONTRIBUTING.md](./CONTRIBUTING.md) をご覧ください。alpha のうちは、コードを書く前に Issue で方針を相談すると確実です。
+Contributions are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md). While Nowaki is in alpha, it's best to discuss your approach in an issue before writing code.
 
-## ライセンス
+## License
 
 [MIT](./LICENSE) © 2026 [VorEdge](https://voredge.com)
 
-<sub>Built and maintained by VorEdge. 「Nowaki」「野分」は台風を意味する日本語の古語です。</sub>
+<sub>Built and maintained by VorEdge. "Nowaki" (野分) is an archaic Japanese word for a typhoon.</sub>

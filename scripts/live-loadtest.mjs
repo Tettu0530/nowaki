@@ -1,9 +1,9 @@
-// Jetstream の N 並列接続の実測。Node 22+ の global WebSocket を使う。
-// 測るもの: (1) N 接続を張る時間、(2) 接続時のサーバー RSS 増分（= 1 接続あたりの常駐コスト）、
-//          (3) イベント処理スループット（events/sec, 各接続が inc を送り patch を受けるまで）。
+// Measures N concurrent Jetstream connections. Uses Node 22+'s global WebSocket.
+// Measures: (1) time to open N connections, (2) server RSS growth while connected (= resident cost per connection),
+//           (3) event throughput (events/sec, from each connection sending inc to receiving its patch).
 //
-// 使い方: node scripts/live-loadtest.mjs <baseUrl> <N> <rustPid> <sidecarPid>
-//   例: node scripts/live-loadtest.mjs http://127.0.0.1:8200 1000 12345 12346
+// Usage: node scripts/live-loadtest.mjs <baseUrl> <N> <rustPid> <sidecarPid>
+//   e.g. node scripts/live-loadtest.mjs http://127.0.0.1:8200 1000 12345 12346
 
 import { execSync } from "node:child_process";
 
@@ -23,7 +23,7 @@ const rssKB = () => {
   return total;
 };
 
-// /live から LiveCounter の nid / 初期 state / 署名(sig)を取り出す（属性順に依らず）。
+// Extracts LiveCounter's nid / initial state / signature (sig) from /live (regardless of attribute order).
 const html = await (await fetch(base + "/live")).text();
 const tag = html.match(/<nowaki-live\b[^>]*>/)?.[0];
 if (!tag || !/name="LiveCounter"/.test(tag)) {
@@ -45,7 +45,7 @@ const open = (url) =>
 const baseRss = rssKB();
 console.log(`baseline RSS: ${(baseRss / 1024).toFixed(1)} MB  (pids ${pids.join(",")})`);
 
-// バッチで張って FD/受け入れの瞬間ピークを抑える。
+// Connect in batches to limit momentary FD/accept peaks.
 const t0 = now();
 const conns = [];
 const BATCH = 100;
@@ -59,7 +59,7 @@ const connMs = now() - t0;
 for (const ws of conns) {
   ws.send(JSON.stringify({ type: "join", islands: [{ nid, name: "LiveCounter", state, sig }] }));
 }
-await new Promise((r) => setTimeout(r, 1500)); // 安定待ち（presence 配信など）
+await new Promise((r) => setTimeout(r, 1500)); // wait to settle (presence broadcasts, etc.)
 const afterRss = rssKB();
 
 console.log(`opened ${conns.length}/${N} connections in ${connMs} ms`);

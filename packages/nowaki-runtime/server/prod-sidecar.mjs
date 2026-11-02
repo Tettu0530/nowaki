@@ -1,6 +1,6 @@
-// 本番 SSR サイドカー。`nowaki start`（Rust axum フロント）から起動され、Node はコンポーネント
-// 描画だけを担う（静的配信と HTML 組み立ては Rust）。起動完了は stdout の
-// "NOWAKI_START_READY <port>" で Rust へ通知する。
+// Production SSR sidecar. Spawned by `nowaki start` (Rust axum front); Node only renders
+// components (Rust handles static serving and HTML assembly). Signals readiness to Rust
+// with "NOWAKI_START_READY <port>" on stdout.
 
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
@@ -16,7 +16,7 @@ const { env, liveRegistry } = await createApp({
   serverDir: path.join(appRoot, "dist/server"),
 });
 
-// ページは完成 HTML ではなく body+メタのマーカーを返す。ストリーミングはマーカーを通らず素通し。
+// Pages return body+meta markers instead of final HTML. Streaming bypasses the markers.
 env.renderDocument = ({ mod, body, meta }) => {
   const m = pageMeta(meta, mod);
   return { __nowakiPage: true, body, title: m.title, head: m.head, lang: m.lang };
@@ -51,7 +51,7 @@ const server = createServer(async (req, res) => {
     const result = await handleRequest(env, { method: req.method, url, version: "prod", req });
     const b = result.body;
     if (b && typeof b === "object" && b.__nowakiPage) {
-      // 応答ヘッダ（cookie 等）は保ったまま、x-nowaki-page で Rust に HTML の組み立てを伝える。
+      // Keep response headers (cookies etc.) and tell Rust to assemble the HTML via x-nowaki-page.
       res.writeHead(result.status ?? 200, {
         ...(result.headers ?? {}),
         "content-type": "application/json; charset=utf-8",

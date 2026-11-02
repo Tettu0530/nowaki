@@ -1,6 +1,6 @@
-//! CLI 統合テスト。ビルド済みバイナリで `nowaki build examples/hello` を実行し、
-//! 出力の不変条件（manifest・スコープホイスティング・ライブ島のゼロJS）を検証する。
-//! examples/hello に node_modules が無い環境ではスキップする。
+//! CLI integration test. Runs `nowaki build examples/hello` with the built binary and
+//! checks output invariants (manifest, scope hoisting, zero JS for live islands).
+//! Skipped when examples/hello has no node_modules.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -37,7 +37,7 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
     let manifest = std::fs::read_to_string(client.join("manifest.json")).expect("manifest");
     assert!(manifest.contains("\"preload\""), "preload chains expected");
 
-    // Jetstream island: 登録されるが、クライアントチャンクは出さない（JS追加ゼロ）。
+    // Jetstream island: registered, but no client chunk is emitted (zero added JS).
     assert!(
         manifest.contains("\"liveIslands\": [\"LiveCounter\"]"),
         "LiveCounter should be a live island"
@@ -54,18 +54,18 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
         !names.iter().any(|n| n.starts_with("LiveCounter.")),
         "live island must not ship a client chunk"
     );
-    // スコープホイスティング: 循環 lib (cycle-a) は別チャンクにならない（Cycle へ連結）。
+    // Scope hoisting: the cyclic lib (cycle-a) doesn't become its own chunk (concatenated into Cycle).
     assert!(
         !names.iter().any(|n| n.starts_with("cycle-a.")),
         "cyclic lib should be hoisted, not a separate chunk"
     );
-    // ライブ島もサーバーモジュールとしては出力される（再描画に必要）。
+    // Live islands are still emitted as server modules (needed for re-rendering).
     assert!(
         root.join("dist/server/islands/LiveCounter.js").exists(),
         "live island server module expected"
     );
 
-    // サーバー関数: allowlist（dist/server/functions.json）に actions/todos の export が並ぶ。
+    // Server functions: the allowlist (dist/server/functions.json) lists actions/todos' exports.
     let functions =
         std::fs::read_to_string(root.join("dist/server/functions.json")).expect("functions.json");
     for export in ["addTodo", "listTodos", "whoami"] {
@@ -79,7 +79,7 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
         "functions.json module should point at the built server module"
     );
 
-    // 実装はクライアントへ出ない（サーバー専用の secret/store がバンドルに無い）。
+    // The implementation never reaches the client (no server-only secret/store in the bundle).
     for chunk in &names {
         if chunk.ends_with(".js") {
             let body = std::fs::read_to_string(client.join(chunk)).unwrap_or_default();
@@ -90,7 +90,7 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
         }
     }
 
-    // 島チャンクはサーバー関数の本体ではなく、別チャンクのプロキシ（todos.*.js）を import する。
+    // The island chunk imports a proxy in a separate chunk (todos.*.js), not the server function body.
     let todos_proxy = names
         .iter()
         .find(|n| n.starts_with("todos.") && n.ends_with(".js"))
@@ -100,13 +100,13 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
         proxy.contains("__nowakiCall(") && proxy.contains("/__nowaki/fn"),
         "proxy chunk should be the fetch shim, not the impl"
     );
-    // プロキシの id は functions.json の id と一致する（クライアント／サーバーで独立に算出）。
+    // The proxy's id matches the id in functions.json (computed independently on client and server).
     for id in ["675f80133a1699f8", "6c90d7dc921a9a3f", "781de5a7f5ba2469"] {
         assert!(functions.contains(id), "functions.json missing id {id}");
         assert!(proxy.contains(id), "proxy missing id {id}");
     }
 
-    // `<form action={fn}>`: プロキシの toString が "__nowaki_action:<id>" を返し form 傍受が拾う。
+    // `<form action={fn}>`: the proxy's toString returns "__nowaki_action:<id>" for form interception to pick up.
     assert!(
         functions.contains("\"export\": \"addTodoForm\""),
         "addTodoForm (form-action server fn) should be in functions.json"
@@ -115,7 +115,7 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
         proxy.contains("__nowaki_action:"),
         "proxy should expose a form-action sentinel via toString"
     );
-    // islands ランタイムチャンクが form 傍受を同梱している。
+    // The islands runtime chunk bundles form interception.
     assert!(
         names.iter().any(|n| {
             n.starts_with("islands.")
@@ -127,8 +127,8 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
         "islands runtime should ship the <form action> interceptor"
     );
 
-    // 仮想モジュール（plugin resolveId/load）:
-    // クライアントでは生成ソースが島チャンクへ連結され、bare `virtual:` 指定子は残らない。
+    // Virtual modules (plugin resolveId/load):
+    // on the client the generated source is concatenated into the island chunk; no bare `virtual:` specifier remains.
     let vbadge = names
         .iter()
         .find(|n| n.starts_with("VirtualBadge.") && n.ends_with(".js"))
@@ -142,7 +142,7 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
         !vbody.contains("virtual:build-info"),
         "bare virtual specifier should be inlined, not left as an import"
     );
-    // SSR: data: モジュールへインライン化される（Node が直接 import できる）。
+    // SSR: inlined as a data: module (Node can import it directly).
     let vserver =
         std::fs::read_to_string(root.join("dist/server/islands/VirtualBadge.js")).unwrap();
     assert!(

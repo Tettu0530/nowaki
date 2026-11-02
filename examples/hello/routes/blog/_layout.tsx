@@ -1,4 +1,4 @@
-// blog/ 配下だけを包むネストレイアウト（root の _layout の内側に入る）。
+// Nested layout wrapping only blog/ (sits inside the root _layout).
 export default function BlogLayout({ children }: { children: unknown }) {
   return (
     <section style="border-left:3px solid #4a9;padding-left:1rem">

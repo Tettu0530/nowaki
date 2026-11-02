@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// プラットフォーム別 npm パッケージ (@nowaki-dev/cli-<key>) を組み立てる。
+// Assembles the per-platform npm packages (@nowaki-dev/cli-<key>).
 //
 //   node scripts/build-npm.mjs <key> [--binary <path>] [--no-build]
 //
-// <key> は darwin-arm64 / darwin-x64 / linux-x64-gnu / linux-arm64-gnu / win32-x64。
-// 既定では cargo build してから packages/nowaki-cli/npm/<key>/ に配置する（CI の各マトリクスジョブ用）。
+// <key> is darwin-arm64 / darwin-x64 / linux-x64-gnu / linux-arm64-gnu / win32-x64.
+// By default runs cargo build, then places it in packages/nowaki-cli/npm/<key>/ (for each CI matrix job).
 
 import { execFileSync } from "node:child_process";
 import {
@@ -20,8 +20,8 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-// key -> Rust ターゲットトリプル + npm の os/cpu/libc メタ。
-// lib/resolve.js の PACKAGES と必ず一致させること。
+// key -> Rust target triple + npm os/cpu/libc metadata.
+// Must match PACKAGES in lib/resolve.js.
 const TARGETS = {
   "darwin-arm64": { triple: "aarch64-apple-darwin", os: "darwin", cpu: "arm64" },
   "darwin-x64": { triple: "x86_64-apple-darwin", os: "darwin", cpu: "x64" },
@@ -48,7 +48,7 @@ const TARGETS = {
 function workspaceVersion() {
   const cargo = readFileSync(path.join(ROOT, "Cargo.toml"), "utf8");
   const m = cargo.match(/\[workspace\.package\][\s\S]*?version\s*=\s*"([^"]+)"/);
-  if (!m) throw new Error("Cargo.toml から workspace バージョンを取得できません");
+  if (!m) throw new Error("could not read the workspace version from Cargo.toml");
   return m[1];
 }
 
@@ -66,7 +66,7 @@ function parseArgs(argv) {
 function main() {
   const { key, binary, build } = parseArgs(process.argv.slice(2));
   if (!key || !TARGETS[key]) {
-    console.error(`使い方: build-npm.mjs <key> [--binary <path>] [--no-build]`);
+    console.error(`usage: build-npm.mjs <key> [--binary <path>] [--no-build]`);
     console.error(`<key>: ${Object.keys(TARGETS).join(" | ")}`);
     process.exit(1);
   }

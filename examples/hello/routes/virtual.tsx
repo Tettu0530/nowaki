@@ -7,8 +7,8 @@ export default function Page() {
     <main style="font-family:sans-serif;max-width:640px;margin:4rem auto">
       <h1>Virtual modules</h1>
       <p>
-        プラグインの <code>resolveId</code> / <code>load</code> でディスクに無いモジュール
-        （<code>virtual:build-info</code>）を生成し、島が import しています。
+        The plugin's <code>resolveId</code> / <code>load</code> generate a module that isn't on disk
+        (<code>virtual:build-info</code>), and an island imports it.
       </p>
       <VirtualBadge />
       <p style="margin-top:2rem">

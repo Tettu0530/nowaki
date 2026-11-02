@@ -1,6 +1,6 @@
-// 実ブラウザ（Chrome）でのクライアントルーター挙動テスト。
-// CI（Chrome 無し）では走らせず、手元での検証用。Chrome を CDP で直接駆動する（puppeteer 不要）。
-// 使い方: BASE=http://127.0.0.1:8233 node scripts/router-browser-test.mjs
+// Client router behavior test in a real browser (Chrome).
+// Not run in CI (no Chrome); for local verification. Drives Chrome directly over CDP (no puppeteer).
+// Usage: BASE=http://127.0.0.1:8233 node scripts/router-browser-test.mjs
 import { spawn } from "node:child_process";
 
 const BASE = process.env.BASE || "http://127.0.0.1:8233";
@@ -16,7 +16,7 @@ async function cdpTargets() {
   return res.json();
 }
 
-// 1つの CDP セッション。Runtime.evaluate でページ内 JS を実行する薄いラッパ。
+// A single CDP session. Thin wrapper that runs in-page JS via Runtime.evaluate.
 class CDP {
   constructor(wsUrl) {
     this.ws = new WebSocket(wsUrl);
@@ -87,7 +87,7 @@ try {
   await cdp.send("Page.navigate", { url: BASE + "/" });
   await sleep(800);
 
-  // SPA 遷移: リンクを作って click（ルーターが横取り）
+  // SPA navigation: create a link and click it (the router intercepts)
   await cdp.evalAsync(`
     window.__nav = (href) => { const a=document.createElement('a'); a.href=href; a.textContent=href; document.body.appendChild(a); a.click(); };
     return true;`);
@@ -97,7 +97,7 @@ try {
     return { path: location.pathname, h1: document.querySelector('h1')?.textContent || '', hasIslandRuntime: !!window.__nowakiRouter };`);
   check("SPA navigation swapped to /about", afterAbout.path === "/about" && /About/i.test(afterAbout.h1));
 
-  // Router Cache: 戻ってまた /about。フェッチ回数が増えない
+  // Router Cache: go back, then /about again. Fetch count doesn't grow
   await cdp.evalAsync(`history.back(); return true;`);
   await sleep(400);
   const fetchesBefore = await cdp.evalAsync(`
@@ -112,11 +112,11 @@ try {
     after.path === "/about" && after.fetches === fetchesBefore,
   );
 
-  // loading 境界
+  // loading boundary
   await cdp.evalAsync(`history.back(); return true;`);
   await sleep(400);
   await cdp.evalAsync(`window.__nav('/slow?ms=700'); return true;`);
-  await sleep(300); // 150ms 閾値は過ぎ、700ms ローダーはまだ未完
+  await sleep(300); // past the 150ms threshold, 700ms loader not done yet
   const duringLoad = await cdp.evalAsync(`
     return { hasLoading: !!document.querySelector('[data-testid="loading"]'), hasSlow: !!document.querySelector('[data-testid="slow"]') };`);
   check("loading boundary shows during a slow navigation", duringLoad.hasLoading && !duringLoad.hasSlow);
@@ -125,10 +125,10 @@ try {
     return { hasSlow: !!document.querySelector('[data-testid="slow"]'), hasLoading: !!document.querySelector('[data-testid="loading"]') };`);
   check("slow page replaces the loading boundary once loaded", afterSlow.hasSlow && !afterSlow.hasLoading);
 
-  // error 境界: フェッチをブロック → フォールバック表示 → reset で復帰
+  // error boundary: block the fetch -> fallback shown -> reset recovers
   await cdp.evalAsync(`history.back(); return true;`);
   await sleep(400);
-  // Router Cache をまたぐので、別 URL でブロックを試す（?e=1 で未キャッシュ）
+  // The Router Cache would serve it, so block a different URL (?e=1 is uncached)
   await cdp.send("Network.setBlockedURLs", { urls: ["*/about?e=1*", "*/about\\?e=1*", "*about?e=1*"] });
   await cdp.evalAsync(`window.__nav('/about?e=1'); return true;`);
   await sleep(700);

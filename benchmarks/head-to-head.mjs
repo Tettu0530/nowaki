@@ -1,13 +1,13 @@
-// Nowaki vs Next.js vs Astro の head-to-head（benchmarks/apps/*-counter、カウンタ1個 + SSR）。
-// toolchain が入っているものだけ測り、無ければ "not installed" と表示して数字を捏造しない。
-// Next/Astro を測るには:
+// Nowaki vs Next.js vs Astro head-to-head (benchmarks/apps/*-counter, one counter + SSR).
+// Measures only installed toolchains; others show "not installed" rather than made-up numbers.
+// To measure Next/Astro:
 //   pnpm -C benchmarks/apps/next-counter  install
 //   pnpm -C benchmarks/apps/astro-counter install
-// 使い方: node benchmarks/head-to-head.mjs [--json]
-// 指標:
-//   dev ready (cold)  — dev サーバー起動 → ready 行までの wall time
-//   build            — 本番ビルドの wall time
-//   client JS (gzip) — ページが読み込むクライアント JS の gzip 合計（小さいほど良い）
+// Usage: node benchmarks/head-to-head.mjs [--json]
+// Metrics:
+//   dev ready (cold)  — wall time from dev server start to the ready line
+//   build            — wall time of the production build
+//   client JS (gzip) — gzip total of client JS the page loads (smaller is better)
 
 import { spawn, spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, existsSync, rmSync } from "node:fs";
@@ -24,7 +24,7 @@ const nowakiBin = existsSync(path.join(ROOT, "target/release/nowaki"))
   ? path.join(ROOT, "target/release/nowaki")
   : path.join(ROOT, "target/debug/nowaki");
 
-// dir 以下の *.js を再帰的に集計。{ rawKB, gzKB } を返す（生の minified バイトと gzip）。
+// Sums *.js under dir recursively. Returns { rawKB, gzKB } (raw minified bytes and gzip).
 function jsSize(dir, keep = () => true) {
   if (!existsSync(dir)) return { rawKB: 0, gzKB: 0 };
   let raw = 0;
@@ -44,7 +44,7 @@ function jsSize(dir, keep = () => true) {
   return { rawKB: raw / 1024, gzKB: gz / 1024 };
 }
 
-// cmd を起動し、stdout/stderr に marker が出るまでの wall time（ms）を返す。kill する。
+// Spawns cmd and returns the wall time (ms) until marker appears on stdout/stderr, then kills it.
 function timeUntil(cmd, args, opts, marker, timeoutMs = 90000) {
   return new Promise((resolve) => {
     const t0 = now();
@@ -68,7 +68,7 @@ function timeUntil(cmd, args, opts, marker, timeoutMs = 90000) {
   });
 }
 
-// cmd を最後まで走らせ、{ ms, stdout }（失敗時 ms=null）を返す。
+// Runs cmd to completion and returns { ms, stdout } (ms=null on failure).
 function timeRun(cmd, args, opts) {
   const t0 = now();
   const r = spawnSync(cmd, args, {
@@ -110,7 +110,7 @@ async function benchNext() {
   const dev = await timeUntil(bin, ["dev", "-p", "8911"], { cwd: dir, env }, "ready in");
   clean(dir, [".next"]);
   const build = timeRun(bin, ["build"], { cwd: dir, env });
-  // first-load JS は `next build` のルート表 `/` 行の最終列（Next 公式値、未圧縮）を採る。
+  // first-load JS is the last column of the `/` row in `next build`'s route table (Next's official figure, uncompressed).
   let firstLoadKB = null;
   const m = build.stdout.match(/[┌├└]\s*[○●ƒλ]?\s*\/\s+\S+\s+(?:k?B\s+)?([\d.]+)\s*kB/);
   if (m) firstLoadKB = parseFloat(m[1]);
@@ -119,7 +119,7 @@ async function benchNext() {
     if (shared) firstLoadKB = parseFloat(shared[1]);
   }
   clean(dir, [".next"]);
-  // 未圧縮値なので rawKB に入れる（gzip は出さない）。
+  // It's uncompressed, so it goes in rawKB (no gzip figure).
   return { name: "Next.js", dev, build: build.ms, rawKB: firstLoadKB, gzKB: null, rawNote: "Next-reported First Load JS" };
 }
 
@@ -132,7 +132,7 @@ async function benchAstro() {
   const dev = await timeUntil(bin, ["dev", "--port", "8912"], { cwd: dir }, "ready in");
   clean(dir, ["dist", ".astro"]);
   const build = timeRun(bin, ["build"], { cwd: dir });
-  const js = jsSize(path.join(dir, "dist")); // Astro は island JS だけを dist/_astro に出す
+  const js = jsSize(path.join(dir, "dist")); // Astro emits only island JS, into dist/_astro
   clean(dir, ["dist", ".astro"]);
   return { name: "Astro", dev, build: build.ms, rawKB: js.rawKB, gzKB: js.gzKB };
 }

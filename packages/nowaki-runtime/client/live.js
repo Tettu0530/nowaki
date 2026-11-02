@@ -1,5 +1,5 @@
-// Jetstream のクライアントランタイム。data-live のイベントを WS で送り、返る HTML パッチを morph で当てる。
-// WS が張れない/落ちても初期 SSR のまま表示はおかしくならない（劣化のみ）。
+// Jetstream client runtime. Sends data-live events over WS and morphs in the returned HTML patches.
+// If the WS can't connect or drops, the initial SSR stays intact (graceful degradation only).
 
 function lives() {
   return [...document.querySelectorAll("nowaki-live")];
@@ -45,11 +45,11 @@ function connect() {
         }
         window.dispatchEvent(new CustomEvent("nowaki:presence", { detail: { count: msg.count } }));
       } else if (msg.type === "error" && msg.reason === "at capacity") {
-        // 上限到達: サーバーが接続を断った。初期 SSR のまま劣化動作（再接続は試みる）。
+        // Limit reached: the server closed the connection. Degrade to the initial SSR (still tries to reconnect).
         console.warn("[nowaki live] server at capacity; staying on the initial SSR view");
       }
     };
-    // 再接続（指数バックオフ、上限あり）。再 join で状態を取り戻す。
+    // Reconnect (exponential backoff, capped). Re-joining restores state.
     ws.onclose = () => {
       const delay = Math.min(1000 * 2 ** retry++, 10000);
       setTimeout(open, delay);
@@ -87,7 +87,7 @@ function cssEscape(s) {
   return String(s).replace(/"/g, '\\"');
 }
 
-// 最小 DOM morph（keyless、in-place 更新）。
+// Minimal DOM morph (keyless, in-place updates).
 function morph(from, toHtml) {
   const tmp = document.createElement("template");
   tmp.innerHTML = toHtml;
@@ -129,7 +129,7 @@ function morphAttrs(from, to) {
   for (const a of to.attributes) {
     if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
   }
-  // value はプロパティも合わせる（フォーカス/入力をおかしくしないよう値のみ）
+  // also sync the value property (value only, so focus/input aren't disrupted)
   if ("value" in from && to.hasAttribute("value")) {
     const v = to.getAttribute("value");
     if (from.value !== v) from.value = v;

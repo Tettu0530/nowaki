@@ -1,9 +1,9 @@
-// クライアント JS サイズのリグレッションゲート（送信 JS は決定的なのでゲートにできる）。
-// 時間系はマシン依存でブレるのでゲートにしない（head-to-head.mjs で参考値として測る）。
-// 使い方:
-//   node benchmarks/check-regression.mjs           # baseline.json と比較（超過で exit 1）
-//   node benchmarks/check-regression.mjs --update   # 現在値で baseline.json を更新
-// 対象は benchmarks/apps/nowaki-counter（最小・安定）。閾値は gzip +12%。
+// Regression gate on client JS size (shipped JS is deterministic, so it can gate).
+// Timings vary by machine, so they don't gate (head-to-head.mjs measures them for reference).
+// Usage:
+//   node benchmarks/check-regression.mjs           # compare against baseline.json (exit 1 if exceeded)
+//   node benchmarks/check-regression.mjs --update   # update baseline.json with current values
+// Target is benchmarks/apps/nowaki-counter (minimal, stable). Threshold is gzip +12%.
 
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
@@ -13,7 +13,7 @@ import path from "node:path";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const APP = path.join(ROOT, "benchmarks/apps/nowaki-counter");
 const BASELINE = path.join(ROOT, "benchmarks/baseline.json");
-const TOLERANCE = 0.12; // gzip サイズの許容増加率
+const TOLERANCE = 0.12; // allowed gzip size increase ratio
 const UPDATE = process.argv.includes("--update");
 
 const bin = existsSync(path.join(ROOT, "target/release/nowaki"))
@@ -29,15 +29,15 @@ function measure() {
   }
   const clientDir = path.join(APP, "dist/client");
   const manifest = JSON.parse(readFileSync(path.join(clientDir, "manifest.json"), "utf8"));
-  // SPA ルーター（routerRuntime + manifest.preload の推移的依存）は idle で遅延 import され
-  // first-load に乗らないので、ゲート対象（gzipBytes）から除外する。
+  // The SPA router (routerRuntime + manifest.preload's transitive deps) is lazily imported on idle
+  // and isn't part of first load, so it's excluded from the gated value (gzipBytes).
   const lazySet = new Set();
   if (manifest.routerRuntime) {
     lazySet.add(manifest.routerRuntime);
     for (const dep of manifest.preload?.[manifest.routerRuntime] ?? []) lazySet.add(dep);
   }
   let gz = 0; // eager first-load
-  let lazyGz = 0; // 遅延ルーターチャンク（参考）
+  let lazyGz = 0; // lazy router chunks (for reference)
   let jsFiles = 0;
   for (const f of readdirSync(clientDir)) {
     if (!f.endsWith(".js")) continue;
@@ -72,7 +72,7 @@ if (cur.gzipBytes > limit) {
   console.error(`REGRESSION: shipped JS grew >${TOLERANCE * 100}% over baseline`);
   failed = true;
 }
-// 構造の変化（チャンク数・島数）も知らせる（致命ではないが baseline 更新の合図）。
+// Also report structural changes (chunk/island counts): not fatal, but a cue to update the baseline.
 if (cur.jsFiles !== base.jsFiles) {
   console.warn(`note: client chunk count ${base.jsFiles} → ${cur.jsFiles}`);
 }

@@ -1,5 +1,5 @@
-// クライアントルーターの純粋ロジック（router-core.js）の単体テスト。
-// DOM 非依存なので Node でそのまま実行できる（matchBoundary / createPageCache）。
+// Unit tests for the client router's pure logic (router-core.js).
+// No DOM dependency, so it runs as-is in Node (matchBoundary / createPageCache).
 import assert from "node:assert/strict";
 import { matchBoundary, createPageCache } from "../packages/nowaki-runtime/client/router-core.js";
 
@@ -10,7 +10,7 @@ const ok = (label, cond) => {
   passed++;
 };
 
-// matchBoundary: 最長 prefix 一致
+// matchBoundary: longest prefix match
 const boundaries = [
   { prefix: "", html: "root" },
   { prefix: "/blog", html: "blog" },
@@ -24,7 +24,7 @@ ok("/blogger does NOT match /blog prefix", matchBoundary(boundaries, "/blogger")
 ok("no boundaries → null", matchBoundary([], "/x") === null);
 ok("no root boundary and no match → null", matchBoundary([{ prefix: "/p" }], "/q") === null);
 
-// createPageCache: 制御可能な now で時間を進める
+// createPageCache: advance time with a controllable now
 let t = 0;
 const now = () => t;
 const cache = createPageCache({ ttlMs: 1000, max: 2, now });
@@ -39,13 +39,13 @@ t = 1001;
 ok("stale after TTL → get undefined", cache.get("/a") === undefined);
 ok("stale entry is evicted (size 0)", cache.size() === 0);
 
-// LRU: 上限 2。3 件目で最古を追い出すが、get で触れた方は残る。
+// LRU: capacity 2. The 3rd entry evicts the oldest, but one touched by get stays.
 t = 0;
 const lru = createPageCache({ ttlMs: 100000, max: 2, now });
 lru.set("/1", 1);
 lru.set("/2", 2);
-lru.get("/1"); // /1 を最近使用に
-lru.set("/3", 3); // 最古 = /2 が追い出される
+lru.get("/1"); // mark /1 as recently used
+lru.set("/3", 3); // oldest = /2 is evicted
 ok("LRU keeps the recently-used entry", lru.get("/1") === 1);
 ok("LRU evicts the least-recently-used entry", lru.get("/2") === undefined);
 ok("LRU keeps the newest entry", lru.get("/3") === 3);

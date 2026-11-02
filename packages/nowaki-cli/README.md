@@ -23,10 +23,10 @@ nowaki --version
 ## Usage
 
 ```bash
-nowaki dev [dir]          # 開発サーバー (HMR + Islands ハイドレーション)
-nowaki build [dir]        # 本番ビルド (client + server)
-nowaki start [dir]        # ビルド済みアプリを配信
-nowaki prerender [dir]    # 静的サイト生成 (SSG)
+nowaki dev [dir]          # Dev server (HMR + Islands hydration)
+nowaki build [dir]        # Production build (client + server)
+nowaki start [dir]        # Serve the built app
+nowaki prerender [dir]    # Static site generation (SSG)
 ```
 
 Scaffold a new app with `npm create nowaki@latest my-app`.

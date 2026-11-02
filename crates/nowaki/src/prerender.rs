@@ -6,7 +6,7 @@ use nowaki_core::NowakiCore;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-/// 静的サイト生成: ビルド → 本番サーバーを一時起動 → 各静的ルートをHTML化 → 出力。
+/// Static site generation: build → start a temporary prod server → render each static route to HTML → write out.
 pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     let _plugin_host = crate::plugins::start(&root)?;
     let mut core = NowakiCore::new(root.clone());
@@ -22,7 +22,7 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     let entry = root.join("node_modules/@nowaki-dev/runtime/server/start.mjs");
     if !entry.exists() {
         return Err(anyhow!(
-            "@nowaki-dev/runtime が見つかりません: {}",
+            "@nowaki-dev/runtime not found: {}",
             entry.display()
         ));
     }
@@ -36,25 +36,25 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         .stderr(Stdio::inherit())
         .kill_on_drop(true)
         .spawn()
-        .context("node の起動に失敗しました")?;
+        .context("failed to start node")?;
 
     let stdout = child.stdout.take().expect("piped stdout");
     let mut lines = BufReader::new(stdout).lines();
     let mut port = None;
     while let Some(line) = lines.next_line().await? {
         if let Some(rest) = line.strip_prefix("NOWAKI_START_READY ") {
-            port = Some(rest.trim().parse::<u16>().context("ポート解析に失敗")?);
+            port = Some(rest.trim().parse::<u16>().context("failed to parse port")?);
             break;
         }
     }
-    let port = port.ok_or_else(|| anyhow!("本番サーバーが READY を報告せず終了しました"))?;
+    let port = port.ok_or_else(|| anyhow!("prod server exited without reporting READY"))?;
 
     let routes = enumerate_routes(&root.join("dist/server/routes"))?;
     if routes.is_empty() {
-        return Err(anyhow!("プリレンダ対象の静的ルートがありません"));
+        return Err(anyhow!("no static routes to prerender"));
     }
 
-    // リダイレクトは追従せず、非200はスキップする。
+    // Don't follow redirects; skip non-200 responses.
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
@@ -66,7 +66,7 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
             .send()
             .await?;
         if !resp.status().is_success() {
-            eprintln!("[nowaki] {url_path}: {} のためスキップ", resp.status());
+            eprintln!("[nowaki] {url_path}: skipped ({})", resp.status());
             continue;
         }
         let html = resp.text().await?;
@@ -87,7 +87,7 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     )?;
 
     drop(child);
-    println!("[nowaki] prerender完了: {count} pages → {}", out.display());
+    println!("[nowaki] prerender done: {count} pages → {}", out.display());
     Ok(())
 }
 
@@ -104,7 +104,7 @@ fn enumerate_routes(routes_dir: &Path) -> Result<Vec<String>> {
         let Some(stem) = rel_str.strip_suffix(".js") else {
             continue;
         };
-        // 静的化対象外: api ルート、動的 [param]、規約ファイル（_layout/_middleware/_404/...）
+        // Not prerendered: api routes, dynamic [param], convention files (_layout/_middleware/_404/...)
         if stem.starts_with("api/")
             || stem.contains('[')
             || stem.split('/').any(|seg| seg.starts_with('_'))
@@ -124,7 +124,7 @@ fn enumerate_routes(routes_dir: &Path) -> Result<Vec<String>> {
     Ok(urls)
 }
 
-/// URL を出力ファイルパスへ。`/` → index.html、`/about` → about/index.html（クリーンURL）。
+/// URL to output file path. `/` → index.html, `/about` → about/index.html (clean URLs).
 fn out_file_for(out: &Path, url: &str) -> PathBuf {
     if url == "/" {
         out.join("index.html")

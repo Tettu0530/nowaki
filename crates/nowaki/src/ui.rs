@@ -1,4 +1,4 @@
-//! ターミナル出力の体裁（色・バナー）。NO_COLOR と非 TTY を尊重し、色なしでも崩れない。
+//! Terminal output styling (colors, banners). Respects NO_COLOR and non-TTY; stays readable without color.
 
 use std::io::IsTerminal;
 use std::net::{IpAddr, UdpSocket};
@@ -34,7 +34,7 @@ pub fn red(s: &str) -> String {
     paint("31", s)
 }
 
-/// ファイル変更 → HMR のログ。`kind` は "update"（島ホットスワップ）/ "reload"（フルリロード）。
+/// File change → HMR log. `kind` is "update" (island hot swap) / "reload" (full reload).
 pub fn hmr_log(kind: &str, files: &[String]) {
     let list = files.join(", ");
     if kind == "update" {
@@ -62,7 +62,7 @@ pub fn request_log(method: &str, path: &str, status: u16, ms: u128) {
     );
 }
 
-/// LAN の IPv4 を推定する（UDP connect で経路を引くだけ。実際のパケットは送らない）。
+/// Guess the LAN IPv4 (a UDP connect only looks up the route; no packets are sent).
 pub fn lan_ip() -> Option<String> {
     let sock = UdpSocket::bind("0.0.0.0:0").ok()?;
     sock.connect("8.8.8.8:80").ok()?;
@@ -72,7 +72,7 @@ pub fn lan_ip() -> Option<String> {
     }
 }
 
-/// ディレクトリ直下の *.js の合計サイズ（KB, 生 minified バイト）。
+/// Total size of *.js directly in the directory (KB, raw minified bytes).
 pub fn dir_js_kb(dir: &std::path::Path) -> f64 {
     let mut bytes = 0u64;
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -142,7 +142,7 @@ pub fn build_summary(
     println!();
 }
 
-/// `show_network` のときだけ LAN URL を出す。
+/// Prints the LAN URL only when `show_network` is set.
 pub fn server_banner(
     label: &str,
     version: &str,
@@ -177,7 +177,7 @@ pub fn server_banner(
             dim("use --host to expose"),
         );
     }
-    // "ready in" はベンチ（bench.mjs / head-to-head.mjs）が待つマーカーでもある。
+    // "ready in" is also the marker the benchmarks (bench.mjs / head-to-head.mjs) wait for.
     println!(
         "  {}  ready in {}",
         green("➜"),
@@ -190,7 +190,7 @@ pub fn server_banner(
     println!();
 }
 
-/// 既定ブラウザで URL を開く（OS 別。失敗しても何も出さずに無視）。
+/// Open the URL in the default browser (per OS; failures are silently ignored).
 pub fn open_browser(url: &str) {
     let mut cmd = if cfg!(target_os = "macos") {
         let mut c = std::process::Command::new("open");

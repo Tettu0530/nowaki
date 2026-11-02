@@ -1,4 +1,4 @@
-// ルート直下の _layout.tsx は全ページを包む（ネスト可）。共有ナビ + フッタ。
+// The top-level _layout.tsx wraps every page (nestable). Shared nav + footer.
 export default function RootLayout({
   children,
   url,

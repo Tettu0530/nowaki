@@ -4,7 +4,7 @@ Thanks for your interest in contributing. Nowaki is in alpha and the
 architecture is still settling, so opening an issue to discuss your idea
 before writing code is the best way to avoid wasted effort.
 
-日本語でのIssue・PRも歓迎します。
+Issues and PRs in Japanese are also welcome.
 
 ## Development setup
 
@@ -33,7 +33,7 @@ cargo build -p nowaki
 | `crates/nowaki` | CLI binary: dev server (axum), HMR, sidecar management |
 | `packages/nowaki-runtime` | `@nowaki-dev/runtime`: islands hydration client, SSR sidecar, Node loader hooks |
 | `examples/hello` | Example app used for end-to-end verification |
-| `DESIGN.md` | Architecture and roadmap (Japanese; translation welcome!) |
+| `DESIGN.md` | Architecture and roadmap |
 
 ## Before you submit
 

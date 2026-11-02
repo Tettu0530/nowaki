@@ -1,116 +1,116 @@
-# Nowaki ロードマップ
+# Nowaki Roadmap
 
-> 方向性を示すものです。項目・順序・時期は予告なく変わります。設計の根拠は
-> [DESIGN.md](./DESIGN.md)、各リリースの詳細は [CHANGELOG.md](./CHANGELOG.md) を参照。
+> This shows direction only. Items, order, and timing may change without notice. See
+> [DESIGN.md](./DESIGN.md) for the design rationale and [CHANGELOG.md](./CHANGELOG.md) for per-release details.
 
-## ビジョン
+## Vision
 
-「Next.js の遅さへの構造的な答え」を、3つの柱で実現します。
+A "structural answer to the slowness of Next.js", built on three pillars:
 
-1. Rust ツールチェーン: 変換・解決・バンドル・配信を oxc ベースの Rust が担い、起動とビルドを速く保つ。
-2. デフォルト JS ゼロ（Islands）: ページはサーバーで描画し、明示した「島」だけがクライアントで動く。
-3. npm エコシステム互換: SSR は Node に委譲し、既存の資産をそのまま使える。
+1. Rust toolchain: oxc-based Rust handles transforming, resolving, bundling, and serving, keeping startup and builds fast.
+2. Zero JS by default (Islands): pages render on the server, and only explicitly marked "islands" run on the client.
+3. npm ecosystem compatibility: SSR is delegated to Node, so existing packages work as is.
 
-**成功の指標（1.0 時点の目標）**: dev 起動 < 300ms、HMR 反映 < 100ms、典型ページのクライアント JS < 15KB(gzip)、実アプリでの採用実績。
+**Success metrics (targets for 1.0)**: dev startup < 300ms, HMR update < 100ms, client JS for a typical page < 15KB (gzip), and adoption in real apps.
 
-## 現在地
+## Where we are
 
-**alpha（CLI / crates 0.12.x、crates.io / npm に公開済み）**。`npm create nowaki` で雛形を作り、`nowaki dev / build / start / prerender` が通しで動きます。ルーティング・loader/action・ミドルウェア・API・Islands・Jetstream（サーバーリアクティブ島）・サーバー関数・5種のデプロイアダプタ・プラグイン/仮想モジュールが揃っています。本番採用はまだ推奨しません（API は安定化の途中）。
+**alpha (CLI / crates 0.12.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands), server functions, 5 deploy adapters, and plugins/virtual modules are all in place. Production use is not yet recommended (the API is still stabilizing).
 
-## マイルストーン
+## Milestones
 
-各マイルストーンは「テーマ」と「Exit 基準」で定義します。完了済みの実装詳細は CHANGELOG を参照。
+Each milestone is defined by a "theme" and "Exit criteria". See the CHANGELOG for implementation details of completed work.
 
-### v0.1 「Gust」: Public alpha ✅
-世に出す。誰でも `npm create nowaki` → `nowaki dev` が動き、パッケージとドキュメントが公開されている。
+### v0.1 "Gust": Public alpha ✅
+Ship it. Anyone can run `npm create nowaki` → `nowaki dev`, and the packages and docs are published.
 
-### v0.2 「Breeze」: DX & 正しさ ✅
-毎日使える開発体験。エラーオーバーレイ、CSS（`.css` import・scoped styles）、環境変数（`.env`、`PUBLIC_*` の露出制御）、コードフレーム診断、`modulepreload` マニフェスト。
+### v0.2 "Breeze": DX & correctness ✅
+A dev experience you can use every day. Error overlay, CSS (`.css` imports, scoped styles), environment variables (`.env`, exposure control for `PUBLIC_*`), code-frame diagnostics, `modulepreload` manifest.
 
-### v0.3 「Squall」: ルーティング & データ ✅
-ネストレイアウト（`_layout.tsx`）、ミドルウェア（`_middleware.ts`）、`action`（フォーム送信）、メソッド別 API ルート、島間 SPA ルーター、404/500 規約、`LoaderContext`。
+### v0.3 "Squall": Routing & data ✅
+Nested layouts (`_layout.tsx`), middleware (`_middleware.ts`), `action` (form submissions), per-method API routes, SPA router across islands, 404/500 conventions, `LoaderContext`.
 
-### v0.4 「Monsoon」: バンドラーの深化 ✅
-真のチャンクバンドリング + スコープホイスティング、ツリーシェイキング、永続ディスクキャッシュ、end-to-end ソースマップ、CSS Modules、アセット import とハッシュ、循環依存対応。
+### v0.4 "Monsoon": Deeper bundler ✅
+Real chunk bundling + scope hoisting, tree shaking, persistent disk cache, end-to-end source maps, CSS Modules, asset imports and hashing, circular dependency support.
 
-### v0.5 「Typhoon」: エコシステム & デプロイ ✅
-デプロイアダプタ5種（node / static / bun / deno / cloudflare edge）、ストリーミング SSR、プラグイン変換フック、TSRX ブリッジ、`nowaki start` の Rust 本番ホットパス。
+### v0.5 "Typhoon": Ecosystem & deploy ✅
+5 deploy adapters (node / static / bun / deno / cloudflare edge), streaming SSR, plugin transform hooks, TSRX bridge, a Rust production hot path for `nowaki start`.
 
-### v0.6 「Jetstream」: サーバーリアクティブ島 ★flagship ✅
-**Jetstream islands** では、島が `export const live = { state, on }` を持つと、コンポーネント JS をクライアントに送らずに動く。状態はサーバーが WebSocket 接続ごとに保持し、HTML パッチを push。クライアント島（楽観 UI）と共存し、静的デプロイでは初期 SSR に劣化する。
+### v0.6 "Jetstream": Server-reactive islands ★flagship ✅
+With **Jetstream islands**, an island that has `export const live = { state, on }` works without shipping its component JS to the client. The server holds state per WebSocket connection and pushes HTML patches. It coexists with client islands (optimistic UI) and degrades to the initial SSR on static deploys.
 
-### v0.7 「Beta」: 安定化の土台 ✅
-`cargo test` スイート、再現可能なベンチマーク（[BENCHMARKS.md](./BENCHMARKS.md)）、信頼境界の明文化（[SECURITY.md](./SECURITY.md)）と CI の依存監査、SemVer 規律と [CHANGELOG.md](./CHANGELOG.md)。
+### v0.7 "Beta": Groundwork for stability ✅
+A `cargo test` suite, reproducible benchmarks ([BENCHMARKS.md](./BENCHMARKS.md)), documented trust boundaries ([SECURITY.md](./SECURITY.md)) with dependency auditing in CI, SemVer discipline and [CHANGELOG.md](./CHANGELOG.md).
 
-### v0.8〜v0.9 「Beta」: 拡充・実用化 ✅
-**サーバー関数（`"use server"` RPC）**、Next/Astro との head-to-head ベンチ + CI でのリグレッション検出、テスト拡充（ルーター snapshot・Jetstream 負荷）、Jetstream の presence・接続スケール、**プラグイン仮想モジュール（resolveId / load）**、ドキュメントサイト（`/docs`）。
+### v0.8–v0.9 "Beta": Expansion and real-world readiness ✅
+**Server functions (`"use server"` RPC)**, head-to-head benchmarks against Next/Astro + regression detection in CI, broader tests (router snapshots, Jetstream load), Jetstream presence and connection scaling, **plugin virtual modules (resolveId / load)**, docs site (`/docs`).
 
-> 状態保持（prefresh）HMR は follow-up（島ホットスワップは既存）。TSRX 島の scoped CSS も継続。
+> State-preserving (prefresh) HMR is a follow-up (island hot-swap already exists). Scoped CSS for TSRX islands also continues.
 
-### v0.10〜v0.12 「Beta」: DX・セキュリティ監査 ✅
-`npm create nowaki` の対話ウィザードとテンプレート選択、dev/start のバナー。dev/prod サーバーの多段セキュリティ監査（ファイル読み取り、RPC の CSRF、CSWSH、live state の署名、ISR の Vary など 15 件）と、それを守る CI の回帰スイート（`scripts/security-e2e.mjs`）。
+### v0.10–v0.12 "Beta": DX & security audit ✅
+An interactive wizard and template selection for `npm create nowaki`, dev/start banners. A multi-stage security audit of the dev/prod servers (15 issues, including file reads, CSRF on RPC, CSWSH, live state signing, and Vary on ISR), plus a CI regression suite that guards them (`scripts/security-e2e.mjs`).
 
-### v0.13 「Zephyr」: 足場固め
-大きな機能を入れる前に、コードを読みやすく壊しにくくする。
+### v0.13 "Zephyr": Solid footing
+Before adding big features, make the code easier to read and harder to break.
 
-**Exit 基準**: コメント方針が AGENTS.md に明文化され、コードがそれに沿っている。ルート列挙の実装が Rust 側で 1 か所になる。再接続しても live 島の状態が初期値に戻らない。
+**Exit criteria**: The comment policy is documented in AGENTS.md and the code follows it. Route enumeration has a single implementation on the Rust side. Live island state no longer resets to initial values on reconnect.
 
-- [ ] コメント最小化（挙動の変更なし）
-- [ ] `nowaki-core` にルート列挙を集約（typegen / prerender で共用、JS 側 routeTable との突き合わせテスト）
-- [ ] SECURITY.md の再構成と、AGENTS.md への「Security invariants」節
-- [ ] Rust フロントでの受信ヘッダの浄化（`x-forwarded-host` / `x-nowaki-*`、`NOWAKI_TRUST_PROXY`）
-- [ ] Jetstream: patch に署名付き state を載せる（再接続で状態が初期値に戻る不具合の修正）
-- [ ] Jetstream: セッションループの非同期化、sidecar のタイムアウトとエラー通知
+- [ ] Comment minimization (no behavior changes)
+- [ ] Consolidate route enumeration in `nowaki-core` (shared by typegen / prerender, with a test cross-checking the JS-side routeTable)
+- [ ] Restructure SECURITY.md and add a "Security invariants" section to AGENTS.md
+- [ ] Sanitize incoming headers at the Rust front (`x-forwarded-host` / `x-nowaki-*`, `NOWAKI_TRUST_PROXY`)
+- [ ] Jetstream: carry signed state in patches (fixes state resetting to initial values on reconnect)
+- [ ] Jetstream: make the session loop async; sidecar timeouts and error reporting
 
-### v0.14 「Gale」: Secure by default
-設定しなくても安全側で動く。主張はすべて CI で毎 push 検証する。
+### v0.14 "Gale": Secure by default
+Safe without any configuration. Every claim is verified in CI on every push.
 
-**Exit 基準**: SECURITY.md の「既定で有効な防御」の各行に、実装箇所と CI のチェックが対応している。security-e2e が dev と prod の両方で同じチェックを通る。
+**Exit criteria**: Each row of SECURITY.md's "defenses enabled by default" maps to an implementation location and a CI check. security-e2e passes the same checks in both dev and prod.
 
-- [ ] ページ action と非 GET リクエストの既定の Origin 検証（API ルートは段階導入、`export const csrf = false` で無効化）
-- [ ] 既定のセキュリティヘッダ（nosniff / frame-ancestors / Referrer-Policy / COOP、ISR の HIT にも付ける）
-- [ ] サーバー関数の本文と引数の上限、`serverFn(schema, impl)`（Standard Schema）、未検証の export への build 警告
-- [ ] prod でのエラー内容の露出を減らす（`ServerFnError`）、live 署名鍵の運用強化（未設定の警告、`iat` と最大寿命）
-- [ ] CI: 全モードで全チェック、edge 経路の単体テスト、`pnpm audit` を必須にする
-- [ ] CSP nonce 対応（まず Report-Only から）
+- [ ] Origin checks by default for page actions and non-GET requests (phased rollout for API routes; opt out with `export const csrf = false`)
+- [ ] Default security headers (nosniff / frame-ancestors / Referrer-Policy / COOP, also on ISR HITs)
+- [ ] Body and argument limits for server functions, `serverFn(schema, impl)` (Standard Schema), a build warning for unvalidated exports
+- [ ] Less error detail exposed in prod (`ServerFnError`); hardened handling of the live signing key (warning when unset, `iat` and max lifetime)
+- [ ] CI: all checks in all modes, unit tests for the edge path, make `pnpm audit` required
+- [ ] CSP nonce support (starting with Report-Only)
 
-### v0.15 「Cyclone」: Jetstream 2 ★flagship
-「npm エコシステムの LiveView、コンポーネント JS 0KB」を実用にする。フォームと入力、認証付きハンドラ、外部の変更を push する live query、接続をまたいで共有する状態（rooms）。
+### v0.15 "Cyclone": Jetstream 2 ★flagship
+Make "LiveView for the npm ecosystem, with 0KB of component JS" practical. Forms and inputs, authenticated handlers, live queries that push external changes, and state shared across connections (rooms).
 
-**Exit 基準**: 再接続とサーバー再起動をまたいで状態が続く。`publish()` で別の接続の島に patch が届く。2 タブの投票デモが部屋単位の在席表示付きで動く。1000 接続のファンアウト p95 を BENCHMARKS.md に記録している。
+**Exit criteria**: State survives reconnects and server restarts. `publish()` delivers patches to islands on other connections. A two-tab voting demo works with per-room presence. Fan-out p95 at 1000 connections is recorded in BENCHMARKS.md.
 
-- [ ] イベントの拡張（submit / input / change、debounce、keyed morph）
-- [ ] 安定した署名鍵、stale 通知、resume token（任意）
-- [ ] ハンドラからリクエスト文脈を読む（`getContext()`、`live.authorize`）
-- [ ] Live queries（`subscribe` / `load` / `publish`、Node→Rust のイベント経路）
-- [ ] Multiplayer rooms（`room` / `shared` / 部屋単位の presence）
-- [ ] 単一プロセス前提で edge 非対応であることを docs に明記
+- [ ] More events (submit / input / change, debounce, keyed morph)
+- [ ] Stable signing key, stale notifications, resume token (optional)
+- [ ] Read request context from handlers (`getContext()`, `live.authorize`)
+- [ ] Live queries (`subscribe` / `load` / `publish`, a Node→Rust event path)
+- [ ] Multiplayer rooms (`room` / `shared` / per-room presence)
+- [ ] Document in the docs that it assumes a single process and does not support edge
 
-### v0.16 「Chinook」: 数字で示す
-差別化を数字とツールで示す。
+### v0.16 "Chinook": Show it with numbers
+Prove the differentiation with numbers and tooling.
 
-**Exit 基準**: `nowaki build` がルートごとの first-load JS を表示し、予算を超えたら失敗する。TTFB と Jetstream のベンチ結果を docs に載せている。`nowaki dev` の MCP に Claude Code から接続できる。
+**Exit criteria**: `nowaki build` reports first-load JS per route and fails when a budget is exceeded. TTFB and Jetstream benchmark results are in the docs. Claude Code can connect to the `nowaki dev` MCP.
 
-- [ ] ルートごとのクライアント JS 予算（`export const budget`）
-- [ ] build 時の「この島は live にできる」提案（live 判定の AST 化を含む）
-- [ ] ISR / 静的ページを起動直後から Rust だけで返す（プリレンダの取り込み、ETag / 304、事前 gzip、TTFB 計測）
-- [ ] `nowaki dev` の MCP エンドポイント（ルート、モジュールグラフ、直近のエラー）
-- [ ] Jetstream の docs・デモ・ベンチの仕上げ
+- [ ] Per-route client JS budgets (`export const budget`)
+- [ ] Build-time "this island could be live" suggestions (including moving live detection to the AST)
+- [ ] Serve ISR / static pages from Rust alone right after startup (prerender ingestion, ETag / 304, pre-gzip, TTFB measurement)
+- [ ] An MCP endpoint for `nowaki dev` (routes, module graph, recent errors)
+- [ ] Polish Jetstream docs, demos, and benchmarks
 
-### v1.0 「Nowaki」: 安定版
-**Exit 基準**: 公開 API の安定保証、完全なドキュメント、ガバナンス確立。
+### v1.0 "Nowaki": Stable release
+**Exit criteria**: Stability guarantees for the public API, complete documentation, established governance.
 
-- [ ] 公開 API の安定保証 + 非互換ポリシー
-- [ ] 完全なドキュメントと移行ガイド
-- [ ] ガバナンス（メンテナ体制、RFC プロセス、リリース手順）
-- [ ] LTS / サポートポリシー
+- [ ] Stability guarantees for the public API + a breaking-change policy
+- [ ] Complete documentation and migration guides
+- [ ] Governance (maintainer structure, RFC process, release process)
+- [ ] LTS / support policy
 
-## 横断的に続くこと
+## Ongoing work
 
-マイルストーンを縦糸とすると、以下は横糸として常時進みます。
+If the milestones are the warp, the following is the weft that runs continuously.
 
-- DX: HMR、エラー表示、CLI 体験、型補完（`.d.ts`）、テンプレート拡充
-- 性能: バンドルグラフ、キャッシュ、ソースマップ、ベンチのリグレッション検出
-- エコシステム: アダプタ、プラグイン API、TSRX
-- 品質: テスト、`cargo audit` / `pnpm audit`、セキュリティレビュー
-- コミュニティ: ドキュメント、レシピ、RFC、コントリビュータ導線
+- DX: HMR, error display, CLI experience, type completion (`.d.ts`), more templates
+- Performance: bundle graph, caching, source maps, benchmark regression detection
+- Ecosystem: adapters, plugin API, TSRX
+- Quality: tests, `cargo audit` / `pnpm audit`, security reviews
+- Community: docs, recipes, RFCs, contributor onboarding

@@ -1,17 +1,17 @@
 import { useEffect } from "preact/hooks";
 
-// ページのモーションをまとめて制御する島。自分自身は何も描画しない。
-// 「最小JSを自分で証明する」サイトなので外部依存は載せない（WAAPI + IntersectionObserver + rAF だけ）。
-// 隠すのはヒーローだけで、prefers-reduced-motion では何もしない。
+// Island that drives all page motion. It renders nothing itself.
+// The site has to prove minimal JS itself, so no external deps (just WAAPI + IntersectionObserver + rAF).
+// Only the hero is hidden, and nothing happens under prefers-reduced-motion.
 const EXPO = "cubic-bezier(0.16,1,0.3,1)";
 const QUINT = "cubic-bezier(0.22,1,0.36,1)";
 
 export default function Animator() {
   useEffect(() => {
     const root = document.documentElement;
-    // reduced-motion（head が .anim を付けない）や、起動が遅れて保険が発火した場合は何もしない。
+    // Do nothing under reduced-motion (head doesn't add .anim) or if startup was late and the fallback already fired.
     if (!root.classList.contains("anim")) return;
-    root.classList.add("anim-on"); // head 側の「保険で全表示」タイマを止める
+    root.classList.add("anim-on"); // stop head's show-everything fallback timer
 
     const ac = new AbortController();
     const { signal } = ac;
@@ -39,7 +39,7 @@ export default function Animator() {
       observers.push(io);
     };
 
-    // 署名モーション: ヒーローのタイポが風で吹き込む
+    // Signature motion: the hero type blows in on the wind
     const lines = Array.from(root.querySelectorAll<HTMLElement>("[data-hero-title] > span"));
     const rest = Array.from(root.querySelectorAll<HTMLElement>("[data-hero] [data-reveal]")).filter(
       (el) => !el.closest("[data-hero-title]"),
@@ -64,11 +64,11 @@ export default function Animator() {
       );
     });
 
-    // 3ステップを読み方向(左→右)に順次出す
+    // Reveal the 3 steps in reading order (left -> right)
     const steps = document.querySelector<HTMLElement>("[data-steps]");
     if (steps) {
       const kids = Array.from(steps.children) as HTMLElement[];
-      kids.forEach((el) => (el.style.opacity = "0")); // 折り返し下なので先に伏せる（チラ見え防止）
+      kids.forEach((el) => (el.style.opacity = "0")); // below the fold, so hide first (prevents a flash)
       onEnter(steps, () => {
         kids.forEach((el, i) => {
           el.animate(
@@ -82,7 +82,7 @@ export default function Animator() {
       });
     }
 
-    // 送信JS量の棒はレイアウトを動かさないよう width ではなく scaleX で伸ばす
+    // Grow the shipped-JS bars with scaleX, not width, so layout doesn't shift
     Array.from(document.querySelectorAll<HTMLElement>(".bar-fill")).forEach((el) => {
       el.style.transform = "scaleX(0)";
       onEnter(el, () => {
@@ -94,14 +94,14 @@ export default function Animator() {
       });
     });
 
-    // 数字のカウントアップ（接頭/接尾を保ったまま数値だけ回す）
+    // Number count-up (spins only the number, keeping prefix/suffix)
     Array.from(document.querySelectorAll<HTMLElement>("[data-countup]")).forEach((el) => {
       const raw = el.textContent || "";
       const m = raw.match(/[\d.]+/);
       if (!m) return;
       const target = parseFloat(m[0]);
       const dec = (m[0].split(".")[1] || "").length;
-      el.textContent = raw.replace(m[0], (0).toFixed(dec)); // 先に0に（折り返し下なのでチラ見えしない）
+      el.textContent = raw.replace(m[0], (0).toFixed(dec)); // start at 0 (below the fold, so no flash)
       onEnter(el, () => {
         const dur = 1300;
         let start: number | null = null;
@@ -116,7 +116,7 @@ export default function Animator() {
       });
     });
 
-    // 折り返し以降をスクロールで立ち上げる。伏せるのは JS のみ（静的HTML/クローラ/JS無効では常に表示）。
+    // Reveal below-the-fold content on scroll. Only JS hides it (always visible for static HTML/crawlers/JS off).
     const riseKeys: Keyframe[] = [
       { opacity: 0, transform: "translateY(22px)", filter: "blur(6px)" },
       { opacity: 1, transform: "none", filter: "blur(0px)" },
@@ -143,7 +143,7 @@ export default function Animator() {
       });
     });
 
-    // スクロール: 進捗バー + ヒーロー透かしの視差。風のマーキーへ突風も渡す
+    // Scroll: progress bar + hero watermark parallax. Also passes gusts to the wind marquee
     const progress = document.querySelector<HTMLElement>("[data-progress]");
     const watermark = document.querySelector<HTMLElement>("[data-parallax]");
     const wmAmount = watermark ? parseFloat(watermark.dataset.parallax || "0.15") : 0;
@@ -174,7 +174,7 @@ export default function Animator() {
     window.addEventListener("scroll", onScroll, { passive: true, signal });
     updateScroll();
 
-    // 風のマーキー。スクロール速度で一瞬だけ加速する（突風）。視界外では止める。
+    // Wind marquee. Briefly speeds up with scroll velocity (a gust). Paused when offscreen.
     const track = document.querySelector<HTMLElement>("[data-marquee]");
     if (track) {
       let half = track.scrollWidth / 2;

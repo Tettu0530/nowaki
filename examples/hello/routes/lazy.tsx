@@ -1,5 +1,5 @@
-// 遅延ハイドレーション（client:* 指令）のデモ。client:visible は可視になるまで待ち、
-// client:idle はアイドル時、client:only は SSR せずクライアントだけで描画する。
+// Lazy hydration (client:* directives) demo. client:visible waits until visible,
+// client:idle hydrates when idle, and client:only skips SSR and renders on the client only.
 import Counter from "../islands/Counter.tsx";
 import ClientOnly from "../islands/ClientOnly.tsx";
 
@@ -11,7 +11,7 @@ export default function Lazy() {
       <h1>Lazy hydration</h1>
 
       <section data-testid="sec-load">
-        <h2>client:load（既定・即時）</h2>
+        <h2>client:load (default, immediate)</h2>
         <Counter start={0} />
       </section>
 
@@ -21,11 +21,11 @@ export default function Lazy() {
       </section>
 
       <section data-testid="sec-only">
-        <h2>client:only（SSR なし）</h2>
+        <h2>client:only (no SSR)</h2>
         <ClientOnly client:only />
       </section>
 
-      {/* 下のカウンタを折り返しの下へ押しやる（可視になるまでハイドレートしない） */}
+      {/* Push the counter below the fold (it doesn't hydrate until visible) */}
       <div style="height:150vh" aria-hidden="true" />
 
       <section data-testid="sec-visible">

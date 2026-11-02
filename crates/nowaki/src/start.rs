@@ -1,7 +1,7 @@
-//! 本番配信の Rust ホットパス。`nowaki start` が使う。
+//! Rust hot path for production serving. Used by `nowaki start`.
 //!
-//! Rust(axum) が HTTP エッジ・静的配信・HTML 組み立てを担い、Node の prod-sidecar は
-//! コンポーネント描画だけを行う（ページは body+メタを JSON で返す）。デプロイアダプタとは別経路。
+//! Rust (axum) handles the HTTP edge, static files, and HTML assembly; the Node prod-sidecar
+//! only renders components (pages return body + meta as JSON). Separate from the deploy adapters.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -48,35 +48,35 @@ struct ProdState {
     manifest: Manifest,
     live_hub: Arc<crate::live::LiveHub>,
     isr: IsrCache,
-    _child: Child, // kill_on_drop で終了時にサイドカーを落とす
+    _child: Child, // kill_on_drop kills the sidecar on exit
 }
 
-/// ISR のメモリキャッシュ（`export const revalidate = <秒>` のルート、stale-while-revalidate）。
+/// In-memory ISR cache (routes with `export const revalidate = <seconds>`, stale-while-revalidate).
 struct IsrCache {
     entries: Mutex<HashMap<String, Arc<CacheEntry>>>,
-    inflight: Mutex<HashSet<String>>,        // 再検証の単一フライト
-    specs: Mutex<HashMap<String, VarySpec>>, // pathname → 学習した Vary 仕様
-    max: usize,                              // エントリ数の上限（超過時は最古を追い出す）
+    inflight: Mutex<HashSet<String>>, // revalidation single-flight
+    specs: Mutex<HashMap<String, VarySpec>>, // learned Vary spec per pathname
+    max: usize,                       // entry cap (oldest evicted when exceeded)
 }
 
-/// ルートの描画が依存する入力（Vary）。x-nowaki-vary から学習してキャッシュキーに含め、
-/// ヘッダ依存ページのクロスユーザー漏れと未使用クエリによるキャッシュ氾濫を防ぐ。
+/// Inputs a route's render depends on (Vary). Learned from x-nowaki-vary and folded into the cache key
+/// to prevent cross-user leaks on header-dependent pages and cache floods from unused queries.
 #[derive(Default, Clone)]
 struct VarySpec {
-    query: bool,                                 // クエリ文字列に依存するか
-    headers: std::collections::BTreeSet<String>, // 依存するリクエストヘッダ名（小文字, 安定順）
-    no_cache: bool,                              // 全ヘッダ依存("*") → キャッシュ不可
+    query: bool,                                 // depends on the query string
+    headers: std::collections::BTreeSet<String>, // request header names depended on (lowercase, stable order)
+    no_cache: bool,                              // depends on all headers ("*") → uncacheable
 }
 
 struct CacheEntry {
     status: u16,
     html: String,
-    headers: Vec<(String, String)>, // 復元する応答ヘッダ（cookie/長さ系は除外済み）
+    headers: Vec<(String, String)>, // response headers to restore (cookie/length headers excluded)
     stored_at: Instant,
     revalidate: Duration,
-    // 裏での再検証で同一 variant を再生成するためのリクエスト文脈。
-    refetch_path: String,                   // サイドカーへ投げる path(+query)
-    refetch_headers: Vec<(String, String)>, // 織り込んだ Vary ヘッダの実値
+    // Request context for regenerating the same variant during background revalidation.
+    refetch_path: String,                   // path(+query) sent to the sidecar
+    refetch_headers: Vec<(String, String)>, // actual values of the folded-in Vary headers
 }
 
 impl IsrCache {
@@ -100,14 +100,14 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
     let client_dir = root.join("dist/client");
     if !client_dir.join("manifest.json").exists() {
         anyhow::bail!(
-            "まだビルドされていません。先に `nowaki build {}` を実行してください。",
+            "Not built yet. Run `nowaki build {}` first.",
             root.display()
         );
     }
     let entry = root.join("node_modules/@nowaki-dev/runtime/server/prod-sidecar.mjs");
     if !entry.exists() {
         anyhow::bail!(
-            "依存がインストールされていません（{} が見つかりません）。\n  → アプリのディレクトリで `npm install` を実行してください。",
+            "Dependencies are not installed ({} not found).\n  → Run `npm install` in the app directory.",
             entry.display()
         );
     }
@@ -120,19 +120,19 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         .stderr(Stdio::inherit())
         .kill_on_drop(true)
         .spawn()
-        .context("prod-sidecar (node) の起動に失敗")?;
+        .context("failed to start prod-sidecar (node)")?;
     let stdout = child.stdout.take().expect("piped stdout");
     let mut lines = BufReader::new(stdout).lines();
     let mut sidecar_port = None;
     while let Some(line) = lines.next_line().await? {
         if let Some(rest) = line.strip_prefix("NOWAKI_START_READY ") {
-            sidecar_port = Some(rest.trim().parse::<u16>().context("サイドカーポート不正")?);
+            sidecar_port = Some(rest.trim().parse::<u16>().context("invalid sidecar port")?);
             break;
         }
         println!("[sidecar] {line}");
     }
     let sidecar_port =
-        sidecar_port.ok_or_else(|| anyhow!("prod-sidecar が READY を報告せず終了しました"))?;
+        sidecar_port.ok_or_else(|| anyhow!("prod-sidecar exited without reporting READY"))?;
     tokio::spawn(async move {
         while let Ok(Some(l)) = lines.next_line().await {
             println!("[sidecar] {l}");
@@ -165,7 +165,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         .with_state(state);
     let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
     let actual = listener.local_addr()?.port();
-    // PORT=0 のときの実ポートも報告（prerender / アダプタ / bench が grep するマーカー。維持）。
+    // Also report the actual port when PORT=0 (a marker grepped by prerender / adapters / bench; keep it).
     println!("NOWAKI_START_READY {actual}");
     crate::ui::server_banner(
         "Nowaki (production)",
@@ -193,8 +193,8 @@ async fn live_ws(
     ws.on_upgrade(move |socket| crate::live::handle(socket, hub, http, port, "prod".to_string()))
 }
 
-/// WS upgrade の Origin を検証する（CSWSH 対策）。本番は公開前提なので Origin==Host のみ許可
-/// （Origin 無し = 非ブラウザは許可）。
+/// Validate the WS upgrade Origin (CSWSH guard). Prod is assumed public, so only Origin==Host is allowed
+/// (no Origin = non-browser is allowed).
 fn prod_ws_origin_ok(headers: &axum::http::HeaderMap) -> bool {
     let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
         return true;
@@ -210,7 +210,7 @@ fn prod_ws_origin_ok(headers: &axum::http::HeaderMap) -> bool {
 
 async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
     let path = req.uri().path().to_string();
-    // 静的アセットは Rust が直接配信（高ボリュームのホットパス）。
+    // Rust serves static assets directly (high-volume hot path).
     if req.method() == Method::GET && path.starts_with("/_nowaki/") {
         return serve_static(&state, &path).await;
     }
@@ -236,7 +236,7 @@ async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
     proxy(state, req, false).await
 }
 
-/// ヘッダ値は BTreeSet の安定順で織り込む。
+/// Header values are folded in the BTreeSet's stable order.
 fn isr_key(
     pathname: &str,
     query: Option<&str>,
@@ -255,7 +255,7 @@ fn isr_key(
             .get(name.as_str())
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
-        k.push('\u{1f}'); // Unit Separator: ヘッダ境界（値に出ない制御文字）
+        k.push('\u{1f}'); // Unit Separator: header boundary (a control char that never appears in values)
         k.push_str(name);
         k.push('=');
         k.push_str(val);
@@ -285,7 +285,7 @@ fn cached_response(entry: &CacheEntry, cache_status: &str) -> Response {
         .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
 }
 
-/// 単一フライト: 同じキーの再検証は1本だけ走らせる。
+/// Single-flight: only one revalidation runs per key.
 fn spawn_revalidate(state: Arc<ProdState>, key: String) {
     {
         let mut inflight = state.isr.inflight.lock().unwrap();
@@ -299,7 +299,7 @@ fn spawn_revalidate(state: Arc<ProdState>, key: String) {
     });
 }
 
-/// クリーン GET ではなく保存時の variant（path+query と Vary ヘッダ値）を replay する。
+/// Replays the stored variant (path+query and Vary header values), not a clean GET.
 async fn revalidate_entry(state: &Arc<ProdState>, key: &str) -> Option<()> {
     let (refetch_path, refetch_headers) = {
         let e = state.isr.entries.lock().unwrap().get(key).cloned()?;
@@ -316,7 +316,7 @@ async fn revalidate_entry(state: &Arc<ProdState>, key: &str) -> Option<()> {
     Some(())
 }
 
-/// 条件: 200 / x-nowaki-page / x-nowaki-revalidate>0 / Set-Cookie 無し（per-user は除外）。
+/// Conditions: 200 / x-nowaki-page / x-nowaki-revalidate>0 / no Set-Cookie (per-user excluded).
 async fn page_to_entry(
     state: &ProdState,
     resp: reqwest::Response,
@@ -354,7 +354,7 @@ fn isr_secs_of(h: &reqwest::header::HeaderMap) -> Option<u64> {
         .filter(|n| *n > 0)
 }
 
-/// Set-Cookie は共有キャッシュから復元しない。
+/// Set-Cookie is never restored from the shared cache.
 fn kept_headers(h: &reqwest::header::HeaderMap) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for (name, value) in h.iter() {
@@ -374,7 +374,7 @@ fn kept_headers(h: &reqwest::header::HeaderMap) -> Vec<(String, String)> {
     out
 }
 
-/// x-nowaki-vary から pathname ごとの spec を学習してから保存する。`"*"` は安全側でキャッシュ不可。
+/// Learn the per-pathname spec from x-nowaki-vary, then store. `"*"` is uncacheable, to be safe.
 #[allow(clippy::too_many_arguments)]
 fn maybe_store(
     state: &Arc<ProdState>,
@@ -449,7 +449,7 @@ fn maybe_store(
     );
 }
 
-/// 上限超過時はまず同一 pathname の最古を追い出す（クエリ/ヘッダ氾濫で他ルートを巻き込まない）。
+/// When over the cap, evict the oldest entry of the same pathname first (a query/header flood doesn't hit other routes).
 fn isr_store(state: &ProdState, key: &str, entry: CacheEntry) {
     let mut map = state.isr.entries.lock().unwrap();
     if map.len() >= state.isr.max && !map.contains_key(key) {
@@ -472,7 +472,7 @@ fn isr_store(state: &ProdState, key: &str, entry: CacheEntry) {
 }
 
 async fn serve_static(state: &ProdState, path: &str) -> Response {
-    let name = path.rsplit('/').next().unwrap_or(""); // basename で traversal 防止
+    let name = path.rsplit('/').next().unwrap_or(""); // basename prevents traversal
     let file = state.client_dir.join(name);
     match tokio::fs::read(&file).await {
         Ok(bytes) => (
@@ -504,7 +504,7 @@ async fn proxy(state: Arc<ProdState>, req: Request, cacheable: bool) -> Response
     };
 
     let mut builder = state.http.request(method, &url).body(body.to_vec());
-    // 元 Host は剥がすが、同一オリジン検証（サーバー関数の CSRF 対策）用に転送する。
+    // Strip the original Host but forward it for the same-origin check (server function CSRF guard).
     if let Some(host) = headers.get(header::HOST) {
         builder = builder.header("x-forwarded-host", host);
     }
@@ -519,7 +519,7 @@ async fn proxy(state: Arc<ProdState>, req: Request, cacheable: bool) -> Response
         Err(err) => {
             return (
                 StatusCode::BAD_GATEWAY,
-                format!("prod-sidecar への接続に失敗: {err}"),
+                format!("failed to connect to prod-sidecar: {err}"),
             )
                 .into_response()
         }
@@ -557,7 +557,7 @@ async fn proxy(state: Arc<ProdState>, req: Request, cacheable: bool) -> Response
             }
             builder = builder.header(name, value);
         }
-        // per-user 応答（Set-Cookie 付き）は共有キャッシュに入れない。
+        // Per-user responses (with Set-Cookie) never go into the shared cache.
         if let Some(secs) = isr_secs {
             if !resp_headers.contains_key(header::SET_COOKIE) {
                 maybe_store(
@@ -576,7 +576,7 @@ async fn proxy(state: Arc<ProdState>, req: Request, cacheable: bool) -> Response
             .body(Body::from(html))
             .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
     } else {
-        // 素通し（API / redirect / stream / streaming SSR / 組み込み 404・500）。
+        // Pass through (API / redirect / stream / streaming SSR / built-in 404/500).
         let mut builder = Response::builder().status(status.as_u16());
         for (name, value) in resp_headers.iter() {
             if name != header::TRANSFER_ENCODING && name != header::CONTENT_LENGTH {
@@ -589,7 +589,7 @@ async fn proxy(state: Arc<ProdState>, req: Request, cacheable: bool) -> Response
     }
 }
 
-/// prodDocument(JS) の Rust 版。island は body 中の <nowaki-island name="..."> から拾う。
+/// Rust port of prodDocument (JS). Islands are picked from <nowaki-island name="..."> in the body.
 fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
     let island_names = scan_island_names(&meta.body);
     let has_islands = !island_names.is_empty() && manifest.runtime.is_some();
@@ -623,7 +623,7 @@ fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     let runtime_script = if has_islands {
-        // data-router に遅延ルーターチャンクの URL を載せる（islands.js が idle で import）。
+        // Put the lazy router chunk's URL in data-router (islands.js imports it when idle).
         let data_router = match &manifest.router_runtime {
             Some(r) => format!(" data-router=\"/_nowaki/{r}\""),
             None => String::new(),

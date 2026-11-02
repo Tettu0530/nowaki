@@ -1,13 +1,13 @@
-//! サーバー関数（`"use server"`）。RSC 的なサーバー↔クライアント境界。
+//! Server functions (`"use server"`). An RSC-style server↔client boundary.
 //!
-//! トップに `"use server"` ディレクティブを持つモジュールは「サーバーモジュール」になり、
-//! その export 関数はサーバーにだけ残る RPC エンドポイントになる。クライアントへは実装の
-//! 代わりに極小プロキシ（`POST /__nowaki/fn` へ転送する async 関数）だけを出力する。
-//! サーバー専用の依存（DB ドライバ等）をクライアントグラフへ引き込まないよう、
-//! ビルド/dev の双方でサーバーモジュールは「依存ゼロの境界」として扱う。
+//! A module with a top-level `"use server"` directive becomes a "server module", and its
+//! exported functions become RPC endpoints that stay on the server. The client gets only
+//! a tiny proxy instead of the implementation (async functions forwarding to `POST /__nowaki/fn`).
+//! To keep server-only dependencies (DB drivers etc.) out of the client graph, both build
+//! and dev treat server modules as a "zero-dependency boundary".
 //!
-//! id は `<moduleKey>#<export>` の安定ハッシュ。moduleKey は拡張子を除いたルート相対 posix パス
-//! なので、クライアントのプロキシとサーバーの allowlist が同じ id を独立に算出できる。
+//! The id is a stable hash of `<moduleKey>#<export>`. moduleKey is the root-relative posix path
+//! without extension, so the client proxy and the server allowlist compute the same id independently.
 
 use std::path::Path;
 
@@ -18,17 +18,17 @@ use oxc::parser::Parser;
 use oxc::span::SourceType;
 use xxhash_rust::xxh3::xxh3_64;
 
-/// クライアントから 1 リクエストで呼ぶ RPC エンドポイント。
+/// RPC endpoint the client calls in a single request.
 pub const SERVER_FN_PATH: &str = "/__nowaki/fn";
 
-/// このソースがサーバーモジュール（先頭に `"use server"` ディレクティブ）か。
-/// 構文解析せず、ディレクティブプロローグ（先頭の文字列リテラル文の並び）だけを走査する。
+/// Whether this source is a server module (leading `"use server"` directive).
+/// Doesn't parse; scans only the directive prologue (the leading run of string-literal statements).
 pub fn has_use_server(source: &str) -> bool {
     has_directive(source, "use server")
 }
 
-/// 先頭のディレクティブプロローグに `want` ディレクティブがあるか。
-/// 空白・行/ブロックコメント・先行する他ディレクティブ（"use strict" 等）を飛ばす。
+/// Whether the leading directive prologue contains the `want` directive.
+/// Skips whitespace, line/block comments, and preceding other directives ("use strict" etc.).
 fn has_directive(source: &str, want: &str) -> bool {
     let bytes = source.as_bytes();
     let mut i = 0;
@@ -57,7 +57,7 @@ fn has_directive(source: &str, want: &str) -> bool {
         let quote = match bytes.get(i) {
             Some(&b'"') => b'"',
             Some(&b'\'') => b'\'',
-            _ => return false, // ディレクティブ以外の文 → プロローグ終わり
+            _ => return false, // non-directive statement → end of prologue
         };
         let start = i + 1;
         let mut j = start;
@@ -73,7 +73,7 @@ fn has_directive(source: &str, want: &str) -> bool {
         if &source[start..j] == want {
             return true;
         }
-        // 別ディレクティブだった: 閉じquote と任意の `;`・空白を飛ばして次へ
+        // A different directive: skip the closing quote, optional `;`, and whitespace, then continue
         i = j + 1;
         while i < bytes.len() && (bytes[i] == b';' || bytes[i].is_ascii_whitespace()) {
             i += 1;
@@ -81,13 +81,13 @@ fn has_directive(source: &str, want: &str) -> bool {
     }
 }
 
-/// 拡張子を除いたルート相対 posix パス（id 計算の安定キー）。
+/// Root-relative posix path without extension (stable key for id computation).
 pub fn module_key(root: &Path, abs: &Path) -> String {
     let rel = abs.strip_prefix(root).unwrap_or(abs);
     rel.with_extension("").to_string_lossy().replace('\\', "/")
 }
 
-/// ルート相対 posix パス（拡張子つき）。
+/// Root-relative posix path (with extension).
 pub fn source_rel(root: &Path, abs: &Path) -> String {
     abs.strip_prefix(root)
         .unwrap_or(abs)
@@ -95,7 +95,7 @@ pub fn source_rel(root: &Path, abs: &Path) -> String {
         .replace('\\', "/")
 }
 
-/// サーバー関数の安定 id（`<moduleKey>#<export>` の 64bit ハッシュを 16 桁 hex で）。
+/// Stable server function id (64-bit hash of `<moduleKey>#<export>` as 16 hex digits).
 pub fn server_fn_id(module_key: &str, export: &str) -> String {
     format!(
         "{:016x}",
@@ -103,8 +103,8 @@ pub fn server_fn_id(module_key: &str, export: &str) -> String {
     )
 }
 
-/// モジュールが export する名前を集める（named 宣言・`export {a}`・default）。
-/// `export * from` や `export {a} from` の再 export は対象外（プロキシ不能なため）。
+/// Collects the names a module exports (named declarations, `export {a}`, default).
+/// Re-exports like `export * from` and `export {a} from` are excluded (they can't be proxied).
 pub fn collect_exports(abs: &Path, source: &str) -> Result<Vec<String>> {
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(abs).unwrap_or_else(|_| SourceType::tsx());
@@ -138,19 +138,19 @@ pub fn collect_exports(abs: &Path, source: &str) -> Result<Vec<String>> {
     Ok(out)
 }
 
-/// サーバーモジュールのクライアントプロキシソースを生成する（依存なしのリーフ）。
-/// 各 export は `fetch(SERVER_FN_PATH)` する async 関数。実装はクライアントに出ない。
+/// Generates the client proxy source for a server module (a dependency-free leaf).
+/// Each export is an async function that does `fetch(SERVER_FN_PATH)`. The implementation never reaches the client.
 pub fn client_proxy(module_key: &str, exports: &[String]) -> String {
     let mut out = String::new();
     out.push_str(
-        "// nowaki: \"use server\" モジュールのクライアントプロキシ（実装はサーバーに留まる）。\n",
+        "// nowaki: client proxy for a \"use server\" module (the implementation stays on the server).\n",
     );
-    // `<form action={serverFn}>` で渡される FormData を JSON 化できるようオブジェクト化する。
+    // Turn the FormData passed by `<form action={serverFn}>` into an object so it can be JSON-encoded.
     out.push_str(
         "const __nowakiArg = (a) => (typeof FormData !== \"undefined\" && a instanceof FormData) ? Object.fromEntries(a) : a;\n",
     );
-    // プロキシ本体。`<form action={fn}>` で使えるよう、toString は `__nowaki_action:<id>` を返す
-    // （preact は関数 action を文字列化して属性に入れるので、クライアントの form 傍受がこれを拾う）。
+    // The proxy itself. For `<form action={fn}>`, toString returns `__nowaki_action:<id>`
+    // (preact stringifies a function action into the attribute, and the client form interceptor picks it up).
     out.push_str(&format!(
         "const __nowakiCall = (id) => {{\n  \
 const fn = async (...args) => {{\n    \
@@ -177,18 +177,18 @@ return fn;\n\
     out
 }
 
-/// 検出したサーバー関数 1 つ分。
+/// One discovered server function.
 pub struct DiscoveredFn {
     pub id: String,
-    /// ルート相対 posix パス（拡張子つき, dev のソース import 用）
+    /// Root-relative posix path (with extension, for dev source imports)
     pub source_rel: String,
-    /// 拡張子を除いた moduleKey
+    /// moduleKey without extension
     pub module_key: String,
     pub export: String,
 }
 
-/// 指定ディレクトリ（ルート相対名）配下を走査し、サーバー関数を全部集める。
-/// dev（ソースを直接 import）と build（functions.json）の両方が同じ結果を使う。
+/// Scans the given directories (root-relative names) and collects every server function.
+/// Both dev (imports sources directly) and build (functions.json) use the same result.
 pub fn discover(core: &crate::NowakiCore, dirs: &[&str]) -> Vec<DiscoveredFn> {
     let mut out = Vec::new();
     for sub in dirs {
@@ -279,12 +279,12 @@ mod tests {
     fn detects_use_server_directive() {
         assert!(has_use_server("\"use server\";\nexport function a(){}"));
         assert!(has_use_server("'use server'\nexport const b = 1"));
-        // 先行コメント・空行を飛ばす
+        // skips leading comments and blank lines
         assert!(has_use_server("// top\n\n  \"use server\";\n"));
         assert!(has_use_server("/* c */ \"use server\";"));
-        // 別ディレクティブの後でも拾う
+        // found even after another directive
         assert!(has_use_server("\"use strict\";\n\"use server\";"));
-        // 本体の途中の文字列は誤検出しない
+        // strings mid-body are not false positives
         assert!(!has_use_server("export const x = \"use server\";"));
         assert!(!has_use_server("const a = 1;\n\"use server\";"));
         assert!(!has_use_server(
@@ -309,7 +309,7 @@ mod tests {
     fn id_is_stable_and_distinct() {
         let a = server_fn_id("actions/todos", "addTodo");
         let a2 = server_fn_id("actions/todos", "addTodo");
-        assert_eq!(a, a2, "同じ入力は同じ id");
+        assert_eq!(a, a2, "same input, same id");
         assert_ne!(a, server_fn_id("actions/todos", "listTodos"));
         assert_ne!(a, server_fn_id("actions/other", "addTodo"));
         assert_eq!(a.len(), 16);
@@ -339,7 +339,7 @@ export default async function(){}\n";
         assert!(proxy.contains("export const addTodo = __nowakiCall("));
         assert!(proxy.contains("export default __nowakiCall("));
         assert!(proxy.contains(SERVER_FN_PATH));
-        // 実装の痕跡が無い
+        // no trace of the implementation
         assert!(!proxy.contains("function addTodo"));
     }
 }

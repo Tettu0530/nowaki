@@ -1,7 +1,7 @@
-// プラグインホスト。Rust（dev/build）から起動され、nowaki.config のプラグインフックを
-// HTTP で提供する。起動完了は stdout の "NOWAKI_PLUGIN_HOST_READY <port>" で通知する。
+// Plugin host. Spawned by Rust (dev/build); serves nowaki.config plugin hooks
+// over HTTP. Signals readiness with "NOWAKI_PLUGIN_HOST_READY <port>" on stdout.
 //
-// nowaki.config.mjs（または .js）:
+// nowaki.config.mjs (or .js):
 //   export default {
 //     plugins: [
 //       { name: "my-plugin", transform(code, id) { return code.replaceAll("__X__", "1"); } },
@@ -33,8 +33,8 @@ const transformers = plugins.filter((p) => typeof p.transform === "function");
 const resolvers = plugins.filter((p) => typeof p.resolveId === "function");
 const loaders = plugins.filter((p) => typeof p.load === "function");
 
-// アプリに @tsrx/preact があれば .tsrx を JSX へコンパイルする。このホストは runtime
-// パッケージ配下にあるので、アプリの node_modules を基準に解決する。
+// If the app has @tsrx/preact, compile .tsrx to JSX. This host lives under the runtime
+// package, so resolve relative to the app's node_modules.
 let tsrxCompile = null;
 try {
   const appRequire = createRequire(path.join(appRoot, "package.json"));
@@ -43,7 +43,7 @@ try {
   if (typeof mod.compile === "function") tsrxCompile = mod.compile;
 } catch {}
 
-// 前段の出力を次段へ渡す。誰も変えなければ null。
+// Pipes each stage's output to the next. null if nobody changed it.
 async function runTransform(id, code) {
   let current = code;
   let changed = false;
@@ -59,7 +59,7 @@ async function runTransform(id, code) {
   return changed ? current : null;
 }
 
-// 最初に id を返したプラグインが優先される。
+// The first plugin to return an id wins.
 async function runResolveId(source, importer) {
   for (const p of resolvers) {
     const out = await p.resolveId(source, importer);
@@ -70,7 +70,7 @@ async function runResolveId(source, importer) {
   return null;
 }
 
-// 最初にソースを返したプラグインが優先される。
+// The first plugin to return source wins.
 async function runLoad(id) {
   for (const p of loaders) {
     const out = await p.load(id);
@@ -81,7 +81,7 @@ async function runLoad(id) {
   return null;
 }
 
-// Rust 側の素朴な HTTP クライアントが chunked を扱わずに済むよう Content-Length を明示する。
+// Set Content-Length explicitly so the simple Rust HTTP client needn't handle chunked.
 function sendJson(res, status, obj) {
   const json = JSON.stringify(obj);
   res.writeHead(status, {

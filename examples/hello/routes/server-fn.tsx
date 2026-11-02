@@ -3,7 +3,7 @@ import ServerTodos from "../islands/ServerTodos.tsx";
 
 export const title = "Server functions — Nowaki";
 
-// サーバー → サーバーは直接呼べる（HTTP を経由しない）。loader でそのまま await する。
+// Server-to-server calls are direct (no HTTP). Just await it in the loader.
 export const loader = async () => {
   return await listTodos();
 };
@@ -15,8 +15,8 @@ export default function Page({ data }: { data: Data }) {
     <main style="font-family:sans-serif;max-width:640px;margin:4rem auto">
       <h1>Server functions</h1>
       <p>
-        <code>"use server"</code> モジュールの export は RPC 境界です。実装はサーバーに残り、
-        クライアントには fetch する極小プロキシだけが届きます。
+        Exports of a <code>"use server"</code> module are an RPC boundary. The implementation stays on the server,
+        and the client only gets a tiny proxy that calls fetch.
       </p>
       <ServerTodos initial={data} />
       <p style="margin-top:2rem">

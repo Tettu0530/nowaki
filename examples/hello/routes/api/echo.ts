@@ -1,4 +1,4 @@
-// API のメソッド別 export（GET / POST）。default の代わりにメソッド名で分岐できる。
+// Per-method API exports (GET / POST). Dispatch by method name instead of default.
 type Ctx = {
   url: URL;
   json: (data: unknown) => unknown;

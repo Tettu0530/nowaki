@@ -1,43 +1,44 @@
-# リリース手順
+# Releasing
 
-## バージョニング方針
+## Versioning policy
 
-Nowaki は [SemVer](https://semver.org/) に従う。ただし **0.x alpha** の間は次のとおりとする。
+Nowaki follows [SemVer](https://semver.org/). During **0.x alpha**, however:
 
-- **minor（0.x.0）** は新機能と破壊的変更を含みうる。破壊的変更は必ず
-  [CHANGELOG.md](../CHANGELOG.md) に明記し、移行メモを添える。
-- **patch（0.x.y）** はバグ修正のみ。破壊的変更は入れない。
-- 公開 API（CLI コマンド・オーサリング規約・`@nowaki-dev/runtime` の公開
-  エクスポート）が概ね固定できたら **1.0.0** とし、そこからは破壊的変更を
-  major でのみ行う。
-- crate・npm の全パッケージは同一バージョンで揃える（同じコミットから出す）。
-- すべての release に対応するタグ `vX.Y.Z` と CHANGELOG 項目を用意する。
+- **minor (0.x.0)** may include new features and breaking changes. Breaking
+  changes must always be called out in [CHANGELOG.md](../CHANGELOG.md) with
+  migration notes.
+- **patch (0.x.y)** is bug fixes only. No breaking changes.
+- Once the public API (CLI commands, authoring conventions, the public exports
+  of `@nowaki-dev/runtime`) is mostly settled, we go to **1.0.0**; from then on
+  breaking changes happen only in a major.
+- All crate and npm packages share the same version (released from the same commit).
+- Every release has a matching `vX.Y.Z` tag and CHANGELOG entry.
 
-## 配布チャンネル
+## Distribution channels
 
-Nowaki は次の2系統で配布する。
+Nowaki ships through two channels:
 
-- **crates.io**: `nowaki` / `nowaki-core`（`cargo install nowaki`）
-- **npm**: `nowaki`（プリビルドバイナリの wrapper）+ `@nowaki-dev/cli-<platform>` ×5、`@nowaki-dev/runtime`、`create-nowaki`
+- **crates.io**: `nowaki` / `nowaki-core` (`cargo install nowaki`)
+- **npm**: `nowaki` (wrapper for the prebuilt binaries) + 5× `@nowaki-dev/cli-<platform>`, `@nowaki-dev/runtime`, `create-nowaki`
 
-npm の CLI は esbuild/biome 方式をとる。プラットフォーム別バイナリを `optionalDependencies`
-で配り、`packages/nowaki-cli/bin/nowaki.js`（postinstall 不要のシム）が実行時に解決して
-exec する。
+The npm CLI follows the esbuild/biome approach. Per-platform binaries ship as
+`optionalDependencies`, and `packages/nowaki-cli/bin/nowaki.js` (a shim that
+needs no postinstall) resolves and execs the right one at runtime.
 
-## 前提
+## Prerequisites
 
-一度だけ、リポジトリの **Secrets に `NPM_TOKEN`** を登録する（npm の Automation token、
-`@nowaki-dev` org と未スコープ `nowaki` に publish 権限があること）。
+Once, register **`NPM_TOKEN` in the repository Secrets** (an npm Automation
+token with publish rights to the `@nowaki-dev` org and the unscoped `nowaki`).
 
-## バージョンを上げる
+## Bumping the version
 
-以下を同じバージョンに揃える。
+Set all of the following to the same version:
 
-1. `Cargo.toml` の `[workspace.package] version`（crate のバージョンで、`build-npm.mjs` もここから読む）
-2. `packages/nowaki-cli/package.json` の `version` と `optionalDependencies` の各 `@nowaki-dev/cli-*`
-3. （必要なら）`packages/create-nowaki/template/package.json` の `devDependencies.nowaki`
+1. `[workspace.package] version` in `Cargo.toml` (the crate version; `build-npm.mjs` reads it from here too)
+2. `version` in `packages/nowaki-cli/package.json` and each `@nowaki-dev/cli-*` in its `optionalDependencies`
+3. (If needed) `devDependencies.nowaki` in `packages/create-nowaki/template/package.json`
 
-## 公開する
+## Publishing
 
 ### crates.io
 
@@ -46,32 +47,33 @@ cargo publish -p nowaki-core
 cargo publish -p nowaki
 ```
 
-### npm CLI（自動）
+### npm CLI (automated)
 
-バージョンタグを push すると、リリース CI（`.github/workflows/release.yml`）が
-5プラットフォームをビルドして全パッケージを publish する。
+Pushing a version tag makes the release CI (`.github/workflows/release.yml`)
+build all 5 platforms and publish every package.
 
 ```bash
 git tag v0.1.2
 git push origin v0.1.2
 ```
 
-- `build` ジョブ: 各ターゲットをビルドし、`node scripts/build-npm.mjs <key> --no-build`
-  でパッケージ化して、`@nowaki-dev/cli-<key>` を publish する。
-- `publish-wrapper` ジョブ: 全ビルドの後に wrapper `nowaki` を publish する。
-- 手動実行（workflow_dispatch）で `dry_run=true` にすると、ビルドだけを実行する。
+- `build` job: builds each target, packages it with
+  `node scripts/build-npm.mjs <key> --no-build`, and publishes `@nowaki-dev/cli-<key>`.
+- `publish-wrapper` job: publishes the `nowaki` wrapper after all builds finish.
+- A manual run (workflow_dispatch) with `dry_run=true` only runs the builds.
 
 ### npm runtime / create-nowaki
 
-各 `package.json` の version を上げてから、`Publish npm packages`
-ワークフロー（`.github/workflows/publish-npm.yml`）を手動実行する。`package`
-入力で対象を選ぶ。既定の `all` は runtime と create-nowaki、create-nowaki-app を対象にする。
-release.yml と同じ `NPM_TOKEN` を使う。
+Bump the version in each `package.json`, then manually run the
+`Publish npm packages` workflow (`.github/workflows/publish-npm.yml`). Pick the
+target with the `package` input; the default `all` covers runtime,
+create-nowaki, and create-nowaki-app. It uses the same `NPM_TOKEN` as release.yml.
 
-注: `@nowaki-dev/runtime` は、同じコミットから出すため CLI とバージョンを揃える。
-scaffold テンプレートの `@nowaki-dev/runtime` 依存も合わせて上げる。
+Note: `@nowaki-dev/runtime` shares its version with the CLI, since both are
+released from the same commit. Bump the scaffold template's
+`@nowaki-dev/runtime` dependency to match.
 
-npm にログイン済みなら、ローカルから手で publish する場合は次のようにする。
+To publish by hand from your machine (while logged in to npm):
 
 ```bash
 cd packages/nowaki-runtime && npm publish
@@ -79,14 +81,15 @@ cd packages/create-nowaki   && npm publish
 cd packages/create-nowaki-app && npm publish
 ```
 
-## ローカル動作確認
+## Local verification
 
-任意のターゲットを手元で組み立てて確認できる。実行できるのは、ホストと同じ key のターゲットに限られる。
+You can assemble any target locally to check it. Only a target whose key
+matches the host can actually run.
 
 ```bash
-node scripts/build-npm.mjs darwin-arm64   # 例: Apple Silicon
-# 生成物: packages/nowaki-cli/npm/darwin-arm64/{package.json, bin/nowaki}
+node scripts/build-npm.mjs darwin-arm64   # e.g. Apple Silicon
+# Output: packages/nowaki-cli/npm/darwin-arm64/{package.json, bin/nowaki}
 ```
 
-CI の `npm CLI wrapper (smoke)` ジョブ（`ci.yml`）が、ホスト用パッケージを組み立てて
-wrapper シム経由で `nowaki --version` が通ることを毎 PR で検証する。
+On every PR, the `npm CLI wrapper (smoke)` job in `ci.yml` assembles the host
+package and checks that `nowaki --version` works through the wrapper shim.

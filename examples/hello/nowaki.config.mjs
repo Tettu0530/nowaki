@@ -1,8 +1,8 @@
-// Nowaki の設定。`plugins` は変換フック（transform）と仮想モジュール（resolveId/load）を持てる。
-//   transform(code, id)        — 変換可能なソースが oxc にかかる前に呼ばれる
-//   resolveId(source, importer) — 指定子を引き受けて id を返す（通常解決が失敗したときだけ呼ばれる）
-//   load(id)                    — その id のソースを返す（ディスクに無い仮想モジュール）
-// 変更しなければ null/undefined を返す（高速パス）。
+// Nowaki config. `plugins` can have a transform hook (transform) and virtual modules (resolveId/load).
+//   transform(code, id)        — called on transformable source before oxc runs
+//   resolveId(source, importer) — claims a specifier and returns an id (called only when normal resolution fails)
+//   load(id)                    — returns the source for that id (a virtual module not on disk)
+// Return null/undefined for no change (fast path).
 export default {
   plugins: [
     {
@@ -13,7 +13,7 @@ export default {
       },
     },
     {
-      // 仮想モジュール: ディスクに無い `virtual:build-info` を生成して提供する。
+      // Virtual module: generates and serves `virtual:build-info`, which isn't on disk.
       name: "virtual-build-info",
       resolveId(source) {
         return source === "virtual:build-info" ? source : null;

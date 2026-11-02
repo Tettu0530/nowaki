@@ -15,16 +15,16 @@ use oxc_resolver::Resolver;
 use crate::cache::Mode;
 use crate::resolve::fs_path_to_url;
 
-/// プラグインの仮想モジュール解決。通常の解決が失敗した指定子に対して呼ばれる。
-/// Browser とSSR で出力先が違う（dev URL か data: モジュールか）ため2つのメソッドに分ける。
+/// Plugin virtual-module resolution. Called for specifiers that normal resolution failed on.
+/// Split into two methods because Browser and SSR produce different targets (dev URL vs data: module).
 pub trait VirtualResolve {
-    /// Browser: 仮想モジュールの合成パス（呼び出し側が dev URL 化する）。
+    /// Browser: synthetic path of the virtual module (the caller turns it into a dev URL).
     fn virtual_browser(&self, dir: &Path, spec: &str) -> Option<PathBuf>;
-    /// SSR: Node が直接 import できる data: モジュール（自己完結の ESM）。
+    /// SSR: a data: module Node can import directly (self-contained ESM).
     fn virtual_ssr_module(&self, dir: &Path, spec: &str) -> Option<String>;
 }
 
-/// 1ファイルを変換する: TS型剥がし + JSX(automatic, preact) + import書き換え(Browserのみ)。
+/// Transforms one file: TS type stripping + JSX (automatic, preact) + import rewriting (Browser only).
 #[allow(clippy::too_many_arguments)]
 pub fn transform_file(
     root: &Path,
@@ -35,8 +35,8 @@ pub fn transform_file(
     client_defines: &[(String, String)],
     vr: Option<&dyn VirtualResolve>,
 ) -> Result<String> {
-    // サーバーモジュール（`"use server"`）をブラウザ向けに変換するときは、実装を出さず
-    // クライアントプロキシ（fetch する極小 async 関数）に差し替える。SSR 変換では本物を残す。
+    // When transforming a server module (`"use server"`) for the browser, emit no implementation;
+    // swap in a client proxy (tiny async functions that fetch). SSR keeps the real thing.
     if mode == Mode::Browser && crate::server_fn::has_use_server(source) {
         let key = crate::server_fn::module_key(root, path);
         let exports = crate::server_fn::collect_exports(path, source)?;
@@ -77,12 +77,12 @@ pub fn transform_file(
     if mode == Mode::Browser {
         rewrite_imports(&allocator, root, path, &mut program, resolver, vr);
     } else {
-        // SSR: .css は no-op、アセットは URL 文字列の data モジュールに（Node が svg 等を
-        // 直接 import して落ちないように。描画される <img src> はクライアントと一致する）。
+        // SSR: .css becomes a no-op, assets become URL-string data modules (so Node doesn't crash
+        // importing svg etc. directly; the rendered <img src> matches the client).
         rewrite_ssr_imports(&allocator, root, path, &mut program, resolver, vr);
     }
 
-    // minify しないのでインラインソースマップの位置は正確。
+    // No minification, so inline source map positions are exact.
     let ret = Codegen::new()
         .with_options(CodegenOptions {
             source_map_path: Some(path.to_path_buf()),
@@ -98,8 +98,8 @@ pub fn transform_file(
     Ok(code)
 }
 
-/// トップレベルの import / re-export の指定子をdevサーバーURLへ書き換える。
-/// (JSX automatic変換が挿入する "preact/jsx-runtime" もここで拾われる)
+/// Rewrites top-level import / re-export specifiers to dev server URLs.
+/// (Also catches the "preact/jsx-runtime" inserted by the automatic JSX transform.)
 fn rewrite_imports<'a>(
     allocator: &'a Allocator,
     root: &Path,
@@ -129,8 +129,8 @@ fn rewrite_imports<'a>(
     }
 }
 
-/// import.meta.env.PUBLIC_* / MODE などの定数置換を適用する（client_defines が空なら素通し）。
-/// 3つの変換経路（dev transform / build client / build server）で共有する。
+/// Applies constant replacement for import.meta.env.PUBLIC_* / MODE etc. (pass-through if client_defines is empty).
+/// Shared by all three transform paths (dev transform / build client / build server).
 pub(crate) fn apply_client_defines<'a>(
     allocator: &'a Allocator,
     scoping: Scoping,
@@ -146,11 +146,11 @@ pub(crate) fn apply_client_defines<'a>(
                 .build(scoping, program)
                 .scoping
         }
-        Err(_) => scoping, // 設定不正時は素通し
+        Err(_) => scoping, // pass through on invalid config
     }
 }
 
-/// oxc 診断を、file:line:col + 該当行 + キャレットのコードフレームへ整形する（色なし）。
+/// Formats an oxc diagnostic as a code frame: file:line:col + the offending line + a caret (no color).
 fn render_diagnostics(path: &Path, source: &str, diags: &[OxcDiagnostic]) -> String {
     let handler = GraphicalReportHandler::new_themed(GraphicalTheme::unicode_nocolor());
     let name = path.to_string_lossy().to_string();
@@ -171,8 +171,8 @@ fn render_diagnostics(path: &Path, source: &str, diags: &[OxcDiagnostic]) -> Str
     out
 }
 
-/// 指定子をURLへ解決する。書き換え不要/不能なら None。
-/// アセット（画像・フォント等）は URL 文字列を default export する data モジュールに包む。
+/// Resolves a specifier to a URL. None if no rewrite is needed or possible.
+/// Assets (images, fonts, etc.) are wrapped in a data module that default-exports the URL string.
 fn map_specifier(
     spec: &str,
     dir: &Path,
@@ -194,28 +194,31 @@ fn map_specifier(
             }
         }
         Err(err) => {
-            // 仮想モジュールは合成パスの dev URL にし、dev サーバーが load で配信する。
+            // Virtual modules get a dev URL for their synthetic path; the dev server serves them via load.
             if let Some(p) = vr.and_then(|v| v.virtual_browser(dir, spec)) {
                 return Some(fs_path_to_url(root, &p));
             }
-            eprintln!("[nowaki] 解決失敗 {spec} (from {}): {err}", dir.display());
+            eprintln!(
+                "[nowaki] failed to resolve {spec} (from {}): {err}",
+                dir.display()
+            );
             None
         }
     }
 }
 
-/// 任意の JS 本文を持つ data: モジュールを返す（Node/ブラウザどちらも import 可能）。
+/// Returns a data: module with an arbitrary JS body (importable from both Node and the browser).
 pub(crate) fn data_module(body: &str) -> String {
     format!("data:text/javascript,{}", percent_encode_js(body))
 }
 
-/// アセットの配信URLを default export する小さな JS モジュールを data: URI で返す。
-/// `import logo from "./logo.png"` → logo === "<asset url>"（実体は別途バイナリ配信）。
+/// Returns, as a data: URI, a tiny JS module that default-exports the asset's served URL.
+/// `import logo from "./logo.png"` → logo === "<asset url>" (the binary is served separately).
 pub(crate) fn asset_module_data_url(url: &str) -> String {
     data_module(&format!("export default {url:?}"))
 }
 
-/// data: URI の本文に安全な最小パーセントエンコード。
+/// Minimal percent-encoding that is safe for a data: URI body.
 fn percent_encode_js(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 2);
     for b in s.bytes() {
@@ -229,8 +232,8 @@ fn percent_encode_js(s: &str) -> String {
     out
 }
 
-/// SSR向け: `.css` の副作用 import を空モジュールへ、アセット import は URL 文字列の
-/// data モジュールへ書き換える（サーバーに DOM は無い／Node は svg 等を import できない）。
+/// For SSR: rewrites `.css` side-effect imports to an empty module and asset imports to URL-string
+/// data modules (the server has no DOM; Node can't import svg etc.).
 fn rewrite_ssr_imports<'a>(
     allocator: &'a Allocator,
     root: &Path,
@@ -248,13 +251,13 @@ fn rewrite_ssr_imports<'a>(
             _ => None,
         };
         let Some(lit) = source else { continue };
-        // React 系 → preact/compat（bare のまま残し Node に解決させる）。
+        // React packages → preact/compat (left bare for Node to resolve).
         if let Some(aliased) = crate::resolve::alias_specifier(lit.value.as_str()) {
             lit.value = allocator.alloc_str(aliased).into();
             lit.raw = None;
         }
         let spec = lit.value.as_str();
-        // 仮想モジュールは data: へインライン化（自己完結 ESM 想定）。bare 解決より先に判定する。
+        // Inline virtual modules as data: (assumed self-contained ESM). Checked before bare resolution.
         if !spec.starts_with('.') && !spec.starts_with('/') && !spec.contains("://") {
             if let Some(data) = vr.and_then(|v| v.virtual_ssr_module(dir, spec)) {
                 lit.value = allocator.alloc_str(&data).into();
@@ -262,7 +265,7 @@ fn rewrite_ssr_imports<'a>(
                 continue;
             }
         }
-        // CSS Modules: SSR はクラス名マップだけ（注入は client 側）。
+        // CSS Modules: SSR gets only the class name map (injection happens on the client).
         if spec.ends_with(".module.css") {
             if let Ok(resolution) = resolver.resolve(dir, spec) {
                 let full = resolution.full_path();

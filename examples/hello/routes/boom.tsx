@@ -1,12 +1,12 @@
-// エラーバウンダリ（_500）のデモ。?boom=1 のときだけ loader が投げる。
-// クエリ無し（prerender や通常ナビ）では普通に表示される。
+// Error boundary (_500) demo. The loader throws only with ?boom=1.
+// Without the query (prerender or normal navigation) it renders normally.
 type Ctx = { url: URL };
 
 export const title = "Boom — Nowaki";
 
 export const loader = (ctx: Ctx) => {
   if (ctx.url.searchParams.get("boom")) {
-    throw new Error("意図的なエラー（_500.tsx のデモ）");
+    throw new Error("Intentional error (_500.tsx demo)");
   }
   return {};
 };
@@ -16,7 +16,7 @@ export default function Boom() {
     <main>
       <h1>Boom</h1>
       <p>
-        <a href="/boom?boom=1">?boom=1 で 500 を発生させる</a>
+        <a href="/boom?boom=1">Trigger a 500 with ?boom=1</a>
       </p>
     </main>
   );

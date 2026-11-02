@@ -1,10 +1,10 @@
-//! 画像アセットの最適化（pure-Rust。C 依存コーデックは使わず cross-compile 安全）。
+//! Image asset optimization (pure Rust; no C-dependent codecs, so cross-compile safe).
 //!
-//! - 自動: PNG を再エンコードし、小さくなる場合だけ採用（メタデータも落ちる）。
-//! - opt-in: import クエリ `?w=&h=&format=webp|jpeg|png&quality=` でリサイズ・形式変換・品質指定。
-//!   例: `import hero from "./hero.jpg?w=800&format=webp"`。
+//! - Automatic: re-encodes PNGs and keeps the result only if smaller (metadata is dropped too).
+//! - Opt-in: the import query `?w=&h=&format=webp|jpeg|png&quality=` resizes, converts format, and sets quality.
+//!   e.g. `import hero from "./hero.jpg?w=800&format=webp"`.
 //!
-//! WebP はロスレスエンコード（image-webp）。SVG/ICO/動画等は対象外（そのまま）。
+//! WebP is encoded lossless (image-webp). SVG/ICO/video etc. are untouched.
 
 use anyhow::Result;
 use image::codecs::jpeg::JpegEncoder;
@@ -45,7 +45,7 @@ impl Fmt {
     }
 }
 
-/// import クエリから決まる変換指定。
+/// Transform spec derived from the import query.
 #[derive(Default, Clone)]
 pub struct Transform {
     pub width: Option<u32>,
@@ -55,7 +55,7 @@ pub struct Transform {
 }
 
 impl Transform {
-    /// リサイズ・形式変換・品質のいずれも指定されていない（＝自動最適化のみ）。
+    /// None of resize, format conversion, or quality is specified (= automatic optimization only).
     fn is_noop(&self) -> bool {
         self.width.is_none()
             && self.height.is_none()
@@ -64,7 +64,7 @@ impl Transform {
     }
 }
 
-/// クエリ文字列（"w=800&format=webp&quality=80"）を Transform にパースする。
+/// Parses a query string ("w=800&format=webp&quality=80") into a Transform.
 pub fn parse_query(q: &str) -> Transform {
     let mut t = Transform::default();
     for pair in q.split('&').filter(|s| !s.is_empty()) {
@@ -87,8 +87,8 @@ pub fn parse_query(q: &str) -> Transform {
     t
 }
 
-/// バイト列を最適化する。戻り値 = (最適化後バイト, 出力拡張子)。
-/// 対象外・失敗・サイズ増（自動時）は元のまま返す（壊さない）。
+/// Optimizes bytes. Returns (optimized bytes, output extension).
+/// Unsupported input, failure, or a size increase (in automatic mode) returns the original untouched (never breaks it).
 pub fn optimize(bytes: &[u8], ext: &str, t: &Transform) -> (Vec<u8>, String) {
     match try_optimize(bytes, ext, t) {
         Ok(Some(out)) => out,
@@ -98,10 +98,10 @@ pub fn optimize(bytes: &[u8], ext: &str, t: &Transform) -> (Vec<u8>, String) {
 
 fn try_optimize(bytes: &[u8], ext: &str, t: &Transform) -> Result<Option<(Vec<u8>, String)>> {
     let Some(in_fmt) = Fmt::from_ext(ext) else {
-        return Ok(None); // svg/ico/gif/動画などは画像処理しない
+        return Ok(None); // no image processing for svg/ico/gif/video etc.
     };
-    // 自動（クエリ無し）は PNG のロスレス再エンコードだけ。JPEG/WebP の自動再圧縮は
-    // 劣化し得るので、明示的なクエリ（リサイズ・形式・品質）がある時だけ行う。
+    // Automatic (no query) is lossless PNG re-encoding only. Auto-recompressing JPEG/WebP can
+    // degrade quality, so it only happens with an explicit query (resize, format, quality).
     if t.is_noop() && in_fmt != Fmt::Png {
         return Ok(None);
     }
@@ -119,7 +119,7 @@ fn try_optimize(bytes: &[u8], ext: &str, t: &Transform) -> Result<Option<(Vec<u8
     Ok(Some((out, out_fmt.ext().to_string())))
 }
 
-// 片方だけ指定ならアスペクト比維持で内接、両方指定なら厳密リサイズ。
+// One dimension: fit within, keeping aspect ratio. Both: exact resize.
 fn resize(img: &DynamicImage, w: Option<u32>, h: Option<u32>) -> DynamicImage {
     match (w, h) {
         (Some(w), Some(h)) => img.resize_exact(w, h, FilterType::Lanczos3),
@@ -203,7 +203,7 @@ mod tests {
         let (out, ext) = optimize(&png, "png", &t);
         assert_eq!(ext, "png");
         let decoded = image::load_from_memory(&out).unwrap();
-        assert_eq!(decoded.width(), 32); // 64 → 32（アスペクト比維持）
+        assert_eq!(decoded.width(), 32); // 64 → 32 (aspect ratio kept)
     }
 
     #[test]
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn auto_png_recompresses_smaller() {
-        // 圧縮の弱い PNG（CompressionType::Fast）を入力にすると、自動最適化（Best）で縮む。
+        // A weakly compressed PNG (CompressionType::Fast) shrinks under automatic optimization (Best).
         let img = ImageBuffer::from_fn(96, 96, |x, y| {
             Rgba([(x * 2) as u8, (y * 2) as u8, ((x + y) * 3) as u8, 255])
         });

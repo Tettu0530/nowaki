@@ -1,6 +1,6 @@
-// Nowaki framework の公開型（値としては getContext もエクスポートする）。
+// Public types for the Nowaki framework (getContext is also exported as a value).
 
-/** ルートパラメータ。`[slug]` は string、`[...slug]`（catch-all）は string[]。 */
+/** Route params. `[slug]` is a string; `[...slug]` (catch-all) is a string[]. */
 export type RouteParams = Record<string, string | string[]>;
 
 export interface CookieOptions {
@@ -8,10 +8,10 @@ export interface CookieOptions {
   expires?: Date | string;
   path?: string;
   domain?: string;
-  /** 既定 true。明示的に false で HttpOnly を外す。 */
+  /** Defaults to true. Set to false explicitly to drop HttpOnly. */
   httpOnly?: boolean;
   secure?: boolean;
-  /** 既定 "Lax"。 */
+  /** Defaults to "Lax". */
   sameSite?: "Lax" | "Strict" | "None" | "lax" | "strict" | "none";
 }
 
@@ -20,113 +20,113 @@ export interface ResponseInit {
   headers?: Record<string, string>;
 }
 
-/** ctx.json / html / text / redirect が返す結果（そのまま return すると確定する）。 */
+/** Result of ctx.json / html / text / redirect (returning it finalizes the response). */
 export interface NowakiResult {
   readonly __nowakiResult: true;
 }
 
 /**
- * loader / action / middleware / API ハンドラに渡る共通コンテキスト。
- * リクエスト（url・params・method・headers・cookies・body）と、レスポンスへの
- * 書き込み（status・header・cookie・redirect・json・…）をまとめる。
+ * Shared context passed to loaders, actions, middleware, and API handlers.
+ * Bundles the request (url, params, method, headers, cookies, body) and
+ * response writers (status, header, cookie, redirect, json, ...).
  */
 export interface LoaderContext {
-  /** リクエスト URL。 */
+  /** The request URL. */
   readonly url: URL;
-  /** ルートパラメータ（catch-all は配列）。 */
+  /** Route params (catch-all values are arrays). */
   readonly params: RouteParams;
-  /** HTTP メソッド。 */
+  /** The HTTP method. */
   readonly method: string;
-  /** リクエストヘッダ（キーは小文字）。 */
+  /** Request headers (lowercase keys). */
   readonly headers: Record<string, string>;
-  /** パース済みリクエスト Cookie。 */
+  /** Parsed request cookies. */
   readonly cookies: Record<string, string>;
-  /** Node の IncomingMessage（Edge では未定義）。 */
+  /** Node's IncomingMessage (undefined on Edge). */
   readonly req?: unknown;
-  /** ミドルウェアが loader / ページへ渡す任意データ。 */
+  /** Arbitrary data middleware passes to loaders and pages. */
   state: Record<string, unknown>;
-  /** action の戻り値（ページ再描画時に渡る）。 */
+  /** The action's return value (passed when the page re-renders). */
   actionData?: unknown;
 
-  /** リクエストヘッダを取得（大文字小文字を無視）。 */
+  /** Gets a request header (case-insensitive). */
   get(name: string): string | undefined;
-  /** application/x-www-form-urlencoded のボディを URLSearchParams で。 */
+  /** Reads an application/x-www-form-urlencoded body as URLSearchParams. */
   formData(): Promise<URLSearchParams>;
-  /** リクエストボディを文字列で。 */
+  /** Reads the request body as a string. */
   bodyText(): Promise<string>;
-  /** リクエストボディを JSON として。 */
+  /** Reads the request body as JSON. */
   bodyJson<T = unknown>(): Promise<T>;
 
-  /** レスポンスステータスを設定（チェーン可）。 */
+  /** Sets the response status (chainable). */
   status(code: number): this;
-  /** レスポンスヘッダを設定（チェーン可）。 */
+  /** Sets a response header (chainable). */
   setHeader(name: string, value: string): this;
-  /** Set-Cookie を積む（チェーン可）。 */
+  /** Appends a Set-Cookie header (chainable). */
   setCookie(name: string, value: string, opts?: CookieOptions): this;
-  /** Cookie を削除（Max-Age=0、チェーン可）。 */
+  /** Deletes a cookie (Max-Age=0, chainable). */
   deleteCookie(name: string, opts?: CookieOptions): this;
 
-  /** リダイレクト（既定 302）。loader/action/middleware から return する。 */
+  /** Redirects (302 by default). Return it from a loader, action, or middleware. */
   redirect(to: string, status?: number): NowakiResult;
-  /** JSON レスポンスを返す。 */
+  /** Returns a JSON response. */
   json<T>(data: T, init?: ResponseInit): NowakiResult;
-  /** HTML レスポンスを返す。 */
+  /** Returns an HTML response. */
   html(markup: string, init?: ResponseInit): NowakiResult;
-  /** text/plain レスポンスを返す。 */
+  /** Returns a text/plain response. */
   text(s: string, init?: ResponseInit): NowakiResult;
 }
 
-/** サーバー専用の loader。戻り値はページに `data` として渡る。 */
+/** Server-only loader. Its return value is passed to the page as `data`. */
 export type Loader<T = unknown> = (ctx: LoaderContext) => T | Promise<T>;
 
-/** 非 GET リクエストで走る action。Response/redirect か、再描画用データを返す。 */
+/** Action that runs on non-GET requests. Returns a Response/redirect, or data for re-rendering. */
 export type Action = (ctx: LoaderContext) => unknown | Promise<unknown>;
 
-/** API ルートのハンドラ（メソッド別 export または default）。 */
+/** API route handler (per-method export or default). */
 export type ApiHandler = (
   ctx: LoaderContext,
 ) => Response | NowakiResult | unknown | Promise<Response | NowakiResult | unknown>;
 
-/** ミドルウェア。Response/redirect を返すと短絡する。 */
+/** Middleware. Returning a Response/redirect short-circuits the request. */
 export type Middleware = (ctx: LoaderContext) => unknown | Promise<unknown>;
 
-/** ページのメタ（`<title>` / `<head>` / `<html lang>`）。 */
+/** Page metadata (`<title>` / `<head>` / `<html lang>`). */
 export interface Meta {
   title?: string;
   head?: string;
   lang?: string;
 }
 
-/** 動的・非同期メタ。loader 結果や params から算出できる。 */
+/** Dynamic, possibly async metadata. Can be derived from loader data or params. */
 export type MetaFn<D = unknown> = (info: {
   data: D;
   params: RouteParams;
   url: URL;
 }) => Meta | Promise<Meta>;
 
-/** ページコンポーネントが受け取る props。 */
+/** Props a page component receives. */
 export interface RouteProps<D = unknown> {
-  /** loader の戻り値。 */
+  /** The loader's return value. */
   data: D;
-  /** action の戻り値（あれば）。 */
+  /** The action's return value, if any. */
   actionData?: unknown;
   params: RouteParams;
   url: URL;
 }
 
-/** loader 型から data を推論したページ props。`PageProps<typeof loader>` で使う。 */
+/** Page props with `data` inferred from the loader type. Use as `PageProps<typeof loader>`. */
 export type PageProps<L extends Loader<any> = Loader<unknown>> = RouteProps<Awaited<ReturnType<L>>>;
 
 /**
- * `routes/loading.tsx` の default export。クライアント遷移が 150ms を超えると、
- * 遷移先 HTML が届くまで最寄りの loading 境界（ネスト可）が表示される。島は不要。
+ * Default export of `routes/loading.tsx`. When a client navigation takes over 150ms,
+ * the nearest loading boundary (nestable) is shown until the target HTML arrives. No island needed.
  */
 export type LoadingComponent = () => unknown;
 
 /**
- * `routes/error.tsx` の default export が受け取る props。クライアント遷移が失敗したとき、
- * 最寄りの error 境界（ネスト可）が表示される。メッセージは `data-nowaki-error` を付けた
- * 要素へ、再試行は `data-nowaki-reset` を付けた要素へ、クライアントルーターが配線する。
+ * Props received by the default export of `routes/error.tsx`. When a client navigation fails,
+ * the nearest error boundary (nestable) is shown. The client router puts the message into the
+ * element marked `data-nowaki-error` and wires retry to the element marked `data-nowaki-reset`.
  */
 export interface ErrorPageProps {
   error: { message: string };
@@ -134,18 +134,18 @@ export interface ErrorPageProps {
 }
 
 /**
- * Jetstream（サーバーリアクティブ島）の宣言。島が `export const live` で持つと、
- * クライアントへコンポーネント JS を送らずに、状態はサーバーが保持し HTML パッチで更新する。
+ * Jetstream (server-reactive island) declaration. When an island has `export const live`,
+ * no component JS is sent to the client: the server holds the state and updates via HTML patches.
  */
 export interface Live<S = any> {
-  /** 初期状態（props を受け取れる）。 */
+  /** Initial state (may take props). */
   state: (props?: any) => S;
-  /** `data-live="名前"` のイベント → 新しい状態を返すハンドラ群。 */
+  /** Handlers keyed by `data-live="name"` event, each returning the new state. */
   on: Record<string, (state: S, payload?: any) => S>;
 }
 
 /**
- * サーバー関数（`"use server"`）の実行中に、その呼び出しの LoaderContext を返す。
- * RPC 実行外では null。cookie/ヘッダの読み取り・認証に使う。
+ * While a server function (`"use server"`) is running, returns that call's LoaderContext.
+ * Returns null outside an RPC. Use it to read cookies/headers or for auth.
  */
 export function getContext(): LoaderContext | null;

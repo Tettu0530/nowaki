@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 "use strict";
 
-// プリビルドされた Rust 製 nowaki バイナリへ、引数と標準入出力をそのまま委譲する。
-// postinstall は使わず、実行時にプラットフォーム対応パッケージを解決して exec する。
+// Forwards args and stdio unchanged to the prebuilt Rust nowaki binary.
+// No postinstall: the platform package is resolved and exec'd at runtime.
 
 const { spawnSync } = require("node:child_process");
 const { resolveBinary } = require("../lib/resolve.js");
@@ -18,7 +18,7 @@ try {
 const result = spawnSync(binary, process.argv.slice(2), { stdio: "inherit" });
 
 if (result.error) {
-  console.error(`[nowaki] バイナリの起動に失敗しました: ${result.error.message}`);
+  console.error(`[nowaki] failed to launch the binary: ${result.error.message}`);
   process.exit(1);
 }
 

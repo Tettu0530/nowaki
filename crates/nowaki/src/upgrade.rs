@@ -1,7 +1,7 @@
-//! `nowaki upgrade`: 既存アプリの nowaki(CLI) と @nowaki-dev/runtime を最新へ更新する。
+//! `nowaki upgrade`: update an existing app's nowaki (CLI) and @nowaki-dev/runtime to the latest version.
 //!
-//! caret(`^0.x`)は 0.x 系ではマイナーをロックするため `npm update` では 0.10 → 0.11 に
-//! 上がらない。明示的に `@latest`（または `--to`）を入れて package.json のレンジごと更新する。
+//! On 0.x a caret (`^0.x`) locks the minor, so `npm update` won't go from 0.10 → 0.11.
+//! Install `@latest` (or `--to`) explicitly to update the range in package.json too.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -17,14 +17,14 @@ pub fn run(root: PathBuf, to: Option<String>) -> Result<()> {
     let pkg_path = root.join("package.json");
     if !pkg_path.exists() {
         bail!(
-            "package.json が見つかりません（{}）。Nowaki アプリのディレクトリで実行してください。",
+            "package.json not found ({}). Run this in a Nowaki app directory.",
             root.display()
         );
     }
     let text = std::fs::read_to_string(&pkg_path)
-        .with_context(|| format!("読み込み失敗: {}", pkg_path.display()))?;
+        .with_context(|| format!("failed to read: {}", pkg_path.display()))?;
     let pkg: serde_json::Value =
-        serde_json::from_str(&text).context("package.json の解析に失敗")?;
+        serde_json::from_str(&text).context("failed to parse package.json")?;
 
     let dep = |group: &str, name: &str| -> Option<String> {
         pkg.get(group)?.get(name)?.as_str().map(str::to_string)
@@ -34,7 +34,7 @@ pub fn run(root: PathBuf, to: Option<String>) -> Result<()> {
     let cli_is_dev = dep("devDependencies", CLI).is_some();
 
     if cur_runtime.is_none() && cur_cli.is_none() {
-        bail!("このプロジェクトは Nowaki アプリではないようです（{RUNTIME} も {CLI} も依存に見つかりません）。");
+        bail!("This doesn't look like a Nowaki app (neither {RUNTIME} nor {CLI} found in dependencies).");
     }
 
     let pm = detect_pm(&root);
@@ -60,7 +60,7 @@ pub fn run(root: PathBuf, to: Option<String>) -> Result<()> {
     }
     println!();
 
-    // runtime は dependencies、CLI は（元の場所に合わせて）devDependencies に入れる。
+    // runtime goes in dependencies, CLI in devDependencies (matching where it was).
     if cur_runtime.is_some() {
         run_pm(&root, &pm, false, &format!("{RUNTIME}@{spec}"))?;
     }
@@ -123,7 +123,7 @@ fn detect_pm(root: &Path) -> Pm {
     }
 }
 
-/// `<pm> add/install [dev-flag] <spec>` を実行する（stdio は継承してそのまま見せる）。
+/// Run `<pm> add/install [dev-flag] <spec>` (stdio is inherited and shown as-is).
 fn run_pm(root: &Path, pm: &Pm, dev: bool, spec: &str) -> Result<()> {
     let (prog, verb, dev_flag) = match pm {
         Pm::Npm => ("npm", "install", "-D"),
@@ -142,9 +142,9 @@ fn run_pm(root: &Path, pm: &Pm, dev: bool, spec: &str) -> Result<()> {
         .args(&args)
         .current_dir(root)
         .status()
-        .with_context(|| format!("{prog} の起動に失敗しました（インストールされていますか？）"))?;
+        .with_context(|| format!("failed to start {prog} (is it installed?)"))?;
     if !status.success() {
-        bail!("{prog} {spec} が失敗しました");
+        bail!("{prog} {spec} failed");
     }
     Ok(())
 }

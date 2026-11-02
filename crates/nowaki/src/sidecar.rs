@@ -5,10 +5,10 @@ use anyhow::{anyhow, Context, Result};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
-/// SSRサイドカー (Nodeプロセス)。stdoutの READY 行からポートを得る。
+/// SSR sidecar (Node process). Its port comes from the READY line on stdout.
 pub struct Sidecar {
     pub port: u16,
-    #[allow(dead_code)] // Dropでkillさせるために保持する
+    #[allow(dead_code)] // held so Drop kills it
     child: Child,
 }
 
@@ -16,7 +16,7 @@ pub async fn spawn(root: &Path, rust_port: u16) -> Result<Sidecar> {
     let entry = root.join("node_modules/@nowaki-dev/runtime/server/sidecar.mjs");
     if !entry.exists() {
         return Err(anyhow!(
-            "依存がインストールされていません（{} が見つかりません）。\n  → アプリのディレクトリで `npm install`（または pnpm / yarn / bun）を実行してください。",
+            "Dependencies are not installed ({} not found).\n  → Run `npm install` (or pnpm / yarn / bun) in the app directory.",
             entry.display()
         ));
     }
@@ -30,25 +30,21 @@ pub async fn spawn(root: &Path, rust_port: u16) -> Result<Sidecar> {
         .stderr(Stdio::inherit())
         .kill_on_drop(true)
         .spawn()
-        .context("nodeの起動に失敗しました")?;
+        .context("failed to start node")?;
 
     let stdout = child.stdout.take().expect("piped stdout");
     let mut lines = BufReader::new(stdout).lines();
     let mut port = None;
     while let Some(line) = lines.next_line().await? {
         if let Some(rest) = line.strip_prefix("NOWAKI_SIDECAR_READY ") {
-            port = Some(
-                rest.trim()
-                    .parse::<u16>()
-                    .context("サイドカーのポートが不正です")?,
-            );
+            port = Some(rest.trim().parse::<u16>().context("invalid sidecar port")?);
             break;
         }
         println!("[sidecar] {line}");
     }
-    let port = port.ok_or_else(|| anyhow!("サイドカーがREADYを報告せずに終了しました"))?;
+    let port = port.ok_or_else(|| anyhow!("sidecar exited without reporting READY"))?;
 
-    // 以降のstdoutはログとして流し続ける
+    // Keep streaming the rest of stdout as logs
     tokio::spawn(async move {
         while let Ok(Some(line)) = lines.next_line().await {
             println!("[sidecar] {line}");

@@ -1,4 +1,4 @@
-// TSRX 島のデモ。`.tsrx` で書いた島を通常の route から使う。
+// TSRX island demo. Uses an island written in `.tsrx` from a regular route.
 import TsrxCounter from "../islands/TsrxCounter.tsrx";
 
 export default function TsrxDemo() {

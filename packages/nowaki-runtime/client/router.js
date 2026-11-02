@@ -1,18 +1,18 @@
-// クライアントルーター。内部 <a> クリックを横取りし、遷移先 HTML を fetch して
-// body を差し替え、新しい島だけを再ハイドレートする（JSゼロのページはフルナビ）。
+// Client router. Intercepts internal <a> clicks, fetches the target HTML,
+// swaps the body, and re-hydrates only the new islands (zero-JS pages do full navigations).
 
 import { matchBoundary, createPageCache } from "./router-core.js";
 
-// ハイドレートは eager ランタイム（islands.js）が window に公開する。
-// ここから islands.js を import しないことで、ルーターを独立した遅延チャンクに保つ。
+// The eager runtime (islands.js) exposes hydrate on window.
+// Not importing islands.js here keeps the router a separate lazy chunk.
 const hydrateIslands = (root) => window.__nowakiHydrateIslands?.(root);
 
 const pageCache = createPageCache({ ttlMs: readCacheTtl(), max: 32 });
 const scrollPos = new Map(); // history key -> scrollY
-let boundariesPromise = null; // /__nowaki/boundaries の結果（一度だけ取得）
-let navToken = 0; // 競合する遷移をガードするトークン
+let boundariesPromise = null; // result of /__nowaki/boundaries (fetched once)
+let navToken = 0; // token guarding against racing navigations
 
-// <meta name="nowaki-router-cache" content="秒"> で Router Cache の TTL を上書き（既定 30s、0 で無効）。
+// <meta name="nowaki-router-cache" content="seconds"> overrides the Router Cache TTL (default 30s, 0 disables).
 function readCacheTtl() {
   if (typeof document === "undefined") return 30000;
   const m = document.querySelector('meta[name="nowaki-router-cache"]');
@@ -47,7 +47,7 @@ async function fetchPage(url) {
   };
 }
 
-// loading/error 境界の SSR HTML を一度だけ取得して使い回す。
+// Fetch the SSR HTML for loading/error boundaries once and reuse it.
 function loadBoundaries() {
   if (!boundariesPromise) {
     boundariesPromise = fetch("/__nowaki/boundaries", { headers: { "x-nowaki-nav": "1" } })
@@ -71,7 +71,7 @@ async function navigate(url, { push = true } = {}) {
   const key = url.toString();
   const token = ++navToken;
 
-  // Router Cache 即時ヒット（loading は出さない）。
+  // Immediate Router Cache hit (no loading shown).
   const cached = pageCache.get(key);
   if (cached) {
     applyDocument(cached, push, token);
@@ -83,7 +83,7 @@ async function navigate(url, { push = true } = {}) {
     () => null,
   );
 
-  // 150ms 超えたら loading 表示（速い遷移ではちらつかせない）。
+  // Show loading after 150ms (no flicker on fast navigations).
   const timer = setTimeout(async () => {
     if (token !== navToken) return;
     const { loading } = await loadBoundaries();
@@ -93,10 +93,10 @@ async function navigate(url, { push = true } = {}) {
 
   const result = await pending;
   clearTimeout(timer);
-  if (token !== navToken) return; // 新しい遷移に追い越された
+  if (token !== navToken) return; // superseded by a newer navigation
 
   if (!result) {
-    await showError(url, "ページの読み込みに失敗しました");
+    await showError(url, "Failed to load the page");
     return;
   }
   if (result.status === 200) pageCache.set(key, result);
@@ -104,7 +104,7 @@ async function navigate(url, { push = true } = {}) {
   return result.finalUrl;
 }
 
-// キャッシュ/フェッチ済みのドキュメントを実DOMへ反映する（body はクローンしてキャッシュを保つ）。
+// Apply a cached/fetched document to the live DOM (clones body to keep the cache intact).
 function applyDocument(entry, push, token) {
   if (token !== undefined && token !== navToken) return;
   scrollPos.set(historyKey(), window.scrollY);
@@ -120,7 +120,7 @@ function applyDocument(entry, push, token) {
   removeProgressBar();
 }
 
-// loading 境界（あればスケルトンで body を差し替え）。無ければ既定のプログレスバー。
+// Loading boundary (swaps body for its skeleton if present). Otherwise, the default progress bar.
 function showLoading(boundary) {
   if (boundary) {
     const tmp = new DOMParser().parseFromString(`<body>${boundary.html}</body>`, "text/html");
@@ -130,7 +130,7 @@ function showLoading(boundary) {
   }
 }
 
-// error 境界（あれば表示し、data-nowaki-error にメッセージ、data-nowaki-reset に再試行を配線）。
+// Error boundary (if present, shows it with the message in data-nowaki-error and retry wired to data-nowaki-reset).
 async function showError(url, message) {
   const { error } = await loadBoundaries();
   const boundary = matchBoundary(error, url.pathname);
@@ -160,7 +160,7 @@ function showDefaultError(message) {
   document.body.replaceWith(body);
 }
 
-// 現在のページは残したまま上端にバーだけ出す。
+// Keep the current page and show just a bar at the top.
 let progressEl = null;
 function showProgressBar() {
   if (progressEl) return;
@@ -189,7 +189,7 @@ function escapeHtml(s) {
   );
 }
 
-// <head> の title 以外（meta/link 等、data-nowaki-css は除く）を新ページに合わせる。
+// Sync <head> apart from title (meta/link etc., excluding data-nowaki-css) to the new page.
 function syncHead(doc) {
   const keep = (el) => el.hasAttribute("data-nowaki-css") || el.tagName === "TITLE";
   for (const el of [...document.head.children]) {
@@ -225,7 +225,7 @@ export function installRouter() {
     const url = internalAnchor(e.target);
     if (!url) return;
     if (url.pathname === location.pathname && url.search === location.search) {
-      return; // 同一ページ（ハッシュ等）はブラウザに任せる
+      return; // leave same-page (hash etc.) to the browser
     }
     e.preventDefault();
     navigate(url, { push: true }).then((final) => {
@@ -249,7 +249,7 @@ export function installRouter() {
     });
   });
 
-  // ブラウザのデフォルトのスクロール復元は無効化（自前で管理）
+  // disable the browser's default scroll restoration (we manage it)
   if ("scrollRestoration" in history) history.scrollRestoration = "manual";
 }
 

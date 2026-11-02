@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { addTodo, addTodoForm, listTodos, whoami } from "../actions/todos.ts";
 
-// クライアント島がサーバー関数を RPC で呼ぶ例。ブラウザへ届くのは島JS + プロキシだけ。
+// A client island calling server functions over RPC. The browser only gets island JS + the proxy.
 export default function ServerTodos({ initial = [] }: { initial?: string[] }) {
   const [todos, setTodos] = useState<string[]>(initial);
   const [text, setText] = useState("");
   const [who, setWho] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
 
-  // form action（<form action={addTodoForm}>）の結果を受け取り、リストを更新してフォームをリセット。
+  // Takes the form action (<form action={addTodoForm}>) result, updates the list, and resets the form.
   useEffect(() => {
     const form = formRef.current;
     if (!form) return;
@@ -48,8 +48,8 @@ export default function ServerTodos({ initial = [] }: { initial?: string[] }) {
         />{" "}
         <button data-testid="add" type="submit">add</button>
       </form>
-      {/* サーバー関数を form の action に直接渡す（React 19 風）。submit で FormData が
-          サーバー関数へ渡り、サーバー側で実行される。 */}
+      {/* Pass a server function directly as the form action (React 19 style). On submit, FormData
+          goes to the server function, which runs on the server. */}
       <form action={addTodoForm} ref={formRef} data-testid="fa-form">
         <input data-testid="fa-input" name="text" placeholder="todo via form action" />{" "}
         <button data-testid="fa-add" type="submit">add (form action)</button>

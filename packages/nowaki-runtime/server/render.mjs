@@ -1,5 +1,5 @@
-// dev の Islands 対応 SSR レンダラー。Rust 側の AST 加工を不要にするため、
-// options.vnode フックで islands/ 配下のコンポーネントを検知して <nowaki-island> で包む。
+// Island-aware dev SSR renderer. To avoid AST rewriting on the Rust side, the options.vnode
+// hook detects components under islands/ and wraps them in <nowaki-island>.
 
 import { readdir } from "node:fs/promises";
 import path from "node:path";
@@ -15,7 +15,7 @@ const ISLAND_EXT = /\.(tsx|jsx|ts|js|tsrx)$/;
 
 let registry = new Map();
 let registryVersion = null;
-let liveCounter = 0; // ページ内で衝突しなければよい
+let liveCounter = 0; // only needs to be unique within a page
 
 export async function loadIslandRegistry(appRoot, version) {
   if (registryVersion === version) return registry;
@@ -33,7 +33,7 @@ export async function loadIslandRegistry(appRoot, version) {
     next.set(mod.default, {
       name: f.replace(ISLAND_EXT, ""),
       src: `/islands/${f}`,
-      // `export const live` を持つ島はサーバーリアクティブ島（クライアントに JS を送らない）。
+      // Islands with `export const live` are server-reactive (no JS sent to the client).
       live: mod.live ?? null,
       mod,
     });
@@ -54,12 +54,12 @@ options.vnode = (vnode) => {
     const island = registry.get(vnode.type);
     const Original = vnode.type;
     if (island.live) {
-      // ライブ島の JS はクライアントに送らない（サーバーが再描画して patch を push）。
+      // Live island JS isn't sent to the client (the server re-renders and pushes patches).
       vnode.type = (props) => {
         const { state: propState, ...rest } = props;
         const state = propState ?? liveInitialState(island.mod, rest);
         const nid = `L${liveCounter++}`;
-        // liveProps が初期 state を HMAC 署名する（join 時に検証し state 偽造を弾く）。
+        // liveProps HMAC-signs the initial state (verified on join to reject forged state).
         return h(
           "nowaki-live",
           liveProps(island.name, nid, state),
@@ -73,7 +73,7 @@ options.vnode = (vnode) => {
   if (prevVnodeHook) prevVnodeHook(vnode);
 };
 
-// head（…<body>）と tail（</body>…）を返す。ストリーミング時は handler が間に本文を流し込む。
+// Returns head (…<body>) and tail (</body>…). When streaming, the handler pipes the body in between.
 export function renderShell({ mod, meta }) {
   const m = pageMeta(meta, mod);
   const head = `<!DOCTYPE html>
@@ -99,7 +99,7 @@ export function renderDocument({ mod, body, meta }) {
 }
 
 function devScripts() {
-  // SPA ルーターは本番と同じく、islands.js がハイドレート後に data-router から遅延 import する。
+  // As in prod, islands.js lazily imports the SPA router from data-router after hydration.
   const router =
     '<script id="nowaki-runtime" type="module" src="/node_modules/@nowaki-dev/runtime/client/islands.js" data-router="/node_modules/@nowaki-dev/runtime/client/router.js"></script>\n';
   const live =
@@ -117,7 +117,7 @@ function escapeHtml(s) {
     .replaceAll('"', "&quot;");
 }
 
-// hmr.js を含むので修正後に自動リロードする。
+// Includes hmr.js, so it auto-reloads once fixed.
 export function errorPage(message) {
   return `<!DOCTYPE html>
 <html lang="en">

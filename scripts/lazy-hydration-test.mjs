@@ -1,6 +1,6 @@
-// 遅延ハイドレーション（client:* 指令）の実ブラウザ挙動テスト。
-// CI（Chrome 無し）では走らせず、手元検証用。Chrome を CDP で直接駆動する（puppeteer 不要）。
-// 使い方: BASE=http://127.0.0.1:8241 node scripts/lazy-hydration-test.mjs
+// Real-browser behavior test for lazy hydration (client:* directives).
+// Not run in CI (no Chrome); for local verification. Drives Chrome directly over CDP (no puppeteer).
+// Usage: BASE=http://127.0.0.1:8241 node scripts/lazy-hydration-test.mjs
 import { spawn } from "node:child_process";
 
 const BASE = process.env.BASE || "http://127.0.0.1:8241";
@@ -89,7 +89,7 @@ try {
   await sleep(80);
   check("client:load hydrates immediately", (await cdp.evalAsync(`return window.__count('sec-load');`)) === "1");
 
-  // sec-visible は折り返しの下にある。
+  // sec-visible is below the fold.
   await cdp.evalAsync(`window.__plus('sec-visible'); return true;`);
   await sleep(80);
   check(

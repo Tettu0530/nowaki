@@ -1,10 +1,10 @@
-// 非同期・動的メタデータ: loader 結果や params から title/head/lang を生成できる。
+// Async/dynamic metadata: title/head/lang can be built from loader results and params.
 export async function meta({ params }: { params: { path: string[] } }) {
   const p = Array.isArray(params.path) ? params.path.join("/") : "";
   return { title: `files/${p} — Nowaki` };
 }
 
-// catch-all ルート: /files/a/b/c → params.path === ["a", "b", "c"]
+// catch-all route: /files/a/b/c -> params.path === ["a", "b", "c"]
 export default function Files({ params }: { params: { path: string[] } }) {
   const segs = Array.isArray(params.path) ? params.path : [];
   return (

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "preact/hooks";
 
-// 野分（風）を表す生成ビジュアル。カーソル付近で風の筋が曲がり・加速し・明るくなる。
-// reduced-motion 時はアニメーションせず、静止した一枚を描く。タッチ端末では反応を付けない。
+// Generative visual of nowaki (the wind). Near the cursor, wind streaks bend, speed up, and brighten.
+// With reduced-motion, no animation: draws a single still frame. No interaction on touch devices.
 export default function WindHero() {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -56,7 +56,7 @@ export default function WindHero() {
       ctx.stroke();
     };
 
-    // ポインタ位置（canvas ローカル px）。離れている間は遠方に置く。
+    // Pointer position (canvas-local px). Parked far away while the pointer is out.
     let px = -9999;
     let py = -9999;
     const onMove = (e: PointerEvent) => {
@@ -82,7 +82,7 @@ export default function WindHero() {
         canvas.parentElement?.addEventListener("pointermove", onMove, { passive: true });
         canvas.parentElement?.addEventListener("pointerleave", onLeave, { passive: true });
       }
-      const R = 175; // 反応半径
+      const R = 175; // interaction radius
       const frame = () => {
         ctx.clearRect(0, 0, w, h);
         const active = px > -9000;
@@ -93,12 +93,12 @@ export default function WindHero() {
             const dist = Math.hypot(dx, dy);
             if (dist < R) {
               const f = 1 - dist / R;
-              s.y += (py - s.y) * 0.045 * f; // カーソルの高さへゆっくり引き寄せる（風が曲がる）
-              s.x += s.speed * f * 1.7; // 近づくほど加速（突風）
+              s.y += (py - s.y) * 0.045 * f; // ease toward the cursor's height (the wind bends)
+              s.x += s.speed * f * 1.7; // faster the closer it gets (a gust)
               s.boost = Math.max(s.boost, f);
             }
           }
-          s.boost *= 0.92; // 余韻を残して減衰
+          s.boost *= 0.92; // decay, leaving a trail
           drawStreak(s);
           s.x += s.speed;
           if (s.x > w + 60) Object.assign(s, spawn(true));

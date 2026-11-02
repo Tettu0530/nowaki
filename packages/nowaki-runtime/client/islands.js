@@ -1,11 +1,11 @@
-// Islandsハイドレーションランタイム（クライアントの eager エントリ）。島モジュールだけを
-// `client` 属性（client:* 指令）の戦略で dynamic import する。ページ本体のJSは存在しない。
+// Islands hydration runtime (the client's eager entry). Dynamically imports only island modules,
+// using the strategy from the `client` attribute (client:* directive). Pages themselves ship no JS.
 
 import { h, hydrate, render } from "preact";
 
 export function hydrateIslands(root = document) {
   for (const el of root.querySelectorAll("nowaki-island")) {
-    if (el.__nowakiHydrated) continue; // 二重ハイドレート防止（SPA 遷移時）
+    if (el.__nowakiHydrated) continue; // prevent double hydration (on SPA navigation)
     el.__nowakiHydrated = true;
     schedule(el, el.getAttribute("client") || "load");
   }
@@ -20,7 +20,7 @@ function schedule(el, strategy) {
   } else if (strategy === "media") {
     whenMedia(el.getAttribute("client-media") || "", go);
   } else {
-    go(); // load / only / 未知 は即時
+    go(); // load / only / unknown run immediately
   }
 }
 
@@ -29,12 +29,12 @@ function mount(el, clientOnly) {
   const props = JSON.parse(el.getAttribute("props") || "{}");
   import(src).then(
     (mod) => (clientOnly ? render : hydrate)(h(mod.default, props), el),
-    (err) => console.error(`[nowaki] island読み込み失敗 ${src}:`, err),
+    (err) => console.error(`[nowaki] failed to load island ${src}:`, err),
   );
 }
 
-// IntersectionObserver で要素が可視になったら1度だけ実行（非対応なら即時）。
-// <nowaki-island> は display:contents で箱を持たないので、SSR 済みの子要素を観測する。
+// Runs once when the element becomes visible via IntersectionObserver (immediately if unsupported).
+// <nowaki-island> is display:contents with no box, so observe its SSR'd children.
 function whenVisible(el, go) {
   if (!("IntersectionObserver" in window)) return go();
   const target = el.firstElementChild || el;
@@ -63,9 +63,9 @@ function whenMedia(query, go) {
   mql.addEventListener("change", on);
 }
 
-// `<form action={serverFn}>` の傍受。preact は server fn の toString（"__nowaki_action:<id>"）を
-// action 属性に入れるので、submit をここで横取りして FormData を server fn へ送る（ページ遷移しない）。
-// 結果は form に `nowaki:action` イベント（detail: { id, ok, result, error }）で通知する。
+// Intercepts `<form action={serverFn}>`. Preact puts the server fn's toString ("__nowaki_action:<id>")
+// in the action attribute, so we catch submit here and send FormData to the server fn (no navigation).
+// The result is dispatched on the form as a `nowaki:action` event (detail: { id, ok, result, error }).
 const ACTION_PREFIX = "__nowaki_action:";
 document.addEventListener("submit", async (ev) => {
   const form = ev.target;
@@ -81,7 +81,7 @@ document.addEventListener("submit", async (ev) => {
   try {
     const res = await fetch("/__nowaki/fn", {
       method: "POST",
-      // x-nowaki-rpc はサーバーの CSRF ゲート（functions.mjs）が要求する。
+      // x-nowaki-rpc is required by the server's CSRF gate (functions.mjs).
       headers: { "content-type": "application/json", "x-nowaki-rpc": "1" },
       body: JSON.stringify({ id, args: [fields] }),
     });
@@ -98,13 +98,13 @@ document.addEventListener("submit", async (ev) => {
   form.dispatchEvent(new CustomEvent("nowaki:action", { bubbles: true, detail: { id, ok, result, error } }));
 });
 
-// SPA ルーターは window 経由でハイドレートを呼ぶ（islands.js を再バンドルさせないための分離）。
+// The SPA router calls hydrate via window (kept separate so islands.js isn't bundled twice).
 if (typeof window !== "undefined") window.__nowakiHydrateIslands = hydrateIslands;
 
 hydrateIslands();
 
-// first-load を小さく保つため、サーバーが data-router に注入したルーターチャンクを idle で遅延ロードする
-// （ロード前のクリックはフルナビ）。
+// To keep first load small, lazily load the router chunk the server injected into data-router when idle
+// (clicks before it loads do full navigations).
 if (typeof document !== "undefined") {
   const runtimeEl = document.getElementById("nowaki-runtime");
   const routerSrc = runtimeEl && runtimeEl.getAttribute("data-router");

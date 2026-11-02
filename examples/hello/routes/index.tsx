@@ -3,10 +3,10 @@ import Logo from "../islands/Logo.tsx";
 import Badge from "../islands/Badge.tsx";
 import Cycle from "../islands/Cycle.tsx";
 
-export const title = "Nowaki デモ";
+export const title = "Nowaki demo";
 
 export const loader = async () => {
-  return { message: "Nowaki へようこそ 🍃", renderedAt: new Date().toISOString() };
+  return { message: "Welcome to Nowaki 🍃", renderedAt: new Date().toISOString() };
 };
 
 type Data = Awaited<ReturnType<typeof loader>>;
@@ -15,12 +15,12 @@ export default function Home({ data }: { data: Data }) {
   return (
     <main style="font-family:sans-serif;max-width:640px;margin:4rem auto">
       <h1><Logo /> {data.message}</h1>
-      <p>サーバーでレンダリング: {data.renderedAt}</p>
+      <p>Rendered on the server: {data.renderedAt}</p>
       <Counter start={5} /> <Badge /> <Cycle />
-      <p>このページがブラウザに送るJSは、島 (Counter) の分だけです。</p>
+      <p>The only JS this page sends to the browser is for the island (Counter).</p>
       <p>
-        <a href="/about">about (島なし・JSゼロのページ)</a> /{" "}
-        <a href="/api/hello">APIルート</a>
+        <a href="/about">about (no islands, zero-JS page)</a> /{" "}
+        <a href="/api/hello">API route</a>
       </p>
     </main>
   );

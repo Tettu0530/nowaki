@@ -1,6 +1,6 @@
-// ルーター（scanRoutes / matchRoute）のテスト。examples/hello/routes のマッチ結果を
-// スナップショットで固定し、優先順位は合成テーブルで検証する。
-// 使い方: node scripts/router-test.mjs
+// Router (scanRoutes / matchRoute) tests. Match results for examples/hello/routes
+// are pinned as snapshots; precedence is checked with a synthetic table.
+// Usage: node scripts/router-test.mjs
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,7 +32,7 @@ eq(snap(table, "/virtual"), { file: "virtual.tsx", params: {}, isApi: false }, "
 eq(snap(table, "/blog"), null, "/blog (depth 1) does not match /blog/:slug (depth 2)");
 eq(snap(table, "/nope/x/y"), null, "unknown deep path -> null");
 
-// catch-all [...path]: 残りセグメントを配列に束ねる（≥1 必須）。
+// catch-all [...path]: collects the remaining segments into an array (≥1 required).
 eq(
   snap(table, "/files/a/b/c"),
   { file: "[...path].tsx", params: { path: ["a", "b", "c"] }, isApi: false },
@@ -50,10 +50,10 @@ eq(
   "catch-all segments are url-decoded",
 );
 
-// URL デコード（[slug] にエンコード文字）。
+// URL decoding (encoded characters in [slug]).
 eq(snap(table, "/blog/a%20b"), { file: "[slug].tsx", params: { slug: "a b" }, isApi: false }, "param is url-decoded");
 
-// 規約ファイルはルートにならない（_layout/_middleware/_404/_500 はテーブルの別枠）。
+// Convention files are not routes (_layout/_middleware/_404/_500 are tracked separately in the table).
 eq(
   table.routes.every((r) => !path.basename(r.file).startsWith("_")),
   true,
@@ -67,7 +67,7 @@ const syn = [
 eq(matchRoute(syn, "/users/me")?.file, "static", "static route wins over dynamic at same depth");
 eq(matchRoute(syn, "/users/42")?.params, { id: "42" }, "dynamic route catches the rest");
 
-// 静的 > 動的 > catch-all。
+// static > dynamic > catch-all.
 const syn2 = [
   { segments: [{ lit: "docs" }, { lit: "intro" }], file: "static", isApi: false, specificity: 2, rest: false },
   { segments: [{ lit: "docs" }, { param: "slug" }], file: "dynamic", isApi: false, specificity: 1, rest: false },

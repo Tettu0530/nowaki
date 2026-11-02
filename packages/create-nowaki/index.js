@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// `npm create nowaki` のスキャフォールダ。依存ゼロ（Node 組み込みのみ）。
-// 対話ウィザード（TTY 時）: プロジェクト名・パッケージマネージャ・git・依存インストール。
-// 非対話（CI / `-y` / パイプ）では質問せずに既定値で生成する。
+// Scaffolder for `npm create nowaki`. Zero dependencies (Node built-ins only).
+// Interactive wizard (on a TTY): project name, package manager, git, dependency install.
+// Non-interactive (CI / `-y` / pipe): no prompts, generates with defaults.
 //
-// フラグ: -t/--template <basics|minimal>, -y/--yes（質問を飛ばす）,
-//         --install（非対話でも入れる）, --no-install, --no-git, --pm <npm|pnpm|yarn|bun>
+// Flags: -t/--template <basics|minimal>, -y/--yes (skip prompts),
+//        --install (install even when non-interactive), --no-install, --no-git, --pm <npm|pnpm|yarn|bun>
 
 import { cp, mkdir, readdir, readFile, writeFile, rename } from "node:fs/promises";
 import path from "node:path";
@@ -15,7 +15,7 @@ import process from "node:process";
 
 const { stdin, stdout, env, argv, platform } = process;
 
-// NO_COLOR と非 TTY を尊重する。
+// Respects NO_COLOR and non-TTY output.
 const useColor = !!stdout.isTTY && !env.NO_COLOR;
 const wrap = (code) => (s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : `${s}`);
 const cyan = wrap("36");
@@ -26,7 +26,7 @@ const red = wrap("31");
 const yellow = wrap("33");
 
 const args = argv.slice(2);
-// 値をとるフラグ。これらの直後の引数は positional ではない。
+// Flags that take a value. The argument right after one is not positional.
 const VALUE_FLAGS = new Set(["--pm", "--template", "-t"]);
 const flagAt = (...names) => {
   const i = args.findIndex((a) => names.includes(a));
@@ -95,7 +95,7 @@ async function select(question, options, def) {
 
 let name = positionals[0] || (await ask("Project name?", interactive ? "my-app" : "nowaki-app"));
 name = name.trim() || "nowaki-app";
-// ディレクトリ名は入力のまま、package.json の name だけ npm 名に正規化する。
+// Keep the directory name as typed; normalize only package.json's name to a valid npm name.
 const pkgName = name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[._-]+/, "") || "nowaki-app";
 const dest = path.resolve(process.cwd(), name);
 
@@ -122,7 +122,7 @@ let pm = pmFlag || detectPM();
 if (interactive && !pmFlag) pm = (await ask("Package manager?", pm)).trim() || pm;
 if (!["npm", "pnpm", "yarn", "bun"].includes(pm)) pm = "npm";
 const doGit = noGit ? false : await confirm("Initialize a git repository?", false);
-// 非対話（-y / CI / パイプ）では驚き防止のため --install が無い限り install しない。
+// Non-interactive (-y / CI / pipe): to avoid surprises, don't install unless --install is given.
 const doInstall = noInstall
   ? false
   : forceInstall
@@ -132,12 +132,12 @@ const doInstall = noInstall
       : false;
 rl?.close();
 
-// 共通設定（_shared）→ 選択テンプレートの順に重ねる。
+// Layer the shared config (_shared), then the chosen template.
 await mkdir(dest, { recursive: true });
 await cp(path.join(templatesDir, "_shared"), dest, { recursive: true });
 await cp(path.join(templatesDir, template), dest, { recursive: true });
 
-// npm は公開時に .gitignore を除外するので、テンプレートでは _gitignore で持ち、ここで戻す。
+// npm strips .gitignore on publish, so templates ship _gitignore and it's renamed back here.
 try {
   await rename(path.join(dest, "_gitignore"), path.join(dest, ".gitignore"));
 } catch {}
