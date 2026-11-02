@@ -1,8 +1,7 @@
 "use server";
 
 // "use server" モジュール。ここの export はサーバーにだけ残る RPC エンドポイントになる。
-// クライアントへは実装は出ず、fetch する極小プロキシだけが届く。
-// （SERVER_SECRET や store はクライアントのバンドルに含まれない。）
+// クライアントへは fetch する極小プロキシだけが届く（SERVER_SECRET や store はバンドルに含まれない）。
 
 import { getContext } from "@nowaki-dev/runtime";
 

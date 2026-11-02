@@ -1,7 +1,5 @@
-// ルーター（scanRoutes / matchRoute）のスナップショット + 単体テスト。
-// 実アプリ（examples/hello/routes）をスキャンし、代表パスのマッチ結果を固定する。
-// さらに、静的ルートが同じ深さの動的ルートに優先することを合成テーブルで検証する。
-//
+// ルーター（scanRoutes / matchRoute）のテスト。examples/hello/routes のマッチ結果を
+// スナップショットで固定し、優先順位は合成テーブルで検証する。
 // 使い方: node scripts/router-test.mjs
 
 import path from "node:path";
@@ -18,7 +16,6 @@ const eq = (got, want, label) => {
   if (!ok) failed++;
 };
 
-// マッチ結果を安定スナップショットに（絶対パス → basename）。
 const snap = (table, pathname) => {
   const m = matchRoute(table, pathname);
   return m ? { file: path.basename(m.file), params: m.params, isApi: m.isApi } : null;
@@ -26,7 +23,6 @@ const snap = (table, pathname) => {
 
 const table = await scanRoutes(app);
 
-// --- 実アプリのルーティング・スナップショット ---
 eq(snap(table, "/"), { file: "index.tsx", params: {}, isApi: false }, "/ -> index");
 eq(snap(table, "/about"), { file: "about.tsx", params: {}, isApi: false }, "/about -> about");
 eq(snap(table, "/blog/hello"), { file: "[slug].tsx", params: { slug: "hello" }, isApi: false }, "/blog/:slug param");
@@ -64,7 +60,6 @@ eq(
   "convention files are not routes",
 );
 
-// --- 合成テーブル: 静的ルートが同じ深さの動的ルートに優先する（specificity 降順）---
 const syn = [
   { segments: [{ lit: "users" }, { param: "id" }], file: "dyn", isApi: false, specificity: 1 },
   { segments: [{ lit: "users" }, { lit: "me" }], file: "static", isApi: false, specificity: 2 },
@@ -72,7 +67,7 @@ const syn = [
 eq(matchRoute(syn, "/users/me")?.file, "static", "static route wins over dynamic at same depth");
 eq(matchRoute(syn, "/users/42")?.params, { id: "42" }, "dynamic route catches the rest");
 
-// 静的 > 動的 > catch-all の優先順位（合成テーブル）。
+// 静的 > 動的 > catch-all。
 const syn2 = [
   { segments: [{ lit: "docs" }, { lit: "intro" }], file: "static", isApi: false, specificity: 2, rest: false },
   { segments: [{ lit: "docs" }, { param: "slug" }], file: "dynamic", isApi: false, specificity: 1, rest: false },

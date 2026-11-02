@@ -15,7 +15,7 @@ import process from "node:process";
 
 const { stdin, stdout, env, argv, platform } = process;
 
-// --- 色（NO_COLOR と非 TTY を尊重）---
+// NO_COLOR と非 TTY を尊重する。
 const useColor = !!stdout.isTTY && !env.NO_COLOR;
 const wrap = (code) => (s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : `${s}`);
 const cyan = wrap("36");
@@ -25,7 +25,6 @@ const green = wrap("32");
 const red = wrap("31");
 const yellow = wrap("33");
 
-// --- 引数 ---
 const args = argv.slice(2);
 // 値をとるフラグ。これらの直後の引数は positional ではない。
 const VALUE_FLAGS = new Set(["--pm", "--template", "-t"]);
@@ -37,7 +36,7 @@ const flags = new Set(args.filter((a) => a.startsWith("-")));
 const positionals = [];
 for (let i = 0; i < args.length; i++) {
   if (args[i].startsWith("-")) {
-    if (VALUE_FLAGS.has(args[i])) i++; // フラグの値を飛ばす
+    if (VALUE_FLAGS.has(args[i])) i++;
     continue;
   }
   positionals.push(args[i]);
@@ -51,13 +50,11 @@ const noGit = flags.has("--no-git");
 const interactive = !!stdin.isTTY && !!stdout.isTTY && !yes;
 
 const templatesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "templates");
-// 利用可能なテンプレート（templates/<name>、_shared は共通設定）。
 const TEMPLATES = [
   { value: "basics", hint: "starter with an interactive island" },
   { value: "minimal", hint: "a single page, zero islands" },
 ];
 
-// --- パッケージマネージャ検出（`npm create` の user-agent から）---
 function detectPM() {
   const ua = env.npm_config_user_agent || "";
   if (ua.startsWith("pnpm")) return "pnpm";
@@ -66,7 +63,6 @@ function detectPM() {
   return "npm";
 }
 
-// --- バナー ---
 console.log();
 console.log(`  ${cyan(bold("Nowaki"))} ${dim("野分")}  ${dim("· create a new app")}`);
 console.log();
@@ -83,7 +79,6 @@ async function confirm(question, def = true) {
   if (!a) return def;
   return a === "y" || a === "yes";
 }
-// 番号 or 名前で選ぶ簡易メニュー（依存なし）。
 async function select(question, options, def) {
   if (!rl) return def;
   console.log(`  ${question}`);
@@ -98,14 +93,12 @@ async function select(question, options, def) {
   return options.some((o) => o.value === a) ? a : def;
 }
 
-// --- 質問 ---
 let name = positionals[0] || (await ask("Project name?", interactive ? "my-app" : "nowaki-app"));
 name = name.trim() || "nowaki-app";
-// package.json の name は valid な npm 名に正規化（ディレクトリ名は入力のまま）
+// ディレクトリ名は入力のまま、package.json の name だけ npm 名に正規化する。
 const pkgName = name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[._-]+/, "") || "nowaki-app";
 const dest = path.resolve(process.cwd(), name);
 
-// 既存の空でないディレクトリは中止
 try {
   const existing = await readdir(dest);
   if (existing.length > 0) {
@@ -113,11 +106,8 @@ try {
     rl?.close();
     process.exit(1);
   }
-} catch {
-  // 無ければOK
-}
+} catch {}
 
-// テンプレート選択（-t/--template or 対話メニュー、既定 basics）。
 let template = templateFlag || (interactive ? await select("Template?", TEMPLATES, "basics") : "basics");
 template = String(template).toLowerCase();
 if (!TEMPLATES.some((t) => t.value === template)) {
@@ -132,8 +122,7 @@ let pm = pmFlag || detectPM();
 if (interactive && !pmFlag) pm = (await ask("Package manager?", pm)).trim() || pm;
 if (!["npm", "pnpm", "yarn", "bun"].includes(pm)) pm = "npm";
 const doGit = noGit ? false : await confirm("Initialize a git repository?", false);
-// 依存インストール: 対話なら確認（既定 Yes）。非対話（-y / CI / パイプ）は自動実行しない
-//（驚き防止）。非対話で入れたいときは --install。--no-install は常にスキップ。
+// 非対話（-y / CI / パイプ）では驚き防止のため --install が無い限り install しない。
 const doInstall = noInstall
   ? false
   : forceInstall
@@ -143,7 +132,6 @@ const doInstall = noInstall
       : false;
 rl?.close();
 
-// --- 生成 ---
 // 共通設定（_shared）→ 選択テンプレートの順に重ねる。
 await mkdir(dest, { recursive: true });
 await cp(path.join(templatesDir, "_shared"), dest, { recursive: true });
@@ -152,25 +140,19 @@ await cp(path.join(templatesDir, template), dest, { recursive: true });
 // npm は公開時に .gitignore を除外するので、テンプレートでは _gitignore で持ち、ここで戻す。
 try {
   await rename(path.join(dest, "_gitignore"), path.join(dest, ".gitignore"));
-} catch {
-  // _gitignore が無ければ素通し
-}
+} catch {}
 
-// package.json の name を設定
 try {
   const pkgPath = path.join(dest, "package.json");
   const pkg = JSON.parse(await readFile(pkgPath, "utf8"));
   pkg.name = pkgName;
   await writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
-} catch {
-  // package.json が無ければ素通し
-}
+} catch {}
 
 console.log(
   `\n  ${green("✓")} created ${bold(name)} ${dim(`(${template} template · ${path.relative(process.cwd(), dest) || "."})`)}`,
 );
 
-// git init（任意）
 if (doGit) {
   try {
     execFileSync("git", ["init", "-q"], { cwd: dest, stdio: "ignore" });
@@ -180,7 +162,6 @@ if (doGit) {
   }
 }
 
-// 依存インストール（任意）
 let installed = false;
 if (doInstall) {
   console.log(`\n  ${dim(`installing dependencies with ${pm}…`)}\n`);
@@ -193,7 +174,6 @@ if (doInstall) {
   }
 }
 
-// --- 次のステップ ---
 const runDev = pm === "npm" || pm === "bun" ? `${pm} run dev` : `${pm} dev`;
 console.log(`\n  ${bold("Next steps:")}`);
 console.log(`    cd ${name}`);

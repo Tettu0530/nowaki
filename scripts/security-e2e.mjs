@@ -1,9 +1,6 @@
-// アプリ層セキュリティの回帰スイート。多段監査(4ラウンド)で直した防御が
-// 退行していないかを決定的に検証する(Chrome 不要、curl/WS のみ)。CI の e2e から呼ぶ。
-//
+// アプリ層セキュリティの回帰スイート。防御の退行を決定的に検証する(Chrome 不要)。CI の e2e から呼ぶ。
 //   node scripts/security-e2e.mjs dev  <devBase>  <appRoot>
 //   node scripts/security-e2e.mjs prod <prodBase>
-//
 // 検証対象: 任意ファイル読取(@fs/ssr-module/.env/virtual ..)、RPC CSRF、CSWSH、
 //           live state 偽造、ISR クロスユーザー隔離・クエリ氾濫集約。
 
@@ -79,7 +76,7 @@ async function liveForgeryRejected(b) {
 
 if (mode === "dev") {
   const enc = encodeURIComponent;
-  // --- 任意ファイル読取面（canonicalize + allow-root + deny + transformable ゲート） ---
+  // 任意ファイル読取面（canonicalize + allow-root + deny + transformable ゲート）
   check("@fs arbitrary read blocked (/etc/passwd → 403)",
     (await statusOf(`${base}/@fs/etc/passwd`)) === 403);
   check("@fs .env blocked (403)",
@@ -97,7 +94,7 @@ if (mode === "dev") {
   check("virtual-module traversal rejected (.. → 404)",
     (await rawGet(base, "/__nowaki_virtual__/../../../../../../../etc/hosts")) === 404);
 
-  // --- サーバー関数 RPC の CSRF ゲート ---
+  // サーバー関数 RPC の CSRF ゲート
   const fn = `${base}/__nowaki/fn`;
   const post = (h) =>
     fetch(fn, { method: "POST", headers: h, body: JSON.stringify({ id: "6c90d7dc921a9a3f", args: [] }) })
@@ -108,7 +105,7 @@ if (mode === "dev") {
   check("RPC cross-origin rejected (403)",
     (await post({ "content-type": "application/json", "x-nowaki-rpc": "1", origin: "http://evil.test" })) === 403);
 
-  // --- CSWSH（WS upgrade の Origin 検証） ---
+  // CSWSH（WS upgrade の Origin 検証）
   check("CSWSH /__nowaki/live cross-origin upgrade rejected (403)",
     (await wsUpgrade(base, "/__nowaki/live", "http://evil.test")) === 403);
   check("CSWSH /__nowaki/hmr cross-origin upgrade rejected (403)",
@@ -116,12 +113,12 @@ if (mode === "dev") {
   check("WS same-origin upgrade allowed (101)",
     (await wsUpgrade(base, "/__nowaki/live", base)) === 101);
 
-  // --- live state 偽造 ---
+  // live state 偽造
   check("forged live join is rejected (no patch)", await liveForgeryRejected(base));
 }
 
 if (mode === "prod") {
-  // --- ISR クロスユーザー隔離（accept-language 依存ルート /vary） ---
+  // ISR クロスユーザー隔離（accept-language 依存ルート /vary）
   const get = (lang) =>
     fetch(`${base}/vary`, { headers: { "accept-language": lang } });
   await get("de-DE"); // 1回目: de variant を学習・保存
@@ -133,7 +130,7 @@ if (mode === "prod") {
   check("ISR variant is cached on repeat (HIT/STALE)",
     /HIT|STALE/.test(de2.headers.get("x-nowaki-cache") || ""));
 
-  // --- ISR クエリ氾濫集約（/isr はクエリを読まない→ ?cb は単一エントリに集約） ---
+  // ISR クエリ氾濫集約（/isr はクエリを読まない→ ?cb は単一エントリに集約）
   await fetch(`${base}/isr`); // populate
   const f1 = (await fetch(`${base}/isr?cb=1`)).headers.get("x-nowaki-cache");
   const f2 = (await fetch(`${base}/isr?cb=2`)).headers.get("x-nowaki-cache");

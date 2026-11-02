@@ -22,7 +22,6 @@ if (result.error) {
   process.exit(1);
 }
 
-// シグナルで終了した場合は 128 + シグナル番号、それ以外は終了コードをそのまま返す。
 if (result.signal) {
   process.exit(1);
 }

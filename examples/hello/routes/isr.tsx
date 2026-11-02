@@ -1,10 +1,8 @@
-// ISR（incremental static regeneration）デモ。
-// `export const revalidate = <秒>` でオプトイン。`nowaki start` の Rust フロントは
-// 組み立て済み HTML を path 単位でキャッシュし、鮮度切れは「古いものを即返し → 裏で再生成」。
+// ISR デモ。`export const revalidate = <秒>` でオプトインすると、`nowaki start` は HTML を
+// path 単位でキャッシュし、鮮度切れは「古いものを即返し → 裏で再生成」する。
 // CDN/エッジ配備でも Cache-Control(s-maxage + stale-while-revalidate) で同じ挙動になる。
 import type { PageProps } from "@nowaki-dev/runtime";
 
-// 2 秒ごとに再検証。
 export const revalidate = 2;
 
 export const title = "ISR — Nowaki";

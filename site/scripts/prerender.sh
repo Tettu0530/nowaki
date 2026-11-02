@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # nowaki.dev ランディングを静的ファイルに事前レンダリングする。
 # 出力: site/public/  (Cloudflare Pages 等の静的ホストへそのままデプロイ可能)
-#
 #   /        -> public/index.html
 #   /ja      -> public/ja/index.html
 #   /_nowaki -> public/_nowaki/*   (content-hash 付きクライアントアセット)
-#
 # 前提: `nowaki` が PATH にあること (cargo install nowaki もしくはリポジトリの
 #        target/debug/nowaki) と、site で `pnpm install` 済みであること。
 set -euo pipefail
@@ -24,7 +22,6 @@ echo "[prerender] start (port $PORT)"
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
 
-# サーバー起動待ち
 for _ in $(seq 1 60); do
   if curl -sf "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then break; fi
   sleep 0.25

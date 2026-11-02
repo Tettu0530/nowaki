@@ -1,14 +1,8 @@
 import { useEffect } from "preact/hooks";
 
 // ページのモーションを束ねる「指揮役」の島。自分自身は何も描画しない。
-// 外部ライブラリ不使用（WAAPI + IntersectionObserver + rAF だけ）。このサイトは
-// 「最小JSを自分で証明する」のが第一原則なので、演出のために重い依存は載せない。
-//
-// 設計方針（「風＝メッセージ」）:
-// - 見せ場は1つ ＝ ヒーローの「風で吹き込むタイポ」。一律のフェードは撒かない。
-// - 動かすのは意味のある所だけ: 送信JS量の棒、数値、本物の手順(3ステップ)、風のマーキー。
-// - 隠すのはヒーローだけ（折り返し以降はJS到達前から見えている）。
-// - prefers-reduced-motion では何もしない。
+// 「最小JSを自分で証明する」サイトなので外部依存は載せない（WAAPI + IntersectionObserver + rAF だけ）。
+// 隠すのはヒーローだけで、prefers-reduced-motion では何もしない。
 const EXPO = "cubic-bezier(0.16,1,0.3,1)";
 const QUINT = "cubic-bezier(0.22,1,0.36,1)";
 
@@ -29,7 +23,6 @@ export default function Animator() {
       return id;
     };
 
-    // 要素が初めてビューに入ったら1回だけ実行
     const onEnter = (el: Element, fn: () => void, margin = "0px 0px -10% 0px") => {
       const io = new IntersectionObserver(
         (entries, obs) => {
@@ -46,7 +39,7 @@ export default function Animator() {
       observers.push(io);
     };
 
-    // ── 署名モーション: ヒーローのタイポが風で吹き込む ──────────────────
+    // 署名モーション: ヒーローのタイポが風で吹き込む
     const lines = Array.from(root.querySelectorAll<HTMLElement>("[data-hero-title] > span"));
     const rest = Array.from(root.querySelectorAll<HTMLElement>("[data-hero] [data-reveal]")).filter(
       (el) => !el.closest("[data-hero-title]"),
@@ -71,7 +64,7 @@ export default function Animator() {
       );
     });
 
-    // ── 本物の3ステップを読み方向(左→右)に順次出す ───────────────────
+    // 3ステップを読み方向(左→右)に順次出す
     const steps = document.querySelector<HTMLElement>("[data-steps]");
     if (steps) {
       const kids = Array.from(steps.children) as HTMLElement[];
@@ -89,7 +82,7 @@ export default function Animator() {
       });
     }
 
-    // ── 送信JS量の棒を伸ばす（width ではなく scaleX。レイアウトを動かさない） ──
+    // 送信JS量の棒はレイアウトを動かさないよう width ではなく scaleX で伸ばす
     Array.from(document.querySelectorAll<HTMLElement>(".bar-fill")).forEach((el) => {
       el.style.transform = "scaleX(0)";
       onEnter(el, () => {
@@ -101,7 +94,7 @@ export default function Animator() {
       });
     });
 
-    // ── 数字のカウントアップ（接頭/接尾を保ったまま数値だけ回す） ──────────
+    // 数字のカウントアップ（接頭/接尾を保ったまま数値だけ回す）
     Array.from(document.querySelectorAll<HTMLElement>("[data-countup]")).forEach((el) => {
       const raw = el.textContent || "";
       const m = raw.match(/[\d.]+/);
@@ -123,9 +116,7 @@ export default function Animator() {
       });
     });
 
-    // ── 折り返し以降をスクロールで静かに立ち上げる ───────────────────
-    // 見出し/本文は単体で rise、グリッドやリストは子を順に。距離は控えめ・blur で柔らかく。
-    // 伏せるのは JS のみ（静的HTML/クローラ/JS無効では常に表示）。
+    // 折り返し以降をスクロールで立ち上げる。伏せるのは JS のみ（静的HTML/クローラ/JS無効では常に表示）。
     const riseKeys: Keyframe[] = [
       { opacity: 0, transform: "translateY(22px)", filter: "blur(6px)" },
       { opacity: 1, transform: "none", filter: "blur(0px)" },
@@ -152,7 +143,7 @@ export default function Animator() {
       });
     });
 
-    // ── スクロール: 進捗バー + ヒーロー透かしの視差。風のマーキーへ突風も渡す ──
+    // スクロール: 進捗バー + ヒーロー透かしの視差。風のマーキーへ突風も渡す
     const progress = document.querySelector<HTMLElement>("[data-progress]");
     const watermark = document.querySelector<HTMLElement>("[data-parallax]");
     const wmAmount = watermark ? parseFloat(watermark.dataset.parallax || "0.15") : 0;
@@ -183,7 +174,7 @@ export default function Animator() {
     window.addEventListener("scroll", onScroll, { passive: true, signal });
     updateScroll();
 
-    // ── 風のマーキー。スクロール速度で一瞬だけ加速する（突風）。視界外では止める。 ──
+    // 風のマーキー。スクロール速度で一瞬だけ加速する（突風）。視界外では止める。
     const track = document.querySelector<HTMLElement>("[data-marquee]");
     if (track) {
       let half = track.scrollWidth / 2;

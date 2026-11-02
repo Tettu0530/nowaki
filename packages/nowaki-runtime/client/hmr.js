@@ -1,13 +1,10 @@
-// HMRクライアント + エラーオーバーレイ (dev)。
-// islands/ の変更は島だけをホットスワップ（"update"）、それ以外はフルリロード（"reload"）。
-// 注: 現状の update は島モジュールを再importして再renderするため、コンポーネントの
-// ローカルstateはリセットされる（prefresh相当のstate保持は将来対応）。
+// HMRクライアント + エラーオーバーレイ (dev)。islands/ の変更は島だけを再import・再renderするため
+// 島のローカルstateはリセットされる（prefresh相当のstate保持は未対応）。
 
 import { h, render } from "preact";
 
 const OVERLAY_ID = "__nowaki_error_overlay";
 
-/// islands/ 配下が変更されたとき、各 <nowaki-island> を再importして再renderする。
 async function hotUpdateIslands() {
   const version = Date.now();
   for (const el of document.querySelectorAll("nowaki-island")) {
@@ -89,8 +86,6 @@ ws.addEventListener("close", () => {
       await fetch("/", { method: "HEAD" });
       clearInterval(timer);
       location.reload();
-    } catch {
-      // まだ落ちている
-    }
+    } catch {}
   }, 500);
 });

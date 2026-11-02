@@ -32,9 +32,8 @@ declare module "*.pdf" { const url: string; export default url; }
 // プラグインの仮想モジュール（nowaki.config の resolveId/load）。任意の export を許す。
 declare module "virtual:*";
 
-// 遅延ハイドレーション指令（Astro 互換の client:*）を任意のコンポーネントに付けられるよう、
-// preact の JSX.IntrinsicAttributes を拡張する。<Counter client:visible /> 等が型チェックを通る。
-// （この import で本ファイルはモジュールになる＝下のグローバル型は declare global で公開する。）
+// client:* 指令を任意のコンポーネントに付けられるよう preact の JSX.IntrinsicAttributes を拡張する。
+// この import で本ファイルはモジュールになるので、下のグローバル型は declare global で公開する。
 import "preact";
 declare module "preact" {
   namespace JSX {

@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "preact/hooks";
 
-// 野分（風）を表す生成ビジュアル。ストーム帯の上を、嵐の青の筋が流れる。
-// ポインタに反応する: カーソル付近で風が曲がり・加速し・明るくなる（風が応答する）。
+// 野分（風）を表す生成ビジュアル。カーソル付近で風の筋が曲がり・加速し・明るくなる。
 // reduced-motion 時はアニメーションせず、静止した一枚を描く。タッチ端末では反応を付けない。
 export default function WindHero() {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -89,7 +88,6 @@ export default function WindHero() {
         const active = px > -9000;
         for (const s of streaks) {
           if (active) {
-            // 筋の中心とカーソルの距離で近接度 f を出す。
             const dx = s.x + s.len * 0.5 - px;
             const dy = s.y - py;
             const dist = Math.hypot(dx, dy);

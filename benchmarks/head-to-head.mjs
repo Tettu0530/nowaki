@@ -1,14 +1,9 @@
-// Nowaki vs Next.js vs Astro の head-to-head。同条件の「カウンタ1個 + SSR」アプリを
-// benchmarks/apps/{nowaki,next,astro}-counter に置き、同じ指標で測る。
-//
-// 正直さの原則: 各フレームワークの toolchain（node_modules）が入っているものだけ測る。
-// 入っていなければ "not installed" と表示し、数字を捏造しない。Next/Astro を測るには:
+// Nowaki vs Next.js vs Astro の head-to-head（benchmarks/apps/*-counter、カウンタ1個 + SSR）。
+// toolchain が入っているものだけ測り、無ければ "not installed" と表示して数字を捏造しない。
+// Next/Astro を測るには:
 //   pnpm -C benchmarks/apps/next-counter  install
 //   pnpm -C benchmarks/apps/astro-counter install
-// （Nowaki は monorepo の pnpm install でリンクされる。）
-//
 // 使い方: node benchmarks/head-to-head.mjs [--json]
-//
 // 指標:
 //   dev ready (cold)  — dev サーバー起動 → ready 行までの wall time
 //   build            — 本番ビルドの wall time
@@ -89,7 +84,6 @@ function clean(dir, subs) {
   for (const s of subs) rmSync(path.join(dir, s), { recursive: true, force: true });
 }
 
-// --- Nowaki ---
 async function benchNowaki() {
   const dir = path.join(APPS, "nowaki-counter");
   const runtimeLinked =
@@ -106,7 +100,6 @@ async function benchNowaki() {
   return { name: "Nowaki", dev, build: build.ms, rawKB: js.rawKB, gzKB: js.gzKB };
 }
 
-// --- Next.js ---
 async function benchNext() {
   const dir = path.join(APPS, "next-counter");
   const bin = path.join(dir, "node_modules/.bin/next");
@@ -117,8 +110,7 @@ async function benchNext() {
   const dev = await timeUntil(bin, ["dev", "-p", "8911"], { cwd: dir, env }, "ready in");
   clean(dir, [".next"]);
   const build = timeRun(bin, ["build"], { cwd: dir, env });
-  // first-load JS は Next 自身の `next build` 出力（ルート表の `/` 行の最終列）を採る。
-  // これは「`/` が実際に最初に読む JS」の Next 公式値（parsed, 未圧縮）。
+  // first-load JS は `next build` のルート表 `/` 行の最終列（Next 公式値、未圧縮）を採る。
   let firstLoadKB = null;
   const m = build.stdout.match(/[┌├└]\s*[○●ƒλ]?\s*\/\s+\S+\s+(?:k?B\s+)?([\d.]+)\s*kB/);
   if (m) firstLoadKB = parseFloat(m[1]);
@@ -127,11 +119,10 @@ async function benchNext() {
     if (shared) firstLoadKB = parseFloat(shared[1]);
   }
   clean(dir, [".next"]);
-  // Next の first-load は未圧縮の Next 公式値なので rawKB に入れる（gzip は出さない）。
+  // 未圧縮値なので rawKB に入れる（gzip は出さない）。
   return { name: "Next.js", dev, build: build.ms, rawKB: firstLoadKB, gzKB: null, rawNote: "Next-reported First Load JS" };
 }
 
-// --- Astro ---
 async function benchAstro() {
   const dir = path.join(APPS, "astro-counter");
   const bin = path.join(dir, "node_modules/.bin/astro");

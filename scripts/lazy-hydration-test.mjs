@@ -1,8 +1,4 @@
 // 遅延ハイドレーション（client:* 指令）の実ブラウザ挙動テスト。
-//   client:load    即時ハイドレート（クリックで増える）
-//   client:idle    アイドル後にハイドレート
-//   client:only    SSR されず、クライアントで描画される
-//   client:visible スクロールで可視になるまでハイドレートしない
 // CI（Chrome 無し）では走らせず、手元検証用。Chrome を CDP で直接駆動する（puppeteer 不要）。
 // 使い方: BASE=http://127.0.0.1:8241 node scripts/lazy-hydration-test.mjs
 import { spawn } from "node:child_process";
@@ -89,12 +85,11 @@ try {
   await sleep(700);
   await cdp.evalAsync(HELPERS + " return true;");
 
-  // --- client:load: 即時ハイドレート ---
   await cdp.evalAsync(`window.__plus('sec-load'); return true;`);
   await sleep(80);
   check("client:load hydrates immediately", (await cdp.evalAsync(`return window.__count('sec-load');`)) === "1");
 
-  // --- client:visible: 折り返しの下なので、まだハイドレートしない ---
+  // sec-visible は折り返しの下にある。
   await cdp.evalAsync(`window.__plus('sec-visible'); return true;`);
   await sleep(80);
   check(
@@ -102,13 +97,11 @@ try {
     (await cdp.evalAsync(`return window.__count('sec-visible');`)) === "100",
   );
 
-  // --- client:idle: アイドル後にハイドレート ---
   await sleep(600);
   await cdp.evalAsync(`window.__plus('sec-idle'); return true;`);
   await sleep(80);
   check("client:idle hydrates on idle", (await cdp.evalAsync(`return window.__count('sec-idle');`)) === "11");
 
-  // --- client:only: SSR されず、クライアントで描画（width が入る） ---
   const onlyText = (await cdp.evalAsync(`return window.__onlyText();`)) || "";
   const onlyMatch = onlyText.match(/innerWidth = (\d+)/);
   check(
@@ -116,7 +109,6 @@ try {
     !!onlyMatch && Number(onlyMatch[1]) > 0,
   );
 
-  // --- client:visible: スクロールで可視にすると、ハイドレートする ---
   await cdp.evalAsync(`window.scrollTo(0, document.body.scrollHeight); return true;`);
   await sleep(600);
   await cdp.evalAsync(`window.__plus('sec-visible'); return true;`);
