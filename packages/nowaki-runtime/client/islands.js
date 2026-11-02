@@ -1,12 +1,5 @@
-// Islandsハイドレーションランタイム（= クライアントの eager エントリ）。
-// SSRが埋め込んだ <nowaki-island src props client> を見つけ、島モジュールだけを
-// dynamic importしてハイドレートする。ページ本体のJSは存在しない。
-// SPA ルーター(router.js: Router Cache / loading / error / クリック横取り)は
-// 初回描画では不要なので、ハイドレート後に idle で遅延ロードする（first-load を最小に保つ）。
-//
-// 遅延ハイドレーション（Astro 互換の client:* 指令）。島の `client` 属性で戦略を切替える:
-//   load(既定) 即時 / idle requestIdleCallback / visible IntersectionObserver で可視時 /
-//   media client-media のメディアクエリ一致時 / only SSR せずクライアントだけで render。
+// Islandsハイドレーションランタイム（クライアントの eager エントリ）。島モジュールだけを
+// `client` 属性（client:* 指令）の戦略で dynamic import する。ページ本体のJSは存在しない。
 
 import { h, hydrate, render } from "preact";
 
@@ -18,7 +11,6 @@ export function hydrateIslands(root = document) {
   }
 }
 
-// 戦略に応じて mount をスケジュールする。
 function schedule(el, strategy) {
   const go = () => mount(el, strategy === "only");
   if (strategy === "idle") {
@@ -32,7 +24,6 @@ function schedule(el, strategy) {
   }
 }
 
-// 島モジュールを読み込み、hydrate（SSR 済み）または render（client:only）する。
 function mount(el, clientOnly) {
   const src = el.getAttribute("src");
   const props = JSON.parse(el.getAttribute("props") || "{}");
@@ -59,7 +50,6 @@ function whenVisible(el, go) {
   io.observe(target);
 }
 
-// メディアクエリが一致したら実行（既に一致なら即時、後で一致したら一度だけ）。
 function whenMedia(query, go) {
   if (!query || !window.matchMedia) return go();
   const mql = window.matchMedia(query);
@@ -113,9 +103,8 @@ if (typeof window !== "undefined") window.__nowakiHydrateIslands = hydrateIsland
 
 hydrateIslands();
 
-// SPA ルーターを遅延ロード（first-load JS を小さく保つ）。ランタイム <script> の
-// data-router 属性（サーバーが注入）にチャンク URL があれば、idle で import する。
-// ロード前のクリックは通常のフルナビになる（グレースフルデグラデーション）。
+// first-load を小さく保つため、サーバーが data-router に注入したルーターチャンクを idle で遅延ロードする
+// （ロード前のクリックはフルナビ）。
 if (typeof document !== "undefined") {
   const runtimeEl = document.getElementById("nowaki-runtime");
   const routerSrc = runtimeEl && runtimeEl.getAttribute("data-router");

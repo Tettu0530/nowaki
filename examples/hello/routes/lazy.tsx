@@ -1,6 +1,5 @@
-// 遅延ハイドレーション（Astro 互換の client:* 指令）のデモ。
-// それぞれの島が異なる戦略でハイドレートする。client:visible はスクロールで可視になるまで、
-// client:idle はアイドル時、client:only は SSR せずクライアントだけで描画。
+// 遅延ハイドレーション（client:* 指令）のデモ。client:visible は可視になるまで待ち、
+// client:idle はアイドル時、client:only は SSR せずクライアントだけで描画する。
 import Counter from "../islands/Counter.tsx";
 import ClientOnly from "../islands/ClientOnly.tsx";
 

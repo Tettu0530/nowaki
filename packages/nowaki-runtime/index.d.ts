@@ -1,6 +1,4 @@
-// Nowaki framework の公開型。アプリのルート・loader・action・API・サーバー関数を型付ける。
-//   import type { LoaderContext, PageProps } from "@nowaki-dev/runtime";
-// 値の getContext も同名でエクスポートする（import { getContext } from "@nowaki-dev/runtime"）。
+// Nowaki framework の公開型（値としては getContext もエクスポートする）。
 
 /** ルートパラメータ。`[slug]` は string、`[...slug]`（catch-all）は string[]。 */
 export type RouteParams = Record<string, string | string[]>;

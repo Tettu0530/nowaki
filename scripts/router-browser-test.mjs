@@ -1,9 +1,4 @@
 // 実ブラウザ（Chrome）でのクライアントルーター挙動テスト。
-//   1) SPA 遷移（body 差し替え + URL 更新）
-//   2) Router Cache（再訪が再フェッチ無し）
-//   3) loading 境界（遅い遷移でローディングUIが出る）
-//   4) error 境界（フェッチ失敗でフォールバック表示 + reset で復帰）
-//
 // CI（Chrome 無し）では走らせず、手元での検証用。Chrome を CDP で直接駆動する（puppeteer 不要）。
 // 使い方: BASE=http://127.0.0.1:8233 node scripts/router-browser-test.mjs
 import { spawn } from "node:child_process";
@@ -74,7 +69,6 @@ try {
     "--user-data-dir=/tmp/nwk-chrome-test",
     "about:blank",
   ]);
-  // CDP が立ち上がるまで待つ
   let targets;
   for (let i = 0; i < 40; i++) {
     try {
@@ -90,11 +84,10 @@ try {
   await cdp.send("Runtime.enable");
   await cdp.send("Network.enable");
 
-  // 初期ページ
   await cdp.send("Page.navigate", { url: BASE + "/" });
   await sleep(800);
 
-  // --- 1) SPA 遷移: /about へのリンクを作って click（ルーターが横取り） ---
+  // SPA 遷移: リンクを作って click（ルーターが横取り）
   await cdp.evalAsync(`
     window.__nav = (href) => { const a=document.createElement('a'); a.href=href; a.textContent=href; document.body.appendChild(a); a.click(); };
     return true;`);
@@ -104,7 +97,7 @@ try {
     return { path: location.pathname, h1: document.querySelector('h1')?.textContent || '', hasIslandRuntime: !!window.__nowakiRouter };`);
   check("SPA navigation swapped to /about", afterAbout.path === "/about" && /About/i.test(afterAbout.h1));
 
-  // --- 2) Router Cache: 戻ってまた /about。/about のフェッチ回数が増えない ---
+  // Router Cache: 戻ってまた /about。フェッチ回数が増えない
   await cdp.evalAsync(`history.back(); return true;`);
   await sleep(400);
   const fetchesBefore = await cdp.evalAsync(`
@@ -119,7 +112,7 @@ try {
     after.path === "/about" && after.fetches === fetchesBefore,
   );
 
-  // --- 3) loading 境界: 遅い /slow への遷移で 150ms 後にローディングUIが出る ---
+  // loading 境界
   await cdp.evalAsync(`history.back(); return true;`);
   await sleep(400);
   await cdp.evalAsync(`window.__nav('/slow?ms=700'); return true;`);
@@ -132,7 +125,7 @@ try {
     return { hasSlow: !!document.querySelector('[data-testid="slow"]'), hasLoading: !!document.querySelector('[data-testid="loading"]') };`);
   check("slow page replaces the loading boundary once loaded", afterSlow.hasSlow && !afterSlow.hasLoading);
 
-  // --- 4) error 境界: /about へのフェッチをブロック → フォールバック表示 → reset で復帰 ---
+  // error 境界: フェッチをブロック → フォールバック表示 → reset で復帰
   await cdp.evalAsync(`history.back(); return true;`);
   await sleep(400);
   // Router Cache をまたぐので、別 URL でブロックを試す（?e=1 で未キャッシュ）
@@ -144,7 +137,6 @@ try {
              msg: document.querySelector('[data-nowaki-error]')?.textContent || '',
              hasReset: !!document.querySelector('[data-nowaki-reset]') };`);
   check("error boundary shows on a failed navigation", errState.hasError && errState.hasReset && errState.msg.length > 0);
-  // reset → ブロック解除して再試行 → /about?e=1 が表示
   await cdp.send("Network.setBlockedURLs", { urls: [] });
   await cdp.evalAsync(`document.querySelector('[data-nowaki-reset]').click(); return true;`);
   await sleep(700);

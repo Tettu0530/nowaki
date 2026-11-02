@@ -1,8 +1,5 @@
-// 型安全なナビゲーションの型（@nowaki-dev/runtime/navigation）。
-//
-// アプリの routes/ から `nowaki typegen`（dev/build が自動実行）が .nowaki/types.d.ts を生成し、
-// `declare module "@nowaki-dev/runtime/navigation" { interface NowakiRoutes { ... } }` で
-// 実際のルートを登録する。生成前は RoutePath が string にフォールバックする（緩い）。
+// 型安全なナビゲーションの型。`nowaki typegen` が .nowaki/types.d.ts で NowakiRoutes を拡張して
+// 実際のルートを登録する。生成前は RoutePath が string にフォールバックする。
 
 import type { VNode } from "preact";
 

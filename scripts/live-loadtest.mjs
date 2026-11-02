@@ -45,7 +45,7 @@ const open = (url) =>
 const baseRss = rssKB();
 console.log(`baseline RSS: ${(baseRss / 1024).toFixed(1)} MB  (pids ${pids.join(",")})`);
 
-// --- N 接続を並列で張る（バッチで FD/受け入れの瞬間ピークを抑える）---
+// バッチで張って FD/受け入れの瞬間ピークを抑える。
 const t0 = now();
 const conns = [];
 const BATCH = 100;
@@ -56,7 +56,6 @@ for (let i = 0; i < N; i += BATCH) {
   for (const r of batch) if (r.status === "fulfilled") conns.push(r.value);
 }
 const connMs = now() - t0;
-// join を送る（接続ごとに独立した state を持たせる）
 for (const ws of conns) {
   ws.send(JSON.stringify({ type: "join", islands: [{ nid, name: "LiveCounter", state, sig }] }));
 }
@@ -69,7 +68,6 @@ console.log(
     `(+${((afterRss - baseRss) / 1024).toFixed(1)} MB, ~${(((afterRss - baseRss) * 1024) / conns.length / 1024).toFixed(1)} KB/conn)`,
 );
 
-// --- イベントスループット: 全接続が inc を送り、patch を数える ---
 let patches = 0;
 for (const ws of conns) {
   ws.addEventListener("message", (e) => {
@@ -86,7 +84,6 @@ const te = now();
 for (const ws of conns) {
   if (ws.readyState === 1) ws.send(JSON.stringify({ type: "event", nid, handler: "inc" }));
 }
-// patch が出そろうまで待つ（最大 20s）
 for (let i = 0; i < 200 && patches < conns.length; i++) await new Promise((r) => setTimeout(r, 100));
 const evMs = now() - te;
 console.log(

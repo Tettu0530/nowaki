@@ -15,7 +15,6 @@ export function matchBoundary(list, pathname) {
 }
 
 // TTL + LRU の小さなページキャッシュ（Router Cache）。値は不透明（router.js では {doc,finalUrl}）。
-// 同じ URL の再訪・戻る/進むがフェッチ無しで即座に復元できる。
 export function createPageCache({ ttlMs = 30000, max = 32, now = () => Date.now() } = {}) {
   const map = new Map(); // key -> { value, at }
   const fresh = (e) => e && now() - e.at < ttlMs;
@@ -39,7 +38,7 @@ export function createPageCache({ ttlMs = 30000, max = 32, now = () => Date.now(
     set(key, value) {
       map.delete(key);
       map.set(key, { value, at: now() });
-      while (map.size > max) map.delete(map.keys().next().value); // 最古を追い出す
+      while (map.size > max) map.delete(map.keys().next().value);
     },
     delete(key) {
       map.delete(key);

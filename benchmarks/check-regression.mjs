@@ -1,11 +1,8 @@
-// クライアント JS サイズの回帰ゲート。送信 JS は決定的（同じソース → 同じバイト）なので、
-// CI で「うっかり依存を足してバンドルが膨らむ」回帰を検出できる。時間系（build/dev）は
-// マシン依存でブレるのでゲートにしない（head-to-head.mjs の方で参考値として測る）。
-//
+// クライアント JS サイズの回帰ゲート（送信 JS は決定的なのでゲートにできる）。
+// 時間系はマシン依存でブレるのでゲートにしない（head-to-head.mjs で参考値として測る）。
 // 使い方:
 //   node benchmarks/check-regression.mjs           # baseline.json と比較（超過で exit 1）
 //   node benchmarks/check-regression.mjs --update   # 現在値で baseline.json を更新
-//
 // 対象は benchmarks/apps/nowaki-counter（最小・安定）。閾値は gzip +12%。
 
 import { spawnSync } from "node:child_process";
@@ -32,9 +29,8 @@ function measure() {
   }
   const clientDir = path.join(APP, "dist/client");
   const manifest = JSON.parse(readFileSync(path.join(clientDir, "manifest.json"), "utf8"));
-  // SPA ルーターは islands.js が idle で遅延 import する別チャンク。first-load には乗らない
-  // ので、ゲート対象（gzipBytes）からは除外して「初回ロードで送る JS」を測る。
-  // 遅延チャンク = routerRuntime 本体 + その推移的依存（manifest.preload に記録済み）。
+  // SPA ルーター（routerRuntime + manifest.preload の推移的依存）は idle で遅延 import され
+  // first-load に乗らないので、ゲート対象（gzipBytes）から除外する。
   const lazySet = new Set();
   if (manifest.routerRuntime) {
     lazySet.add(manifest.routerRuntime);

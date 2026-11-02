@@ -1,15 +1,9 @@
-// Nowaki の素朴で再現可能なベンチ。誇張せず「自分のアプリで測った数字」を出す。
-//   - dev server ready: `nowaki dev` 起動から ready までの時間（cold / warm）
-//   - build: `nowaki build` の所要時間
-//   - shipped JS: dist/client の全 JS チャンクの gzip 合計
-//   - TTFB: `nowaki start`（Rust front）で `/` の time-to-first-byte
-//
+// Nowaki の素朴で再現可能なベンチ（dev ready cold/warm、build、shipped JS gzip、TTFB）。
 // 使い方: node benchmarks/bench.mjs [appDir] [nowakiBin]
 //   appDir   既定 examples/hello
 //   nowakiBin 既定 ./target/release/nowaki（無ければ ./target/debug/nowaki）
-//
-// 注意: examples/hello は .tsrx・プラグイン・ライブ島まで含むキッチンシンク。
-// 数字には plugin host 起動なども含む（典型的な実アプリの上限寄り）。
+// 注意: examples/hello は .tsrx・プラグイン・ライブ島まで含むキッチンシンクなので、
+// 数字は plugin host 起動なども含む上限寄りになる。
 
 import { spawn, spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, existsSync, rmSync } from "node:fs";
@@ -62,7 +56,6 @@ function clean() {
 }
 
 async function devReady() {
-  // cold（キャッシュ無し）と warm（2回目）を測る
   clean();
   const cold = await timeUntil(["dev", appDir, "--port", "0"], "ready in");
   await sleep(300);

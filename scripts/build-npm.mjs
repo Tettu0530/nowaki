@@ -4,9 +4,7 @@
 //   node scripts/build-npm.mjs <key> [--binary <path>] [--no-build]
 //
 // <key> は darwin-arm64 / darwin-x64 / linux-x64-gnu / linux-arm64-gnu / win32-x64。
-// 既定では `cargo build --release -p nowaki --target <triple>` を実行し、出力を
-// packages/nowaki-cli/npm/<key>/ に package.json + bin/<binary> として配置する。
-// CI の各マトリクスジョブが自身のターゲット分を組み立てて publish する想定。
+// 既定では cargo build してから packages/nowaki-cli/npm/<key>/ に配置する（CI の各マトリクスジョブ用）。
 
 import { execFileSync } from "node:child_process";
 import {
@@ -77,7 +75,6 @@ function main() {
   const version = workspaceVersion();
   const binName = meta.exe ? "nowaki.exe" : "nowaki";
 
-  // 1) バイナリを用意する（--binary 指定が無ければ cargo build）。
   let binPath = binary;
   if (!binPath) {
     if (build) {
@@ -91,12 +88,10 @@ function main() {
     binPath = path.join(ROOT, "target", meta.triple, "release", binName);
   }
 
-  // 2) パッケージディレクトリを作る。
   const pkgDir = path.join(ROOT, "packages", "nowaki-cli", "npm", key);
   rmSync(pkgDir, { recursive: true, force: true });
   mkdirSync(path.join(pkgDir, "bin"), { recursive: true });
 
-  // 3) package.json を生成する。
   const pkgJson = {
     name: `@nowaki-dev/cli-${key}`,
     version,
@@ -121,7 +116,6 @@ function main() {
     JSON.stringify(pkgJson, null, 2) + "\n",
   );
 
-  // 4) バイナリを配置する。
   const dest = path.join(pkgDir, "bin", binName);
   copyFileSync(binPath, dest);
   if (!meta.exe) chmodSync(dest, 0o755);

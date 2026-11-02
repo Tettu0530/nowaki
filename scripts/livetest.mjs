@@ -1,13 +1,9 @@
-// Jetstream（サーバーリアクティブ島）の WS e2e。Node 22+ の global WebSocket を使う。
-// 検証: (1) join → presence、(2) event → patch（カウンタ往復）、(3) 2接続目で presence が増える、
-//       (4) 切断で presence が戻る。
-//
+// Jetstream の WS e2e（join/presence/event→patch/切断）。Node 22+ の global WebSocket を使う。
 // 使い方: node scripts/livetest.mjs <baseUrl>   例: node scripts/livetest.mjs http://127.0.0.1:3300
 
 const base = process.argv[2] ?? "http://127.0.0.1:3300";
 const wsUrl = base.replace(/^http/, "ws") + "/__nowaki/live";
 
-// /live ページから LiveCounter の nid / 初期 state / 署名(sig)を拾う。
 // sig は HMAC 署名で、join 時にサーバーが検証する（無いと弾かれる）。属性順に依らず抽出。
 const html = await (await fetch(base + "/live")).text();
 const tag = html.match(/<nowaki-live\b[^>]*>/)?.[0];
@@ -53,24 +49,20 @@ const check = (cond, label) => {
   if (!cond) failed = true;
 };
 
-// 接続1: join → presence ≥ 1
 const a = await open(wsUrl);
 const p1 = await recvUntil(a, (m) => m.type === "presence");
 check(p1.count >= 1, `presence after first connect (count=${p1.count})`);
 
 a.send(JSON.stringify({ type: "join", islands: [{ nid, name: "LiveCounter", state, sig }] }));
 
-// event（inc）→ patch。LiveCounter は count を +1 する（live: 0 → live: 1）。
 a.send(JSON.stringify({ type: "event", nid, handler: "inc" }));
 const patch = await recvUntil(a, (m) => m.type === "patch" && m.nid === nid);
 check(/live:\s*1/.test(patch.html), `patch reflects incremented count (html has "live: 1")`);
 
-// 接続2 → presence が増える（接続1 が presence 更新を受ける）。
 const b = await open(wsUrl);
 const p2 = await recvUntil(a, (m) => m.type === "presence" && m.count >= 2);
 check(p2.count >= 2, `presence rises on second connect (count=${p2.count})`);
 
-// 接続2 を閉じる → presence が戻る。
 b.close();
 const p3 = await recvUntil(a, (m) => m.type === "presence" && m.count < p2.count);
 check(p3.count < p2.count, `presence falls after disconnect (count=${p3.count})`);

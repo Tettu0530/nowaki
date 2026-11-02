@@ -1,8 +1,6 @@
 "use strict";
 
-// 実行中のプラットフォームに対応する @nowaki-dev/cli-<key> パッケージへ、
-// バイナリの絶対パスを解決する。プリビルドバイナリは optionalDependencies で
-// 配られ、npm/pnpm が os/cpu/libc に一致する1つだけをインストールする。
+// プリビルドバイナリは optionalDependencies で配られ、npm/pnpm が os/cpu/libc に一致する1つだけを入れる。
 
 // key -> npm パッケージ名。scripts/build-npm.mjs の TARGETS と一致させること。
 const PACKAGES = {
@@ -13,7 +11,6 @@ const PACKAGES = {
   "win32-x64": "@nowaki-dev/cli-win32-x64",
 };
 
-// glibc か musl か（linux のみ）。Node の process.report から判定する。
 function detectLibc() {
   try {
     const report = typeof process.report.getReport === "function" ? process.report.getReport() : null;
@@ -24,7 +21,6 @@ function detectLibc() {
   }
 }
 
-// process.platform / process.arch (+ linux は libc) から解決キーを作る。
 function platformKey() {
   const platform = process.platform;
   const arch = process.arch;
@@ -34,7 +30,6 @@ function platformKey() {
   return `${platform}-${arch}`;
 }
 
-// 対応バイナリの絶対パスを返す。見つからない場合は分かりやすいエラーを投げる。
 function resolveBinary() {
   const key = platformKey();
   const pkg = PACKAGES[key];

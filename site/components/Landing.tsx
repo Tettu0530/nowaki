@@ -14,7 +14,6 @@ export default function Landing({ locale }: { locale: Locale }) {
     "actions", "middleware", "API routes", "scope-hoisted", "SSR", "npm install", "source maps",
   ];
 
-  // ルート + loader + 島
   const routeHtml = `<span class="c">// routes/blog/[slug].tsx</span>
 <span class="k">import</span> Comments <span class="k">from</span> <span class="s">"../../islands/Comments.tsx"</span>;
 
@@ -32,7 +31,6 @@ export default function Landing({ locale }: { locale: Locale }) {
   );
 }`;
 
-  // action 付きフォーム
   const actionHtml = `<span class="c">// routes/guestbook.tsx</span>
 <span class="k">export const</span> <span class="f">loader</span> = (ctx) =&gt; ({ entries: <span class="f">read</span>(ctx) });
 
@@ -109,7 +107,6 @@ export default function Landing({ locale }: { locale: Locale }) {
       </div>
 
       <main>
-        {/* Ship: the honest benchmark */}
         <section class="section wrap">
           <p class="kicker" data-rise>Show, don't claim</p>
           <h2 class="h-sec" data-rise style="margin-top:.8rem;max-width:20ch">{s.ship.h2}</h2>
@@ -175,7 +172,6 @@ export default function Landing({ locale }: { locale: Locale }) {
           </div>
         </section>
 
-        {/* Code showcase */}
         <section style="background:var(--surface);border-block:1px solid var(--line)">
           <div class="section wrap">
             <h2 class="h-sec" data-rise style="max-width:20ch">{s.code.h2}</h2>
@@ -206,7 +202,6 @@ export default function Landing({ locale }: { locale: Locale }) {
           </div>
         </section>
 
-        {/* Compare */}
         <section class="section wrap">
           <h2 class="h-sec" data-rise style="max-width:20ch">{s.compare.h2}</h2>
           <p class="lead measure" data-rise style="margin-top:1.1rem">{s.compare.lead}</p>
@@ -245,7 +240,6 @@ export default function Landing({ locale }: { locale: Locale }) {
           <p style="margin-top:1.4rem;font-size:.88rem;color:var(--muted);max-width:64ch">{s.compare.note}</p>
         </section>
 
-        {/* Positioning */}
         <section style="background:var(--surface);border-block:1px solid var(--line)">
           <div class="section wrap">
             <h2 class="h-sec" data-rise style="max-width:16ch">{s.positioning.h2}</h2>
@@ -271,7 +265,6 @@ export default function Landing({ locale }: { locale: Locale }) {
           </div>
         </section>
 
-        {/* Features */}
         <section class="section wrap">
           <h2 class="h-sec" data-rise style="max-width:18ch">{s.features.h2}</h2>
           <p class="lead measure" data-rise style="margin-top:1.1rem">{s.features.lead}</p>
@@ -290,7 +283,6 @@ export default function Landing({ locale }: { locale: Locale }) {
           </div>
         </section>
 
-        {/* Honest alpha */}
         <section style="background:var(--surface);border-block:1px solid var(--line)">
           <div class="section wrap">
             <h2 class="h-sec" data-rise>{s.alpha.h2}</h2>

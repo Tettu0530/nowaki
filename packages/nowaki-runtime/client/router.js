@@ -1,11 +1,5 @@
-// クライアントルーター（島間SPA遷移 / prefetch / スクロール復元 / Router Cache /
-// loading・error 境界）。島ランタイムに同梱され、島のあるページで有効になる
-// （JSゼロのページはフルナビ）。内部 <a> クリックを横取りし、遷移先 HTML を fetch して
-// body を差し替え、新しい島だけを再ハイドレートする。
-//
-// - Router Cache: 訪問済みページを TTL+LRU で保持。戻る/進む・再訪が即時（フェッチ無し）。
-// - loading.tsx: 遷移が 150ms を超えたら最寄りの loading 境界（無ければ既定のプログレスバー）を表示。
-// - error.tsx: 遷移が失敗したら最寄りの error 境界（無ければ既定UI）を表示し、reset で再試行。
+// クライアントルーター。内部 <a> クリックを横取りし、遷移先 HTML を fetch して
+// body を差し替え、新しい島だけを再ハイドレートする（JSゼロのページはフルナビ）。
 
 import { matchBoundary, createPageCache } from "./router-core.js";
 
@@ -26,7 +20,6 @@ function readCacheTtl() {
   return Number.isFinite(s) && s >= 0 ? s * 1000 : 30000;
 }
 
-// 内部ナビゲーション対象の <a> か判定する。
 function internalAnchor(target) {
   const a = target?.closest?.("a");
   if (!a) return null;
@@ -87,7 +80,7 @@ async function navigate(url, { push = true } = {}) {
 
   const pending = fetchPage(url).then(
     (r) => r,
-    () => null, // ネットワーク失敗
+    () => null,
   );
 
   // 150ms 超えたら loading 表示（速い遷移ではちらつかせない）。
@@ -167,7 +160,7 @@ function showDefaultError(message) {
   document.body.replaceWith(body);
 }
 
-// 既定のローディング表示: 画面上端の細いプログレスバー（現在のページは残す）。
+// 現在のページは残したまま上端にバーだけ出す。
 let progressEl = null;
 function showProgressBar() {
   if (progressEl) return;
@@ -222,10 +215,9 @@ export function installRouter() {
   if (typeof window === "undefined" || typeof document === "undefined") return;
   if (window.__nowakiRouter) return;
   window.__nowakiRouter = true;
-  historyKey(); // 初期エントリにキーを付与
-  loadBoundaries(); // 境界 HTML を先読み（非ブロッキング）
+  historyKey();
+  loadBoundaries();
 
-  // クリック横取り（修飾キー・中クリックは通常動作）
   document.addEventListener("click", (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
       return;
@@ -242,7 +234,6 @@ export function installRouter() {
     });
   });
 
-  // ホバー / タッチで prefetch
   const onHover = (e) => {
     const url = internalAnchor(e.target);
     if (url) prefetch(url);
@@ -250,7 +241,6 @@ export function installRouter() {
   document.addEventListener("mouseover", onHover, { passive: true });
   document.addEventListener("touchstart", onHover, { passive: true });
 
-  // 戻る/進む（Router Cache があれば即時）
   window.addEventListener("popstate", () => {
     const url = new URL(location.href);
     navigate(url, { push: false }).then(() => {

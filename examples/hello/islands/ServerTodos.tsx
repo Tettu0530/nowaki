@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { addTodo, addTodoForm, listTodos, whoami } from "../actions/todos.ts";
 
-// クライアント島がサーバー関数を呼ぶ例。ボタン操作で addTodo/whoami を RPC 実行する。
-// この島がブラウザへ送るのはハイドレーション用の島JS + プロキシだけ（実装はサーバー）。
+// クライアント島がサーバー関数を RPC で呼ぶ例。ブラウザへ届くのは島JS + プロキシだけ。
 export default function ServerTodos({ initial = [] }: { initial?: string[] }) {
   const [todos, setTodos] = useState<string[]>(initial);
   const [text, setText] = useState("");

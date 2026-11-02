@@ -10,7 +10,7 @@ const ok = (label, cond) => {
   passed++;
 };
 
-// --- matchBoundary: 最長 prefix 一致 ---
+// matchBoundary: 最長 prefix 一致
 const boundaries = [
   { prefix: "", html: "root" },
   { prefix: "/blog", html: "blog" },
@@ -24,7 +24,7 @@ ok("/blogger does NOT match /blog prefix", matchBoundary(boundaries, "/blogger")
 ok("no boundaries → null", matchBoundary([], "/x") === null);
 ok("no root boundary and no match → null", matchBoundary([{ prefix: "/p" }], "/q") === null);
 
-// --- createPageCache: TTL + LRU（制御可能な now で時間を進める） ---
+// createPageCache: 制御可能な now で時間を進める
 let t = 0;
 const now = () => t;
 const cache = createPageCache({ ttlMs: 1000, max: 2, now });

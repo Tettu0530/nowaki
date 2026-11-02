@@ -1,6 +1,4 @@
-// サーバーリアクティブ島（Jetstream）のクライアントランタイム。
-// <nowaki-live> を見つけて WebSocket を張り、data-live のイベントをサーバーへ送り、
-// 返ってくる HTML パッチを DOM morph で当てる。コンポーネント JS はクライアントに無い。
+// Jetstream のクライアントランタイム。data-live のイベントを WS で送り、返る HTML パッチを morph で当てる。
 // WS が張れない/落ちても初期 SSR のまま表示は壊れない（劣化のみ）。
 
 function lives() {
@@ -42,7 +40,6 @@ function connect() {
         const el = document.querySelector(`nowaki-live[nid="${cssEscape(msg.nid)}"]`);
         if (el) morph(el, msg.html);
       } else if (msg.type === "presence") {
-        // presence（接続数）を data-nowaki-presence 要素に反映し、イベントも投げる。
         for (const el of document.querySelectorAll("[data-nowaki-presence]")) {
           el.textContent = String(msg.count);
         }
@@ -61,7 +58,6 @@ function connect() {
   };
   open();
 
-  // data-live のイベントをサーバーへ送る（最寄りの <nowaki-live> に紐づく）。
   document.addEventListener("click", (ev) => {
     const t = ev.target.closest("[data-live]");
     if (!t) return;
@@ -91,7 +87,7 @@ function cssEscape(s) {
   return String(s).replace(/"/g, '\\"');
 }
 
-// --- 最小 DOM morph（keyless）。from の子を toHtml に合わせて in-place 更新する。 ---
+// 最小 DOM morph（keyless、in-place 更新）。
 function morph(from, toHtml) {
   const tmp = document.createElement("template");
   tmp.innerHTML = toHtml;
@@ -120,7 +116,6 @@ function morphChildren(from, to) {
       morphChildren(fn, tn);
     }
   }
-  // 余った from の子を削除
   while (fromNodes.length > toNodes.length) {
     from.removeChild(from.lastChild);
   }
@@ -134,7 +129,7 @@ function morphAttrs(from, to) {
   for (const a of to.attributes) {
     if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
   }
-  // フォーム要素の value はプロパティも合わせる（フォーカス/入力を壊さないよう値のみ）
+  // value はプロパティも合わせる（フォーカス/入力を壊さないよう値のみ）
   if ("value" in from && to.hasAttribute("value")) {
     const v = to.getAttribute("value");
     if (from.value !== v) from.value = v;
