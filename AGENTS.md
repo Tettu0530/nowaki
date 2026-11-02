@@ -49,8 +49,11 @@ cargo run -p nowaki -- build examples/hello          # production build
 cargo run -p nowaki -- start examples/hello          # Rust front + Node renderer
 ```
 
-CI (`.github/workflows/ci.yml`) mirrors all of the above plus an e2e job that
-curls the example app. Match it locally before pushing.
+CI (`.github/workflows/ci.yml`) mirrors all of the above and adds e2e runs on
+Linux/macOS/Windows, browser tests, scaffolding, adapter runtimes, and audits.
+The e2e steps are plain scripts in `scripts/ci/`, so you can run them locally
+(e.g. `bash scripts/ci/e2e-dev.sh` after `cargo build -p nowaki`). The single
+required check is `CI OK`.
 
 ## Architecture facts you must not break
 

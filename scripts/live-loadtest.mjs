@@ -92,4 +92,5 @@ console.log(
 );
 
 for (const ws of conns) ws.close();
-process.exit(0);
+// Every connection must open and get its patch back.
+process.exit(conns.length === N && patches === N ? 0 : 1);

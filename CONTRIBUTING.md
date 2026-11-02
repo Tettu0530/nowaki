@@ -42,6 +42,9 @@ cargo build -p nowaki
   check that the page renders, the counter island hydrates, and editing
   `routes/index.tsx` triggers a reload.
 - Keep PRs focused: one logical change per PR.
+- Keep PRs under 2,000 changed lines (additions + deletions; lockfiles don't count).
+  The `PR size` check enforces this; split larger work into a stack of PRs.
+- Every PR needs a maintainer approval and a green `CI OK` check before it can merge.
 
 ## Commit messages and sign-off
 
