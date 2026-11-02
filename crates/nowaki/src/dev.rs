@@ -262,7 +262,7 @@ async fn serve_fs(
     State(state): State<Arc<DevState>>,
     axum::extract::Path(rest): axum::extract::Path<String>,
 ) -> Response {
-    let requested = PathBuf::from(format!("/{rest}"));
+    let requested = nowaki_core::resolve::fs_url_to_path(&rest);
     let Ok(canon) = dunce::canonicalize(&requested) else {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     };

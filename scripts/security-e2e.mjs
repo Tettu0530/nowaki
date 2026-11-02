@@ -77,12 +77,15 @@ async function liveForgeryRejected(b) {
 if (mode === "dev") {
   const enc = encodeURIComponent;
   // Arbitrary file read surface (canonicalize + allow-root + deny + transformable gates)
-  check("@fs arbitrary read blocked (/etc/passwd → 403)",
-    (await statusOf(`${base}/@fs/etc/passwd`)) === 403);
+  // A file that exists outside every allowed root, so "blocked" means 403 rather than 404.
+  const outside = process.platform === "win32" ? "C:/Windows/win.ini" : "/etc/passwd";
+  const fsUrl = (p) => `${base}/@fs/${p.replace(/\\/g, "/").replace(/^\//, "")}`;
+  check(`@fs arbitrary read blocked (${outside} → 403)`,
+    (await statusOf(fsUrl(outside))) === 403);
   check("@fs .env blocked (403)",
-    (await statusOf(`${base}/@fs${appRoot}/.env`)) === 403);
-  check("ssr-module arbitrary read blocked (/etc/passwd → 403)",
-    (await statusOf(`${base}/__nowaki/ssr-module?path=${enc("/etc/passwd")}`)) === 403);
+    (await statusOf(fsUrl(`${appRoot}/.env`))) === 403);
+  check(`ssr-module arbitrary read blocked (${outside} → 403)`,
+    (await statusOf(`${base}/__nowaki/ssr-module?path=${enc(outside)}`)) === 403);
   check("ssr-module .env blocked (403)",
     (await statusOf(`${base}/__nowaki/ssr-module?path=${enc(appRoot + "/.env")}`)) === 403);
   check("ssr-module legit module still served (200)",
