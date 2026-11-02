@@ -42,7 +42,7 @@ const server = createServer(async (req, res) => {
     } catch (err) {
       console.error("[nowaki live]", err);
       res.writeHead(500, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: String(err?.stack ?? err) }));
+      res.end(JSON.stringify({ error: "live render failed" }));
     }
     return;
   }
@@ -69,7 +69,7 @@ const server = createServer(async (req, res) => {
   } catch (err) {
     console.error("[nowaki prod-sidecar]", err);
     res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
-    res.end(String(err?.stack ?? err));
+    res.end("Internal Server Error");
   }
 });
 

@@ -3,6 +3,8 @@
 export const title = "500 — Nowaki";
 
 export default function ErrorPage({ error }: { error: { message: string } }) {
+  // /boom?boom=nested: the error page itself fails, so Nowaki falls back to its built-in 500.
+  if (error?.message === "nested-500-demo") throw new Error("the 500 page failed too");
   return (
     <main>
       <h1>500</h1>

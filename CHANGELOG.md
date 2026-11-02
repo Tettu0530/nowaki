@@ -18,6 +18,11 @@ milestone's worth of work; the codename is noted per entry.
   apps from `npm create nowaki` get `preact-render-to-string@^6.8.2`.
 
 ### Fixed
+- **Security:** production servers (`nowaki start` and the node / bun / deno /
+  vercel / cloudflare adapters) no longer send stack traces to clients. When a
+  route fails and the app's `_500` page also fails (or there is none), the
+  response is a plain `Internal Server Error`; the error is still logged. Before,
+  the full stack, including absolute file paths, was returned.
 - Windows: `nowaki dev` / `nowaki build` work (verbatim `\\?\` paths, SSR loader
   file URLs, and `/@fs/` drive-letter URLs).
 - `nowaki dev` / `nowaki start` kill their Node children on SIGTERM instead of
