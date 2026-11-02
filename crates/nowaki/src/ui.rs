@@ -44,7 +44,6 @@ pub fn hmr_log(kind: &str, files: &[String]) {
     }
 }
 
-/// ページ/API/SSR リクエストのログ（method path status ms）。ステータスで色分け。
 pub fn request_log(method: &str, path: &str, status: u16, ms: u128) {
     let code = status.to_string();
     let st = if status < 300 {
@@ -89,7 +88,6 @@ pub fn dir_js_kb(dir: &std::path::Path) -> f64 {
     bytes as f64 / 1024.0
 }
 
-/// `nowaki build` 完了サマリ。
 #[allow(clippy::too_many_arguments)]
 pub fn build_summary(
     client_modules: usize,
@@ -122,7 +120,6 @@ pub fn build_summary(
         bold("server:"),
         dim(&format!("{server_modules} modules")),
     );
-    // 画像最適化で削れたバイトがあれば表示する。
     if asset_in > asset_out {
         let saved = asset_in - asset_out;
         let pct = saved as f64 / asset_in as f64 * 100.0;
@@ -145,8 +142,7 @@ pub fn build_summary(
     println!();
 }
 
-/// 開発/本番サーバーの ready バナー。`show_network` のときだけ LAN URL を出す。
-/// `features` は有効な機能（plugins, Jetstream 等）。色なしでも読める形。
+/// `show_network` のときだけ LAN URL を出す。
 pub fn server_banner(
     label: &str,
     version: &str,

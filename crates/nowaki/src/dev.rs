@@ -34,11 +34,10 @@ pub struct DevState {
 pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<()> {
     let started = Instant::now();
 
-    crate::typegen::write(&root).ok(); // 型付きルート（.nowaki/types.d.ts）を生成
+    crate::typegen::write(&root).ok();
 
     let sidecar = sidecar::spawn(&root, port).await?;
 
-    // nowaki.config があればプラグインホストを起動し、変換フックを core に注入する。
     let plugin_host = crate::plugins::start(&root)?;
     let mut core = NowakiCore::new(root.clone());
     if let Some(ph) = &plugin_host {
@@ -72,7 +71,6 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         .fallback(serve_or_proxy)
         .with_state(state);
 
-    // --host で全インターフェース公開（Network URL を表示）、既定は localhost のみ。
     let bind_host = if expose { "0.0.0.0" } else { "127.0.0.1" };
     let listener = tokio::net::TcpListener::bind((bind_host, port)).await?;
 
@@ -133,7 +131,6 @@ fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::Recommende
             }
             *last = Instant::now();
         }
-        // routes/ が変わったら型付きルートを再生成（追加・削除・リネームを型へ反映）。
         if relevant
             .iter()
             .any(|p| p.to_string_lossy().contains("/routes/"))
@@ -141,12 +138,10 @@ fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::Recommende
             crate::typegen::write(&state.core.root).ok();
         }
         state.ssr_version.fetch_add(1, Ordering::SeqCst);
-        // 変更が islands/ のみなら島をホットスワップ、それ以外はフルリロード
         let island_only = relevant
             .iter()
             .all(|p| p.to_string_lossy().contains("/islands/"));
         let kind = if island_only { "update" } else { "reload" };
-        // 端末にも変更を出す（保存時のフィードバック）。パスはルート相対に。
         let files: Vec<String> = relevant
             .iter()
             .map(|p| {
@@ -203,16 +198,15 @@ async fn handle_hmr(mut socket: WebSocket, state: Arc<DevState>) {
             }
             incoming = socket.recv() => {
                 if incoming.is_none() {
-                    break; // クライアント切断
+                    break;
                 }
             }
         }
     }
 }
 
-/// サーバー関数（`"use server"`）の allowlist を dev サイドカーへ返す。
-/// Rust が oxc で discover し、id → { module(ソース相対), export } を返す。
-/// dev は build しないので、サイドカーはこれを引いて RPC を dispatch する。
+/// サーバー関数の allowlist（id → { module, export }）。dev は build しないので
+/// サイドカーはこれを引いて RPC を dispatch する。
 async fn server_functions(State(state): State<Arc<DevState>>) -> Response {
     let core_state = state.clone();
     let body = tokio::task::spawn_blocking(move || {
@@ -247,12 +241,8 @@ pub struct SsrModuleQuery {
     v: Option<String>,
 }
 
-/// Nodeローダーフック向け: .tsx/.ts をSSRモードで変換して返す。
-///
-/// `path` はユーザー入力なので、serve_fs と同じく実体パスへ正規化してから
-/// 許可ルート配下かつ機微パスでない「変換対象モジュール」だけを通す。これを
-/// 怠ると `?path=/proj/.env` や `?path=/etc/passwd` で任意ファイルの内容が
-/// （変換結果 or パースエラー診断として）漏れる。
+/// Nodeローダーフック向けの SSR 変換。`path` はユーザー入力なので実体パスへ正規化し、
+/// 許可ルート配下・非機微の変換対象だけを通す（`?path=/etc/passwd` 等の任意ファイル読み取り防止）。
 async fn ssr_module(
     State(state): State<Arc<DevState>>,
     Query(q): Query<SsrModuleQuery>,
@@ -266,12 +256,8 @@ async fn ssr_module(
     transform_response(state, canon, Mode::Ssr).await
 }
 
-/// /@fs/<絶対パス> — アプリルート外 (pnpmストア等) のファイル配信。
-///
-/// `rest` はユーザー入力なので、実体パスへ正規化（`..`・シンボリックリンクを潰す）
-/// してから許可ルート配下かつ機微パスでないことを検証する。これを怠ると
-/// `/@fs/etc/passwd` や `/@fs/<home>/.ssh/id_rsa` のような任意ファイル読み取り
-/// （パストラバーサル）を許してしまう。
+/// /@fs/<絶対パス> — アプリルート外 (pnpmストア等) のファイル配信。`rest` はユーザー入力なので
+/// 実体パスへ正規化してから許可ルート配下・非機微を検証する（パストラバーサル防止）。
 async fn serve_fs(
     State(state): State<Arc<DevState>>,
     axum::extract::Path(rest): axum::extract::Path<String>,
@@ -289,9 +275,7 @@ async fn serve_fs(
 /// フォールバック: アプリルート配下のファイルならば配信、さもなくばサイドカーへSSRプロキシ
 async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Response {
     let path = req.uri().path().to_string();
-    // 仮想モジュール（プラグイン load）: 合成パスを Browser 変換して配信する。
-    // 仮想 id に `..` は無い。トラバーサルを弾く（合成ディレクトリが実在した場合に
-    // root.join(".. を含む) で任意ファイルを読まれるのを防ぐ。他の read 経路と同じ防御）。
+    // 仮想 id に `..` は無いので弾く（合成ディレクトリ実在時の root.join 経由トラバーサル防止）。
     if path.starts_with(&format!("/{VIRTUAL_DIR}/")) {
         if path.split('/').any(|seg| seg == "..") {
             return (StatusCode::NOT_FOUND, "not found").into_response();
@@ -302,9 +286,8 @@ async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Res
     if req.method() == axum::http::Method::GET && path != "/" {
         let candidate = state.core.root.join(path.trim_start_matches('/'));
         if candidate.is_file() {
-            // `..` やシンボリックリンクでアプリルート外へ抜けていないか実体で確認する
-            // （root は main.rs で canonicalize 済み）。さらに `.env`/`.git`/鍵などの
-            // 機微パスは（/@fs/ と同じ denylist で）配信しない。抜けていればサイドカーへ委ねる。
+            // `..`/symlink でルート外へ抜けていないか実体で確認し、機微パスも配信しない
+            // （root は main.rs で canonicalize 済み）。
             match candidate.canonicalize() {
                 Ok(canon) if canon.starts_with(&state.core.root) && !is_denied_fs_path(&canon) => {
                     return serve_file(state, candidate).await;
@@ -366,9 +349,7 @@ async fn transform_response(state: Arc<DevState>, abs: PathBuf, mode: Mode) -> R
         Ok(Err(err)) => {
             let msg = format!("{err:#}");
             eprintln!("[nowaki] 変換エラー: {msg}");
-            // エラーオーバーレイ用に HMR クライアント（同一オリジンのみ）へ通知。
-            // 診断メッセージはソース全文を含み得るので HTTP ボディには載せない
-            // （直接リクエストでの情報漏えいを防ぐ。詳細は端末ログとオーバーレイへ）。
+            // 診断はソース全文を含み得るので HTTP ボディに載せず、同一オリジンの HMR オーバーレイへだけ送る。
             let _ = state
                 .hmr_tx
                 .send(json!({ "type": "error", "message": msg }).to_string());
@@ -417,7 +398,6 @@ async fn proxy_to_sidecar(state: Arc<DevState>, req: Request) -> Response {
     match builder.send().await {
         Ok(resp) => {
             let status = resp.status();
-            // ページ/API/SSR のリクエストログ（アセット・モジュールは serve_file 経由で出さない）。
             crate::ui::request_log(
                 &method_str,
                 &log_path,
@@ -446,10 +426,8 @@ async fn proxy_to_sidecar(state: Arc<DevState>, req: Request) -> Response {
     }
 }
 
-/// /@fs/ で配信を許可するルート集合（実体パス）を計算する。
-/// アプリルートと、その上位にあるワークスペースルート（pnpm/モノレポの
-/// 共有 node_modules・リンク済みパッケージを含む最上位）を許可する。
-/// これにより `/etc`・ホームディレクトリ・ルート外の `.env` 等への到達を弾く。
+/// /@fs/ の許可ルート: アプリルートとワークスペースルート（pnpm/モノレポの共有 node_modules）。
+/// それ以外（`/etc`・ホーム・ルート外の `.env` 等）への到達を弾く。
 fn compute_fs_allow(root: &Path) -> Vec<PathBuf> {
     let mut allow = Vec::new();
     if let Ok(c) = root.canonicalize() {
@@ -465,8 +443,7 @@ fn compute_fs_allow(root: &Path) -> Vec<PathBuf> {
     allow
 }
 
-/// root から上方向に辿り、最も近いワークスペース境界
-/// （`pnpm-workspace.yaml` か `.git`）を返す。見つからなければ None。
+/// 最も近いワークスペース境界（`pnpm-workspace.yaml` か `.git`）。
 fn workspace_root(root: &Path) -> Option<PathBuf> {
     let mut dir = Some(root);
     while let Some(d) = dir {
@@ -486,31 +463,24 @@ fn is_denied_fs_path(p: &Path) -> bool {
     }) || matches!(p.extension().and_then(|e| e.to_str()), Some("pem" | "key"))
 }
 
-/// 正規化済み実体パスが配信可能か（許可ルート配下かつ機微でない）。
 fn fs_path_allowed(canon: &Path, allow: &[PathBuf]) -> bool {
     !is_denied_fs_path(canon) && allow.iter().any(|root| canon.starts_with(root))
 }
 
-/// Host 値（`host` または `host:port`）がループバックか。
 fn is_loopback_host(host: &str) -> bool {
     let h = if let Some(rest) = host.strip_prefix('[') {
-        // ブラケット付き IPv6: `[::1]:port` / `[::1]`
         rest.split(']').next().unwrap_or(rest)
     } else if host.matches(':').count() >= 2 {
-        // ブラケット無しの IPv6（ポート無し, 例 `::1`）はそのまま扱う。
+        // ブラケット無しの IPv6（例 `::1`）はポートを持たない。
         host
     } else {
-        // `host` または `host:port`
         host.rsplit_once(':').map(|(h, _)| h).unwrap_or(host)
     };
     matches!(h, "localhost" | "127.0.0.1" | "::1")
 }
 
-/// WebSocket upgrade の Origin を検証する（CSWSH 対策）。
-/// - Origin が無い = ブラウザ起点でない（ネイティブ WS クライアント）→ 許可。
-/// - Origin の host:port が Host と一致 = 同一オリジン。ただし既定バインド
-///   (非 --host) では DNS リバインディング対策に Host をループバックへ限定。
-/// - それ以外（明示的なループバック Origin を除く）→ 拒否。
+/// WebSocket upgrade の Origin を検証する（CSWSH 対策）。Origin 無し（非ブラウザ）は許可、
+/// 同一オリジンは許可だが既定バインドでは DNS リバインディング対策に Host をループバックへ限定。
 fn ws_origin_ok(headers: &axum::http::HeaderMap, expose: bool) -> bool {
     let origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
     let Some(origin) = origin else {
@@ -522,7 +492,6 @@ fn ws_origin_ok(headers: &axum::http::HeaderMap, expose: bool) -> bool {
     let host = headers.get(header::HOST).and_then(|v| v.to_str().ok());
     if let Some(host) = host {
         if origin_host == host {
-            // 同一オリジン。公開時はそのまま許可、既定時はループバックのみ許可。
             return expose || is_loopback_host(host);
         }
     }
@@ -580,7 +549,6 @@ mod tests {
         assert!(!fs_path_allowed(Path::new("/proj/.git/config"), &allow));
         assert!(!fs_path_allowed(Path::new("/proj/keys/server.pem"), &allow));
         assert!(!fs_path_allowed(Path::new("/proj/id_rsa.key"), &allow));
-        // 通常のソースは配信可
         assert!(fs_path_allowed(
             Path::new("/proj/packages/ui/Button.tsx"),
             &allow

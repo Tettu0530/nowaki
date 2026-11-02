@@ -1,9 +1,7 @@
 //! 本番配信の Rust ホットパス。`nowaki start` が使う。
 //!
-//! Rust(axum) が HTTP エッジ・静的配信(dist/client)・HTML 組み立て(island 配線・preload)を担い、
-//! Node の prod-sidecar は「コンポーネント描画」だけを行う（ページは body+メタを JSON で返す）。
-//! API/リダイレクト/ストリーミングはサイドカー応答をそのまま素通しする。
-//! デプロイ用の自己完結物（node/edge アダプタ）とは別経路。これは v0.6 Jetstream の足場でもある。
+//! Rust(axum) が HTTP エッジ・静的配信・HTML 組み立てを担い、Node の prod-sidecar は
+//! コンポーネント描画だけを行う（ページは body+メタを JSON で返す）。デプロイアダプタとは別経路。
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -53,9 +51,7 @@ struct ProdState {
     _child: Child, // kill_on_drop で終了時にサイドカーを落とす
 }
 
-/// ISR（incremental static regeneration）のメモリキャッシュ。
-/// ルートが `export const revalidate = <秒>` を持つと、組み立て済み HTML を
-/// path+query 単位で保持する。鮮度切れは「古い HTML を即返しつつ裏で再生成」する。
+/// ISR のメモリキャッシュ（`export const revalidate = <秒>` のルート、stale-while-revalidate）。
 struct IsrCache {
     entries: Mutex<HashMap<String, Arc<CacheEntry>>>,
     inflight: Mutex<HashSet<String>>,        // 再検証の単一フライト
@@ -63,8 +59,8 @@ struct IsrCache {
     max: usize,                              // エントリ数の上限（超過時は最古を追い出す）
 }
 
-/// あるルート(pathname)の描画が依存する入力（Vary）。サイドカーの x-nowaki-vary から学習し、
-/// キャッシュキーへ織り込む。クエリ・ヘッダの依存有無で #6（漏れ）/#7（氾濫）を防ぐ。
+/// ルートの描画が依存する入力（Vary）。x-nowaki-vary から学習してキャッシュキーへ織り込み、
+/// ヘッダ依存ページのクロスユーザー漏れと未使用クエリによるキャッシュ氾濫を防ぐ。
 #[derive(Default, Clone)]
 struct VarySpec {
     query: bool,                                 // クエリ文字列に依存するか
@@ -116,7 +112,6 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         );
     }
 
-    // Node prod-sidecar をエフェメラルポートで起動し、READY 行からポートを得る。
     let mut child = Command::new("node")
         .arg("--enable-source-maps")
         .arg(&entry)
@@ -147,7 +142,6 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
     let manifest_text = std::fs::read_to_string(client_dir.join("manifest.json"))?;
     let manifest: Manifest = serde_json::from_str(&manifest_text).unwrap_or_default();
 
-    // --host で全インターフェース公開。既定は NOWAKI_HOST or 127.0.0.1。
     let host = if expose {
         "0.0.0.0".to_string()
     } else {
@@ -185,13 +179,11 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
     Ok(())
 }
 
-/// サーバーリアクティブ島の WS。セッションは crate::live、描画は Node prod-sidecar へ橋渡し。
 async fn live_ws(
     ws: WebSocketUpgrade,
     headers: axum::http::HeaderMap,
     State(state): State<Arc<ProdState>>,
 ) -> Response {
-    // CSWSH 対策: 同一オリジン（または Origin 無しのネイティブクライアント）のみ受け付ける。
     if !prod_ws_origin_ok(&headers) {
         return (StatusCode::FORBIDDEN, "forbidden origin").into_response();
     }
@@ -201,8 +193,8 @@ async fn live_ws(
     ws.on_upgrade(move |socket| crate::live::handle(socket, hub, http, port, "prod".to_string()))
 }
 
-/// prod の WS upgrade で Origin を検証する（クロスサイト WebSocket ハイジャック対策）。
-/// 本番は公開前提なので「Origin が Host と同一」のみ許可する（Origin 無し = 非ブラウザは許可）。
+/// WS upgrade の Origin を検証する（CSWSH 対策）。本番は公開前提なので Origin==Host のみ許可
+/// （Origin 無し = 非ブラウザは許可）。
 fn prod_ws_origin_ok(headers: &axum::http::HeaderMap) -> bool {
     let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
         return true;
@@ -222,9 +214,6 @@ async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
     if req.method() == Method::GET && path.starts_with("/_nowaki/") {
         return serve_static(&state, &path).await;
     }
-    // GET ページは ISR キャッシュ（stale-while-revalidate）を経由する。
-    // キャッシュキーは pathname + 学習済み Vary（依存クエリ/ヘッダ値）。これにより
-    // ヘッダ依存ページのクロスユーザー漏れ(#6)と未使用クエリ氾濫(#7)を防ぐ。
     if req.method() == Method::GET {
         let pathname = req.uri().path().to_string();
         let query = req.uri().query().map(|q| q.to_string());
@@ -247,8 +236,7 @@ async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
     proxy(state, req, false).await
 }
 
-/// pathname と学習済み Vary 仕様からキャッシュキーを作る。query 依存ならクエリを、
-/// ヘッダ依存ならその実値を（BTreeSet による安定順で）織り込む。
+/// ヘッダ値は BTreeSet の安定順で織り込む。
 fn isr_key(
     pathname: &str,
     query: Option<&str>,
@@ -275,7 +263,6 @@ fn isr_key(
     k
 }
 
-/// ISR キャッシュ参照。鮮度内なら HIT、鮮度切れなら STALE を即返しつつ裏で再検証する。
 fn isr_lookup(state: &Arc<ProdState>, key: &str) -> Option<Response> {
     let entry = state.isr.entries.lock().unwrap().get(key).cloned()?;
     let stale = entry.stored_at.elapsed() >= entry.revalidate;
@@ -285,7 +272,6 @@ fn isr_lookup(state: &Arc<ProdState>, key: &str) -> Option<Response> {
     Some(cached_response(&entry, if stale { "STALE" } else { "HIT" }))
 }
 
-/// キャッシュ済みエントリから応答を組み立てる（x-nowaki-cache でヒット種別を示す）。
 fn cached_response(entry: &CacheEntry, cache_status: &str) -> Response {
     let mut builder = Response::builder()
         .status(entry.status)
@@ -299,12 +285,12 @@ fn cached_response(entry: &CacheEntry, cache_status: &str) -> Response {
         .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
 }
 
-/// 鮮度切れエントリを裏で再生成する（単一フライト: 同じキーは1本だけ走らせる）。
+/// 単一フライト: 同じキーの再検証は1本だけ走らせる。
 fn spawn_revalidate(state: Arc<ProdState>, key: String) {
     {
         let mut inflight = state.isr.inflight.lock().unwrap();
         if !inflight.insert(key.clone()) {
-            return; // すでに再検証中
+            return;
         }
     }
     tokio::spawn(async move {
@@ -313,8 +299,7 @@ fn spawn_revalidate(state: Arc<ProdState>, key: String) {
     });
 }
 
-/// 鮮度切れエントリを、保存時の variant（path+query と Vary ヘッダ値）を replay して更新する。
-/// ヘッダ依存ページでも同じ variant を再生成できるよう、クリーン GET ではなく文脈を再現する。
+/// クリーン GET ではなく保存時の variant（path+query と Vary ヘッダ値）を replay する。
 async fn revalidate_entry(state: &Arc<ProdState>, key: &str) -> Option<()> {
     let (refetch_path, refetch_headers) = {
         let e = state.isr.entries.lock().unwrap().get(key).cloned()?;
@@ -331,7 +316,6 @@ async fn revalidate_entry(state: &Arc<ProdState>, key: &str) -> Option<()> {
     Some(())
 }
 
-/// サイドカー応答が ISR キャッシュ可能なページなら CacheEntry にする。
 /// 条件: 200 / x-nowaki-page / x-nowaki-revalidate>0 / Set-Cookie 無し（per-user は除外）。
 async fn page_to_entry(
     state: &ProdState,
@@ -363,7 +347,6 @@ async fn page_to_entry(
     })
 }
 
-/// x-nowaki-revalidate ヘッダを正の秒数として読む。
 fn isr_secs_of(h: &reqwest::header::HeaderMap) -> Option<u64> {
     h.get("x-nowaki-revalidate")
         .and_then(|v| v.to_str().ok())
@@ -371,7 +354,7 @@ fn isr_secs_of(h: &reqwest::header::HeaderMap) -> Option<u64> {
         .filter(|n| *n > 0)
 }
 
-/// キャッシュへ復元する応答ヘッダを集める（x-nowaki-* / content-type / 長さ系 / Set-Cookie は除外）。
+/// Set-Cookie は共有キャッシュから復元しない。
 fn kept_headers(h: &reqwest::header::HeaderMap) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for (name, value) in h.iter() {
@@ -391,9 +374,7 @@ fn kept_headers(h: &reqwest::header::HeaderMap) -> Vec<(String, String)> {
     out
 }
 
-/// ISR ページを学習した Vary 仕様に基づき保存する。サイドカーの x-nowaki-vary /
-/// x-nowaki-vary-query を読み、pathname ごとの spec を更新してからキーを織り込む。
-/// `"*"`（全ヘッダ依存）は安全側でキャッシュ不可にする。
+/// x-nowaki-vary から pathname ごとの spec を学習してから保存する。`"*"` は安全側でキャッシュ不可。
 #[allow(clippy::too_many_arguments)]
 fn maybe_store(
     state: &Arc<ProdState>,
@@ -423,7 +404,7 @@ fn maybe_store(
         let mut specs = state.isr.specs.lock().unwrap();
         let spec = specs.entry(pathname.to_string()).or_default();
         if names.iter().any(|n| n == "*") {
-            spec.no_cache = true; // 全ヘッダ依存はキャッシュしない
+            spec.no_cache = true;
             return;
         }
         spec.query |= vary_query;
@@ -434,7 +415,6 @@ fn maybe_store(
     };
 
     let key = isr_key(pathname, query, req_headers, &spec);
-    // 再検証で同じ variant を replay するため path(+query) と Vary ヘッダ実値を保存。
     let refetch_path = if spec.query {
         match query {
             Some(q) => format!("{pathname}?{q}"),
@@ -469,8 +449,7 @@ fn maybe_store(
     );
 }
 
-/// エントリを保存。上限超過時は、まず同一 pathname の最古を追い出す（クエリ/ヘッダ氾濫が
-/// 他ルートのエントリを巻き込んで追い出さないように）。無ければ全体の最古を追い出す。
+/// 上限超過時はまず同一 pathname の最古を追い出す（クエリ/ヘッダ氾濫で他ルートを巻き込まない）。
 fn isr_store(state: &ProdState, key: &str, entry: CacheEntry) {
     let mut map = state.isr.entries.lock().unwrap();
     if map.len() >= state.isr.max && !map.contains_key(key) {
@@ -552,12 +531,10 @@ async fn proxy(state: Arc<ProdState>, req: Request, cacheable: bool) -> Response
     let bytes = resp.bytes().await.unwrap_or_default();
 
     if is_page {
-        // ページ: サイドカーが返した body+メタ(JSON)を Rust が完成 HTML に組み立てる。
         let html = match serde_json::from_slice::<PageMeta>(&bytes) {
             Ok(meta) => assemble(&state.manifest, &meta),
             Err(_) => String::from_utf8_lossy(&bytes).to_string(),
         };
-        // ISR: GET の cacheable ページならメモリへ保存し、この応答は MISS とする。
         let isr_secs = if cacheable && status == StatusCode::OK {
             isr_secs_of(&resp_headers)
         } else {
@@ -569,7 +546,6 @@ async fn proxy(state: Arc<ProdState>, req: Request, cacheable: bool) -> Response
         if isr_secs.is_some() {
             builder = builder.header("x-nowaki-cache", "MISS");
         }
-        // cookie 等の応答ヘッダは保つ（x-nowaki-* と長さ系は除く）。
         for (name, value) in resp_headers.iter() {
             let n = name.as_str();
             if n.starts_with("x-nowaki-")
@@ -581,8 +557,7 @@ async fn proxy(state: Arc<ProdState>, req: Request, cacheable: bool) -> Response
             }
             builder = builder.header(name, value);
         }
-        // Set-Cookie が無いときだけ保存（per-user 応答は共有キャッシュに入れない）。
-        // 学習した Vary をキーへ織り込み、pathname ごとの spec を更新する。
+        // per-user 応答（Set-Cookie 付き）は共有キャッシュに入れない。
         if let Some(secs) = isr_secs {
             if !resp_headers.contains_key(header::SET_COOKIE) {
                 maybe_store(
@@ -614,7 +589,6 @@ async fn proxy(state: Arc<ProdState>, req: Request, cacheable: bool) -> Response
     }
 }
 
-/// 描画済み body とメタから完成 HTML を組み立てる（island 配線 + modulepreload）。
 /// prodDocument(JS) の Rust 版。island は body 中の <nowaki-island name="..."> から拾う。
 fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
     let island_names = scan_island_names(&meta.body);
@@ -661,7 +635,6 @@ fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
     } else {
         String::new()
     };
-    // サーバーリアクティブ島があれば live.js（WS + morph）を読み込む。
     let live_script = if meta.body.contains("<nowaki-live") {
         match &manifest.live_runtime {
             Some(f) => format!("<script type=\"module\" src=\"/_nowaki/{f}\"></script>"),
@@ -680,7 +653,6 @@ fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
     )
 }
 
-/// body から <nowaki-island name="NAME"> の NAME を順不同で集める。
 fn scan_island_names(body: &str) -> Vec<String> {
     let mut out = Vec::new();
     let needle = "<nowaki-island name=\"";

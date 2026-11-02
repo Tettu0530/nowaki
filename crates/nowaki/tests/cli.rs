@@ -65,8 +65,7 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
         "live island server module expected"
     );
 
-    // --- サーバー関数（"use server"）の不変条件 ---
-    // allowlist（dist/server/functions.json）に actions/todos の export が並ぶ。
+    // サーバー関数: allowlist（dist/server/functions.json）に actions/todos の export が並ぶ。
     let functions =
         std::fs::read_to_string(root.join("dist/server/functions.json")).expect("functions.json");
     for export in ["addTodo", "listTodos", "whoami"] {
@@ -107,8 +106,7 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
         assert!(proxy.contains(id), "proxy missing id {id}");
     }
 
-    // server fn を `<form action={fn}>` に渡せる: プロキシは toString で
-    // "__nowaki_action:<id>" を返し、クライアントの form 傍受がそれを拾う。
+    // `<form action={fn}>`: プロキシの toString が "__nowaki_action:<id>" を返し form 傍受が拾う。
     assert!(
         functions.contains("\"export\": \"addTodoForm\""),
         "addTodoForm (form-action server fn) should be in functions.json"
@@ -129,8 +127,8 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
         "islands runtime should ship the <form action> interceptor"
     );
 
-    // --- 仮想モジュール（plugin resolveId/load）の不変条件 ---
-    // クライアント: 生成ソースが島チャンクへ連結され、bare `virtual:` 指定子は残らない。
+    // 仮想モジュール（plugin resolveId/load）:
+    // クライアントでは生成ソースが島チャンクへ連結され、bare `virtual:` 指定子は残らない。
     let vbadge = names
         .iter()
         .find(|n| n.starts_with("VirtualBadge.") && n.ends_with(".js"))

@@ -104,7 +104,6 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Build { dir, adapter } => {
             let root = dir.canonicalize()?;
-            // 型付きルート（.nowaki/types.d.ts）を更新。
             typegen::write(&root)?;
             // static アダプタは prerender に委譲（build → 一時起動 → 各ルートを静的化）。
             if adapter == Adapter::Static {
@@ -115,7 +114,6 @@ fn main() -> anyhow::Result<()> {
                     .block_on(prerender::run(root.clone(), out));
             }
             let dist = root.join("dist");
-            // nowaki.config があればプラグインホストを起動し、変換フックを注入する。
             // build 終了まで生かす（drop でホストを落とす）。
             let plugin_host = plugins::start(&root)?;
             let mut core = nowaki_core::NowakiCore::new(root.clone());
@@ -136,11 +134,8 @@ fn main() -> anyhow::Result<()> {
                 report.asset_out,
             );
             match adapter {
-                // cloudflare: Edge worker（fetch ハンドラ + 静的アセット binding）を生成。
                 Adapter::Cloudflare => adapter::emit_cloudflare(&root, &dist)?,
-                // vercel: Build Output API v3（Node serverless function + 静的アセット）。
                 Adapter::Vercel => adapter::emit_vercel(&root, &dist)?,
-                // node/bun/deno: 自己完結のサーバーエントリを出力。
                 _ => adapter::emit_server(&root, &dist, adapter)?,
             }
             Ok(())
