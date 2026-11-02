@@ -70,15 +70,14 @@ pub fn needs_fallback(core: &NowakiCore, abs: &Path) -> bool {
 
 /// 1モジュールの import / export メタデータ（AST は持たない）。
 struct ModuleMeta {
-    /// このモジュールの直接依存（解決済み絶対パス, 元の指定子）
+    /// (解決済み絶対パス, 元の指定子)
     deps: Vec<(PathBuf, String)>,
     /// export 名 → ローカルのバインディング名（`export {a as b}` は b→a）
     exports: Vec<(String, String)>,
-    /// import: (解決済み絶対パス, 元指定子, items)
     imports: Vec<ImportInfo>,
-    /// グローバルインデックス（リネーム接尾辞に使う）
+    /// リネーム接尾辞に使うグローバルインデックス
     idx: usize,
-    /// 連結を諦めて単体 emit にフォールバックするか（未対応構文を含む）
+    /// 未対応構文を含むので単体 emit にフォールバックする
     fallback: bool,
 }
 
@@ -107,7 +106,6 @@ pub fn hoist_chunk(
     internal: &[PathBuf],
     external_name: &HashMap<PathBuf, String>,
 ) -> Result<String> {
-    // --- パス1: 各内部モジュールのメタデータを集める ---
     let internal_set: HashSet<&Path> = internal.iter().map(|p| p.as_path()).collect();
     let mut metas: HashMap<PathBuf, ModuleMeta> = HashMap::new();
     for (i, abs) in internal.iter().enumerate() {
@@ -121,21 +119,18 @@ pub fn hoist_chunk(
     let mut stack: HashSet<PathBuf> = HashSet::new();
     order_modules(entry, &metas, &mut order, &mut visited, &mut stack);
 
-    // 内部モジュールの export 名 → リネーム後グローバル名 を引けるようにする。
     let renamed_export = |abs: &Path, export_name: &str| -> Option<String> {
         let m = metas.get(abs)?;
         let (_, local) = m.exports.iter().find(|(n, _)| n == export_name)?;
         Some(format!("{local}${}", m.idx))
     };
 
-    // --- パス2: 各モジュールを再変換し、リネーム + import/export 除去して body を得る ---
-    let mut ext_imports: Vec<String> = Vec::new(); // チャンク先頭の ESM import
+    let mut ext_imports: Vec<String> = Vec::new();
     let mut ext_seen: HashSet<String> = HashSet::new();
     let mut bodies: Vec<String> = Vec::new();
 
     for abs in &order {
         let meta = &metas[abs];
-        // 外部 import の配線を決める（このモジュールの import のうち external なもの）
         let mut wiring = ImportWiring::default();
         for imp in &meta.imports {
             let internal_dep = internal_set.contains(imp.source_abs.as_path());
@@ -193,7 +188,6 @@ pub fn hoist_chunk(
         bodies.push(body);
     }
 
-    // entry の default export をチャンクの default として再 export
     let entry_default = renamed_export(entry, "default").ok_or_else(|| {
         anyhow!(
             "island が default export を持っていません: {}",
@@ -424,8 +418,7 @@ fn render_body(core: &NowakiCore, abs: &Path, idx: usize, wiring: &ImportWiring)
                     ExportDefaultDeclarationKind::ClassDeclaration(c) => {
                         new_body.push(Statement::ClassDeclaration(c));
                     }
-                    // 式の default export を持つモジュールは extract_meta で fallback 済み
-                    // （連結対象に入らない）ので、ここには到達しない。
+                    // 式の default export は extract_meta で fallback 済みなので到達しない。
                     _ => {}
                 }
             }
@@ -440,8 +433,6 @@ fn render_body(core: &NowakiCore, abs: &Path, idx: usize, wiring: &ImportWiring)
         .code;
     Ok(code)
 }
-
-// --- 小物ヘルパ ---
 
 fn resolve(core: &NowakiCore, dir: &Path, spec: &str) -> Option<PathBuf> {
     if spec.starts_with('/') || spec.contains("://") || spec.starts_with("data:") {

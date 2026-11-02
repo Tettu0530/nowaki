@@ -21,12 +21,10 @@ fn strips_types_and_transforms_jsx() {
         None,
     )
     .expect("transform ok");
-    // 型注釈は除去される
     assert!(
         !out.contains(": number"),
         "type annotation should be stripped:\n{out}"
     );
-    // JSX は automatic runtime（importSource=preact）へ
     assert!(
         out.contains("jsx-runtime"),
         "jsx-runtime import expected:\n{out}"

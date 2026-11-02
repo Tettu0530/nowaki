@@ -113,7 +113,6 @@ fn try_optimize(bytes: &[u8], ext: &str, t: &Transform) -> Result<Option<(Vec<u8
     }
     let out = encode(&img, out_fmt, t.quality)?;
 
-    // 自動最適化（変換指定なし）で小さくならないなら、元を使う。
     if t.is_noop() && out.len() >= bytes.len() {
         return Ok(None);
     }
@@ -156,7 +155,6 @@ fn encode(img: &DynamicImage, fmt: Fmt, quality: Option<u8>) -> Result<Vec<u8>> 
             )?;
         }
         Fmt::Webp => {
-            // image-webp はロスレスエンコード。
             let enc = WebPEncoder::new_lossless(&mut out);
             let rgba = img.to_rgba8();
             enc.write_image(
@@ -176,7 +174,6 @@ mod tests {
     use image::{ImageBuffer, Rgba};
     use std::io::Cursor;
 
-    // 合成画像（PNG バイト）を作る。
     fn sample_png() -> Vec<u8> {
         let img = ImageBuffer::from_fn(64, 48, |x, y| {
             Rgba([(x * 4) as u8, (y * 5) as u8, 128, 255])

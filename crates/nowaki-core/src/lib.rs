@@ -127,10 +127,9 @@ impl NowakiCore {
         }
     }
 
-    /// 指定子を解決して絶対パスを返す。通常の oxc 解決を先に試し、失敗したときだけ
-    /// プラグインの `resolveId` を試す（＝仮想モジュール）。仮想 id は合成パスにマップし、
-    /// `read_source` が `load` で引けるよう registry に登録する。プラグイン無しなら
-    /// 挙動は素の解決と同一（オーバーヘッドゼロ）。
+    /// 指定子を解決して絶対パスを返す。通常の oxc 解決が失敗したときだけプラグインの
+    /// `resolveId` を試し、仮想 id は合成パスにマップして `read_source` 用に registry へ登録する。
+    /// プラグイン無しなら素の解決と同一（オーバーヘッドゼロ）。
     pub fn resolve_spec(&self, dir: &Path, spec: &str) -> Option<PathBuf> {
         if let Ok(r) = self.resolver.resolve(dir, spec) {
             return Some(r.full_path());
@@ -138,12 +137,10 @@ impl NowakiCore {
         let bridge = self.plugins.as_ref()?;
         let importer = dir.to_string_lossy();
         let id = bridge.resolve_id(spec, &importer)?;
-        // プラグインが実在の絶対パスを返したらそれを使う。
         let p = PathBuf::from(&id);
         if p.is_absolute() && p.exists() {
             return Some(p);
         }
-        // 仮想 id → 合成パス（ディスクには無い）。registry に id を控える。
         let hash = format!("{:016x}", xxh3_64(id.as_bytes()));
         let synthetic = self.root.join(VIRTUAL_DIR).join(format!("{hash}.js"));
         self.virtual_ids
@@ -170,7 +167,6 @@ impl NowakiCore {
     /// プラグイン未設定なら素のファイル読込と同一（＝挙動不変）。dev/build/chunk の
     /// 全ソース読込はここを通すことで、変換フックを一貫適用する。
     pub fn read_source(&self, abs: &Path) -> Result<String> {
-        // 仮想モジュール（合成パス）はディスクに無いので `load` フックでソースを得る。
         if let Some(vid) = self.virtual_id_of(abs) {
             let bridge = self
                 .plugins
@@ -191,7 +187,6 @@ impl NowakiCore {
             return Ok(source);
         };
         let id = abs.to_string_lossy();
-        // .tsrx は @tsrx/preact で JSX へコンパイル（→ 呼び出し側が oxc で JSX→preact）。
         if abs.extension().and_then(|e| e.to_str()) == Some("tsrx") {
             if let Some(code) = bridge.compile_tsrx(&id, &source) {
                 return Ok(code);
@@ -219,7 +214,6 @@ impl NowakiCore {
             }
         }
 
-        // 永続ディスクキャッシュ（再起動後の最初のアクセスでヒットする）
         let disk_key = self.disk_cache.key(abs, mode, hash);
         if let Some(code) = self.disk_cache.get(disk_key) {
             self.cache.insert(
@@ -232,7 +226,6 @@ impl NowakiCore {
             return Ok(code);
         }
 
-        // 仮想モジュール解決（resolveId/load）を渡す（通常解決が失敗したときに試す）。
         let code = transform::transform_file(
             &self.root,
             abs,
@@ -265,7 +258,7 @@ impl NowakiCore {
     /// 実モジュール（通常解決できる）なら None。build_server からも使う。
     pub(crate) fn virtual_ssr_module(&self, dir: &Path, spec: &str) -> Option<String> {
         let p = self.resolve_spec(dir, spec)?;
-        self.virtual_id_of(&p)?; // 仮想モジュールのみ対象
+        self.virtual_id_of(&p)?;
         let src = self.read_source(&p).ok()?;
         Some(transform::data_module(&src))
     }
@@ -273,7 +266,6 @@ impl NowakiCore {
 
 impl transform::VirtualResolve for NowakiCore {
     fn virtual_browser(&self, dir: &Path, spec: &str) -> Option<PathBuf> {
-        // map_specifier の通常解決失敗時のみ呼ばれる。合成パス（or プラグインが返した実パス）を返す。
         self.resolve_spec(dir, spec)
     }
     fn virtual_ssr_module(&self, dir: &Path, spec: &str) -> Option<String> {

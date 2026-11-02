@@ -14,9 +14,8 @@ pub fn is_css_module(path: &Path) -> bool {
     path.to_str().is_some_and(|s| s.ends_with(".module.css"))
 }
 
-/// クラスセレクタ `.name` を `.name_<suffix>` にスコープ化する。suffix は id（絶対パス）由来で
-/// 安定なので、dev/build・client/SSR で同じ名前になる。(スコープ済CSS, 元名→新名のマップ) を返す。
-/// 簡易スキャナ（フル CSS パーサは入れない）: `.` の直後がクラス名のときだけ書き換える。
+/// クラスセレクタ `.name` を `.name_<suffix>` にスコープ化し、(スコープ済CSS, 元名→新名) を返す。
+/// suffix は id 由来で安定（dev/build・client/SSR で一致）。フル CSS パーサは使わない簡易スキャナ。
 pub fn scope_css(id: &str, css: &str) -> (String, Vec<(String, String)>) {
     let suffix = format!("{:08x}", xxh3_64(id.as_bytes()) as u32);
     let bytes = css.as_bytes();
