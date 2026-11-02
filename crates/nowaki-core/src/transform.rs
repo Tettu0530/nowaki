@@ -270,7 +270,7 @@ fn rewrite_ssr_imports<'a>(
             if let Ok(resolution) = resolver.resolve(dir, spec) {
                 let full = resolution.full_path();
                 if let Ok(css) = std::fs::read_to_string(&full) {
-                    let id = full.to_string_lossy();
+                    let id = crate::css::css_scope_id(root, &full);
                     let (_scoped, map) = crate::css::scope_css(&id, &css);
                     let body = format!("export default {}", crate::css::mapping_object(&map));
                     lit.value = allocator.alloc_str(&data_module(&body)).into();

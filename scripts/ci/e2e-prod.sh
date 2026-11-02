@@ -30,6 +30,13 @@ START_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3300/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3300/ | grep -q "modulepreload"
 curl -sf http://127.0.0.1:3300/ | grep -q '<code>a→b</code>'
+# CSS Modules: prod SSR must use the same scoped class names as dev (css_scope_id).
+PROD_BADGE=$(curl -sf http://127.0.0.1:3300/ | grep -oE 'badge_[0-9a-f]{8}' | head -1)
+test -n "$PROD_BADGE"
+if test -f /tmp/nowaki-css-module-badge-class; then
+  test "$PROD_BADGE" = "$(cat /tmp/nowaki-css-module-badge-class)"
+fi
+! curl -sf http://127.0.0.1:3300/ | grep -qE '/Users/|/home/[^/]+/'
 # lazy SPA router: runtime script carries data-router, and the router chunk is
 # NOT eagerly preloaded (it loads on idle, keeping first-load JS small).
 curl -sf http://127.0.0.1:3300/ | grep -q 'id="nowaki-runtime"[^>]*data-router='
