@@ -53,7 +53,7 @@ jobs:
       - run: cargo test --workspace --locked
 
   msrv:
-    name: MSRV (Rust 1.94)
+    name: MSRV (Rust 1.95)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -62,7 +62,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
         with:
-          rust: "1.94"
+          rust: "1.95"
           install: "false"
       - run: cargo check --workspace --all-targets --locked
 
@@ -270,11 +270,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
-        with:
-          tool: actionlint,zizmor
-      - run: actionlint
-      - run: zizmor --persona=regular --min-severity=medium .github/workflows .github/actions
+      # Go and pipx are preinstalled on ubuntu runners; versions are pinned here.
+      - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - run: pipx run zizmor==1.31.1 --persona=regular --min-severity=medium .github/workflows .github/actions
 
   pr-size:
     name: PR size
