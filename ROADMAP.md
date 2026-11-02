@@ -7,9 +7,9 @@
 
 「Next.js の遅さへの構造的な答え」を、3つの柱で実現します。
 
-1. **Rust ツールチェーン** — 変換・解決・バンドル・配信を oxc ベースの Rust が担い、起動とビルドを速く保つ。
-2. **デフォルト JS ゼロ（Islands）** — ページはサーバーで描画し、明示した「島」だけがクライアントで動く。
-3. **npm エコシステム互換** — SSR は Node に委譲し、既存の資産をそのまま使える。
+1. Rust ツールチェーン: 変換・解決・バンドル・配信を oxc ベースの Rust が担い、起動とビルドを速く保つ。
+2. デフォルト JS ゼロ（Islands）: ページはサーバーで描画し、明示した「島」だけがクライアントで動く。
+3. npm エコシステム互換: SSR は Node に委譲し、既存の資産をそのまま使える。
 
 **成功の指標（1.0 時点の目標）**: dev 起動 < 300ms、HMR 反映 < 100ms、典型ページのクライアント JS < 15KB(gzip)、実アプリでの採用実績。
 
@@ -37,13 +37,13 @@
 デプロイアダプタ5種（node / static / bun / deno / cloudflare edge）、ストリーミング SSR、プラグイン変換フック、TSRX ブリッジ、`nowaki start` の Rust 本番ホットパス。
 
 ### v0.6 「Jetstream」: サーバーリアクティブ島 ★flagship ✅
-**Jetstream islands** — 島が `export const live = { state, on }` を持つと、コンポーネント JS をクライアントに送らずに動く。状態はサーバーが WebSocket 接続ごとに保持し、HTML パッチを push。クライアント島（楽観 UI）と共存し、静的デプロイでは初期 SSR に劣化する。
+**Jetstream islands** では、島が `export const live = { state, on }` を持つと、コンポーネント JS をクライアントに送らずに動く。状態はサーバーが WebSocket 接続ごとに保持し、HTML パッチを push。クライアント島（楽観 UI）と共存し、静的デプロイでは初期 SSR に劣化する。
 
 ### v0.7 「Beta」: 安定化の土台 ✅
 `cargo test` スイート、再現可能なベンチマーク（[BENCHMARKS.md](./BENCHMARKS.md)）、信頼境界の明文化（[SECURITY.md](./SECURITY.md)）と CI の依存監査、SemVer 規律と [CHANGELOG.md](./CHANGELOG.md)。
 
 ### v0.8〜v0.9 「Beta」: 拡充・実用化 ✅
-**サーバー関数（`"use server"` RPC）**、Next/Astro との head-to-head ベンチ + CI 回帰検出、テスト拡充（ルーター snapshot・Jetstream 負荷）、Jetstream の presence・接続スケール、**プラグイン仮想モジュール（resolveId / load）**、ドキュメントサイト（`/docs`）。
+**サーバー関数（`"use server"` RPC）**、Next/Astro との head-to-head ベンチ + CI でのリグレッション検出、テスト拡充（ルーター snapshot・Jetstream 負荷）、Jetstream の presence・接続スケール、**プラグイン仮想モジュール（resolveId / load）**、ドキュメントサイト（`/docs`）。
 
 > 状態保持（prefresh）HMR は follow-up（島ホットスワップは既存）。TSRX 島の scoped CSS も継続。
 
@@ -77,7 +77,7 @@
 ### v0.15 「Cyclone」: Jetstream 2 ★flagship
 「npm エコシステムの LiveView、コンポーネント JS 0KB」を実用にする。フォームと入力、認証付きハンドラ、外部の変更を push する live query、接続をまたいで共有する状態（rooms）。
 
-**Exit 基準**: 再接続とサーバー再起動をまたいで状態が続く。`publish()` で別の接続の島に patch が届く。2 タブの投票デモが、部屋単位の在席表示付きで動く。1000 接続のファンアウト p95 を BENCHMARKS.md に記録している。
+**Exit 基準**: 再接続とサーバー再起動をまたいで状態が続く。`publish()` で別の接続の島に patch が届く。2 タブの投票デモが部屋単位の在席表示付きで動く。1000 接続のファンアウト p95 を BENCHMARKS.md に記録している。
 
 - [ ] イベントの拡張（submit / input / change、debounce、keyed morph）
 - [ ] 安定した署名鍵、stale 通知、resume token（任意）
@@ -109,8 +109,8 @@
 
 マイルストーンを縦糸とすると、以下は横糸として常時進みます。
 
-- **DX** — HMR、エラー表示、CLI 体験、型補完（`.d.ts`）、テンプレート拡充
-- **性能** — バンドルグラフ、キャッシュ、ソースマップ、ベンチ回帰検出
-- **エコシステム** — アダプタ、プラグイン API、TSRX
-- **品質** — テスト、`cargo audit` / `pnpm audit`、セキュリティレビュー
-- **コミュニティ** — ドキュメント、レシピ、RFC、コントリビュータ導線
+- DX: HMR、エラー表示、CLI 体験、型補完（`.d.ts`）、テンプレート拡充
+- 性能: バンドルグラフ、キャッシュ、ソースマップ、ベンチのリグレッション検出
+- エコシステム: アダプタ、プラグイン API、TSRX
+- 品質: テスト、`cargo audit` / `pnpm audit`、セキュリティレビュー
+- コミュニティ: ドキュメント、レシピ、RFC、コントリビュータ導線

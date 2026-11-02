@@ -1,10 +1,10 @@
 # リリース手順
 
-## バージョニング方針（SemVer）
+## バージョニング方針
 
-Nowaki は [SemVer](https://semver.org/) に従う。ただし **0.x alpha** の間は:
+Nowaki は [SemVer](https://semver.org/) に従う。ただし **0.x alpha** の間は次のとおりとする。
 
-- **minor（0.x.0）** は新機能 ＋ 破壊的変更を含みうる。破壊的変更は必ず
+- **minor（0.x.0）** は新機能と破壊的変更を含みうる。破壊的変更は必ず
   [CHANGELOG.md](../CHANGELOG.md) に明記し、移行メモを添える。
 - **patch（0.x.y）** はバグ修正のみ。破壊的変更は入れない。
 - 公開 API（CLI コマンド・オーサリング規約・`@nowaki-dev/runtime` の公開
@@ -15,25 +15,25 @@ Nowaki は [SemVer](https://semver.org/) に従う。ただし **0.x alpha** の
 
 ## 配布チャンネル
 
-Nowaki は2系統で配布する:
+Nowaki は次の2系統で配布する。
 
 - **crates.io**: `nowaki` / `nowaki-core`（`cargo install nowaki`）
 - **npm**: `nowaki`（プリビルドバイナリの wrapper）+ `@nowaki-dev/cli-<platform>` ×5、`@nowaki-dev/runtime`、`create-nowaki`
 
-npm の CLI は esbuild/biome 方式: プラットフォーム別バイナリを `optionalDependencies`
+npm の CLI は esbuild/biome 方式をとる。プラットフォーム別バイナリを `optionalDependencies`
 で配り、`packages/nowaki-cli/bin/nowaki.js`（postinstall 不要のシム）が実行時に解決して
 exec する。
 
-## 前提（一度だけ）
+## 前提
 
-リポジトリの **Secrets に `NPM_TOKEN`** を登録する（npm の Automation token、
+一度だけ、リポジトリの **Secrets に `NPM_TOKEN`** を登録する（npm の Automation token、
 `@nowaki-dev` org と未スコープ `nowaki` に publish 権限があること）。
 
 ## バージョンを上げる
 
-以下を同じバージョンに揃える:
+以下を同じバージョンに揃える。
 
-1. `Cargo.toml` の `[workspace.package] version`（crate と、`build-npm.mjs` が読む元）
+1. `Cargo.toml` の `[workspace.package] version`（crate のバージョンで、`build-npm.mjs` もここから読む）
 2. `packages/nowaki-cli/package.json` の `version` と `optionalDependencies` の各 `@nowaki-dev/cli-*`
 3. （必要なら）`packages/create-nowaki/template/package.json` の `devDependencies.nowaki`
 
@@ -48,30 +48,30 @@ cargo publish -p nowaki
 
 ### npm CLI（自動）
 
-バージョンタグを push するとリリース CI（`.github/workflows/release.yml`）が
-5プラットフォームをビルドして全パッケージを publish する:
+バージョンタグを push すると、リリース CI（`.github/workflows/release.yml`）が
+5プラットフォームをビルドして全パッケージを publish する。
 
 ```bash
 git tag v0.1.2
 git push origin v0.1.2
 ```
 
-- `build` ジョブ: 各ターゲットをビルド → `node scripts/build-npm.mjs <key> --no-build`
-  でパッケージ化 → `@nowaki-dev/cli-<key>` を publish。
-- `publish-wrapper` ジョブ: 全ビルド後に wrapper `nowaki` を publish。
-- 手動実行（workflow_dispatch）で `dry_run=true` にするとビルドのみ。
+- `build` ジョブ: 各ターゲットをビルドし、`node scripts/build-npm.mjs <key> --no-build`
+  でパッケージ化して、`@nowaki-dev/cli-<key>` を publish する。
+- `publish-wrapper` ジョブ: 全ビルドの後に wrapper `nowaki` を publish する。
+- 手動実行（workflow_dispatch）で `dry_run=true` にすると、ビルドだけを実行する。
 
 ### npm runtime / create-nowaki
 
 各 `package.json` の version を上げてから、`Publish npm packages`
 ワークフロー（`.github/workflows/publish-npm.yml`）を手動実行する。`package`
-入力で対象を選ぶ（既定 `all` = runtime + create-nowaki + create-nowaki-app）。
+入力で対象を選ぶ。既定の `all` は runtime と create-nowaki、create-nowaki-app を対象にする。
 release.yml と同じ `NPM_TOKEN` を使う。
 
-注: `@nowaki-dev/runtime` は CLI とバージョンを揃える（同じコミットから出すため）。
+注: `@nowaki-dev/runtime` は、同じコミットから出すため CLI とバージョンを揃える。
 scaffold テンプレートの `@nowaki-dev/runtime` 依存も合わせて上げる。
 
-ローカルから手で publish する場合（npm にログイン済みなら）:
+npm にログイン済みなら、ローカルから手で publish する場合は次のようにする。
 
 ```bash
 cd packages/nowaki-runtime && npm publish
@@ -81,7 +81,7 @@ cd packages/create-nowaki-app && npm publish
 
 ## ローカル動作確認
 
-任意のターゲットを手元で組み立てて確認できる（ホストと同じ key のみ実行可能）:
+任意のターゲットを手元で組み立てて確認できる。実行できるのは、ホストと同じ key のターゲットに限られる。
 
 ```bash
 node scripts/build-npm.mjs darwin-arm64   # 例: Apple Silicon
