@@ -7,7 +7,7 @@ Rust製ツールチェーンを核とするフルスタックWebフレームワ�
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)](#status)
 
-クライアントJSはデフォルトでゼロ。開発サーバーはRustバイナリで即起動します。Next.js の構造的な遅さへの答えとして設計しました。
+クライアントJSはデフォルトでゼロです。開発サーバーはRustバイナリで即起動します。Next.js の構造的な遅さへの答えとして設計しました。
 
 </div>
 
@@ -15,7 +15,7 @@ Rust製ツールチェーンを核とするフルスタックWebフレームワ�
 
 ## Nowaki とは
 
-Nowaki（野分 = 台風の古語）は、Next.js の構造的な遅さを出発点に設計したフルスタックフレームワークです。バンドラー・変換・開発サーバーを Rust と [oxc](https://oxc.rs) で書き、レンダリングには Islands Architecture を採りました。ページが送るクライアントJSは「島」の分だけに収まります。
+Nowaki（野分 = 台風の古語）は、Next.js の構造的な遅さを出発点に設計したフルスタックフレームワークです。バンドラー・変換・開発サーバーを Rust と [oxc](https://oxc.rs) で書き、レンダリングには Islands Architecture を採りました。ページのクライアントJSは「島」の分だけに収まります。
 
 | Next.js の課題 | Nowaki の回答 |
 |---|---|
@@ -36,7 +36,7 @@ Nowaki（野分 = 台風の古語）は、Next.js の構造的な遅さを出発
 
 ## クイックスタート
 
-前提は Node.js 22 以上と pnpm（npm や yarn でも動きます）。Rust は要りません。CLI はプリビルドのネイティブバイナリを npm から取得します。
+前提は Node.js 22 以上と pnpm です（npm や yarn でも動きます）。Rust は要りません。CLI はプリビルドのネイティブバイナリを npm から取得します。
 
 ```bash
 # 新しいアプリを作成
@@ -47,7 +47,7 @@ pnpm install   # nowaki CLI（ネイティブバイナリ）+ ランタイムを
 pnpm dev       # → http://127.0.0.1:3000
 ```
 
-scaffold 済みアプリの npm scripts:
+scaffold 済みアプリの npm scripts は次のとおりです。
 
 ```bash
 pnpm dev         # 開発サーバー (HMR + Islands)
