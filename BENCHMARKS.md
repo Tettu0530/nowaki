@@ -19,22 +19,24 @@ node benchmarks/head-to-head.mjs          # Nowaki vs Next vs Astro (same counte
 
 The same minimal app — one server-rendered page with a single interactive
 counter island (Preact for Nowaki *and* Astro, so the UI library is equal) —
-built and booted on one machine.
+built and booted on one machine. Versions: Next.js 16.4, Astro 7.4, Nowaki at
+the commit measured.
 
 | framework | dev ready (cold) | production build | first-load JS (raw) | first-load JS (gzip) |
 |---|---|---|---|---|
-| **Nowaki** | **74 ms** | **10 ms** | **21.6 KB** | **9.9 KB** |
-| Astro | 544 ms | 999 ms | 23.1 KB | 10.0 KB |
-| Next.js | 1374 ms | 7580 ms | 103.0 KB\* | — |
+| **Nowaki** | **82 ms** | **20 ms** | **20.3 KB** | **9.1 KB** |
+| Astro | 1119 ms | 721 ms | 24.1 KB | 10.4 KB |
+| Next.js | 261 ms | 2087 ms | 446.7 KB | 132.0 KB |
 
-\* Next's own *First Load JS* figure from `next build` (parsed/uncompressed). For
-Nowaki and Astro, *raw* is the summed uncompressed size of the production client
-chunks and *gzip* is what's transferred.
+*First-load JS* is the JavaScript `/` fetches on load, measured the same way for
+all three: Nowaki's eager chunks (its idle-loaded SPA router is excluded, as in
+the CI size gate), Astro's island JS, and the `<script src>` chunks in Next's
+prerendered `/` (`noModule` polyfills excluded). *gzip* is what's transferred.
 
-Reading it: Nowaki boots dev ~7× faster than Astro and ~18× faster than Next,
-builds ~100× faster than Astro and ~750× faster than Next, and ships about the
-same tiny client payload as Astro (both are islands frameworks) — roughly **5×
-less than Next's app-router baseline**. The apps live in
+Reading it: Nowaki builds ~35× faster than Astro and ~100× faster than Next,
+starts dev ~3× faster than Next and ~14× faster than Astro, and ships about
+the same small client payload as Astro (both are islands frameworks) — roughly
+**14× less than Next's app-router baseline** (gzip). The apps live in
 `benchmarks/apps/{nowaki,next,astro}-counter`; install the peers and re-run
 `head-to-head.mjs` to reproduce on your machine.
 
