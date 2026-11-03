@@ -11,6 +11,7 @@ loadEnv();
 
 // from here on, dynamically imported .tsx/.ts go through Rust's transform endpoint
 register(new URL("./loader-hooks.mjs", import.meta.url));
+register(new URL("./react-alias-hooks.mjs", import.meta.url));
 
 const { scanRoutes } = await import("./router.mjs");
 const { loadIslandRegistry, renderDocument, renderShell, errorPage } = await import("./render.mjs");

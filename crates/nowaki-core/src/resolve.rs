@@ -28,12 +28,17 @@ pub fn make_resolver() -> Resolver {
 /// Maps React bare imports to Preact-compatible ones. A layer that lets code ported from
 /// Next.js and React-dependent libraries run as is via `react`→`preact/compat`.
 /// If it returns Some, use that specifier instead (applied at the specifier level, before resolution).
+/// SSR of node_modules uses the same table (`server/react-alias-hooks.mjs`); keep them in sync.
 pub fn alias_specifier(spec: &str) -> Option<&'static str> {
     match spec {
-        "react" | "react-dom" | "react-dom/client" => Some("preact/compat"),
+        "react" | "react-dom" => Some("preact/compat"),
+        "react-dom/client" => Some("preact/compat/client"),
+        "react-dom/server" => Some("preact/compat/server"),
+        "react-dom/test-utils" => Some("preact/test-utils"),
         "react/jsx-runtime" => Some("preact/jsx-runtime"),
         "react/jsx-dev-runtime" => Some("preact/jsx-dev-runtime"),
-        "react-dom/test-utils" => Some("preact/test-utils"),
+        "react/compiler-runtime" => Some("preact/compat/compiler-runtime"),
+        "scheduler" => Some("preact/compat/scheduler"),
         _ => None,
     }
 }
@@ -82,7 +87,18 @@ mod tests {
     fn react_family_aliases_to_preact() {
         assert_eq!(alias_specifier("react"), Some("preact/compat"));
         assert_eq!(alias_specifier("react-dom"), Some("preact/compat"));
-        assert_eq!(alias_specifier("react-dom/client"), Some("preact/compat"));
+        assert_eq!(
+            alias_specifier("react-dom/client"),
+            Some("preact/compat/client")
+        );
+        assert_eq!(
+            alias_specifier("react-dom/server"),
+            Some("preact/compat/server")
+        );
+        assert_eq!(
+            alias_specifier("scheduler"),
+            Some("preact/compat/scheduler")
+        );
         assert_eq!(
             alias_specifier("react/jsx-runtime"),
             Some("preact/jsx-runtime")
