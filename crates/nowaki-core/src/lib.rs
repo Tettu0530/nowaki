@@ -5,6 +5,7 @@ pub mod chunk;
 pub mod css;
 pub mod env;
 pub mod resolve;
+pub mod routes;
 pub mod server_fn;
 pub mod transform;
 
