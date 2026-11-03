@@ -2,6 +2,7 @@
 // clientDir / serverDir are passed in, so it's tied to neither cwd nor import.meta's location.
 
 import { createServer } from "node:http";
+import { register } from "node:module";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -13,6 +14,12 @@ import { handleRequest, sendResult } from "./handler.mjs";
 import { prodDocument, prodShell } from "./document.mjs";
 import { liveInitialState } from "./live.mjs";
 import { liveProps } from "./live-sign.mjs";
+
+// Route modules are imported later, so libraries in them resolve React through this hook.
+// Bun and Deno don't implement Node's module.register; their SSR keeps the old behavior.
+try {
+  register(new URL("./react-alias-hooks.mjs", import.meta.url));
+} catch {}
 
 const CONTENT_TYPE = {
   js: "text/javascript; charset=utf-8",
@@ -131,7 +138,8 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
       return {
         status: 500,
         headers: { "content-type": "text/plain; charset=utf-8" },
-        body: String(err?.stack ?? err),
+        // Production: never send the stack (it leaks file paths and code); it's logged above.
+        body: "Internal Server Error",
       };
     },
   };
@@ -166,7 +174,7 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
     } catch (err) {
       console.error("[nowaki]", err);
       res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
-      res.end(String(err?.stack ?? err));
+      res.end("Internal Server Error");
     }
   };
 

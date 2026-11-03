@@ -40,6 +40,9 @@ grep -q 'Post: hello' examples/hello/dist/static/blog/hello/index.html
 grep -q 'Post: nowaki' examples/hello/dist/static/blog/nowaki/index.html
 grep -q 'docs / intro (2)' examples/hello/dist/static/files/docs/intro/index.html
 grep -q 'Page not found' examples/hello/dist/static/404.html
+# the SPA router's boundaries fetch is answered by a static file (no 404 on static hosts)
+node -e 'const b=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!Array.isArray(b.loading)||!Array.isArray(b.error)||!b.loading.length) process.exit(1)' examples/hello/dist/static/__nowaki/boundaries
+grep -q '/__nowaki/boundaries' examples/hello/dist/static/_headers
 # cloudflare (edge) adapter: generates a bundled fetch-handler worker + wrangler config
 ./target/debug/nowaki build examples/hello --adapter cloudflare
 test -f examples/hello/dist/worker/index.js

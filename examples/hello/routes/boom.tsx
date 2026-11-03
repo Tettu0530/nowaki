@@ -1,13 +1,13 @@
-// Error boundary (_500) demo. The loader throws only with ?boom=1.
-// Without the query (prerender or normal navigation) it renders normally.
+// Error boundary (_500) demo. The loader throws only with ?boom=1 (or ?boom=nested, which also makes
+// _500.tsx throw, to show the built-in fallback). Without the query it renders normally.
 type Ctx = { url: URL };
 
 export const title = "Boom — Nowaki";
 
 export const loader = (ctx: Ctx) => {
-  if (ctx.url.searchParams.get("boom")) {
-    throw new Error("Intentional error (_500.tsx demo)");
-  }
+  const boom = ctx.url.searchParams.get("boom");
+  if (boom === "nested") throw new Error("nested-500-demo");
+  if (boom) throw new Error("Intentional error (_500.tsx demo)");
   return {};
 };
 

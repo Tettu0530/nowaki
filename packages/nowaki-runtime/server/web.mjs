@@ -72,11 +72,14 @@ export function createFetchHandler({
     serverFunctions,
     renderDocument: (args) => prodDocument(manifest, args),
     renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta),
-    renderError: (err) => ({
-      status: 500,
-      headers: { "content-type": "text/plain; charset=utf-8" },
-      body: String(err?.stack ?? err),
-    }),
+    renderError: (err) => {
+      console.error("[nowaki]", err);
+      return {
+        status: 500,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+        body: "Internal Server Error",
+      };
+    },
   };
 
   return async (request) => {

@@ -95,6 +95,7 @@ column.
 | ISR cache key + `Vary` learning | Cross-user HTML cache bleed | `server/context.mjs` (`__vary()`), `server/handler.mjs` (`x-nowaki-vary`); `crates/nowaki/src/start.rs` (`isr_key`); e.g. `examples/hello/routes/vary.tsx` | `scripts/security-e2e.mjs` (prod) |
 | ISR query folding | Cache flood via distinct query strings | `crates/nowaki/src/start.rs` | `scripts/security-e2e.mjs` (prod) |
 | Static client assets by basename | Path traversal on `/_nowaki/*` | `crates/nowaki/src/start.rs` | `scripts/security-e2e.mjs` (prod) |
+| Generic production 500s | Stack traces (file paths, code) reaching clients | `server/app.mjs`, `server/web.mjs`, `server/prod-sidecar.mjs` (`renderError` and top-level catches) | `scripts/security-e2e.mjs` (prod) |
 | Dependency advisories | Known-vulnerable crates/packages | `.github/workflows/ci.yml` | `cargo audit`, `cargo-deny`, `pnpm audit` jobs |
 
 **Planned (not yet default):** inbound proxy header sanitization (`NOWAKI_TRUST_PROXY`),

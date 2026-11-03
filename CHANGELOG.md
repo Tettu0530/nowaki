@@ -27,6 +27,36 @@ milestone's worth of work; the codename is noted per entry.
   apps from `npm create nowaki` get `preact-render-to-string@^6.8.2`.
 
 ### Fixed
+- React libraries now SSR: `react` / `react-dom` imports inside node_modules
+  resolve to `preact/compat` on the server (a Node resolve hook in the dev and
+  production sidecars and the node adapter), instead of loading real React and
+  failing every hook call. The client alias table also maps
+  `react-dom/client`, `react-dom/server`, `react/compiler-runtime`, and
+  `scheduler` to their `preact/compat` counterparts, and
+  `process.env.NODE_ENV` is defined for client code.
+- Jetstream: a reconnect no longer resets live islands to their initial state.
+  Patches now carry the signed state, the client stores it on the element, and
+  re-joining resumes from it.
+- `nowaki build` starts from empty `dist/client` and `dist/server` (and the
+  cloudflare / static adapter outputs), so islands you deleted no longer ship.
+  `nowaki prerender --out <dir>` replaces only `<dir>/_nowaki` (#18).
+- Statically prerendered sites (`nowaki prerender`, the static adapter) include
+  `__nowaki/boundaries` (served as JSON via `_headers`), so the SPA router's
+  loading/error boundaries work and no longer 404 on static hosts (#19).
+- Client navigation applies the target page's `<style>` / `<link>` / `<meta>`
+  and `<html lang>` / `dir`, and drops the previous page's. The server marks
+  each page's own head content (`<meta name="nowaki-head">` start/end) and the
+  router swaps only that region, so styles injected at runtime by CSS-in-JS
+  libraries survive navigation (#21).
+- Assets imported only from server code (e.g. a font URL in a server-side style
+  module) are emitted to `dist/client` with a content-hashed name. They used to
+  be referenced as `/_nowaki/<name>` without being written, and without a hash
+  despite the immutable cache header (#17).
+- **Security:** production servers (`nowaki start` and the node / bun / deno /
+  vercel / cloudflare adapters) no longer send stack traces to clients. When a
+  route fails and the app's `_500` page also fails (or there is none), the
+  response is a plain `Internal Server Error`; the error is still logged. Before,
+  the full stack, including absolute file paths, was returned.
 - Windows: `nowaki dev` / `nowaki build` work (verbatim `\\?\` paths, SSR loader
   file URLs, and `/@fs/` drive-letter URLs).
 - `nowaki dev` / `nowaki start` kill their Node children on SIGTERM instead of
