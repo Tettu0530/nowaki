@@ -70,5 +70,15 @@ const p3 = await recvUntil(a, (m) => m.type === "presence" && m.count < p2.count
 check(p3.count < p2.count, `presence falls after disconnect (count=${p3.count})`);
 
 a.close();
+
+// Reconnect: re-joining with the state/sig from the last patch must resume (count 1 → 2), not reset to the SSR state.
+check(patch.state !== undefined && typeof patch.sig === "string", "patch carries the signed state");
+const c = await open(wsUrl);
+c.send(JSON.stringify({ type: "join", islands: [{ nid, name: "LiveCounter", state: patch.state, sig: patch.sig }] }));
+c.send(JSON.stringify({ type: "event", nid, handler: "inc" }));
+const resumed = await recvUntil(c, (m) => m.type === "patch" && m.nid === nid);
+check(/live:\s*2/.test(resumed.html), `state survives a reconnect (html has "live: 2")`);
+c.close();
+
 console.log(failed ? "\nLIVETEST FAILED" : "\nLIVETEST PASSED");
 process.exit(failed ? 1 : 0);

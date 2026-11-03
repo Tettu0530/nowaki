@@ -19,6 +19,9 @@ curl -sf http://127.0.0.1:3310/stream | grep -q "nowaki-island"
 # ISR signal is universal: the node adapter emits the same Cache-Control,
 # so the page gets stale-while-revalidate on any CDN/edge without the Rust front.
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr | grep -qi 'cache-control: public, s-maxage=2, stale-while-revalidate'
+# adapters have no live transport: live islands render their initial SSR, and live.js isn't shipped
+curl -sf http://127.0.0.1:3310/live | grep -q 'nowaki-live name="LiveCounter"'
+! curl -sf http://127.0.0.1:3310/live | grep -qE '/_nowaki/live\.[0-9a-f]+\.js'
 kill $NODE_PID
 # the printed deploy command (`cd dist/server && ... && npm start`) works as written
 grep -q '"start": "node index.mjs"' examples/hello/dist/server/package.json
@@ -32,6 +35,9 @@ pkill -f 'node index.mjs' 2>/dev/null || true
 ./target/debug/nowaki build examples/hello --adapter static
 test -f examples/hello/dist/static/index.html
 test -f examples/hello/dist/static/about/index.html
+# the SPA router's boundaries fetch is answered by a static file (no 404 on static hosts)
+node -e 'const b=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!Array.isArray(b.loading)||!Array.isArray(b.error)||!b.loading.length) process.exit(1)' examples/hello/dist/static/__nowaki/boundaries
+grep -q '/__nowaki/boundaries' examples/hello/dist/static/_headers
 # cloudflare (edge) adapter: generates a bundled fetch-handler worker + wrangler config
 ./target/debug/nowaki build examples/hello --adapter cloudflare
 test -f examples/hello/dist/worker/index.js

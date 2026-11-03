@@ -214,7 +214,10 @@ async fn handle_text(
                     .to_string();
                 islands.insert(nid.clone(), (name, ns.clone(), nsig));
             }
-            let patch = json!({ "type": "patch", "nid": nid, "html": html });
+            // The client stores state+sig on the element so a re-join after a reconnect resumes here.
+            let (_, st, sig) = &islands[&nid];
+            let patch =
+                json!({ "type": "patch", "nid": nid, "html": html, "state": st, "sig": sig });
             socket
                 .send(Message::Text(patch.to_string().into()))
                 .await

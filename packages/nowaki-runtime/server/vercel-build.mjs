@@ -56,7 +56,7 @@ await writeFile(path.join(funcDir, "index.mjs"), handler);
 // launcher=Nodejs accepts a (req,res) handler.
 await writeFile(
   path.join(funcDir, ".vc-config.json"),
-  JSON.stringify({ runtime: "nodejs20.x", handler: "index.mjs", launcherType: "Nodejs" }, null, 2) +
+  JSON.stringify({ runtime: "nodejs22.x", handler: "index.mjs", launcherType: "Nodejs" }, null, 2) +
     "\n",
 );
 
