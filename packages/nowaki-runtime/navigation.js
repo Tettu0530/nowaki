@@ -6,12 +6,12 @@ import { h } from "preact";
 // route("/blog/[slug]", { slug: "x" }) → "/blog/x"。
 // A catch-all ([...path]) joins its array with "/". Each segment is encodeURIComponent'd.
 export function route(pattern, params = {}) {
-  return pattern.replace(/\[\.\.\.([^\]]+)\]|\[([^\]]+)\]/g, (_, rest, one) => {
-    if (rest) {
-      const v = params[rest] ?? [];
+  return pattern.replace(/\[(\.\.\.)?([^[\]]+)\]/g, (_, dots, name) => {
+    if (dots) {
+      const v = params[name] ?? [];
       return (Array.isArray(v) ? v : [v]).map(encodeURIComponent).join("/");
     }
-    return encodeURIComponent(params[one] ?? "");
+    return encodeURIComponent(params[name] ?? "");
   });
 }
 

@@ -95,7 +95,7 @@ function parse(s) {
 }
 
 function cssEscape(s) {
-  return String(s).replace(/"/g, '\\"');
+  return CSS.escape(String(s));
 }
 
 // Minimal DOM morph (keyless, in-place updates).

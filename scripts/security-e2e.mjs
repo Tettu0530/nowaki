@@ -122,6 +122,15 @@ if (mode === "dev") {
 }
 
 if (mode === "prod") {
+  // 500s never carry a stack trace (file paths, code) in production — neither the app's _500 page
+  // nor the built-in fallback used when _500 itself throws.
+  const stackLike = /\n\s+at |\(file:\/\/|node:internal/;
+  const err500 = await fetch(`${base}/boom?boom=1`);
+  check("prod _500 page has no stack trace", err500.status === 500 && !stackLike.test(await err500.text()));
+  const nested = await fetch(`${base}/boom?boom=nested`);
+  const nestedBody = await nested.text();
+  check(`prod fallback 500 is generic (${JSON.stringify(nestedBody.slice(0, 40))})`,
+    nested.status === 500 && nestedBody === "Internal Server Error");
   // ISR cross-user isolation (accept-language-dependent route /vary)
   const get = (lang) =>
     fetch(`${base}/vary`, { headers: { "accept-language": lang } });

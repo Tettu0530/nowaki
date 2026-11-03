@@ -43,6 +43,11 @@ milestone's worth of work; the codename is noted per entry.
   module) are emitted to `dist/client` with a content-hashed name. They used to
   be referenced as `/_nowaki/<name>` without being written, and without a hash
   despite the immutable cache header (#17).
+- **Security:** production servers (`nowaki start` and the node / bun / deno /
+  vercel / cloudflare adapters) no longer send stack traces to clients. When a
+  route fails and the app's `_500` page also fails (or there is none), the
+  response is a plain `Internal Server Error`; the error is still logged. Before,
+  the full stack, including absolute file paths, was returned.
 - Windows: `nowaki dev` / `nowaki build` work (verbatim `\\?\` paths, SSR loader
   file URLs, and `/@fs/` drive-letter URLs).
 - `nowaki dev` / `nowaki start` kill their Node children on SIGTERM instead of

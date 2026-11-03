@@ -138,7 +138,8 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
       return {
         status: 500,
         headers: { "content-type": "text/plain; charset=utf-8" },
-        body: String(err?.stack ?? err),
+        // Production: never send the stack (it leaks file paths and code); it's logged above.
+        body: "Internal Server Error",
       };
     },
   };
@@ -173,7 +174,7 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
     } catch (err) {
       console.error("[nowaki]", err);
       res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
-      res.end(String(err?.stack ?? err));
+      res.end("Internal Server Error");
     }
   };
 
