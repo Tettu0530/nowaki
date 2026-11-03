@@ -81,7 +81,7 @@ body:
     attributes:
       label: Nowaki version
       description: Output of `npx nowaki --version`, plus `@nowaki-dev/runtime` from package.json if it differs.
-      placeholder: nowaki 0.12.1, @nowaki-dev/runtime 0.11.1
+      placeholder: nowaki 0.13.0, @nowaki-dev/runtime 0.12.0
     validations:
       required: true
   - type: dropdown
