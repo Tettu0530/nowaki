@@ -35,6 +35,11 @@ pkill -f 'node index.mjs' 2>/dev/null || true
 ./target/debug/nowaki build examples/hello --adapter static
 test -f examples/hello/dist/static/index.html
 test -f examples/hello/dist/static/about/index.html
+# dynamic routes listed by `export const staticPaths` (including a catch-all), and 404.html
+grep -q 'Post: hello' examples/hello/dist/static/blog/hello/index.html
+grep -q 'Post: nowaki' examples/hello/dist/static/blog/nowaki/index.html
+grep -q 'docs / intro (2)' examples/hello/dist/static/files/docs/intro/index.html
+grep -q 'Page not found' examples/hello/dist/static/404.html
 # cloudflare (edge) adapter: generates a bundled fetch-handler worker + wrangler config
 ./target/debug/nowaki build examples/hello --adapter cloudflare
 test -f examples/hello/dist/worker/index.js

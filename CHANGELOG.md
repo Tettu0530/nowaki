@@ -10,6 +10,15 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **SSG for dynamic routes:** `export const staticPaths` on a `[param]` or
+  `[...rest]` route lists the params to prerender (an array, or a sync/async
+  function returning one; typed as `StaticPaths`). `nowaki prerender` and the
+  static adapter render one page per entry. Values that would escape the output
+  directory (`..`, `/`, empty) are rejected.
+- `nowaki prerender` writes `404.html` from `routes/_404.tsx`, which static
+  hosts (Cloudflare Pages, Netlify, GitHub Pages) serve for unknown paths.
+
 ### Changed
 - `@nowaki-dev/runtime` accepts **preact 11** (`peerDependencies.preact` is now
   `^10.25.0 || ^11.1.0`) and requires `preact-render-to-string` **6.8.2 or

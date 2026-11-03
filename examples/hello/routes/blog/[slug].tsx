@@ -3,6 +3,9 @@ type Ctx = { params: { slug: string } };
 
 export const title = "Blog — Nowaki";
 
+// `nowaki prerender` / the static adapter render one page per entry.
+export const staticPaths = [{ slug: "hello" }, { slug: "nowaki" }];
+
 export const loader = (ctx: Ctx) => ({ slug: ctx.params.slug });
 
 export default function Post({ data }: { data: { slug: string } }) {

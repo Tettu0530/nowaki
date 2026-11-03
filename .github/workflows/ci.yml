@@ -121,6 +121,8 @@ jobs:
         run: node scripts/router-test.mjs
       - name: Client router-cache unit test (matchBoundary + Router Cache TTL/LRU)
         run: node scripts/router-cache-test.mjs
+      - name: SSG staticPaths expansion
+        run: node scripts/static-paths-test.mjs
       - name: nowaki upgrade (command surface + non-app guard)
         run: bash scripts/ci/e2e-upgrade.sh
       - name: Typed routes (typegen)

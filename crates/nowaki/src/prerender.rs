@@ -49,8 +49,18 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     }
     let port = port.ok_or_else(|| anyhow!("prod server exited without reporting READY"))?;
 
-    let routes = enumerate_routes(&root.join("dist/server/routes"))?;
-    if routes.is_empty() {
+    // (request path, file under `out`): static routes, then dynamic ones from `export const staticPaths`.
+    let mut pages: Vec<(String, PathBuf)> = enumerate_routes(&root.join("dist/server/routes"))?
+        .into_iter()
+        .map(|url| {
+            let file = out_file_for(&out, &url);
+            (url, file)
+        })
+        .collect();
+    for (url, file) in static_paths(&root).await? {
+        pages.push((url, out.join(file)));
+    }
+    if pages.is_empty() {
         return Err(anyhow!("no static routes to prerender"));
     }
 
@@ -60,7 +70,7 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         .build()?;
     std::fs::create_dir_all(&out)?;
     let mut count = 0;
-    for url_path in &routes {
+    for (url_path, file) in &pages {
         let resp = client
             .get(format!("http://127.0.0.1:{port}{url_path}"))
             .send()
@@ -70,12 +80,23 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
             continue;
         }
         let html = resp.text().await?;
-        let file = out_file_for(&out, url_path);
         if let Some(parent) = file.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&file, html)?;
+        std::fs::write(file, html)?;
         count += 1;
+    }
+
+    // Static hosts (Cloudflare Pages, Netlify, GitHub Pages) serve 404.html for unknown paths.
+    // Rendered for /404, since a static page can't know the path that was actually requested.
+    if root.join("dist/server/routes/_404.js").exists() {
+        let resp = client
+            .get(format!("http://127.0.0.1:{port}/404"))
+            .send()
+            .await?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            std::fs::write(out.join("404.html"), resp.text().await?)?;
+        }
     }
 
     let assets = out.join("_nowaki");
@@ -89,6 +110,37 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     drop(child);
     println!("[nowaki] prerender done: {count} pages → {}", out.display());
     Ok(())
+}
+
+/// Runs the runtime's static-paths.mjs, which evaluates `export const staticPaths` in Node
+/// (nowaki-core never runs JS). Returns (request path, file relative to `out`).
+async fn static_paths(root: &Path) -> Result<Vec<(String, String)>> {
+    let script = root.join("node_modules/@nowaki-dev/runtime/server/static-paths.mjs");
+    if !script.exists() {
+        return Ok(Vec::new()); // older runtime: dynamic routes stay unrendered, as before
+    }
+    let output = Command::new("node")
+        .arg(&script)
+        .arg(root.join("dist/server"))
+        .current_dir(root)
+        .stderr(Stdio::inherit())
+        .output()
+        .await
+        .context("failed to run static-paths.mjs")?;
+    if !output.status.success() {
+        return Err(anyhow!("staticPaths failed (see the error above)"));
+    }
+    let pages: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).context("static-paths.mjs printed invalid JSON")?;
+    Ok(pages
+        .iter()
+        .filter_map(|p| {
+            Some((
+                p["url"].as_str()?.to_string(),
+                p["file"].as_str()?.to_string(),
+            ))
+        })
+        .collect())
 }
 
 fn enumerate_routes(routes_dir: &Path) -> Result<Vec<String>> {
