@@ -57,7 +57,7 @@ Before adding big features, make the code easier to read and harder to break.
 
 - [x] Comment minimization (no behavior changes)
 - [ ] Consolidate route enumeration in `nowaki-core` (shared by typegen / prerender, with a test cross-checking the JS-side routeTable)
-- [ ] Restructure SECURITY.md and add a "Security invariants" section to AGENTS.md
+- [x] Restructure SECURITY.md and add a "Security invariants" section to AGENTS.md
 - [ ] Sanitize incoming headers at the Rust front (`x-forwarded-host` / `x-nowaki-*`, `NOWAKI_TRUST_PROXY`)
 - [x] Jetstream: carry signed state in patches (fixes state resetting to initial values on reconnect)
 - [ ] Jetstream: make the session loop async; sidecar timeouts and error reporting

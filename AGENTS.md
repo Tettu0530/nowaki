@@ -78,8 +78,10 @@ required check is `CI OK`.
 ## Security invariants
 
 When you change dev/start, sidecars, Jetstream, or server functions, preserve
-these properties. Full context and the defenses table live in
-[SECURITY.md](./SECURITY.md).
+these properties. Trust boundaries and reporter guidance are in
+[SECURITY.md](./SECURITY.md); each default defense is listed in
+[Defenses enabled by default](./SECURITY.md#defenses-enabled-by-default) with
+code locations and CI coverage.
 
 - **`nowaki-core` stays JS-free.** Security logic belongs in the CLI (`dev.rs`,
   `start.rs`, `live.rs`), runtime (`packages/nowaki-runtime/server`), or
@@ -104,12 +106,16 @@ these properties. Full context and the defenses table live in
   that path.
 - **ISR keys must include learned `Vary` inputs** (`context.mjs` `__vary()` →
   `x-nowaki-vary`, folded in `isr_key` in `start.rs`) so cached pages cannot
-  bleed across users.
+  bleed across users. Query strings are folded in `isr_key` as well (cache-flood
+  guard).
 - **Only `PUBLIC_*` (and `MODE`) reach client bundles** via env inlining; never
   ship secrets or raw `.env` contents to the browser.
+- **Production error responses stay generic.** Do not expose stack traces or other
+  internal details from prod SSR/sidecar paths (`server/app.mjs`, `server/web.mjs`,
+  `server/prod-sidecar.mjs`).
 - **Regressions need tests.** If you add or change a default defense, extend
   `scripts/security-e2e.mjs` and/or `scripts/ci/e2e-*.sh` when CI does not already
-  cover the behavior (see SECURITY.md “Defenses enabled by default”).
+  cover the behavior, and update the defenses table in SECURITY.md.
 
 ## Feature map (where things live)
 

@@ -35,6 +35,9 @@ cargo build -p nowaki
 
 ## Before you submit
 
+- Security-sensitive changes (dev/start, sidecars, Jetstream, server functions,
+  ISR, static serving): follow [AGENTS.md § Security invariants](./AGENTS.md#security-invariants)
+  and update [SECURITY.md](./SECURITY.md) when a default defense changes.
 - `cargo fmt` and `cargo clippy --workspace` must pass with no warnings.
 - Verify the example app still works: start `nowaki dev examples/hello` and
   check that the page renders, the counter island hydrates, and editing
