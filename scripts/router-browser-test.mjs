@@ -146,6 +146,24 @@ try {
     return { path: location.pathname + location.search, hasAbout: /About/i.test(document.querySelector('h1')?.textContent||'') };`);
   check("reset retries and recovers the page", afterReset.hasAbout);
 
+  // <head> styles and <html lang> follow the page on client navigation (and are dropped when leaving)
+  // A style injected at runtime (as CSS-in-JS libraries do) is outside the page's head region.
+  await cdp.evalAsync(`const s = document.createElement('style'); s.id = 'runtime-css'; document.head.appendChild(s); return true;`);
+  await cdp.evalAsync(`window.__nav('/styled'); return true;`);
+  await sleep(600);
+  check("runtime-injected <style> survives client navigation", await cdp.evalAsync(`return !!document.getElementById('runtime-css');`));
+  const styled = await cdp.evalAsync(`
+    return { path: location.pathname, lang: document.documentElement.lang,
+             color: getComputedStyle(document.getElementById('styled-probe') || document.body).color };`);
+  check("client navigation applies the target page's <style>", styled.path === "/styled" && styled.color === "rgb(1, 2, 3)");
+  check("client navigation applies the target page's <html lang>", styled.lang === "ja");
+  await cdp.evalAsync(`window.__nav('/about'); return true;`);
+  await sleep(600);
+  const left = await cdp.evalAsync(`
+    return { lang: document.documentElement.lang,
+             stale: [...document.head.querySelectorAll('style')].some((s) => s.textContent.includes('styled-probe')) };`);
+  check("leaving drops the previous page's <style> and restores lang", !left.stale && left.lang === "en");
+
   console.log(`\n${failures === 0 ? "BROWSER ROUTER TEST PASSED" : `BROWSER ROUTER TEST FAILED (${failures})`}`);
 } catch (err) {
   console.error("harness error:", err);

@@ -82,7 +82,9 @@ export function renderShell({ mod, meta }) {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(m.title)}</title>
+<meta name="nowaki-head" content="start" />
 ${m.head}
+<meta name="nowaki-head" content="end" />
 </head>
 <body>
 `;

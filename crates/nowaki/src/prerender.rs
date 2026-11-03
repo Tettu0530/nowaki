@@ -58,6 +58,10 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
+    // Output under dist/ (the static adapter) is ours to replace; a user-chosen `--out` is not.
+    if out.starts_with(root.join("dist")) {
+        nowaki_core::build::clear_dir(&out)?;
+    }
     std::fs::create_dir_all(&out)?;
     let mut count = 0;
     for url_path in &routes {
@@ -78,12 +82,25 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         count += 1;
     }
 
+    // The SPA router fetches this once; a static host has no server to answer it.
+    let boundaries = client
+        .get(format!("http://127.0.0.1:{port}/__nowaki/boundaries"))
+        .send()
+        .await?;
+    if boundaries.status().is_success() {
+        let dir = out.join("__nowaki");
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(dir.join("boundaries"), boundaries.text().await?)?;
+    }
+
+    // Only the framework-owned asset dir is cleared; other files in `out` are left alone.
     let assets = out.join("_nowaki");
+    nowaki_core::build::clear_dir(&assets)?;
     std::fs::create_dir_all(&assets)?;
     copy_dir(&root.join("dist/client"), &assets)?;
     std::fs::write(
         out.join("_headers"),
-        "/_nowaki/*\n  Cache-Control: public, max-age=31536000, immutable\n",
+        "/_nowaki/*\n  Cache-Control: public, max-age=31536000, immutable\n/__nowaki/boundaries\n  Content-Type: application/json\n",
     )?;
 
     drop(child);
