@@ -10,6 +10,10 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Fixed
+- The cloudflare adapter renders live (Jetstream) islands with their initial
+  state. It ignored `liveIslands`, so a page with a live island returned 500.
+
 ### Changed
 - Docs: clearer SECURITY.md layout (audience map, defenses ↔ AGENTS invariants) and
   contributor pointers in CONTRIBUTING.md.

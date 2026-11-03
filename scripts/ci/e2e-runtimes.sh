@@ -34,6 +34,8 @@ for i in $(seq 1 90); do curl -sf $B/ >/dev/null && break; sleep 1; done
 curl -sf $B/ | grep -q "nowaki-island"
 curl -sf $B/api/hello | grep -q '"hello":"nowaki"'
 curl -sf $B/blog/hello | grep -q "Post: hello"
+# live islands render their initial state (no live transport on these adapters yet)
+curl -sf $B/live | grep -q 'live: 0'
 test "$(curl -s -o /dev/null -w '%{http_code}' $B/nope)" = "404"
 curl -sf -XPOST -H 'content-type: application/json' -d '{"a":1}' $B/api/echo | grep -q '"received":{"a":1}'
 echo "runtime e2e ($target): OK"
