@@ -10,6 +10,10 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Changed
+- Docs: clearer SECURITY.md layout (audience map, defenses ↔ AGENTS invariants) and
+  contributor pointers in CONTRIBUTING.md.
+
 ## [0.13.0] — 2026-11-03 · "Zephyr" (part 1)
 
 Packages: `nowaki` / `nowaki-core` 0.13.0 (crates.io, npm), `@nowaki-dev/runtime`

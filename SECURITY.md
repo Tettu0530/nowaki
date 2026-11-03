@@ -5,6 +5,14 @@ sidecars** (SSR, plugins). Production traffic should hit `nowaki start` or a dep
 adapter output — not `nowaki dev`. This document covers reporting, trust boundaries,
 and defenses the framework applies by default.
 
+## How this document is organized
+
+| Audience | Start here |
+|----------|------------|
+| Vulnerability reporters | [Reporting a vulnerability](#reporting-a-vulnerability) |
+| App authors operating a deployment | [Trust boundaries](#trust-boundaries) (especially [application author responsibilities](#application-author-responsibilities)) |
+| Framework contributors and coding agents | [Defenses enabled by default](#defenses-enabled-by-default) plus the [Security invariants](./AGENTS.md#security-invariants) checklist in AGENTS.md |
+
 ## Supported versions
 
 Nowaki is in alpha; only the latest release (and `main`) receives security fixes.
@@ -80,9 +88,11 @@ Framework defaults do not replace app-level checks:
 
 ## Defenses enabled by default
 
-These are implemented in the repo today. ROADMAP v0.14 aims to map **every row**
-to an automated CI check in both dev and prod; coverage is noted in the last
-column.
+These are implemented in the repo today. When you change one, keep this table
+accurate and follow the [Security invariants](./AGENTS.md#security-invariants)
+checklist (extend `scripts/security-e2e.mjs` when CI does not already cover the
+behavior). ROADMAP v0.14 aims to map **every row** to an automated CI check in
+both dev and prod; coverage is noted in the last column.
 
 | Defense | What it limits | Primary location | CI regression |
 |---------|----------------|------------------|---------------|
@@ -113,8 +123,10 @@ cargo audit
 pnpm audit --prod
 ```
 
-## Further reading
+## Related documentation
 
-- Agent-oriented invariants when changing the codebase: [AGENTS.md](./AGENTS.md#security-invariants)
-- Architecture and data flow: [DESIGN.md](./DESIGN.md)
-- Direction and security milestone exit criteria: [ROADMAP.md](./ROADMAP.md)
+- [AGENTS.md § Security invariants](./AGENTS.md#security-invariants) — checklist for
+  code changes (maps to the table above)
+- [DESIGN.md](./DESIGN.md) — architecture and data flow
+- [ROADMAP.md](./ROADMAP.md) — milestone exit criteria (v0.13–v0.14 security work)
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — PR expectations before you submit
