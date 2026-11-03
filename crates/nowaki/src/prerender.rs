@@ -58,6 +58,10 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
+    // Output under dist/ (the static adapter) is ours to replace; a user-chosen `--out` is not.
+    if out.starts_with(root.join("dist")) {
+        nowaki_core::build::clear_dir(&out)?;
+    }
     std::fs::create_dir_all(&out)?;
     let mut count = 0;
     for url_path in &routes {
@@ -89,7 +93,9 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         std::fs::write(dir.join("boundaries"), boundaries.text().await?)?;
     }
 
+    // Only the framework-owned asset dir is cleared; other files in `out` are left alone.
     let assets = out.join("_nowaki");
+    nowaki_core::build::clear_dir(&assets)?;
     std::fs::create_dir_all(&assets)?;
     copy_dir(&root.join("dist/client"), &assets)?;
     std::fs::write(

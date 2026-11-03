@@ -44,35 +44,10 @@ pub fn transform_file(
     }
 
     let allocator = Allocator::default();
-    let source_type = SourceType::from_path(path).unwrap_or_else(|_| SourceType::tsx());
-
-    let parsed = Parser::new(&allocator, source, source_type).parse();
-    if !parsed.errors.is_empty() {
-        return Err(anyhow!(
-            "parse error\n{}",
-            render_diagnostics(path, source, &parsed.errors)
-        ));
-    }
-    let mut program = parsed.program;
-
-    let scoping = SemanticBuilder::new()
-        .build(&program)
-        .semantic
-        .into_scoping();
+    let mut program = parse_program(&allocator, path, source, source_type_for_path(path))?;
+    let scoping = semantic_scoping(&program);
     let scoping = apply_client_defines(&allocator, scoping, &mut program, client_defines);
-
-    let mut options = TransformOptions::default();
-    options.jsx.runtime = JsxRuntime::Automatic;
-    options.jsx.import_source = Some("preact".to_string());
-
-    let transformed =
-        Transformer::new(&allocator, path, &options).build_with_scoping(scoping, &mut program);
-    if !transformed.errors.is_empty() {
-        return Err(anyhow!(
-            "transform error\n{}",
-            render_diagnostics(path, source, &transformed.errors)
-        ));
-    }
+    run_preact_transform(&allocator, path, source, scoping, &mut program)?;
 
     if mode == Mode::Browser {
         rewrite_imports(&allocator, root, path, &mut program, resolver, vr);
@@ -129,8 +104,7 @@ fn rewrite_imports<'a>(
     }
 }
 
-/// Applies constant replacement for import.meta.env.PUBLIC_* / MODE etc. (pass-through if client_defines is empty).
-/// Shared by all three transform paths (dev transform / build client / build server).
+/// Shared by dev transform, production build, and chunk render (defines before or after JSX per caller).
 pub(crate) fn apply_client_defines<'a>(
     allocator: &'a Allocator,
     scoping: Scoping,
@@ -150,8 +124,63 @@ pub(crate) fn apply_client_defines<'a>(
     }
 }
 
-/// Formats an oxc diagnostic as a code frame: file:line:col + the offending line + a caret (no color).
-fn render_diagnostics(path: &Path, source: &str, diags: &[OxcDiagnostic]) -> String {
+/// oxc `SourceType` for a project file path (falls back to TSX).
+pub(crate) fn source_type_for_path(path: &Path) -> SourceType {
+    SourceType::from_path(path).unwrap_or_else(|_| SourceType::tsx())
+}
+
+fn preact_transform_options() -> TransformOptions {
+    let mut options = TransformOptions::default();
+    options.jsx.runtime = JsxRuntime::Automatic;
+    options.jsx.import_source = Some("preact".to_string());
+    options
+}
+
+/// Parses TS/JS source; on failure returns dev-style `parse error` diagnostics.
+pub(crate) fn parse_program<'a>(
+    allocator: &'a Allocator,
+    path: &Path,
+    source: &'a str,
+    source_type: SourceType,
+) -> Result<Program<'a>> {
+    let parsed = Parser::new(allocator, source, source_type).parse();
+    if !parsed.errors.is_empty() {
+        return Err(anyhow!(
+            "parse error\n{}",
+            render_diagnostics(path, source, &parsed.errors)
+        ));
+    }
+    Ok(parsed.program)
+}
+
+pub(crate) fn semantic_scoping(program: &Program<'_>) -> Scoping {
+    SemanticBuilder::new()
+        .build(program)
+        .semantic
+        .into_scoping()
+}
+
+/// TS strip + automatic JSX (preact). Preserves ordering: run after `apply_client_defines` in dev/build paths.
+pub(crate) fn run_preact_transform<'a>(
+    allocator: &'a Allocator,
+    path: &Path,
+    source: &str,
+    scoping: Scoping,
+    program: &mut Program<'a>,
+) -> Result<Scoping> {
+    let ret = Transformer::new(allocator, path, &preact_transform_options())
+        .build_with_scoping(scoping, program);
+    if !ret.errors.is_empty() {
+        return Err(anyhow!(
+            "transform error\n{}",
+            render_diagnostics(path, source, &ret.errors)
+        ));
+    }
+    Ok(ret.scoping)
+}
+
+/// Formats oxc diagnostics as a code frame (file:line:col + caret). Shared by dev transform and production build.
+pub(crate) fn render_diagnostics(path: &Path, source: &str, diags: &[OxcDiagnostic]) -> String {
     let handler = GraphicalReportHandler::new_themed(GraphicalTheme::unicode_nocolor());
     let name = path.to_string_lossy().to_string();
     let mut out = String::new();
@@ -270,7 +299,7 @@ fn rewrite_ssr_imports<'a>(
             if let Ok(resolution) = resolver.resolve(dir, spec) {
                 let full = resolution.full_path();
                 if let Ok(css) = std::fs::read_to_string(&full) {
-                    let id = full.to_string_lossy();
+                    let id = crate::css::css_scope_id(root, &full);
                     let (_scoped, map) = crate::css::scope_css(&id, &css);
                     let body = format!("export default {}", crate::css::mapping_object(&map));
                     lit.value = allocator.alloc_str(&data_module(&body)).into();
@@ -295,5 +324,42 @@ fn rewrite_ssr_imports<'a>(
                 lit.raw = None;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxc::allocator::Allocator;
+    use oxc::parser::Parser;
+    use oxc::span::SourceType;
+
+    #[test]
+    fn render_diagnostics_includes_named_source() {
+        let path = Path::new("/app/islands/Broken.tsx");
+        let source = "export default () => <;\n";
+        let allocator = Allocator::default();
+        let parsed = Parser::new(&allocator, source, SourceType::tsx()).parse();
+        assert!(!parsed.errors.is_empty());
+        let out = render_diagnostics(path, source, &parsed.errors);
+        assert!(
+            out.contains("Broken.tsx") || out.contains('╭') || out.contains('|'),
+            "expected a code frame, got: {out}"
+        );
+    }
+
+    #[test]
+    fn parse_transform_pipeline_strips_types_and_jsx() {
+        let path = Path::new("/app/islands/Counter.tsx");
+        let source = "const n: number = 1;\nexport default function C() { return <p>{n}</p>; }\n";
+        let allocator = Allocator::default();
+        let mut program =
+            parse_program(&allocator, path, source, source_type_for_path(path)).unwrap();
+        let scoping = semantic_scoping(&program);
+        let scoping = apply_client_defines(&allocator, scoping, &mut program, &[]);
+        run_preact_transform(&allocator, path, source, scoping, &mut program).unwrap();
+        let code = Codegen::new().build(&program).code;
+        assert!(!code.contains(": number"));
+        assert!(code.contains("jsx"));
     }
 }

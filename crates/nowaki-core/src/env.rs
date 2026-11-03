@@ -42,5 +42,7 @@ pub fn load_client_defines(root: &Path) -> Vec<(String, String)> {
     defines.push(("import.meta.env.MODE".to_string(), format!("{mode:?}")));
     defines.push(("import.meta.env.DEV".to_string(), (!is_prod).to_string()));
     defines.push(("import.meta.env.PROD".to_string(), is_prod.to_string()));
+    // React-ecosystem libraries branch on this; left as-is it throws `process is not defined`.
+    defines.push(("process.env.NODE_ENV".to_string(), format!("{mode:?}")));
     defines
 }

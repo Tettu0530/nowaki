@@ -19,6 +19,9 @@ curl -sf http://127.0.0.1:3310/stream | grep -q "nowaki-island"
 # ISR signal is universal: the node adapter emits the same Cache-Control,
 # so the page gets stale-while-revalidate on any CDN/edge without the Rust front.
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr | grep -qi 'cache-control: public, s-maxage=2, stale-while-revalidate'
+# adapters have no live transport: live islands render their initial SSR, and live.js isn't shipped
+curl -sf http://127.0.0.1:3310/live | grep -q 'nowaki-live name="LiveCounter"'
+! curl -sf http://127.0.0.1:3310/live | grep -qE '/_nowaki/live\.[0-9a-f]+\.js'
 kill $NODE_PID
 # the printed deploy command (`cd dist/server && ... && npm start`) works as written
 grep -q '"start": "node index.mjs"' examples/hello/dist/server/package.json

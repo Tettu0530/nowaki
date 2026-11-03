@@ -18,10 +18,7 @@ use oxc::ast::ast::{
 };
 use oxc::codegen::{Codegen, CodegenOptions};
 use oxc::minifier::{Minifier, MinifierOptions};
-use oxc::parser::Parser;
-use oxc::semantic::SemanticBuilder;
 use oxc::span::SourceType;
-use oxc::transformer::{JsxRuntime, TransformOptions, Transformer};
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::NowakiCore;
@@ -231,19 +228,10 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
             fallback: true,
         });
     }
-    let source_type = SourceType::from_path(abs).unwrap_or_else(|_| SourceType::tsx());
-    let mut program = Parser::new(&allocator, &source, source_type)
-        .parse()
-        .program;
-
-    let scoping = SemanticBuilder::new()
-        .build(&program)
-        .semantic
-        .into_scoping();
-    let mut options = TransformOptions::default();
-    options.jsx.runtime = JsxRuntime::Automatic;
-    options.jsx.import_source = Some("preact".to_string());
-    Transformer::new(&allocator, abs, &options).build_with_scoping(scoping, &mut program);
+    let source_type = crate::transform::source_type_for_path(abs);
+    let mut program = crate::transform::parse_program(&allocator, abs, &source, source_type)?;
+    let scoping = crate::transform::semantic_scoping(&program);
+    crate::transform::run_preact_transform(&allocator, abs, &source, scoping, &mut program)?;
 
     let dir = abs.parent().unwrap_or(&core.root);
     let mut meta = ModuleMeta {
@@ -337,24 +325,14 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
 fn render_body(core: &NowakiCore, abs: &Path, idx: usize, wiring: &ImportWiring) -> Result<String> {
     let allocator = Allocator::default();
     let source = core.read_source(abs)?;
-    let source_type = SourceType::from_path(abs).unwrap_or_else(|_| SourceType::tsx());
-    let mut program = Parser::new(&allocator, &source, source_type)
-        .parse()
-        .program;
-
-    let scoping = SemanticBuilder::new()
-        .build(&program)
-        .semantic
-        .into_scoping();
-    let mut options = TransformOptions::default();
-    options.jsx.runtime = JsxRuntime::Automatic;
-    options.jsx.import_source = Some("preact".to_string());
-    let mut scoping = Transformer::new(&allocator, abs, &options)
-        .build_with_scoping(scoping, &mut program)
-        .scoping;
+    let source_type = crate::transform::source_type_for_path(abs);
+    let mut program = crate::transform::parse_program(&allocator, abs, &source, source_type)?;
+    let scoping = crate::transform::semantic_scoping(&program);
+    let scoping =
+        crate::transform::run_preact_transform(&allocator, abs, &source, scoping, &mut program)?;
     let scoping = crate::transform::apply_client_defines(
         &allocator,
-        scoping_take(&mut scoping),
+        scoping,
         &mut program,
         &core.client_defines,
     );
@@ -498,25 +476,12 @@ fn order_modules(
     order.push(abs.to_path_buf());
 }
 
-/// Dummy for taking ownership of `Scoping` (apply_client_defines needs it by value).
-fn scoping_take(s: &mut oxc::semantic::Scoping) -> oxc::semantic::Scoping {
-    std::mem::take(s)
-}
-
 /// Re-parses the concatenated chunk source, then minifies + codegens it (with an external source map).
 /// Returns (final code, source map JSON).
 pub fn minify_chunk(name: &str, source: &str) -> Result<(String, Option<String>)> {
     let allocator = Allocator::default();
-    let source_type = SourceType::mjs();
-    let parsed = Parser::new(&allocator, source, source_type).parse();
-    if !parsed.errors.is_empty() {
-        let msgs: Vec<String> = parsed.errors.iter().map(|e| e.to_string()).collect();
-        return Err(anyhow!(
-            "failed to re-parse concatenated chunk {name}: {}",
-            msgs.join("; ")
-        ));
-    }
-    let mut program = parsed.program;
+    let path = Path::new(name);
+    let mut program = crate::transform::parse_program(&allocator, path, source, SourceType::mjs())?;
     Minifier::new(MinifierOptions::default()).minify(&allocator, &mut program);
     let ret = Codegen::new()
         .with_options(CodegenOptions {
