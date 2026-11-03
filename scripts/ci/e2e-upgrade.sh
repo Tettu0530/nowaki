@@ -2,6 +2,7 @@
 # CI: nowaki upgrade — command surface + non-app guard (no network)
 # Run from the repo root after `cargo build -p nowaki` and `pnpm install`.
 set -e
+trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 cd "$(dirname "$0")/../.."
 
 ./target/debug/nowaki --help | grep -q upgrade
