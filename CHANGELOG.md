@@ -39,6 +39,10 @@ milestone's worth of work; the codename is noted per entry.
   each page's own head content (`<meta name="nowaki-head">` start/end) and the
   router swaps only that region, so styles injected at runtime by CSS-in-JS
   libraries survive navigation (#21).
+- Assets imported only from server code (e.g. a font URL in a server-side style
+  module) are emitted to `dist/client` with a content-hashed name. They used to
+  be referenced as `/_nowaki/<name>` without being written, and without a hash
+  despite the immutable cache header (#17).
 - Windows: `nowaki dev` / `nowaki build` work (verbatim `\\?\` paths, SSR loader
   file URLs, and `/@fs/` drive-letter URLs).
 - `nowaki dev` / `nowaki start` kill their Node children on SIGTERM instead of
