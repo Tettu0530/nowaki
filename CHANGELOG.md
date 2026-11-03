@@ -27,6 +27,11 @@ milestone's worth of work; the codename is noted per entry.
   apps from `npm create nowaki` get `preact-render-to-string@^6.8.2`.
 
 ### Fixed
+- `nowaki start` serves `/_nowaki/*` only for build-output file names
+  (`[A-Za-z0-9._-]`). The previous check split the path on `/` only, which on
+  Windows would have let `\`, drive letters, and `..` reach files outside
+  `dist/client`. No released version was reachable this way, because
+  `nowaki start` didn't start on Windows before this release.
 - React libraries now SSR: `react` / `react-dom` imports inside node_modules
   resolve to `preact/compat` on the server (a Node resolve hook in the dev and
   production sidecars and the node adapter), instead of loading real React and
