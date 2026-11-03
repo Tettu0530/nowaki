@@ -1368,7 +1368,6 @@ dependencies = [
  "oxc",
  "oxc_resolver",
  "rayon",
- "serde_json",
  "tempfile",
  "xxhash-rust",
 ]

@@ -114,11 +114,7 @@ pub fn scan_typegen(routes_dir: &Path) -> Result<Vec<(String, String)>> {
 
 /// Whether a built server route stem (`dist/server/routes/...` without `.js`) is a static HTML prerender target.
 pub fn is_static_prerender_stem(stem: &str) -> bool {
-    !stem.starts_with("api/")
-        && !stem.contains('[')
-        && !stem
-            .split('/')
-            .any(|seg| seg.starts_with('_') || seg == "loading" || seg == "error")
+    !stem.starts_with("api/") && !stem.contains('[') && !is_convention_source(file_base_name(stem))
 }
 
 /// Static prerender URLs from compiled `dist/server/routes/**/*.js`.
@@ -216,11 +212,43 @@ mod tests {
     fn static_prerender_stems() {
         assert!(is_static_prerender_stem("index"));
         assert!(is_static_prerender_stem("about"));
+        assert!(is_static_prerender_stem("error/index"));
         assert!(!is_static_prerender_stem("blog/[slug]"));
         assert!(!is_static_prerender_stem("api/hello"));
         assert!(!is_static_prerender_stem("_404"));
+        assert!(!is_static_prerender_stem("loading"));
         assert!(!is_static_prerender_stem("blog/loading"));
         assert!(!is_static_prerender_stem("foo/error"));
+    }
+
+    #[test]
+    fn prerender_stems_match_typegen_convention_rule() {
+        let tmp = tempfile::tempdir().unwrap();
+        let routes = tmp.path().join("routes");
+        std::fs::create_dir_all(routes.join("error")).unwrap();
+        std::fs::create_dir_all(routes.join("blog")).unwrap();
+        std::fs::write(
+            routes.join("error/index.tsx"),
+            "export default () => null;\n",
+        )
+        .unwrap();
+        std::fs::write(
+            routes.join("blog/loading.tsx"),
+            "export default () => null;\n",
+        )
+        .unwrap();
+
+        let urls = page_url_patterns(&routes).expect("scan");
+        assert!(urls.contains(&"/error".to_string()));
+        assert!(!urls.iter().any(|u| u.contains("loading")));
+
+        let build = tmp.path().join("dist");
+        std::fs::create_dir_all(build.join("error")).unwrap();
+        std::fs::create_dir_all(build.join("blog")).unwrap();
+        std::fs::write(build.join("error/index.js"), "").unwrap();
+        std::fs::write(build.join("blog/loading.js"), "").unwrap();
+        let prerender = enumerate_static_prerender_urls(&build).expect("prerender urls");
+        assert_eq!(prerender, vec!["/error".to_string()]);
     }
 
     #[test]
