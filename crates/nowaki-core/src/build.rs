@@ -35,6 +35,8 @@ pub fn build_client(
     dist: &Path,
 ) -> Result<(BuildReport, HashMap<PathBuf, String>)> {
     let client_dir = dist.join("client");
+    // Start empty so deleted islands/modules from a previous build don't ship.
+    clear_dir(&client_dir)?;
     fs::create_dir_all(&client_dir)
         .with_context(|| format!("failed to create dist: {}", client_dir.display()))?;
 
@@ -153,6 +155,24 @@ pub fn build_client(
 
 /// Server build: transforms routes/ and islands/ in SSR mode and
 /// writes them to dist/server/ as ESM that Node can run directly.
+/// Empties `dir`, keeping the directory itself. Windows can't remove a directory that is some
+/// process's working directory (e.g. a server started from dist/server), but its files are fine.
+pub fn clear_dir(dir: &Path) -> Result<()> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Ok(());
+    };
+    for entry in entries {
+        let path = entry?.path();
+        let res = if path.is_dir() {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        };
+        res.with_context(|| format!("failed to clear {}", path.display()))?;
+    }
+    Ok(())
+}
+
 /// Rewrites .tsx/.ts/.jsx in relative imports to .js (bare imports are left to Node resolution).
 /// Returns the number of output modules.
 pub fn build_server(
@@ -163,6 +183,7 @@ pub fn build_server(
     use rayon::prelude::*;
 
     let server_dir = dist.join("server");
+    clear_dir(&server_dir)?;
     let mut files = Vec::new();
     for sub in ["routes", "islands", "components", "lib", "actions"] {
         let src_root = core.root.join(sub);

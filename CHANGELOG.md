@@ -28,6 +28,9 @@ milestone's worth of work; the codename is noted per entry.
 - Jetstream: a reconnect no longer resets live islands to their initial state.
   Patches now carry the signed state, the client stores it on the element, and
   re-joining resumes from it.
+- `nowaki build` starts from empty `dist/client` and `dist/server` (and the
+  cloudflare / static adapter outputs), so islands you deleted no longer ship.
+  `nowaki prerender --out <dir>` replaces only `<dir>/_nowaki` (#18).
 - Windows: `nowaki dev` / `nowaki build` work (verbatim `\\?\` paths, SSR loader
   file URLs, and `/@fs/` drive-letter URLs).
 - `nowaki dev` / `nowaki start` kill their Node children on SIGTERM instead of
