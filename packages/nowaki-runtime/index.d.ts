@@ -82,6 +82,13 @@ export type Loader<T = unknown> = (ctx: LoaderContext) => T | Promise<T>;
 /** Action that runs on non-GET requests. Returns a Response/redirect, or data for re-rendering. */
 export type Action = (ctx: LoaderContext) => unknown | Promise<unknown>;
 
+/**
+ * `export const staticPaths` on a dynamic route: the params to prerender with `nowaki prerender`
+ * or the static adapter, one page per entry. A `[...rest]` param takes a string[].
+ * @example export const staticPaths: StaticPaths = [{ slug: "hello" }, { slug: "world" }];
+ */
+export type StaticPaths<P extends RouteParams = RouteParams> = P[] | (() => P[] | Promise<P[]>);
+
 /** API route handler (per-method export or default). */
 export type ApiHandler = (
   ctx: LoaderContext,

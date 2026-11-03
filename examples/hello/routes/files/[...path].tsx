@@ -4,6 +4,9 @@ export async function meta({ params }: { params: { path: string[] } }) {
   return { title: `files/${p} — Nowaki` };
 }
 
+// For `nowaki prerender`; a function (sync or async) works too.
+export const staticPaths = () => [{ path: ["docs", "intro"] }];
+
 // catch-all route: /files/a/b/c -> params.path === ["a", "b", "c"]
 export default function Files({ params }: { params: { path: string[] } }) {
   const segs = Array.isArray(params.path) ? params.path : [];
