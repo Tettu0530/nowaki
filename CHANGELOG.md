@@ -87,6 +87,45 @@ Packages: `nowaki` / `nowaki-core` 0.13.0 (crates.io, npm), `@nowaki-dev/runtime
 - The vercel adapter targets the `nodejs22.x` runtime (was `nodejs20.x`,
   deprecated and below the `>=22` engines floor).
 
+## [0.12.1] — 2026-06-15 · security audit
+
+Packages: `nowaki` / `nowaki-core` 0.12.1, `@nowaki-dev/runtime` 0.11.1.
+
+### Security
+- Arbitrary file reads are closed: `/__nowaki/ssr-module?path=`, the dev `.env`
+  fallback, virtual-module paths, and transform error bodies. Every source read
+  goes through one canonicalize-and-allow-root check.
+- Server-function RPC requires `application/json`, an `x-nowaki-rpc` header, and
+  a same-origin request (CSRF).
+- `/__nowaki/live` and `/__nowaki/hmr` check `Origin` in dev and production
+  (cross-site WebSocket hijacking).
+- ISR learns which query, header, and body inputs a route reads (`Vary`) and
+  folds them into the cache key, so one user's page is not served to another
+  and query floods do not grow the cache without bound.
+- Live-island initial state is HMAC-signed and verified on every event, so a
+  client can't forge it.
+- Client assets no longer contain absolute build-machine paths (CSS scope ids
+  and source-map sources are root-relative).
+
+## [0.12.0] — 2026-06-14 · types, lazy hydration, Vercel
+
+Packages: `nowaki` / `nowaki-core` 0.12.0, `@nowaki-dev/runtime` 0.11.0,
+`create-nowaki` / `create-nowaki-app` 0.13.0.
+
+### Added
+- **Lazy hydration:** `client:load` (default), `client:idle`, `client:visible`,
+  `client:media="<query>"`, and `client:only` on an island's usage site control
+  when it hydrates. The directives are typed on any component.
+- **Typed routes:** `nowaki typegen` (also run by `dev` and `build`) writes
+  `.nowaki/types.d.ts`. `@nowaki-dev/runtime/navigation` exports a typed
+  `route(pattern, params)` and `<Link>`; unknown paths and wrong params are
+  compile errors.
+- **Image optimization:** imported PNGs are losslessly re-compressed and
+  stripped of metadata at build time (pure Rust, kept only when smaller).
+- **Vercel adapter:** `nowaki build --adapter vercel` writes
+  `.vercel/output/` (Build Output API v3) with a self-contained Node function.
+  Deploy with `vercel deploy --prebuilt`.
+
 ## [0.11.0] — 2026-06-13 · scaffold templates
 
 ### Added
@@ -221,6 +260,8 @@ and the runtime at 0.9.0.
 
 [Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.13.0...HEAD
 [0.13.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.13.0
+[0.12.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.12.1
+[0.12.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.12.0
 [0.6.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.6.0
 [0.5.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.4.0
