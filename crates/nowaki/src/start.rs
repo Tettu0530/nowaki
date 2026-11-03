@@ -648,7 +648,7 @@ fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
     };
 
     format!(
-        "<!DOCTYPE html>\n<html lang=\"{lang}\">\n<head>\n<meta charset=\"utf-8\" />\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n<title>{title}</title>\n{preload}\n{head}\n</head>\n<body>\n{body}\n{runtime_script}\n{live_script}\n</body>\n</html>",
+        "<!DOCTYPE html>\n<html lang=\"{lang}\">\n<head>\n<meta charset=\"utf-8\" />\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n<title>{title}</title>\n<meta name=\"nowaki-head\" content=\"start\" />\n{preload}\n{head}\n<meta name=\"nowaki-head\" content=\"end\" />\n</head>\n<body>\n{body}\n{runtime_script}\n{live_script}\n</body>\n</html>",
         lang = escape_html(&meta.lang),
         title = escape_html(&meta.title),
         head = meta.head,
