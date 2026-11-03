@@ -41,10 +41,8 @@ export function prodDocument(manifest, { mod, body, meta }) {
   const runtime = hasIslands
     ? `<script id="nowaki-runtime" type="module" src="/_nowaki/${manifest.runtime}"${dataRouter(manifest)}></script>`
     : "";
-  const live =
-    body.includes("<nowaki-live") && manifest.liveRuntime
-      ? `<script type="module" src="/_nowaki/${manifest.liveRuntime}"></script>`
-      : "";
+  // Adapter outputs have no live transport (/__nowaki/live terminates in the Rust server), so live
+  // islands stay on their initial SSR and live.js isn't shipped.
 
   return `<!DOCTYPE html>
 <html lang="${escapeHtml(m.lang)}">
@@ -52,13 +50,14 @@ export function prodDocument(manifest, { mod, body, meta }) {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(m.title)}</title>
+<meta name="nowaki-head" content="start" />
 ${preload}
 ${m.head}
+<meta name="nowaki-head" content="end" />
 </head>
 <body>
 ${body}
 ${runtime}
-${live}
 </body>
 </html>`;
 }
@@ -80,7 +79,9 @@ export function prodShell(manifest, mod, meta) {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(m.title)}</title>
+<meta name="nowaki-head" content="start" />
 ${runtimePreload}${m.head}
+<meta name="nowaki-head" content="end" />
 </head>
 <body>
 `;

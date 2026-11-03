@@ -189,18 +189,33 @@ function escapeHtml(s) {
   );
 }
 
-// Sync <head> apart from title (meta/link etc., excluding data-nowaki-css) to the new page.
+// The server wraps each page's own <head> content (preloads + `export const head`) in
+// <meta name="nowaki-head" content="start|end">.
+function headRegion(d) {
+  const marks = d.head.querySelectorAll('meta[name="nowaki-head"]');
+  return marks.length === 2 ? marks : null;
+}
+
+// Replace the page-owned <head> region with the new page's. Anything outside it (island CSS,
+// styles injected at runtime by CSS-in-JS libraries) is left alone. <html lang>/<dir> follow too.
 function syncHead(doc) {
-  const keep = (el) => el.hasAttribute("data-nowaki-css") || el.tagName === "TITLE";
-  for (const el of [...document.head.children]) {
-    if (!keep(el) && el.tagName !== "META" && el.tagName !== "LINK") continue;
-    if (keep(el)) continue;
-    el.remove();
-  }
-  for (const el of [...doc.head.children]) {
-    if (el.tagName === "META" || el.tagName === "LINK") {
-      document.head.appendChild(el.cloneNode(true));
+  const cur = headRegion(document);
+  const next = headRegion(doc);
+  if (cur && next) {
+    while (cur[0].nextSibling && cur[0].nextSibling !== cur[1]) cur[0].nextSibling.remove();
+    for (let n = next[0].nextSibling; n && n !== next[1]; n = n.nextSibling) {
+      if (n.nodeType === 1 && n.tagName !== "SCRIPT") cur[1].before(n.cloneNode(true));
     }
+  } else {
+    // Older servers without markers: sync meta/link only, as before.
+    const synced = (el) => (el.tagName === "META" || el.tagName === "LINK") && !el.hasAttribute("data-nowaki-css");
+    for (const el of [...document.head.children]) if (synced(el)) el.remove();
+    for (const el of [...doc.head.children]) if (synced(el)) document.head.appendChild(el.cloneNode(true));
+  }
+  for (const attr of ["lang", "dir"]) {
+    const v = doc.documentElement.getAttribute(attr);
+    if (v === null) document.documentElement.removeAttribute(attr);
+    else document.documentElement.setAttribute(attr, v);
   }
 }
 
