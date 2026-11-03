@@ -79,6 +79,8 @@ eq(
 
 eq(snap(table, "/api/echo"), { file: "echo.ts", params: {}, isApi: true }, "/api/echo → api");
 eq(snap(table, "/about/"), snap(table, "/about"), "trailing slash matches same route");
+eq(snap(table, "/vary"), { file: "vary.tsx", params: {}, isApi: false }, "/vary → ISR demo route");
+eq(snap(table, "/live"), { file: "live.tsx", params: {}, isApi: false }, "/live → Jetstream demo route");
 
 const syn = [
   { segments: [{ lit: "users" }, { param: "id" }], file: "dyn", isApi: false, specificity: 1 },

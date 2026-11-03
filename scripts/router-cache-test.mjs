@@ -46,6 +46,13 @@ ok("still fresh just before TTL", cache.get("/a") === "A");
 t = 1001;
 ok("stale after TTL → get undefined", cache.get("/a") === undefined);
 ok("stale entry is evicted (size 0)", cache.size() === 0);
+ok("has is false after TTL", cache.has("/a") === false);
+
+t = 0;
+const upd = createPageCache({ ttlMs: 1000, max: 2, now });
+upd.set("/k", "v1");
+upd.set("/k", "v2");
+ok("set replaces value for the same key", upd.get("/k") === "v2");
 
 // LRU: capacity 2. The 3rd entry evicts the oldest, but one touched by get stays.
 t = 0;
