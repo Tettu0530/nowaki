@@ -10,6 +10,16 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Fixed
+- **Security:** the Rust front (`nowaki dev` / `nowaki start`) no longer passes
+  client-sent `x-forwarded-*`, `forwarded`, `x-real-ip`, or internal
+  `x-nowaki-*` headers to the Node sidecar. It sets `x-forwarded-host` from
+  `Host` itself, so a client can't choose the host the server-function
+  same-origin check compares against. Behind a reverse proxy that sets these
+  headers, `NOWAKI_TRUST_PROXY=1` uses its `x-forwarded-host` /
+  `x-forwarded-proto` (also for the WebSocket Origin check) and keeps
+  `x-forwarded-for`.
+
 ### Changed
 - Docs: clearer SECURITY.md layout (audience map, defenses ↔ AGENTS invariants) and
   contributor pointers in CONTRIBUTING.md.
