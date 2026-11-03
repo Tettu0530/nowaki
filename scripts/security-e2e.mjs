@@ -50,6 +50,21 @@ function wsUpgrade(b, path, origin) {
 
 // Checks that a forged live join gets no patch (rejected by signature verification).
 // The global WebSocket connects without Origin (ws_origin_ok allows it) -> tests the signature alone.
+// Client-sent x-forwarded-host is dropped by the Rust front (no NOWAKI_TRUST_PROXY), so it can
+// neither spoof the RPC same-origin check nor break a genuine same-origin call.
+async function forwardedHostIgnored(b) {
+  const call = (h) =>
+    fetch(`${b}/__nowaki/fn`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-nowaki-rpc": "1", ...h },
+      body: JSON.stringify({ id: "6c90d7dc921a9a3f", args: [] }),
+    }).then((r) => r.status);
+  check("RPC forged x-forwarded-host can't spoof the origin check (403)",
+    (await call({ origin: "http://evil.test", "x-forwarded-host": "evil.test" })) === 403);
+  check("RPC same-origin call unaffected by a client x-forwarded-host (200)",
+    (await call({ origin: b, "x-forwarded-host": "evil.test" })) === 200);
+}
+
 async function liveForgeryRejected(b) {
   const html = await (await fetch(`${b}/live`)).text();
   const tag = html.match(/<nowaki-live\b[^>]*>/)?.[0];
@@ -108,6 +123,7 @@ if (mode === "dev") {
     (await post({ "content-type": "application/json" })) === 403);
   check("RPC cross-origin rejected (403)",
     (await post({ "content-type": "application/json", "x-nowaki-rpc": "1", origin: "http://evil.test" })) === 403);
+  await forwardedHostIgnored(base);
 
   // CSWSH (Origin check on WS upgrade)
   check("CSWSH /__nowaki/live cross-origin upgrade rejected (403)",
@@ -122,6 +138,7 @@ if (mode === "dev") {
 }
 
 if (mode === "prod") {
+  await forwardedHostIgnored(base);
   // 500s never carry a stack trace (file paths, code) in production — neither the app's _500 page
   // nor the built-in fallback used when _500 itself throws.
   const stackLike = /\n\s+at |\(file:\/\/|node:internal/;

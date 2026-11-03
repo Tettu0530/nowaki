@@ -42,6 +42,17 @@ issues (`nowaki build` output, SSR runtime, adapters) take priority.
 
 Sidecars are not designed to be exposed directly on a network interface.
 
+The Rust front decides which request headers reach a sidecar
+(`crates/nowaki/src/forward.rs`). It drops client-sent `x-forwarded-*`,
+`forwarded`, and `x-real-ip` headers and every internal `x-nowaki-*` header
+(only `x-nowaki-rpc` and `x-nowaki-nav` pass). It then sets `x-forwarded-host`
+from `Host` and `x-forwarded-proto` to `http`. Behind a reverse proxy that sets
+these headers itself, set `NOWAKI_TRUST_PROXY=1`: the first `x-forwarded-host`
+/ `x-forwarded-proto` value is used (for the RPC and WebSocket same-origin
+checks) and `x-forwarded-for` is passed through. Leave it unset when clients
+reach `nowaki start` directly, or they can choose the host those checks compare
+against.
+
 ### Dev-only surfaces
 
 - **`/@fs/`** — Serves files under allowed roots (app root, workspace root) so
@@ -101,6 +112,7 @@ both dev and prod; coverage is noted in the last column.
 | Virtual module `..` rejected | Path traversal in plugin URLs | `crates/nowaki/src/dev.rs` | `scripts/security-e2e.mjs` (dev) |
 | Server function allowlist | Calling arbitrary server exports | `nowaki-core` + `dist/server/functions.json` + `functions.mjs` | e2e scripts (`/__nowaki/fn` unknown id → 404) |
 | RPC CSRF gate (JSON + `x-nowaki-rpc` + Origin/Host) | Cross-site POST with victim cookies | `packages/nowaki-runtime/server/functions.mjs`; Rust sets `x-forwarded-host` from browser `Host` on the sidecar hop | `scripts/security-e2e.mjs` (dev) |
+| Forwarding and internal headers sanitized at the Rust front | Spoofing the host the same-origin checks use; forging internal `x-nowaki-*` headers | `crates/nowaki/src/forward.rs` (`NOWAKI_TRUST_PROXY` opt-in) | `scripts/security-e2e.mjs` (dev + prod) |
 | WebSocket Origin check (CSWSH) | Cross-origin upgrades to HMR / Jetstream | `crates/nowaki/src/dev.rs`, `crates/nowaki/src/start.rs` | `scripts/security-e2e.mjs` (dev) |
 | Jetstream state signature | Forged live state used in render/handlers | `server/live.mjs` (verify before each render/handler); `crates/nowaki/src/live.rs` (holds state per session) | `scripts/security-e2e.mjs` (dev) |
 | ISR cache key + `Vary` learning | Cross-user HTML cache bleed | `server/context.mjs` (`__vary()`), `server/handler.mjs` (`x-nowaki-vary`); `crates/nowaki/src/start.rs` (`isr_key`); e.g. `examples/hello/routes/vary.tsx` | `scripts/security-e2e.mjs` (prod) |
