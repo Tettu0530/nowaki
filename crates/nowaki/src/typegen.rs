@@ -1,74 +1,9 @@
 //! Typed route generation. Writes `.nowaki/types.d.ts` (augmenting `NowakiRoutes`) from `routes/`
 //! to make `route()` / `Link` type-safe. Also runs automatically on dev startup, routes changes, and build.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
-
-const ROUTE_EXT: [&str; 4] = ["tsx", "ts", "jsx", "js"];
-
-/// Walk routes/ and return "URL pattern → param type" (sorted by path, deduplicated).
-fn scan(routes_dir: &Path) -> Vec<(String, String)> {
-    let mut files = Vec::new();
-    walk(routes_dir, &mut files);
-    files.sort();
-
-    let mut out: Vec<(String, String)> = Vec::new();
-    for abs in files {
-        let rel = match abs.strip_prefix(routes_dir) {
-            Ok(r) => r.to_string_lossy().replace('\\', "/"),
-            Err(_) => continue,
-        };
-        if let Some(entry) = route_entry(&rel) {
-            out.push(entry);
-        }
-    }
-    out.sort();
-    out.dedup();
-    out
-}
-
-/// Derive (URL pattern, param type) from a routes/-relative path (e.g. "blog/[slug].tsx").
-/// None for non-routes (convention files, boundaries, API, unsupported extensions).
-fn route_entry(rel: &str) -> Option<(String, String)> {
-    let rel = rel.replace('\\', "/");
-    let (stem_path, ext) = rel.rsplit_once('.')?;
-    if !ROUTE_EXT.contains(&ext) {
-        return None;
-    }
-    let base = stem_path.rsplit('/').next().unwrap_or(stem_path);
-    // Exclude convention files (_layout/_middleware/_404/_500/_error), boundaries, and API.
-    if base.starts_with('_') || base == "loading" || base == "error" {
-        return None;
-    }
-    if rel == "api" || rel.starts_with("api/") {
-        return None;
-    }
-
-    let mut url = format!("/{stem_path}");
-    if let Some(stripped) = url.strip_suffix("/index") {
-        url = stripped.to_string();
-    }
-    if url.is_empty() {
-        url = "/".to_string();
-    }
-
-    // [name] → string、[...name] → string[]。
-    let mut params: Vec<String> = Vec::new();
-    for seg in url.split('/').filter(|s| !s.is_empty()) {
-        if let Some(name) = seg.strip_prefix("[...").and_then(|s| s.strip_suffix(']')) {
-            params.push(format!("{name}: string[]"));
-        } else if let Some(name) = seg.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            params.push(format!("{name}: string"));
-        }
-    }
-    let params_ty = if params.is_empty() {
-        "{}".to_string()
-    } else {
-        format!("{{ {} }}", params.join("; "))
-    };
-    Some((url, params_ty))
-}
 
 fn render(routes: &[(String, String)]) -> String {
     let mut s = String::new();
@@ -90,7 +25,7 @@ pub fn write(root: &Path) -> Result<()> {
     if !routes_dir.is_dir() {
         return Ok(());
     }
-    let routes = scan(&routes_dir);
+    let routes = nowaki_core::routes::scan_typegen(&routes_dir)?;
     let out_dir = root.join(".nowaki");
     std::fs::create_dir_all(&out_dir)
         .with_context(|| format!("failed to create: {}", out_dir.display()))?;
@@ -103,12 +38,12 @@ pub fn write(root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn run(root: PathBuf) -> Result<()> {
+pub fn run(root: std::path::PathBuf) -> Result<()> {
     let routes_dir = root.join("routes");
     if !routes_dir.is_dir() {
         anyhow::bail!("routes/ not found ({}).", root.display());
     }
-    let n = scan(&routes_dir).len();
+    let n = nowaki_core::routes::scan_typegen(&routes_dir)?.len();
     write(&root)?;
     println!(
         "{} {} route(s) → {}",
@@ -119,69 +54,11 @@ pub fn run(root: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            walk(&path, out);
-        } else {
-            out.push(path);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{render, route_entry};
-
-    fn entry(rel: &str) -> Option<(String, String)> {
-        route_entry(rel)
-    }
-
-    #[test]
-    fn static_and_index_routes() {
-        assert_eq!(entry("index.tsx"), Some(("/".into(), "{}".into())));
-        assert_eq!(entry("about.tsx"), Some(("/about".into(), "{}".into())));
-        assert_eq!(entry("blog/index.tsx"), Some(("/blog".into(), "{}".into())));
-    }
-
-    #[test]
-    fn dynamic_and_catch_all_params() {
-        assert_eq!(
-            entry("blog/[slug].tsx"),
-            Some(("/blog/[slug]".into(), "{ slug: string }".into()))
-        );
-        assert_eq!(
-            entry("files/[...path].tsx"),
-            Some(("/files/[...path]".into(), "{ path: string[] }".into()))
-        );
-        assert_eq!(
-            entry("users/[id]/posts/[pid].tsx"),
-            Some((
-                "/users/[id]/posts/[pid]".into(),
-                "{ id: string; pid: string }".into()
-            ))
-        );
-    }
-
-    #[test]
-    fn conventions_and_api_are_excluded() {
-        assert_eq!(entry("_layout.tsx"), None);
-        assert_eq!(entry("_404.tsx"), None);
-        assert_eq!(entry("_middleware.ts"), None);
-        assert_eq!(entry("loading.tsx"), None);
-        assert_eq!(entry("error.tsx"), None);
-        assert_eq!(entry("api/hello.ts"), None);
-        assert_eq!(entry("api/posts/[id].ts"), None);
-        assert_eq!(entry("readme.md"), None); // unsupported extension
-    }
-
     #[test]
     fn render_emits_module_augmentation() {
-        let out = render(&[
+        let out = super::render(&[
             ("/".into(), "{}".into()),
             ("/blog/[slug]".into(), "{ slug: string }".into()),
         ]);
