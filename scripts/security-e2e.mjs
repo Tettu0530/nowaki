@@ -162,6 +162,9 @@ if (mode === "prod") {
     "/_nowaki/foo/../../../../etc/passwd",
     "/_nowaki/%2e%2e/%2e%2e/%2e%2e/etc/passwd",
     "/_nowaki/../../server/functions.json",
+    // Windows path syntax must not escape dist/client either (backslashes, drive letters).
+    "/_nowaki/..\\..\\package.json",
+    "/_nowaki/C:\\Windows\\win.ini",
   ]) {
     const st = await rawGet(base, p);
     check(`/_nowaki traversal blocked (${p} → ${st})`, st === 404);

@@ -475,7 +475,9 @@ fn isr_store(state: &ProdState, key: &str, entry: CacheEntry) {
 }
 
 async fn serve_static(state: &ProdState, path: &str) -> Response {
-    let name = path.rsplit('/').next().unwrap_or(""); // basename prevents traversal
+    let Some(name) = asset_name(path) else {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    };
     let file = state.client_dir.join(name);
     match tokio::fs::read(&file).await {
         Ok(bytes) => (
@@ -679,6 +681,19 @@ fn escape_html(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// The file name a `/_nowaki/<name>` request may serve from dist/client, or None.
+/// Build output names are only [A-Za-z0-9._-], so anything else is rejected rather than
+/// trusting the OS to split it: on Windows `\`, `C:` and `..` would escape dist/client.
+fn asset_name(path: &str) -> Option<&str> {
+    let name = path.strip_prefix("/_nowaki/")?;
+    let ok = !name.is_empty()
+        && !name.starts_with('.')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
+    ok.then_some(name)
+}
+
 fn content_type(name: &str) -> &'static str {
     match name.rsplit('.').next().unwrap_or("") {
         "js" | "mjs" => "text/javascript; charset=utf-8",
@@ -701,5 +716,44 @@ fn content_type(name: &str) -> &'static str {
         "wav" => "audio/wav",
         "pdf" => "application/pdf",
         _ => "application/octet-stream",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn asset_name_accepts_build_output_names() {
+        assert_eq!(
+            asset_name("/_nowaki/islands.ed8bc7e5.js"),
+            Some("islands.ed8bc7e5.js")
+        );
+        assert_eq!(
+            asset_name("/_nowaki/Badge.css.1a2b3c4d.js"),
+            Some("Badge.css.1a2b3c4d.js")
+        );
+        assert_eq!(
+            asset_name("/_nowaki/font_x-1.02b54027.woff2"),
+            Some("font_x-1.02b54027.woff2")
+        );
+    }
+
+    #[test]
+    fn asset_name_rejects_traversal_on_every_os() {
+        for path in [
+            "/_nowaki/../../Cargo.toml",
+            "/_nowaki/foo/../../etc/passwd",
+            "/_nowaki/..\\..\\.env",
+            "/_nowaki/C:\\Windows\\win.ini",
+            "/_nowaki/C:win.ini",
+            "/_nowaki/%2e%2e%2f.env",
+            "/_nowaki/.env",
+            "/_nowaki/..",
+            "/_nowaki/",
+            "/other/islands.js",
+        ] {
+            assert_eq!(asset_name(path), None, "{path} must be rejected");
+        }
     }
 }
