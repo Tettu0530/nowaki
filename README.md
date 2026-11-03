@@ -64,7 +64,7 @@ To install the CLI directly, use `npm i -g nowaki`; to install from source, use 
 Prerequisites: Rust (stable), Node.js >= 22, pnpm
 
 ```bash
-git clone https://github.com/nowaki-dev/nowaki
+git clone https://github.com/Tettu0530/nowaki
 cd nowaki
 pnpm install
 cargo build -p nowaki

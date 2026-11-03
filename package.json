@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nowaki-dev/nowaki.git"
+    "url": "git+https://github.com/Tettu0530/nowaki.git"
   },
   "engines": {
     "node": ">=22"
