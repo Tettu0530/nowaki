@@ -9,13 +9,13 @@ A "structural answer to the slowness of Next.js", built on three pillars:
 
 1. Rust toolchain: oxc-based Rust handles transforming, resolving, bundling, and serving, keeping startup and builds fast.
 2. Zero JS by default (Islands): pages render on the server, and only explicitly marked "islands" run on the client.
-3. npm ecosystem compatibility: SSR is delegated to Node, so existing packages work as is.
+3. npm ecosystem compatibility: SSR is delegated to Node, so npm packages run on the server. React libraries go through `preact/compat`; which ones work is being verified in CI.
 
 **Success metrics (targets for 1.0)**: dev startup < 300ms, HMR update < 100ms, client JS for a typical page < 15KB (gzip), and adoption in real apps.
 
 ## Where we are
 
-**alpha (CLI / crates 0.12.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands), server functions, 5 deploy adapters, and plugins/virtual modules are all in place. Production use is not yet recommended (the API is still stabilizing).
+**alpha (CLI / crates 0.12.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands, on `nowaki dev` / `nowaki start`; the deploy adapters render them as initial SSR only), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Production use is not yet recommended (the API is still stabilizing).
 
 ## Milestones
 
@@ -37,7 +37,7 @@ Real chunk bundling + scope hoisting, tree shaking, persistent disk cache, end-t
 5 deploy adapters (node / static / bun / deno / cloudflare edge), streaming SSR, plugin transform hooks, TSRX bridge, a Rust production hot path for `nowaki start`.
 
 ### v0.6 "Jetstream": Server-reactive islands ★flagship ✅
-With **Jetstream islands**, an island that has `export const live = { state, on }` works without shipping its component JS to the client. The server holds state per WebSocket connection and pushes HTML patches. It coexists with client islands (optimistic UI) and degrades to the initial SSR on static deploys.
+With **Jetstream islands**, an island that has `export const live = { state, on }` works without shipping its component JS to the client. The server holds state per WebSocket connection and pushes HTML patches. It coexists with client islands (optimistic UI) and degrades to the initial SSR on static deploys and the deploy adapters, which have no live transport yet.
 
 ### v0.7 "Beta": Groundwork for stability ✅
 A `cargo test` suite, reproducible benchmarks ([BENCHMARKS.md](./BENCHMARKS.md)), documented trust boundaries ([SECURITY.md](./SECURITY.md)) with dependency auditing in CI, SemVer discipline and [CHANGELOG.md](./CHANGELOG.md).
@@ -59,7 +59,7 @@ Before adding big features, make the code easier to read and harder to break.
 - [ ] Consolidate route enumeration in `nowaki-core` (shared by typegen / prerender, with a test cross-checking the JS-side routeTable)
 - [ ] Restructure SECURITY.md and add a "Security invariants" section to AGENTS.md
 - [ ] Sanitize incoming headers at the Rust front (`x-forwarded-host` / `x-nowaki-*`, `NOWAKI_TRUST_PROXY`)
-- [ ] Jetstream: carry signed state in patches (fixes state resetting to initial values on reconnect)
+- [x] Jetstream: carry signed state in patches (fixes state resetting to initial values on reconnect)
 - [ ] Jetstream: make the session loop async; sidecar timeouts and error reporting
 
 ### v0.14 "Gale": Secure by default

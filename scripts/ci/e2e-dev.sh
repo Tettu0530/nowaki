@@ -17,6 +17,11 @@ status() { echo "$(curl -s -o /dev/null -w '%{http_code}' "$@")"; }
 # is lazy-loaded via the data-router attribute (kept out of first-load JS).
 curl -sf $B/ | grep -q "nowaki-island"
 curl -sf $B/ | grep -q 'id="nowaki-runtime"'
+# CSS Modules (Badge on /): root-relative scope id → stable badge_<8 hex> in SSR HTML.
+BADGE_CLASS=$(curl -sf $B/ | grep -oE 'badge_[0-9a-f]{8}' | head -1)
+test -n "$BADGE_CLASS"
+echo "$BADGE_CLASS" > /tmp/nowaki-css-module-badge-class
+! curl -sf $B/ | grep -qE '/Users/|/home/[^/]+/'
 curl -sf $B/ | grep -q 'data-router=.*client/router.js'
 curl -sf "$B/islands/Counter.tsx" | grep -q "jsx-runtime"
 
