@@ -23,6 +23,14 @@ ok("deeper boundary wins (most specific)", matchBoundary(boundaries, "/blog/admi
 ok("/blogger does NOT match /blog prefix", matchBoundary(boundaries, "/blogger").html === "root");
 ok("no boundaries → null", matchBoundary([], "/x") === null);
 ok("no root boundary and no match → null", matchBoundary([{ prefix: "/p" }], "/q") === null);
+ok(
+  "prefix stored with trailing slash still matches children",
+  matchBoundary([{ prefix: "/blog/", html: "blog" }], "/blog/post").html === "blog",
+);
+ok(
+  "exact pathname matches boundary without requiring a child segment",
+  matchBoundary([{ prefix: "/exact", html: "exact" }], "/exact").html === "exact",
+);
 
 // createPageCache: advance time with a controllable now
 let t = 0;
@@ -50,5 +58,11 @@ ok("LRU keeps the recently-used entry", lru.get("/1") === 1);
 ok("LRU evicts the least-recently-used entry", lru.get("/2") === undefined);
 ok("LRU keeps the newest entry", lru.get("/3") === 3);
 ok("LRU respects max size", lru.size() === 2);
+
+cache.clear();
+ok("clear drops all entries", cache.size() === 0 && cache.get("/a") === undefined);
+cache.set("/x", 1);
+cache.delete("/x");
+ok("delete removes an entry", cache.get("/x") === undefined && cache.has("/x") === false);
 
 console.log(`\nROUTER CACHE TEST PASSED (${passed} assertions)`);
