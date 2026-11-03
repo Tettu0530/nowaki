@@ -15,7 +15,7 @@ A "structural answer to the slowness of Next.js", built on three pillars:
 
 ## Where we are
 
-**alpha (CLI / crates 0.12.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands, on `nowaki dev` / `nowaki start`; the deploy adapters render them as initial SSR only), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Production use is not yet recommended (the API is still stabilizing).
+**alpha (CLI / crates 0.13.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands, on `nowaki dev` / `nowaki start`; the deploy adapters render them as initial SSR only), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Production use is not yet recommended (the API is still stabilizing).
 
 ## Milestones
 
@@ -55,7 +55,7 @@ Before adding big features, make the code easier to read and harder to break.
 
 **Exit criteria**: The comment policy is documented in AGENTS.md and the code follows it. Route enumeration has a single implementation on the Rust side. Live island state no longer resets to initial values on reconnect.
 
-- [ ] Comment minimization (no behavior changes)
+- [x] Comment minimization (no behavior changes)
 - [ ] Consolidate route enumeration in `nowaki-core` (shared by typegen / prerender, with a test cross-checking the JS-side routeTable)
 - [ ] Restructure SECURITY.md and add a "Security invariants" section to AGENTS.md
 - [ ] Sanitize incoming headers at the Rust front (`x-forwarded-host` / `x-nowaki-*`, `NOWAKI_TRUST_PROXY`)

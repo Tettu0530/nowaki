@@ -10,6 +10,12 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-11-03 · "Zephyr" (part 1)
+
+Packages: `nowaki` / `nowaki-core` 0.13.0 (crates.io, npm), `@nowaki-dev/runtime`
+0.12.0, `create-nowaki` / `create-nowaki-app` 0.14.0. New apps get
+`@nowaki-dev/runtime@^0.12.0` and `nowaki@^0.13.0`.
+
 ### Added
 - **SSG for dynamic routes:** `export const staticPaths` on a `[param]` or
   `[...rest]` route lists the params to prerender (an array, or a sync/async
@@ -25,6 +31,9 @@ milestone's worth of work; the codename is noted per entry.
   later**. preact 11 with an older `preact-render-to-string` renders every page
   to an empty string, so the peer floor now rules that combination out. New
   apps from `npm create nowaki` get `preact-render-to-string@^6.8.2`.
+- Nowaki is now a personal open-source project: the license holder and package
+  author are Tettu0530, and the repository is `github.com/Tettu0530/nowaki`.
+  Security reports go through GitHub private vulnerability reporting.
 
 ### Fixed
 - `nowaki start` serves `/_nowaki/*` only for build-output file names
@@ -62,8 +71,8 @@ milestone's worth of work; the codename is noted per entry.
   route fails and the app's `_500` page also fails (or there is none), the
   response is a plain `Internal Server Error`; the error is still logged. Before,
   the full stack, including absolute file paths, was returned.
-- Windows: `nowaki dev` / `nowaki build` work (verbatim `\\?\` paths, SSR loader
-  file URLs, and `/@fs/` drive-letter URLs).
+- Windows: `nowaki dev` / `nowaki build` / `nowaki start` work (verbatim `\\?\`
+  paths, SSR loader file URLs, and `/@fs/` drive-letter URLs).
 - `nowaki dev` / `nowaki start` kill their Node children on SIGTERM instead of
   leaving them orphaned.
 - The node/bun/deno adapter deploy hint and `start` script work from
@@ -210,6 +219,8 @@ and the runtime at 0.9.0.
 - Published to crates.io (`nowaki-core`, `nowaki`) and npm (`@nowaki-dev/runtime`,
   `create-nowaki`, `create-nowaki-app`).
 
+[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.13.0
 [0.6.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.6.0
 [0.5.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.4.0
