@@ -31,6 +31,9 @@ milestone's worth of work; the codename is noted per entry.
 - `nowaki build` starts from empty `dist/client` and `dist/server` (and the
   cloudflare / static adapter outputs), so islands you deleted no longer ship.
   `nowaki prerender --out <dir>` replaces only `<dir>/_nowaki` (#18).
+- Statically prerendered sites (`nowaki prerender`, the static adapter) include
+  `__nowaki/boundaries` (served as JSON via `_headers`), so the SPA router's
+  loading/error boundaries work and no longer 404 on static hosts (#19).
 - Windows: `nowaki dev` / `nowaki build` work (verbatim `\\?\` paths, SSR loader
   file URLs, and `/@fs/` drive-letter URLs).
 - `nowaki dev` / `nowaki start` kill their Node children on SIGTERM instead of

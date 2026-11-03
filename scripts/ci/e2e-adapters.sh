@@ -35,6 +35,9 @@ pkill -f 'node index.mjs' 2>/dev/null || true
 ./target/debug/nowaki build examples/hello --adapter static
 test -f examples/hello/dist/static/index.html
 test -f examples/hello/dist/static/about/index.html
+# the SPA router's boundaries fetch is answered by a static file (no 404 on static hosts)
+node -e 'const b=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!Array.isArray(b.loading)||!Array.isArray(b.error)||!b.loading.length) process.exit(1)' examples/hello/dist/static/__nowaki/boundaries
+grep -q '/__nowaki/boundaries' examples/hello/dist/static/_headers
 # cloudflare (edge) adapter: generates a bundled fetch-handler worker + wrangler config
 ./target/debug/nowaki build examples/hello --adapter cloudflare
 test -f examples/hello/dist/worker/index.js
