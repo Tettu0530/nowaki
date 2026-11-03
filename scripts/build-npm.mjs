@@ -101,7 +101,7 @@ function main() {
     homepage: "https://nowaki.dev",
     repository: {
       type: "git",
-      url: "git+https://github.com/nowaki-dev/nowaki.git",
+      url: "git+https://github.com/Tettu0530/nowaki.git",
       directory: `packages/nowaki-cli/npm/${key}`,
     },
     os: [meta.os],

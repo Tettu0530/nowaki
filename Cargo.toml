@@ -7,7 +7,7 @@ version = "0.12.1"
 edition = "2021"
 license = "MIT"
 authors = ["Tettu0530"]
-repository = "https://github.com/nowaki-dev/nowaki"
+repository = "https://github.com/Tettu0530/nowaki"
 homepage = "https://nowaki.dev"
 rust-version = "1.95"
 

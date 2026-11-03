@@ -11,4 +11,4 @@ npx create-nowaki-app@latest my-app
 # = npm create nowaki@latest my-app
 ```
 
-See the [main Nowaki repository](https://github.com/nowaki-dev/nowaki).
+See the [main Nowaki repository](https://github.com/Tettu0530/nowaki).

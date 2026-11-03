@@ -13,7 +13,7 @@ Prerequisites:
 - pnpm
 
 ```bash
-git clone https://github.com/nowaki-dev/nowaki
+git clone https://github.com/Tettu0530/nowaki
 cd nowaki
 pnpm install
 cargo build -p nowaki
@@ -55,5 +55,5 @@ Signed-off-by: Your Name <you@example.com>
 
 ## Where to ask questions
 
-- Bugs and feature requests: [GitHub Issues](https://github.com/nowaki-dev/nowaki/issues)
+- Bugs and feature requests: [GitHub Issues](https://github.com/Tettu0530/nowaki/issues)
 - Security issues: see [SECURITY.md](./SECURITY.md). Please do not open a public issue.
