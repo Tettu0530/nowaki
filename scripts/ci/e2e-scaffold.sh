@@ -8,6 +8,8 @@ ROOT=$(pwd)
 NOWAKI="$ROOT/target/debug/nowaki"
 WORK=$(mktemp -d)
 
+node scripts/create-nowaki-test.mjs
+
 # A packed tarball (not file:) so the app gets its own single copy of preact.
 (cd packages/nowaki-runtime && npm pack --silent --pack-destination "$WORK" >/dev/null)
 TARBALL=$(ls "$WORK"/nowaki-dev-runtime-*.tgz)
@@ -16,7 +18,7 @@ port=3400
 for t in basics minimal; do
   (cd "$WORK" && node "$ROOT/packages/create-nowaki/index.js" "app-$t" -t "$t" -y --no-git --no-install)
   APP="$WORK/app-$t"
-  for f in package.json AGENTS.md CLAUDE.md tsconfig.json nowaki-env.d.ts .gitignore routes/index.tsx; do
+  for f in package.json AGENTS.md CLAUDE.md tsconfig.json nowaki-env.d.ts .gitignore .env.example routes/index.tsx routes/_404.tsx routes/api/health.ts; do
     test -f "$APP/$f"
   done
 
@@ -36,6 +38,7 @@ for t in basics minimal; do
   PID=$!
   for i in $(seq 1 30); do curl -sf "http://127.0.0.1:$port/" >/dev/null && break; sleep 1; done
   curl -sf "http://127.0.0.1:$port/" | grep -q '🌀'
+  curl -sf "http://127.0.0.1:$port/api/health" | grep -q '"ok"'
   if [ "$t" = basics ]; then
     curl -sf "http://127.0.0.1:$port/" | grep -q 'nowaki-island name="Counter"'
   else

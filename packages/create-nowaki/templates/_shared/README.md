@@ -8,6 +8,7 @@ components under `islands/` ship JavaScript and hydrate.
 
 ```bash
 npm install
+cp .env.example .env   # optional — only PUBLIC_* vars belong in client bundles
 npm run dev      # http://localhost:3000
 ```
 
@@ -43,6 +44,7 @@ actions/     "use server" RPC modules (optional)
   `preact/compat`, so many React libraries work.)
 - Use **explicit file extensions** in relative imports: `../islands/Counter.tsx`.
 - A route's `loader` runs only on the server; `action` handles non-GET requests.
+- `routes/api/health.ts` is a minimal JSON API example; `routes/_404.tsx` handles unknown paths.
 - `AGENTS.md` documents the conventions for AI coding agents.
 
 Docs: <https://nowaki.dev/docs>

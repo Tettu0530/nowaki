@@ -91,6 +91,7 @@ nowaki.config.mjs   plugins (optional)
    import { getContext } from "@nowaki-dev/runtime";
    export async function addTodo(text: string) { /* runs on the server */ }
    ```
+   The **basics** template includes `actions/echo.ts` as a minimal validated example.
    Call it from an island like a normal async function:
    `import { addTodo } from "../actions/todos.ts";`
 8. **Jetstream islands** (server-reactive, zero client JS) — give an island
@@ -111,6 +112,17 @@ nowaki.config.mjs   plugins (optional)
     <a href={route("/blog/[slug]", { slug })}>Post</a>      // dynamic, params typed
     ```
     Unknown paths, missing params, and wrong param keys are compile errors.
+
+## Security
+
+- **`nowaki dev` is for local development.** Do not expose it to untrusted networks.
+  Use `nowaki start` or a deploy adapter output in production.
+- **Secrets stay server-side.** Only `PUBLIC_*` (and `MODE`) reach the browser. Copy
+  `.env.example` to `.env` and keep database URLs, API keys, and tokens unprefixed.
+- **Server functions and API routes are public endpoints.** Validate and bound every
+  argument; authorize with `getContext()` (cookies/headers) before mutating data.
+- **Do not embed secrets** in client islands, loaders returned to the page, or static
+  prerender output. ISR pages must not include per-user secrets.
 
 ## Don't
 
