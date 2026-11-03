@@ -17,7 +17,7 @@ anyhow = "1.0.102"
 dashmap = "6.2.1"
 # Image asset optimization (pure Rust; no C-dependent codecs, to stay cross-compile safe).
 image = { version = "0.25.5", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
-oxc = { version = "0.135.0", features = ["transformer", "codegen", "minifier", "semantic"] }
+oxc = { version = "0.156.0", features = ["transformer", "codegen", "minifier", "semantic"] }
 oxc_resolver = "11.21.0"
 rayon = "1.11.0"
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
