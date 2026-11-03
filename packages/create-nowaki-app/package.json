@@ -3,7 +3,7 @@
   "version": "0.13.0",
   "description": "Scaffold a new Nowaki app (alias of create-nowaki, for `npx create-nowaki-app`)",
   "license": "MIT",
-  "author": "VorEdge <dev@voredge.com>",
+  "author": "Tettu0530",
   "homepage": "https://nowaki.dev",
   "repository": {
     "type": "git",
