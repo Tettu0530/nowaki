@@ -106,8 +106,8 @@ code locations and CI coverage.
   that path.
 - **ISR keys must include learned `Vary` inputs** (`context.mjs` `__vary()` →
   `x-nowaki-vary`, folded in `isr_key` in `start.rs`) so cached pages cannot
-  bleed across users. Query strings are folded in `isr_key` as well (cache-flood
-  guard).
+  bleed across users. The query string is part of the key only when the route reads
+  it; unread queries are dropped, so they can't grow the cache.
 - **Only `PUBLIC_*` (and `MODE`) reach client bundles** via env inlining; never
   ship secrets or raw `.env` contents to the browser.
 - **Production error responses stay generic.** Do not expose stack traces or other
