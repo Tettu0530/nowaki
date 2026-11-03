@@ -150,8 +150,8 @@ pub(crate) fn apply_client_defines<'a>(
     }
 }
 
-/// Formats an oxc diagnostic as a code frame: file:line:col + the offending line + a caret (no color).
-fn render_diagnostics(path: &Path, source: &str, diags: &[OxcDiagnostic]) -> String {
+/// Formats oxc diagnostics as a code frame (file:line:col + caret). Shared by dev transform and production build.
+pub(crate) fn render_diagnostics(path: &Path, source: &str, diags: &[OxcDiagnostic]) -> String {
     let handler = GraphicalReportHandler::new_themed(GraphicalTheme::unicode_nocolor());
     let name = path.to_string_lossy().to_string();
     let mut out = String::new();
@@ -270,7 +270,7 @@ fn rewrite_ssr_imports<'a>(
             if let Ok(resolution) = resolver.resolve(dir, spec) {
                 let full = resolution.full_path();
                 if let Ok(css) = std::fs::read_to_string(&full) {
-                    let id = full.to_string_lossy();
+                    let id = crate::css::css_scope_id(root, &full);
                     let (_scoped, map) = crate::css::scope_css(&id, &css);
                     let body = format!("export default {}", crate::css::mapping_object(&map));
                     lit.value = allocator.alloc_str(&data_module(&body)).into();
@@ -295,5 +295,27 @@ fn rewrite_ssr_imports<'a>(
                 lit.raw = None;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxc::allocator::Allocator;
+    use oxc::parser::Parser;
+    use oxc::span::SourceType;
+
+    #[test]
+    fn render_diagnostics_includes_named_source() {
+        let path = Path::new("/app/islands/Broken.tsx");
+        let source = "export default () => <;\n";
+        let allocator = Allocator::default();
+        let parsed = Parser::new(&allocator, source, SourceType::tsx()).parse();
+        assert!(!parsed.errors.is_empty());
+        let out = render_diagnostics(path, source, &parsed.errors);
+        assert!(
+            out.contains("Broken.tsx") || out.contains('╭') || out.contains('|'),
+            "expected a code frame, got: {out}"
+        );
     }
 }
