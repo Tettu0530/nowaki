@@ -11,9 +11,10 @@ Nowaki is in alpha; only the latest release (and `main`) receives security fixes
 
 ## Reporting a vulnerability
 
-Report security issues privately to **dev@voredge.com** — do not open a public
-GitHub issue. Include reproduction steps and the affected version or commit. We
-aim to acknowledge reports within 72 hours.
+Report security issues privately through
+[GitHub private vulnerability reporting](https://github.com/Tettu0530/nowaki/security/advisories/new).
+Do not open a public GitHub issue. Include reproduction steps and the affected
+version or commit. We aim to acknowledge reports within 72 hours.
 
 The dev server (`nowaki dev`) is a **development tool**. It serves files from the
 local filesystem (e.g. `/@fs/`) by design and must never be exposed to untrusted
