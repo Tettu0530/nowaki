@@ -60,6 +60,26 @@ eq(
   "convention files are not routes",
 );
 
+// scanRoutes collects convention metadata separately from navigable routes.
+eq(path.basename(table.notFound ?? ""), "_404.tsx", "notFound → routes/_404.tsx");
+eq(path.basename(table.errorRoute ?? ""), "_500.tsx", "errorRoute → routes/_500.tsx");
+eq(
+  table.layouts.map((l) => l.prefix).sort(),
+  ["", "/blog"],
+  "layouts: root + nested /blog",
+);
+eq(table.middleware.map((m) => m.prefix), [""], "middleware at app root");
+eq(table.loadingBoundaries.map((b) => b.prefix), [""], "loading boundary at root");
+eq(table.errorBoundaries.map((b) => b.prefix), [""], "error boundary at root");
+eq(
+  table.routes.every((r) => path.basename(r.file) !== "loading.tsx" && path.basename(r.file) !== "error.tsx"),
+  true,
+  "loading.tsx / error.tsx are not navigable routes",
+);
+
+eq(snap(table, "/api/echo"), { file: "echo.ts", params: {}, isApi: true }, "/api/echo → api");
+eq(snap(table, "/about/"), snap(table, "/about"), "trailing slash matches same route");
+
 const syn = [
   { segments: [{ lit: "users" }, { param: "id" }], file: "dyn", isApi: false, specificity: 1 },
   { segments: [{ lit: "users" }, { lit: "me" }], file: "static", isApi: false, specificity: 2 },
@@ -76,6 +96,22 @@ const syn2 = [
 eq(matchRoute(syn2, "/docs/intro")?.file, "static", "static beats dynamic and catch-all");
 eq(matchRoute(syn2, "/docs/x")?.file, "dynamic", "dynamic beats catch-all for a single segment");
 eq(matchRoute(syn2, "/docs/x/y")?.file, "catchall", "catch-all handles deeper paths");
+
+// Two dynamic segments in one route.
+const syn3 = [
+  {
+    segments: [{ lit: "shop" }, { param: "category" }, { param: "id" }],
+    file: "item",
+    isApi: false,
+    specificity: 1,
+    rest: false,
+  },
+].sort((a, b) => b.specificity - a.specificity);
+eq(matchRoute(syn3, "/shop/shoes/42")?.params, { category: "shoes", id: "42" }, "two dynamic params");
+eq(matchRoute(syn3, "/shop/shoes"), null, "two-param route rejects missing segment");
+
+// matchRoute accepts a bare routes array (not only a scanRoutes table).
+eq(matchRoute(syn, "/users/me")?.file, "static", "matchRoute(array) same as table.routes");
 
 console.log(failed ? `\nROUTER TEST FAILED (${failed})` : "\nROUTER TEST PASSED");
 process.exit(failed ? 1 : 0);
