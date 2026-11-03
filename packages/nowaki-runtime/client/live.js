@@ -40,7 +40,14 @@ function connect() {
       }
       if (msg.type === "patch") {
         const el = document.querySelector(`nowaki-live[nid="${cssEscape(msg.nid)}"]`);
-        if (el) morph(el, msg.html);
+        if (el) {
+          morph(el, msg.html);
+          // Re-joining after a reconnect sends these, so the server resumes instead of resetting.
+          if (msg.state !== undefined && msg.sig) {
+            el.setAttribute("state", JSON.stringify(msg.state));
+            el.setAttribute("sig", msg.sig);
+          }
+        }
       } else if (msg.type === "presence") {
         for (const el of document.querySelectorAll("[data-nowaki-presence]")) {
           el.textContent = String(msg.count);

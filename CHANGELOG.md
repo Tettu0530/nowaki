@@ -25,6 +25,9 @@ milestone's worth of work; the codename is noted per entry.
   `react-dom/client`, `react-dom/server`, `react/compiler-runtime`, and
   `scheduler` to their `preact/compat` counterparts, and
   `process.env.NODE_ENV` is defined for client code.
+- Jetstream: a reconnect no longer resets live islands to their initial state.
+  Patches now carry the signed state, the client stores it on the element, and
+  re-joining resumes from it.
 - Windows: `nowaki dev` / `nowaki build` work (verbatim `\\?\` paths, SSR loader
   file URLs, and `/@fs/` drive-letter URLs).
 - `nowaki dev` / `nowaki start` kill their Node children on SIGTERM instead of
