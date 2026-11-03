@@ -2,9 +2,6 @@
 //!
 //! URL patterns use Nowaki's on-disk syntax (`/blog/[slug]`, `/files/[...path]`). Convention
 //! files (`_layout`, `loading`, …) and `api/` handlers are excluded from page-route scans.
-//!
-//!
-
 
 use std::path::{Path, PathBuf};
 

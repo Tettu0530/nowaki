@@ -2,22 +2,19 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .expect("workspace root")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
 #[test]
 fn page_urls_match_router_scan_routes() {
     let root = workspace_root();
-    let app = root.join("examples/hello");
-    let routes_dir = app.join("routes");
+    let routes_dir = root.join("examples/hello/routes");
     let rust_urls = nowaki_core::routes::page_url_patterns(&routes_dir).expect("scan routes");
-    let script = root.join("scripts/route-enumeration-parity.mjs");
+    // Relative script path + cwd avoids Windows `\\?\` canonical paths breaking Node's argv parsing.
     let output = Command::new("node")
-        .arg(&script)
-        .arg(&app)
+        .current_dir(&root)
+        .arg("scripts/route-enumeration-parity.mjs")
+        .arg("examples/hello")
         .output()
         .expect("node route-enumeration-parity.mjs");
     assert!(
