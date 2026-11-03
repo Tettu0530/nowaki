@@ -205,7 +205,7 @@ fn prod_ws_origin_ok(headers: &axum::http::HeaderMap) -> bool {
     let Some(origin_host) = origin.split("://").nth(1).map(|h| h.trim_end_matches('/')) else {
         return false;
     };
-    match headers.get(header::HOST).and_then(|v| v.to_str().ok()) {
+    match crate::forward::public_host(headers, crate::forward::trust_proxy()) {
         Some(host) => origin_host == host,
         None => false,
     }
@@ -509,15 +509,7 @@ async fn proxy(state: Arc<ProdState>, req: Request, cacheable: bool) -> Response
     };
 
     let mut builder = state.http.request(method, &url).body(body.to_vec());
-    // Strip the original Host but forward it for the same-origin check (server function CSRF guard).
-    if let Some(host) = headers.get(header::HOST) {
-        builder = builder.header("x-forwarded-host", host);
-    }
-    for (name, value) in headers.iter() {
-        if name != header::HOST {
-            builder = builder.header(name, value);
-        }
-    }
+    builder = crate::forward::apply(builder, &headers, crate::forward::trust_proxy());
 
     let resp = match builder.send().await {
         Ok(r) => r,

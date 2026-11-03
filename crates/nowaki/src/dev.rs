@@ -389,15 +389,7 @@ async fn proxy_to_sidecar(state: Arc<DevState>, req: Request) -> Response {
             state.ssr_version.load(Ordering::SeqCst).to_string(),
         )
         .body(body.to_vec());
-    // Strip the original Host but forward it for the same-origin check (server function CSRF guard).
-    if let Some(host) = headers.get(header::HOST) {
-        builder = builder.header("x-forwarded-host", host);
-    }
-    for (name, value) in headers.iter() {
-        if name != header::HOST {
-            builder = builder.header(name, value);
-        }
-    }
+    builder = crate::forward::apply(builder, &headers, crate::forward::trust_proxy());
 
     match builder.send().await {
         Ok(resp) => {

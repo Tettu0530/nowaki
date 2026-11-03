@@ -101,6 +101,10 @@ code locations and CI coverage.
 - **Do not weaken default CSRF / CSWSH gates** without an explicit opt-in API and
   ROADMAP/SECURITY updates: JSON + `x-nowaki-rpc` + Origin/Host for RPC;
   Origin checks on `/__nowaki/live` and `/__nowaki/hmr` upgrades.
+- **Sidecar requests go through `forward::apply`** (`crates/nowaki/src/forward.rs`).
+  Clients never set `x-forwarded-*` or internal `x-nowaki-*` headers on the
+  sidecar hop unless `NOWAKI_TRUST_PROXY` is set; new client-facing `x-nowaki-*`
+  request headers must be added to its allowlist.
 - **Client-supplied Jetstream state is used only after its signature verifies**
   (`live.mjs` checks before every render and handler run); do not skip or bypass
   that path.
