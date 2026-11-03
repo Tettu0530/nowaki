@@ -11,6 +11,15 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Fixed
+- Jetstream: a live connection no longer stalls while the sidecar re-renders.
+  The render runs off the session loop (pings, presence, and new events keep
+  flowing), one at a time per connection so each island's state stays in
+  order, with up to 32 events queued behind it. A render that takes longer
+  than `NOWAKI_LIVE_RENDER_TIMEOUT_MS` (default 10000) or fails is reported to
+  the client as `{ type: "error", nid, reason }` (`timeout`, `render failed`,
+  or `busy` when the queue is full) and dispatched as a `nowaki:live-error`
+  window event; the island keeps its last HTML and state. Before, a hung
+  sidecar call blocked the connection with no timeout.
 - **Security:** the Rust front (`nowaki dev` / `nowaki start`) no longer passes
   client-sent `x-forwarded-*`, `forwarded`, `x-real-ip`, or internal
   `x-nowaki-*` headers to the Node sidecar. It sets `x-forwarded-host` from

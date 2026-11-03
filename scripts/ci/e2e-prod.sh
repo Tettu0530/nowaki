@@ -81,3 +81,12 @@ node scripts/livetest.mjs http://127.0.0.1:3300
 node scripts/security-e2e.mjs prod http://127.0.0.1:3300
 kill $START_PID
 bash scripts/ci/assert-no-orphans.sh $START_PID
+
+# Jetstream render timeout: with a 150 ms limit, the 400 ms `slow` handler is reported as an error
+# and the connection keeps working.
+NOWAKI_LIVE_RENDER_TIMEOUT_MS=150 ./target/debug/nowaki start examples/hello --port 3301 &
+TIMEOUT_PID=$!
+for i in $(seq 1 20); do curl -sf http://127.0.0.1:3301/ >/dev/null && break; sleep 1; done
+node scripts/livetest.mjs http://127.0.0.1:3301 --expect-timeout
+kill $TIMEOUT_PID
+bash scripts/ci/assert-no-orphans.sh $TIMEOUT_PID

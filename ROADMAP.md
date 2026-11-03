@@ -60,7 +60,7 @@ Before adding big features, make the code easier to read and harder to break.
 - [x] Restructure SECURITY.md and add a "Security invariants" section to AGENTS.md
 - [x] Sanitize incoming headers at the Rust front (`x-forwarded-host` / `x-nowaki-*`, `NOWAKI_TRUST_PROXY`)
 - [x] Jetstream: carry signed state in patches (fixes state resetting to initial values on reconnect)
-- [ ] Jetstream: make the session loop async; sidecar timeouts and error reporting
+- [x] Jetstream: make the session loop async; sidecar timeouts and error reporting
 
 ### v0.14 "Gale": Secure by default
 Safe without any configuration. Every claim is verified in CI on every push.
