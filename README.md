@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="./assets/nowaki-mark.svg" alt="Nowaki logo" width="120" height="120">
+
 # Nowaki (野分)
 
 A full-stack web framework built around a Rust toolchain
