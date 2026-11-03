@@ -41,7 +41,7 @@ function resolveBinary() {
       `Nowaki: no prebuilt binary is available for this platform (${key}).\n` +
         `Supported: ${supported}\n` +
         `Workaround: build from source with \`cargo install nowaki\`, or ` +
-        `request support at https://github.com/nowaki-dev/nowaki/issues.`,
+        `request support at https://github.com/Tettu0530/nowaki/issues.`,
     );
   }
 

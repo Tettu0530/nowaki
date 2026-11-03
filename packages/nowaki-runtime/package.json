@@ -7,10 +7,10 @@
   "homepage": "https://nowaki.dev",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nowaki-dev/nowaki.git",
+    "url": "git+https://github.com/Tettu0530/nowaki.git",
     "directory": "packages/nowaki-runtime"
   },
-  "bugs": "https://github.com/nowaki-dev/nowaki/issues",
+  "bugs": "https://github.com/Tettu0530/nowaki/issues",
   "keywords": [
     "nowaki",
     "islands",
