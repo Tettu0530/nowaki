@@ -125,6 +125,6 @@ Contributions are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md). Whil
 
 ## License
 
-[MIT](./LICENSE) © 2026 [VorEdge](https://voredge.com)
+[MIT](./LICENSE) © 2026 [Tettu0530](https://github.com/Tettu0530)
 
-<sub>Built and maintained by VorEdge. "Nowaki" (野分) is an archaic Japanese word for a typhoon.</sub>
+<sub>Created and maintained by [Tettu0530](https://github.com/Tettu0530). "Nowaki" (野分) is an archaic Japanese word for a typhoon.</sub>

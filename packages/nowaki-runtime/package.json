@@ -3,7 +3,7 @@
   "version": "0.11.1",
   "description": "Runtime for Nowaki — islands hydration client, SSR sidecar, and Node loader hooks",
   "license": "MIT",
-  "author": "VorEdge <dev@voredge.com>",
+  "author": "Tettu0530",
   "homepage": "https://nowaki.dev",
   "repository": {
     "type": "git",
