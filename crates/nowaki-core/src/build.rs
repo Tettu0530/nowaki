@@ -13,10 +13,6 @@ use oxc::allocator::Allocator;
 use oxc::ast::ast::Statement;
 use oxc::codegen::{Codegen, CodegenOptions};
 use oxc::minifier::{Minifier, MinifierOptions};
-use oxc::parser::Parser;
-use oxc::semantic::SemanticBuilder;
-use oxc::span::SourceType;
-use oxc::transformer::{JsxRuntime, TransformOptions, Transformer};
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::NowakiCore;
@@ -246,39 +242,20 @@ fn transform_for_server(
     assets: &HashMap<PathBuf, String>,
 ) -> Result<String> {
     let allocator = Allocator::default();
-    let source_type = SourceType::from_path(path).unwrap_or_else(|_| SourceType::tsx());
-
-    let parsed = Parser::new(&allocator, source, source_type).parse();
-    if !parsed.errors.is_empty() {
-        return Err(anyhow!(
-            "parse error\n{}",
-            crate::transform::render_diagnostics(path, source, &parsed.errors)
-        ));
-    }
-    let mut program = parsed.program;
-
-    let scoping = SemanticBuilder::new()
-        .build(&program)
-        .semantic
-        .into_scoping();
+    let mut program = crate::transform::parse_program(
+        &allocator,
+        path,
+        source,
+        crate::transform::source_type_for_path(path),
+    )?;
+    let scoping = crate::transform::semantic_scoping(&program);
     let scoping = crate::transform::apply_client_defines(
         &allocator,
         scoping,
         &mut program,
         &core.client_defines,
     );
-
-    let mut options = TransformOptions::default();
-    options.jsx.runtime = JsxRuntime::Automatic;
-    options.jsx.import_source = Some("preact".to_string());
-    let ret =
-        Transformer::new(&allocator, path, &options).build_with_scoping(scoping, &mut program);
-    if !ret.errors.is_empty() {
-        return Err(anyhow!(
-            "transform error\n{}",
-            crate::transform::render_diagnostics(path, source, &ret.errors)
-        ));
-    }
+    crate::transform::run_preact_transform(&allocator, path, source, scoping, &mut program)?;
 
     let dir = path.parent().unwrap_or(&core.root);
     for stmt in program.body.iter_mut() {
@@ -643,39 +620,20 @@ struct DepRef {
 /// (The caller later replaces placeholders with the deps' hashed names.)
 fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<BundleModule> {
     let allocator = Allocator::default();
-    let source_type = SourceType::from_path(path).unwrap_or_else(|_| SourceType::tsx());
-
-    let parsed = Parser::new(&allocator, source, source_type).parse();
-    if !parsed.errors.is_empty() {
-        return Err(anyhow!(
-            "parse error\n{}",
-            crate::transform::render_diagnostics(path, source, &parsed.errors)
-        ));
-    }
-    let mut program = parsed.program;
-
-    let scoping = SemanticBuilder::new()
-        .build(&program)
-        .semantic
-        .into_scoping();
+    let mut program = crate::transform::parse_program(
+        &allocator,
+        path,
+        source,
+        crate::transform::source_type_for_path(path),
+    )?;
+    let scoping = crate::transform::semantic_scoping(&program);
     let scoping = crate::transform::apply_client_defines(
         &allocator,
         scoping,
         &mut program,
         &core.client_defines,
     );
-
-    let mut options = TransformOptions::default();
-    options.jsx.runtime = JsxRuntime::Automatic;
-    options.jsx.import_source = Some("preact".to_string());
-    let ret =
-        Transformer::new(&allocator, path, &options).build_with_scoping(scoping, &mut program);
-    if !ret.errors.is_empty() {
-        return Err(anyhow!(
-            "transform error\n{}",
-            crate::transform::render_diagnostics(path, source, &ret.errors)
-        ));
-    }
+    crate::transform::run_preact_transform(&allocator, path, source, scoping, &mut program)?;
 
     // Tree shaking / DCE / mangle. Remove unused imports and dead code before
     // recording deps (removed imports don't enter deps).

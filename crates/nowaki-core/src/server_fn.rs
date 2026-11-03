@@ -11,11 +11,9 @@
 
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use oxc::allocator::Allocator;
 use oxc::ast::ast::{Declaration, ModuleExportName, Statement};
-use oxc::parser::Parser;
-use oxc::span::SourceType;
 use xxhash_rust::xxh3::xxh3_64;
 
 /// RPC endpoint the client calls in a single request.
@@ -107,18 +105,14 @@ pub fn server_fn_id(module_key: &str, export: &str) -> String {
 /// Re-exports like `export * from` and `export {a} from` are excluded (they can't be proxied).
 pub fn collect_exports(abs: &Path, source: &str) -> Result<Vec<String>> {
     let allocator = Allocator::default();
-    let source_type = SourceType::from_path(abs).unwrap_or_else(|_| SourceType::tsx());
-    let parsed = Parser::new(&allocator, source, source_type).parse();
-    if !parsed.errors.is_empty() {
-        let msgs: Vec<String> = parsed.errors.iter().map(|e| e.to_string()).collect();
-        return Err(anyhow!(
-            "parse error in {}: {}",
-            abs.display(),
-            msgs.join("; ")
-        ));
-    }
+    let program = crate::transform::parse_program(
+        &allocator,
+        abs,
+        source,
+        crate::transform::source_type_for_path(abs),
+    )?;
     let mut out: Vec<String> = Vec::new();
-    for stmt in &parsed.program.body {
+    for stmt in &program.body {
         match stmt {
             Statement::ExportNamedDeclaration(d) => {
                 if let Some(decl) = &d.declaration {
