@@ -87,6 +87,10 @@ not run on the production request path unless you embed their output in the app.
 
 ### Application author responsibilities
 
+- **Set `NOWAKI_LIVE_SECRET`** in production when the app has live islands.
+  Without it, each process signs live state with its own random key: state
+  can't resume after a restart or on another instance, and `nowaki start` /
+  the node adapter log a warning at startup.
 - **Cross-site writes.** Page actions reject cross-site non-GET requests. API
   routes still accept them (with a one-time warning) unless they
   `export const csrf = true`; a later release makes that the default. Requests
@@ -133,7 +137,7 @@ both dev and prod; coverage is noted in the last column.
 | Default security headers (`x-content-type-options: nosniff`, `x-frame-options: SAMEORIGIN`, `referrer-policy: strict-origin-when-cross-origin`, `cross-origin-opener-policy: same-origin`, and `content-security-policy: frame-ancestors 'self'` when the app sends no CSP) | MIME sniffing, clickjacking, cross-origin referrer and `window.opener` leaks | `crates/nowaki/src/security_headers.rs` (dev/start, ISR hits, static assets); `server/security-headers.mjs` (node/bun/deno/vercel/cloudflare adapters); `_headers` from `nowaki prerender` | `scripts/security-e2e.mjs` (dev + prod), `scripts/ci/e2e-adapters.sh`, `scripts/ci/e2e-runtimes.sh` |
 | Forwarding and internal headers sanitized at the Rust front | Spoofing the host the same-origin checks use; forging internal `x-nowaki-*` headers | `crates/nowaki/src/forward.rs` (`NOWAKI_TRUST_PROXY` opt-in) | `scripts/security-e2e.mjs` (dev + prod) |
 | WebSocket Origin check (CSWSH) | Cross-origin upgrades to HMR / Jetstream | `crates/nowaki/src/dev.rs`, `crates/nowaki/src/start.rs` | `scripts/security-e2e.mjs` (dev) |
-| Jetstream state signature | Forged live state used in render/handlers | `server/live.mjs` (verify before each render/handler); `crates/nowaki/src/live.rs` (holds state per session) | `scripts/security-e2e.mjs` (dev) |
+| Jetstream state signature | Forged live state used in render/handlers; replaying a captured state indefinitely | `server/live-sign.mjs` (`v1.<iat>.<mac>`: HMAC over name, issue time, and state; rejected after `NOWAKI_LIVE_MAX_AGE`, default 24 h); `server/live.mjs` (verify before each render/handler); `crates/nowaki/src/live.rs` (holds state per session) | `scripts/security-e2e.mjs` (dev), `scripts/live-sign-test.mjs` |
 | ISR cache key + `Vary` learning | Cross-user HTML cache bleed | `server/context.mjs` (`__vary()`), `server/handler.mjs` (`x-nowaki-vary`); `crates/nowaki/src/start.rs` (`isr_key`); e.g. `examples/hello/routes/vary.tsx` | `scripts/security-e2e.mjs` (prod) |
 | ISR query folding | Cache flood via distinct query strings | `crates/nowaki/src/start.rs` | `scripts/security-e2e.mjs` (prod) |
 | Static client assets by basename | Path traversal on `/_nowaki/*` | `crates/nowaki/src/start.rs` | `scripts/security-e2e.mjs` (prod) |

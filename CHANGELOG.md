@@ -51,6 +51,13 @@ milestone's worth of work; the codename is noted per entry.
   state. It ignored `liveIslands`, so a page with a live island returned 500.
 
 ### Changed
+- **Security:** live (Jetstream) state signatures include their issue time
+  (`v1.<iat>.<mac>`) and are rejected after `NOWAKI_LIVE_MAX_AGE` seconds
+  (default 86400), so a captured state can't be replayed forever; every patch
+  is re-signed, so an active island doesn't expire. Signatures from earlier
+  versions no longer verify (live islands on an open page re-render from the
+  server after a reload). The key is created on first use, and production
+  servers warn at startup when `NOWAKI_LIVE_SECRET` is unset.
 - **Security:** in production, a server function error other than
   `ServerFnError` returns a generic `Internal Server Error` (500) and is logged;
   before, its message was sent to the client. Dev still shows the message.
