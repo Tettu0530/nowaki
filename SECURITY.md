@@ -102,7 +102,9 @@ not run on the production request path unless you embed their output in the app.
 - **Set `NOWAKI_LIVE_SECRET`** in production when the app has live islands.
   Without it, each process signs live state with its own random key: state
   can't resume after a restart or on another instance, and `nowaki start` /
-  the node adapter log a warning at startup.
+  the node adapter log a warning at startup. On the adapters every live event
+  is a POST that any instance may serve, so without a shared secret events fail
+  as soon as more than one instance (or Worker isolate) is running.
 - **Cross-site writes.** Page actions reject cross-site non-GET requests. API
   routes still accept them (with a one-time warning) unless they
   `export const csrf = true`; a later release makes that the default. Requests
@@ -124,8 +126,9 @@ Framework defaults do not replace app-level checks:
 - **Server functions (`"use server"`)** — Allowlisted RPC only, but each export
   is still a public endpoint: validate JSON arguments and authorize via
   `getContext()` (cookies/headers).
-- **Jetstream `on` handlers** — State is server-held per WebSocket connection;
-  validate event payloads like any server handler.
+- **Jetstream `on` handlers** — State is server-held per WebSocket connection,
+  or sent back by the client (signed) with each POST event; validate event
+  payloads like any server handler.
 - **Actions / API routes** — Same as in any web app: CSRF and auth are your
   concern unless a framework defense applies (see table below).
 
@@ -134,8 +137,8 @@ Framework defaults do not replace app-level checks:
 These are implemented in the repo today. When you change one, keep this table
 accurate and follow the [Security invariants](./AGENTS.md#security-invariants)
 checklist (extend `scripts/security-e2e.mjs` when CI does not already cover the
-behavior). ROADMAP v0.14 aims to map **every row** to an automated CI check in
-both dev and prod; coverage is noted in the last column.
+behavior). v0.14 mapped most rows to automated checks (last column); add or update
+tests when you change a default defense.
 
 | Defense | What it limits | Primary location | CI regression |
 |---------|----------------|------------------|---------------|
@@ -148,7 +151,10 @@ both dev and prod; coverage is noted in the last column.
 | Same-origin check on page actions and API routes (`server/origin.mjs`) | Cross-site form posts and `fetch` writes with the victim's cookies | `server/handler.mjs`: a non-GET to a route with `action` is rejected (403) when `Origin` is another site or `null`, or `Sec-Fetch-Site` is `cross-site`. API routes only warn for now unless they `export const csrf = true`; `export const csrf = false` opts a route out | `scripts/security-e2e.mjs` (dev + prod) |
 | Default security headers (`x-content-type-options: nosniff`, `x-frame-options: SAMEORIGIN`, `referrer-policy: strict-origin-when-cross-origin`, `cross-origin-opener-policy: same-origin`, and `content-security-policy: frame-ancestors 'self'` when the app sends no CSP) | MIME sniffing, clickjacking, cross-origin referrer and `window.opener` leaks | `crates/nowaki/src/security_headers.rs` (dev/start, ISR hits, static assets); `server/security-headers.mjs` (node/bun/deno/vercel/cloudflare adapters); `_headers` from `nowaki prerender` | `scripts/security-e2e.mjs` (dev + prod), `scripts/ci/e2e-adapters.sh`, `scripts/ci/e2e-runtimes.sh` |
 | Opt-in CSP with a per-response nonce (`NOWAKI_CSP=report-only` or `enforce`) | Injected inline scripts and styles | `crates/nowaki/src/csp.rs` (dev/start, streamed and ISR responses), `server/csp.mjs` (adapters); every `<script>` / `<style>` gets the response's nonce; the client runtime stamps it on styles it inserts (island CSS, client navigation, boundaries) | `scripts/csp-e2e.mjs` (start + node adapter), `scripts/csp-test.mjs`, browser tests under `enforce` |
+| Live request context and `live.authorize` | Unauthorized live events; leaking internal headers to handlers | `crates/nowaki/src/live.rs` `context_headers` (only cookie, authorization, accept-language, user-agent, and the public host from the upgrade); `server/live.mjs` (`authorize` after the signature check, before the handler; refusal → `forbidden`) | `scripts/livetest.mjs` (dev + prod) |
+| Internal sidecar endpoints not proxied (`/__nowaki/live-render`) | Calling the trusted re-render endpoint with a forged request context or replayed state | `crates/nowaki/src/forward.rs` `is_internal_path` (404 in dev/start) | `scripts/security-e2e.mjs` (dev + prod) |
 | Forwarding and internal headers sanitized at the Rust front | Spoofing the host the same-origin checks use; forging internal `x-nowaki-*` headers | `crates/nowaki/src/forward.rs` (`NOWAKI_TRUST_PROXY` opt-in) | `scripts/security-e2e.mjs` (dev + prod) |
+| Jetstream POST transport gate (`POST /__nowaki/live-event`) | Cross-site live events with the victim's cookies; oversized bodies; handlers running on forged state | `server/live-event.mjs` (same shape as RPC: `application/json` only → 415, `x-nowaki-live: 1` required and cross-site `Origin` / `Sec-Fetch-Site` rejected via `server/origin.mjs` → 403, bodies over 64 KiB → 413, generic error bodies); the signature is verified in `server/live.mjs` before any handler (forged → 403, no html); handler names must be own keys of `live.on`; served by dev/start (via the sidecar) and every adapter. The Rust fronts answer 404 for the sidecar-internal `/__nowaki/live-render` (`dev.rs`, `start.rs`) so it cannot be used to skip the gate | `scripts/security-e2e.mjs` (dev + prod), `scripts/edge-handler-test.mjs` (Edge), `scripts/ci/e2e-adapters.sh` (node adapter) |
 | WebSocket Origin check (CSWSH) | Cross-origin upgrades to HMR / Jetstream | `crates/nowaki/src/dev.rs`, `crates/nowaki/src/start.rs` | `scripts/security-e2e.mjs` (dev + prod) |
 | Jetstream state signature | Forged live state used in render/handlers; replaying a captured state indefinitely | `server/live-sign.mjs` (`v1.<iat>.<mac>`: HMAC over name, issue time, and state; rejected after `NOWAKI_LIVE_MAX_AGE`, default 24 h); `server/live.mjs` (verify before each render/handler); `crates/nowaki/src/live.rs` (holds state per session) | `scripts/security-e2e.mjs` (dev + prod), `scripts/live-sign-test.mjs` |
 | ISR cache key + `Vary` learning | Cross-user HTML cache bleed | `server/context.mjs` (`__vary()`), `server/handler.mjs` (`x-nowaki-vary`); `crates/nowaki/src/start.rs` (`isr_key`); e.g. `examples/hello/routes/vary.tsx` | `scripts/security-e2e.mjs` (prod) |
@@ -157,9 +163,15 @@ both dev and prod; coverage is noted in the last column.
 | Generic production 500s | Stack traces (file paths, code) reaching clients | `server/app.mjs`, `server/web.mjs`, `server/prod-sidecar.mjs` (`renderError` and top-level catches) | `scripts/security-e2e.mjs` (prod) |
 | Dependency advisories | Known-vulnerable crates/packages | `.github/workflows/ci.yml` | `cargo audit`, `cargo-deny`, `pnpm audit` jobs |
 
-**Planned (not yet default):** inbound proxy header sanitization (`NOWAKI_TRUST_PROXY`),
-default security headers (CSP, `X-Frame-Options`, etc.), and broader
-`security-e2e` parity in prod — see [ROADMAP.md](./ROADMAP.md) v0.13–v0.14.
+**Opt-in or phased (not missing, but not every row above):**
+
+- **Full CSP enforcement** — default responses add `frame-ancestors` only unless the
+  app sets CSP. Set `NOWAKI_CSP=report-only` or `enforce` for nonce-based
+  `script-src` / `style-src-elem` (see [Application author responsibilities](#application-author-responsibilities)).
+- **API route CSRF by default** — page `action`s reject cross-site non-GET requests
+  today. API routes still allow them with a one-time log warning unless the route
+  exports `csrf = true`; a later release will reject by default. Cookie-authenticated
+  API handlers should set `csrf = true` now.
 
 ## Dependency auditing
 
@@ -176,5 +188,5 @@ pnpm audit --prod
 - [AGENTS.md § Security invariants](./AGENTS.md#security-invariants) — checklist for
   code changes (maps to the table above)
 - [DESIGN.md](./DESIGN.md) — architecture and data flow
-- [ROADMAP.md](./ROADMAP.md) — milestone exit criteria (v0.13–v0.14 security work)
+- [ROADMAP.md](./ROADMAP.md) — milestone exit criteria (v0.14 security defaults shipped; see v0.15+)
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — PR expectations before you submit

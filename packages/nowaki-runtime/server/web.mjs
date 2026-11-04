@@ -29,16 +29,20 @@ function initialState(mod, props) {
   return {};
 }
 
-function installIslandHook(registry, liveRegistry) {
+let liveCounter = 0;
+
+function installIslandHook(registry, liveRegistry, live) {
   const prev = options.vnode;
   options.vnode = (vnode) => {
     if (typeof vnode.type === "function" && liveRegistry.has(vnode.type) && !vnode.props.__nowakiLiveInner) {
-      // No live transport on Edge yet: render the island once with its initial state.
-      const mod = liveRegistry.get(vnode.type);
+      const { name, mod } = liveRegistry.get(vnode.type);
       const Original = vnode.type;
       vnode.type = (props) => {
         const { state: propState, ...rest } = props;
-        return h(Original, { state: propState ?? initialState(mod, rest), __nowakiLiveInner: true });
+        const state = propState ?? initialState(mod, rest);
+        const inner = h(Original, { state, __nowakiLiveInner: true });
+        // Without the signing helpers (an older worker entry) the island stays on its initial SSR.
+        return live ? h("nowaki-live", live.props(name, `L${liveCounter++}`, state), inner) : inner;
       };
     } else if (
       typeof vnode.type === "function" &&
@@ -59,6 +63,8 @@ function installIslandHook(registry, liveRegistry) {
 ///   islandComponents : island name → component (default export)
 ///   liveIslands      : live island name → module namespace (default export + `live`)
 ///   routeTable       : scanRoutes equivalent (file is a key of modules)
+///   live             : { render: liveRender, props: liveProps } when there are live islands. Passed
+///                      in by the worker entry so this module never imports node:crypto itself.
 /// Returns `(request) => Promise<Response>`.
 export function createFetchHandler({
   manifest,
@@ -67,6 +73,7 @@ export function createFetchHandler({
   liveIslands,
   routeTable,
   serverFunctions: serverFnTable,
+  live,
 }) {
   const registry = new Map();
   for (const [name, comp] of Object.entries(islandComponents ?? {})) {
@@ -75,10 +82,14 @@ export function createFetchHandler({
     }
   }
   const liveRegistry = new Map();
-  for (const mod of Object.values(liveIslands ?? {})) {
-    if (typeof mod?.default === "function") liveRegistry.set(mod.default, mod);
+  const liveByName = new Map();
+  for (const [name, mod] of Object.entries(liveIslands ?? {})) {
+    if (typeof mod?.default === "function") {
+      liveRegistry.set(mod.default, { name, mod });
+      liveByName.set(name, mod);
+    }
   }
-  installIslandHook(registry, liveRegistry);
+  installIslandHook(registry, liveRegistry, live);
 
   const serverFunctions =
     serverFnTable && Object.keys(serverFnTable).length
@@ -94,6 +105,10 @@ export function createFetchHandler({
     importModule: (key) => modules[key],
     ensureIslands: () => {},
     serverFunctions,
+    live:
+      live && liveByName.size
+        ? { lookup: (name) => liveByName.get(name) ?? null, render: live.render }
+        : null,
     renderDocument: (args) => prodDocument(manifest, args),
     renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta),
     renderError: (err) => {

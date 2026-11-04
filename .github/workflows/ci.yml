@@ -129,6 +129,8 @@ jobs:
         run: node scripts/csp-test.mjs
       - name: Live state signing (iat, max age, tampering)
         run: node scripts/live-sign-test.mjs
+      - name: Live session hub (join/event, queue, timeout, cap, presence)
+        run: node scripts/live-hub-test.mjs
       - name: nowaki upgrade (command surface + non-app guard)
         run: bash scripts/ci/e2e-upgrade.sh
       - name: Typed routes (typegen)
@@ -160,11 +162,19 @@ jobs:
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8241/ >/dev/null && break; sleep 1; done
           BASE=http://127.0.0.1:8241 node scripts/lazy-hydration-test.mjs
           BASE=http://127.0.0.1:8241 node scripts/router-browser-test.mjs
+          BASE=http://127.0.0.1:8241 EXPECT=ws node scripts/live-browser-test.mjs
+          BASE=http://127.0.0.1:8241 EXPECT=post PAGE=/live-post node scripts/live-browser-test.mjs
           # Same pages under an enforced CSP: hydration, island CSS, and client navigation still work.
           NOWAKI_CSP=enforce ./target/debug/nowaki start examples/hello --port 8242 &
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8242/ >/dev/null && break; sleep 1; done
           BASE=http://127.0.0.1:8242 node scripts/lazy-hydration-test.mjs
           BASE=http://127.0.0.1:8242 node scripts/router-browser-test.mjs
+          BASE=http://127.0.0.1:8242 EXPECT=ws node scripts/live-browser-test.mjs
+          # The node adapter has no WS endpoint: live islands run over POST /__nowaki/live-event.
+          ./target/debug/nowaki build examples/hello --adapter node
+          PORT=8243 node examples/hello/dist/server/index.mjs &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8243/ >/dev/null && break; sleep 1; done
+          BASE=http://127.0.0.1:8243 EXPECT=post node scripts/live-browser-test.mjs
 
   jetstream-load:
     name: Jetstream load (1000 connections)

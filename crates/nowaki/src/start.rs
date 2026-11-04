@@ -195,7 +195,10 @@ async fn live_ws(
     let http = state.http.clone();
     let port = state.sidecar_port;
     let hub = state.live_hub.clone();
-    ws.on_upgrade(move |socket| crate::live::handle(socket, hub, http, port, "prod".to_string()))
+    let request = crate::live::context_headers(&headers);
+    ws.on_upgrade(move |socket| {
+        crate::live::handle(socket, hub, http, port, "prod".to_string(), request)
+    })
 }
 
 /// Validate the WS upgrade Origin (CSWSH guard). Prod is assumed public, so only Origin==Host is allowed
@@ -215,6 +218,9 @@ fn prod_ws_origin_ok(headers: &axum::http::HeaderMap) -> bool {
 
 async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
     let path = req.uri().path().to_string();
+    if crate::forward::is_internal_path(&path) {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    }
     // Rust serves static assets directly (high-volume hot path).
     if req.method() == Method::GET && path.starts_with("/_nowaki/") {
         return serve_static(&state, &path).await;

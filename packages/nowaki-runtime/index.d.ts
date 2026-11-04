@@ -148,12 +148,19 @@ export interface Live<S = any> {
   /** Initial state (may take props). */
   state: (props?: any) => S;
   /** Handlers keyed by `data-live="name"` event, each returning the new state. */
-  on: Record<string, (state: S, payload?: any) => S>;
+  on: Record<string, (state: S, payload?: any) => S | Promise<S>>;
+  /**
+   * Runs after the state signature is verified and before each handler; anything but `true`
+   * refuses the event (the client gets `{ type: "error", reason: "forbidden" }`). `getContext()`
+   * returns the WebSocket upgrade's cookies and headers here and in handlers.
+   */
+  authorize?: (event: { name: string; handler: string; state: S; payload?: any }) => boolean | Promise<boolean>;
 }
 
 /**
- * While a server function (`"use server"`) is running, returns that call's LoaderContext.
- * Returns null outside an RPC. Use it to read cookies/headers or for auth.
+ * While a server function (`"use server"`) or a live handler / `live.authorize` is running, returns
+ * that call's LoaderContext (for live, the WebSocket upgrade's cookie, authorization,
+ * accept-language, and user-agent headers). Returns null elsewhere. Use it for auth.
  */
 export function getContext(): LoaderContext | null;
 

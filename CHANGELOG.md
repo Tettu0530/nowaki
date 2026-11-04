@@ -10,6 +10,39 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Upgrade notes
+- On the adapters, set `NOWAKI_LIVE_SECRET` when more than one instance (or
+  Worker isolate) can serve a request, or live events fail signature checks.
+  The Cloudflare `wrangler.jsonc` now enables `nodejs_compat_populate_process_env`
+  so Worker vars and secrets reach `process.env`.
+
+### Added
+- **Jetstream request context:** live handlers can call `getContext()` to read
+  the cookies and `authorization` / `accept-language` / `user-agent` headers of
+  the WebSocket upgrade, and `live.authorize({ name, handler, state, payload })`
+  runs before each handler (after the signature check); anything but `true`
+  refuses the event with `{ type: "error", reason: "forbidden" }`. Cookies set
+  after the socket opened are seen after the next reconnect.
+- **Jetstream on the deploy adapters.** Live islands are now interactive on the
+  node / bun / deno / vercel / cloudflare adapters: each event is a
+  `POST /__nowaki/live-event` carrying the island's signed state, and the reply
+  is the new HTML, state, and signature. `nowaki dev` / `start` keep the
+  WebSocket and fall back to POST for any event sent while the socket isn't
+  open. `<meta name="nowaki-live" content="post">` (or `"ws"`) in a page's
+  `head` pins the transport. Presence is only available over the WebSocket.
+  The route has the same CSRF gate as server functions (JSON,
+  `x-nowaki-live: 1`, cross-site requests rejected) and a 64 KiB body cap.
+
+### Fixed
+- **Security:** `nowaki dev` / `nowaki start` no longer proxy
+  `/__nowaki/live-render` (404). That endpoint is the sidecar's internal
+  re-render call from `live.rs`, and it trusts its body; reached through the
+  public port, a cross-site `text/plain` POST could run live handlers with a
+  replayed signed state, and with the new request context it could claim any
+  cookie and pass `live.authorize`. The sidecars also match the path exactly.
+- A Jetstream event can only call the island's own `live.on` handlers, not
+  inherited object methods such as `toString`.
+
 ## [0.14.0] — 2026-11-04 · "Gale" (and "Zephyr" complete)
 
 Packages: `nowaki` / `nowaki-core` 0.14.0 (crates.io, npm), `@nowaki-dev/runtime`

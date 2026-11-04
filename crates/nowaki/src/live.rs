@@ -71,6 +71,7 @@ impl EventQueue {
 enum RenderError {
     Timeout,
     Failed,
+    Forbidden,
 }
 
 impl RenderError {
@@ -78,6 +79,7 @@ impl RenderError {
         match self {
             RenderError::Timeout => "timeout",
             RenderError::Failed => "render failed",
+            RenderError::Forbidden => "forbidden",
         }
     }
 }
@@ -132,12 +134,35 @@ impl LiveHub {
     }
 }
 
+/// Upgrade request headers live handlers may read through getContext(). Captured once per
+/// connection; the sidecar never sees client-sent forwarding or internal headers.
+const CONTEXT_HEADERS: [&str; 4] = ["cookie", "authorization", "accept-language", "user-agent"];
+
+pub fn context_headers(headers: &axum::http::HeaderMap) -> serde_json::Map<String, Value> {
+    let mut m = serde_json::Map::new();
+    for name in CONTEXT_HEADERS {
+        if let Some(v) = headers.get(name).and_then(|v| v.to_str().ok()) {
+            m.insert(name.to_string(), Value::String(v.to_string()));
+        }
+    }
+    let trust = crate::forward::trust_proxy();
+    if let Some(host) = crate::forward::public_host(headers, trust) {
+        m.insert("x-forwarded-host".into(), Value::String(host));
+    }
+    m.insert(
+        "x-forwarded-proto".into(),
+        Value::String(crate::forward::public_proto(headers, trust).into()),
+    );
+    m
+}
+
 pub async fn handle(
     mut socket: WebSocket,
     hub: Arc<LiveHub>,
     http: reqwest::Client,
     sidecar_port: u16,
     version: String,
+    request_headers: serde_json::Map<String, Value>,
 ) {
     // Over the cap: send an error, then close (the client degrades to the initial SSR).
     let Some(count) = hub.join() else {
@@ -169,6 +194,7 @@ pub async fn handle(
         sidecar_port,
         version,
         timeout: render_timeout(),
+        request: Arc::new(json!({ "headers": request_headers })),
     };
     let mut last_seen = Instant::now();
     let mut ping = tokio::time::interval(PING_INTERVAL);
@@ -236,6 +262,7 @@ struct RenderCtx {
     sidecar_port: u16,
     version: String,
     timeout: Duration,
+    request: Arc<Value>,
 }
 
 /// Handle a Text message: `join` registers islands; `event` returns the event to queue.
@@ -295,6 +322,7 @@ async fn render(
         "handler": ev.handler,
         "payload": ev.payload,
         "version": ctx.version,
+        "request": *ctx.request,
     });
     let url = format!("http://127.0.0.1:{}/__nowaki/live-render", ctx.sidecar_port);
     let call = async {
@@ -306,6 +334,9 @@ async fn render(
             .send()
             .await
             .map_err(|_| RenderError::Failed)?;
+        if r.status() == reqwest::StatusCode::FORBIDDEN {
+            return Err(RenderError::Forbidden);
+        }
         let rv: Value = serde_json::from_str(&r.text().await.map_err(|_| RenderError::Failed)?)
             .map_err(|_| RenderError::Failed)?;
         // No html (e.g. a failed signature check): never keep forged state or send an empty render.
@@ -415,5 +446,27 @@ mod tests {
     fn error_reasons_are_generic() {
         assert_eq!(RenderError::Timeout.reason(), "timeout");
         assert_eq!(RenderError::Failed.reason(), "render failed");
+        assert_eq!(RenderError::Forbidden.reason(), "forbidden");
+    }
+
+    #[test]
+    fn context_headers_keep_only_the_allowlist() {
+        let mut h = axum::http::HeaderMap::new();
+        for (k, v) in [
+            ("cookie", "user=alice"),
+            ("user-agent", "t"),
+            ("host", "app.example"),
+            ("x-forwarded-host", "evil.test"),
+            ("x-nowaki-page", "1"),
+            ("sec-websocket-key", "k"),
+        ] {
+            h.insert(axum::http::HeaderName::from_static(k), v.parse().unwrap());
+        }
+        let m = context_headers(&h);
+        assert_eq!(m["cookie"], "user=alice");
+        assert_eq!(m["user-agent"], "t");
+        assert_eq!(m["x-forwarded-host"], "app.example");
+        assert_eq!(m["x-forwarded-proto"], "http");
+        assert!(!m.contains_key("x-nowaki-page") && !m.contains_key("sec-websocket-key"));
     }
 }

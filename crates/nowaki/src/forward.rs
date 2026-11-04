@@ -8,8 +8,14 @@ use std::sync::OnceLock;
 
 use axum::http::{header, HeaderMap, HeaderName};
 
+/// Sidecar-only endpoints Rust calls itself (`live.rs`); never proxied from a client. The sidecar
+/// trusts their bodies (state to re-render, the request context for `getContext()`).
+pub fn is_internal_path(path: &str) -> bool {
+    path == "/__nowaki/live-render" || path.starts_with("/__nowaki/live-render/")
+}
+
 /// `x-nowaki-*` request headers the browser runtime sends on purpose; every other one is internal.
-const CLIENT_NOWAKI_HEADERS: [&str; 2] = ["x-nowaki-rpc", "x-nowaki-nav"];
+const CLIENT_NOWAKI_HEADERS: [&str; 3] = ["x-nowaki-rpc", "x-nowaki-nav", "x-nowaki-live"];
 
 pub fn trust_proxy() -> bool {
     static TRUST: OnceLock<bool> = OnceLock::new();
@@ -143,6 +149,7 @@ mod tests {
         for n in [
             "x-nowaki-rpc",
             "x-nowaki-nav",
+            "x-nowaki-live",
             "content-type",
             "cookie",
             "origin",
@@ -160,5 +167,14 @@ mod tests {
                 "{n} must not pass"
             );
         }
+    }
+
+    #[test]
+    fn live_render_is_internal() {
+        assert!(is_internal_path("/__nowaki/live-render"));
+        assert!(is_internal_path("/__nowaki/live-render/x"));
+        assert!(!is_internal_path("/__nowaki/live"));
+        assert!(!is_internal_path("/__nowaki/live-render-not"));
+        assert!(!is_internal_path("/__nowaki/fn"));
     }
 }

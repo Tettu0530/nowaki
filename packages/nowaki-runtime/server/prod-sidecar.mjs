@@ -7,7 +7,8 @@ import { Readable } from "node:stream";
 import path from "node:path";
 import { createApp } from "./app.mjs";
 import { handleRequest } from "./handler.mjs";
-import { liveRender } from "./live.mjs";
+import { liveContext, liveRender, LiveForbiddenError } from "./live.mjs";
+import { runWithContext } from "./functions.mjs";
 import { pageMeta } from "./document.mjs";
 
 const appRoot = process.cwd();
@@ -23,11 +24,11 @@ env.renderDocument = ({ mod, body, meta }) => {
 };
 
 const server = createServer(async (req, res) => {
-  if (req.method === "POST" && req.url.startsWith("/__nowaki/live-render")) {
+  if (req.method === "POST" && req.url.split("?")[0] === "/__nowaki/live-render") {
     try {
       const chunks = [];
       for await (const c of req) chunks.push(c);
-      const { name, state, handler, payload, sig } = JSON.parse(
+      const { name, state, handler, payload, sig, request } = JSON.parse(
         Buffer.concat(chunks).toString("utf8"),
       );
       const entry = [...liveRegistry.values()].find((e) => e.name === name);
@@ -36,10 +37,17 @@ const server = createServer(async (req, res) => {
         res.end(JSON.stringify({ error: "live island not found" }));
         return;
       }
-      const result = await liveRender(entry.mod, state, handler, payload, name, sig);
+      const result = await runWithContext(liveContext(request), () =>
+        liveRender(entry.mod, state, handler, payload, name, sig),
+      );
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(result));
     } catch (err) {
+      if (err instanceof LiveForbiddenError) {
+        res.writeHead(403, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "forbidden" }));
+        return;
+      }
       console.error("[nowaki live]", err);
       res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "live render failed" }));
