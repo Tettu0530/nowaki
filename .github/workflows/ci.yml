@@ -129,6 +129,8 @@ jobs:
         run: node scripts/csp-test.mjs
       - name: Live state signing (iat, max age, tampering)
         run: node scripts/live-sign-test.mjs
+      - name: Live session hub (join/event, queue, timeout, cap, presence)
+        run: node scripts/live-hub-test.mjs
       - name: nowaki upgrade (command surface + non-app guard)
         run: bash scripts/ci/e2e-upgrade.sh
       - name: Typed routes (typegen)
