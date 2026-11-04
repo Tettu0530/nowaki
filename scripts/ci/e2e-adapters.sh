@@ -57,6 +57,8 @@ grep -q '/__nowaki/boundaries' examples/hello/dist/static/_headers
 grep -qi 'x-content-type-options: nosniff' examples/hello/dist/static/_headers
 # cloudflare (edge) adapter: generates a bundled fetch-handler worker + wrangler config
 ./target/debug/nowaki build examples/hello --adapter cloudflare
+# the worker's fetch handler, called directly in Node (web.mjs end to end, no wrangler)
+node scripts/edge-handler-test.mjs examples/hello/dist/worker
 test -f examples/hello/dist/worker/index.js
 test -f examples/hello/dist/worker/wrangler.jsonc
 grep -q "createFetchHandler" examples/hello/dist/worker/index.js

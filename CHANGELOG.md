@@ -37,6 +37,11 @@ milestone's worth of work; the codename is noted per entry.
   turns them off.
 
 ### Fixed
+- **Security:** the cloudflare adapter fills a missing `Host` from the request
+  URL, so the action and server-function same-origin checks compare against the
+  real host; Web `Request`s may omit it, which made same-origin form posts
+  fail and let a cross-origin RPC through. The server-function check now also
+  rejects an `Origin` when there is no host to compare it with.
 - Jetstream: a live connection no longer stalls while the sidecar re-renders.
   The render runs off the session loop (pings, presence, and new events keep
   flowing), one at a time per connection so each island's state stays in

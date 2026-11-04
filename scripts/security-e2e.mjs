@@ -1,9 +1,10 @@
 // App-layer security regression suite. Deterministically checks defenses for regressions (no Chrome). Called from CI e2e.
 //   node scripts/security-e2e.mjs dev  <devBase>  <appRoot>
 //   node scripts/security-e2e.mjs prod <prodBase>
-// Covers: arbitrary file read (@fs/ssr-module/.env/virtual ..), RPC CSRF, CSWSH,
-//         forged live state, ISR cross-user isolation and query-flood collapsing,
-//         prod /_nowaki/* basename static serving (path traversal).
+// Covers (dev + prod unless noted): RPC CSRF, CSWSH, forged live state, server functions,
+//         cross-site writes, default headers. Dev only: arbitrary file read (@fs/ssr-module/.env/
+//         virtual ..), the HMR socket. Prod only: generic 500s, ISR isolation and query-flood
+//         collapsing, /_nowaki/* basename static serving (path traversal).
 
 import http from "node:http";
 
@@ -181,6 +182,14 @@ if (mode === "dev") {
   check("virtual-module traversal rejected (.. → 404)",
     (await rawGet(base, "/__nowaki_virtual__/../../../../../../../etc/hosts")) === 404);
 
+  // HMR is dev-only.
+  check("CSWSH /__nowaki/hmr cross-origin upgrade rejected (403)",
+    (await wsUpgrade(base, "/__nowaki/hmr", "http://evil.test")) === 403);
+}
+
+// Checks that hold in both modes (dev and prod share the RPC gate, WS origin checks, live
+// signatures, and default headers).
+{
   // CSRF gate for server function RPC
   const fn = `${base}/__nowaki/fn`;
   const post = (h) =>
@@ -192,15 +201,13 @@ if (mode === "dev") {
   check("RPC cross-origin rejected (403)",
     (await post({ "content-type": "application/json", "x-nowaki-rpc": "1", origin: "http://evil.test" })) === 403);
   await forwardedHostIgnored(base);
-  await serverFnHardening(base, "dev");
+  await serverFnHardening(base, mode);
   await crossSiteWritesRejected(base);
   await securityHeadersPresent(base, ["/", "/nope"]);
 
   // CSWSH (Origin check on WS upgrade)
   check("CSWSH /__nowaki/live cross-origin upgrade rejected (403)",
     (await wsUpgrade(base, "/__nowaki/live", "http://evil.test")) === 403);
-  check("CSWSH /__nowaki/hmr cross-origin upgrade rejected (403)",
-    (await wsUpgrade(base, "/__nowaki/hmr", "http://evil.test")) === 403);
   check("WS same-origin upgrade allowed (101)",
     (await wsUpgrade(base, "/__nowaki/live", base)) === 101);
 
@@ -209,9 +216,6 @@ if (mode === "dev") {
 }
 
 if (mode === "prod") {
-  await forwardedHostIgnored(base);
-  await serverFnHardening(base, "prod");
-  await crossSiteWritesRejected(base);
   // 500s never carry a stack trace (file paths, code) in production — neither the app's _500 page
   // nor the built-in fallback used when _500 itself throws.
   const stackLike = /\n\s+at |\(file:\/\/|node:internal/;

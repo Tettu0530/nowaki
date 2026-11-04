@@ -110,6 +110,8 @@ export function createFetchHandler({
     const url = new URL(request.url);
     const headers = {};
     for (const [k, v] of request.headers) headers[k.toLowerCase()] = v;
+    // Web Requests may omit Host; the same-origin checks (actions, RPC) need it, and the URL has it.
+    if (!headers.host) headers.host = url.host;
     const result = await handleRequest(env, {
       method: request.method,
       url,
