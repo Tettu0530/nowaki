@@ -12,6 +12,7 @@ import { wrapIsland } from "./island-directive.mjs";
 import { scanRoutes } from "./router.mjs";
 import { handleRequest, sendResult } from "./handler.mjs";
 import { missingSecurityHeaders } from "./security-headers.mjs";
+import { applyCsp } from "./csp.mjs";
 import { prodDocument, prodShell } from "./document.mjs";
 import { liveInitialState } from "./live.mjs";
 import { liveProps, warnIfEphemeralLiveKey } from "./live-sign.mjs";
@@ -174,7 +175,7 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
         version: "prod",
         req,
       });
-      await sendResult(res, result);
+      await sendResult(res, applyCsp(result));
     } catch (err) {
       console.error("[nowaki]", err);
       res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });

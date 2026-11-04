@@ -72,7 +72,7 @@ Safe without any configuration. Every claim is verified in CI on every push.
 - [x] Body and argument limits for server functions, `serverFn(schema, impl)` (Standard Schema), a build warning for unvalidated exports
 - [x] Less error detail exposed in prod (`ServerFnError`); hardened handling of the live signing key (warning when unset, `iat` and max lifetime)
 - [ ] CI: all checks in all modes, unit tests for the edge path, make `pnpm audit` required
-- [ ] CSP nonce support (starting with Report-Only)
+- [x] CSP nonce support (starting with Report-Only)
 
 ### v0.15 "Cyclone": Jetstream 2 ★flagship
 Make "LiveView for the npm ecosystem, with 0KB of component JS" practical. Forms and inputs, authenticated handlers, live queries that push external changes, and state shared across connections (rooms).

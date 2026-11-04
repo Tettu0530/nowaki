@@ -125,6 +125,8 @@ jobs:
         run: node scripts/static-paths-test.mjs
       - name: SSR React alias (react* in node_modules → preact/compat)
         run: node scripts/react-alias-test.mjs
+      - name: CSP nonce injection (adapters)
+        run: node scripts/csp-test.mjs
       - name: Live state signing (iat, max age, tampering)
         run: node scripts/live-sign-test.mjs
       - name: nowaki upgrade (command surface + non-app guard)
@@ -158,6 +160,11 @@ jobs:
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8241/ >/dev/null && break; sleep 1; done
           BASE=http://127.0.0.1:8241 node scripts/lazy-hydration-test.mjs
           BASE=http://127.0.0.1:8241 node scripts/router-browser-test.mjs
+          # Same pages under an enforced CSP: hydration, island CSS, and client navigation still work.
+          NOWAKI_CSP=enforce ./target/debug/nowaki start examples/hello --port 8242 &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8242/ >/dev/null && break; sleep 1; done
+          BASE=http://127.0.0.1:8242 node scripts/lazy-hydration-test.mjs
+          BASE=http://127.0.0.1:8242 node scripts/router-browser-test.mjs
 
   jetstream-load:
     name: Jetstream load (1000 connections)
