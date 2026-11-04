@@ -43,6 +43,12 @@ milestone's worth of work; the codename is noted per entry.
   process only: `nowaki dev` and the adapters don't save rooms.
 
 ### Changed
+- **The npm `nowaki` command no longer keeps a Node process running** (#91).
+  On Linux and macOS, the shim now replaces itself with the Rust binary
+  (`process.execve`, Node 22.15+ / 23.11+), so it no longer runs the binary
+  as a child process. `npx nowaki start` used to leave a ~45 MB Node
+  process running next to the server. It also forwarded signals indirectly.
+  Windows and older Node versions keep the child-process fallback.
 - **ISR pages are cached from the first request.** Right after startup,
   `nowaki start` renders every ISR page once in the background, so the first
   visitor gets a page from the Rust front instead of waiting for a render.
