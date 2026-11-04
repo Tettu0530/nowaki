@@ -83,7 +83,7 @@ Make "LiveView for the npm ecosystem, with 0KB of component JS" practical. Forms
 - [ ] Stable signing key, stale notifications, resume token (optional)
 - [x] Read request context from handlers (`getContext()`, `live.authorize`)
 - [x] Live queries (`subscribe` / `load` / `publish`, a Node→Rust event path)
-- [ ] Multiplayer rooms (`room` / `shared` / per-room presence)
+- [x] Multiplayer rooms (`room` / `shared` / per-room presence)
 - [ ] Document in the docs that it assumes a single process and does not support edge
 
 ### v0.16 "Chinook": Show it with numbers

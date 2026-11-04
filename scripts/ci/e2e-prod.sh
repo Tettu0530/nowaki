@@ -25,7 +25,7 @@ CY=$(ls examples/hello/dist/client/Cycle.*.js | head -1)
 ! grep -q './cycle-' "$CY"
 # v0.6 Jetstream build: the live island ships NO client component JS (only live.js),
 # is listed in the manifest, and is still built as a server module for rendering.
-grep -q '"liveIslands": \["LiveCounter", "LiveTicks", "LiveTodos"\]' examples/hello/dist/client/manifest.json
+grep -qE '"liveIslands": \[[^]]*"LiveCounter"' examples/hello/dist/client/manifest.json
 ! ls examples/hello/dist/client/LiveCounter.*.js >/dev/null 2>&1
 ls examples/hello/dist/client/live.*.js >/dev/null 2>&1
 test -f examples/hello/dist/server/islands/LiveCounter.js

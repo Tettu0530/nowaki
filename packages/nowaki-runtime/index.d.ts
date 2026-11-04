@@ -159,6 +159,15 @@ export interface Live<S = any> {
   subscribe?: string[] | ((state: S) => string[]);
   /** Runs on `publish(topic)` for a subscribed island; returns the new state to push. */
   load?: (state: S, info: { topic: string }) => S | Promise<S>;
+  /**
+   * Makes this a room island: every instance with the same room id (1-120 characters, no
+   * whitespace) shares one state, `shared()`. Handlers then receive and return the shared state,
+   * and every member gets the new HTML. Held in the server process's memory (`nowaki dev` /
+   * `nowaki start`); not shared across instances, and lost on restart.
+   */
+  room?: (props: any) => string;
+  /** Initial shared state of a room (`live.room`). */
+  shared?: (props?: any) => S;
 }
 
 /**

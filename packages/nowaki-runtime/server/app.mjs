@@ -14,7 +14,7 @@ import { handleRequest, sendResult } from "./handler.mjs";
 import { missingSecurityHeaders } from "./security-headers.mjs";
 import { applyCsp } from "./csp.mjs";
 import { prodDocument, prodShell } from "./document.mjs";
-import { liveInitialState, liveRender, liveTopics } from "./live.mjs";
+import { liveInitialState, liveRender, liveTopics, liveView } from "./live.mjs";
 import { liveProps, warnIfEphemeralLiveKey } from "./live-sign.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
@@ -105,7 +105,7 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
           return h(
             "nowaki-live",
             liveProps(info.name, nid, state, liveTopics(info.mod, state)),
-            h(Original, { state, __nowakiLiveInner: true }),
+            h(Original, { state: liveView(info.mod, state), __nowakiLiveInner: true }),
           );
         };
       } else if (registry.has(vnode.type)) {
