@@ -25,6 +25,14 @@ since `nowaki build` alone writes no HTML.
 
 ## Head-to-head: Nowaki vs Next.js vs Astro
 
+> **Known issues with this table.** Its build column times `nowaki build`, which writes no
+> HTML, against Astro and Next.js builds that prerender `/`; with prerendering, Nowaki's build of
+> this app takes about 200 ms, not 20 ms. Its first-load JS for Astro sums every `.js` file in
+> the output, including a Preact signals chunk the page never loads, and leaves out inline
+> scripts. Measured in the browser, Astro ships less JavaScript than Nowaki. Use
+> [`benchmarks/compare`](./benchmarks/compare/README.md) for the comparison; this table stays
+> because the weekly job still prints it.
+
 The same minimal app — one server-rendered page with a single interactive
 counter island (Preact for Nowaki *and* Astro, so the UI library is equal) —
 built and booted on one machine. Versions: Next.js 16.4, Astro 7.4, Nowaki at

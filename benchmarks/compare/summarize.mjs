@@ -63,12 +63,17 @@ for (const fw of ORDER) {
         if (r.at > measured) [measured, machine] = [r.at, r.machine];
       }
     }
-    for (const page of ["/", "post"]) {
-      const b = latest(browser.filter((r) => r.framework === fw && scaleKey(r) === scale && r.page === page)).at(-1);
-      if (b) {
-        const { jsKB, jsFileKB, inlineKB, idleKB, totalKB, byTypeKB, requests, jsFiles, hydrated } = b;
-        cell[page === "/" ? "home" : "post"] = { jsKB, jsFileKB, inlineKB, idleKB, totalKB, byTypeKB, requests, jsFiles, hydrated };
-      }
+    // Post-page rows are matched to `/` through their series: rows written before the browser
+    // result's island count was renamed to islandsOnPage carry islands = 0 there.
+    const home = latest(browser.filter((r) => r.framework === fw && scaleKey(r) === scale && r.page === "/")).at(-1);
+    const post = home && browser.filter((r) => r.framework === fw && r.series === home.series && r.page === "post").at(-1);
+    for (const [key, b] of [
+      ["home", home],
+      ["post", post],
+    ]) {
+      if (!b) continue;
+      const { jsKB, jsFileKB, inlineKB, idleKB, totalKB, byTypeKB, requests, jsFiles, hydrated } = b;
+      cell[key] = { jsKB, jsFileKB, inlineKB, idleKB, totalKB, byTypeKB, requests, jsFiles, hydrated };
     }
   }
   // Scaling fits from the medians.

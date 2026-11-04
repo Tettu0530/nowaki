@@ -114,7 +114,7 @@ export async function measure(url, { idleJs } = {}) {
       requests: responses.size,
       jsFiles: files.length,
       files,
-      islands: page.islands,
+      islandsOnPage: page.islands,
       hydrated: page.hydrated,
       marker: page.marker,
     };

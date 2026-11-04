@@ -90,6 +90,16 @@ dominate build time), HMR, production throughput and Web Vitals. Those are the n
 - **Machine.** On power, Low Power Mode off, other heavy work stopped, ideally under
   `caffeinate -i`. When ranges overlap, read it as "no measurable difference".
 
+## Results
+
+The latest tables are in [`results/summary.md`](./results/summary.md) (and `results/summary.json`
+for the site); every run is in `results/runs.jsonl` and `results/browser.jsonl`.
+
+The 2026-11-04 rows record the harness as `0e830db+dirty`: the dirty check counted the
+uncommitted `results/` directory itself; the measuring code was `0e830db` unchanged. The `1×1`
+series of Nowaki, Astro and SvelteKit were measured again after the sweep because another job
+was busy on the machine during their first series; the summary uses the latest series.
+
 ## Run
 
 ```sh

@@ -59,7 +59,7 @@ const env = { ...process.env, ...fw.env, FORCE_COLOR: "0", NO_COLOR: "1", CI: "1
 const clean = () => fw.caches.forEach((c) => rmSync(path.join(dir, c), { recursive: true, force: true }));
 const machine = `${os.cpus()[0].model}, ${os.cpus().length} cores, ${Math.round(os.totalmem() / 2 ** 30)} GB, ${os.platform()} ${os.release()}, node ${process.version}`;
 const git = (args) => spawnSync("git", args, { cwd: HERE, encoding: "utf8" }).stdout.trim();
-const commit = `${git(["rev-parse", "--short", "HEAD"])}${git(["status", "--porcelain", "--", "."]) ? "+dirty" : ""}`;
+const commit = `${git(["rev-parse", "--short", "HEAD"])}${git(["status", "--porcelain", "--", ".", ":!results"]) ? "+dirty" : ""}`;
 const series = new Date().toISOString();
 const oldestSlug = posts(pages).at(-1).slug;
 
@@ -191,7 +191,7 @@ if (only.has("static")) {
       if (b.marker !== marker) throw new Error(`${fw.label}: ${url} rendered without its marker`);
       if (page === "/" && b.hydrated !== islands) throw new Error(`${fw.label}: ${b.hydrated}/${islands} islands hydrated`);
       record("browser.jsonl", { page, ...b });
-      console.log(`  browser ${url}: JS ${b.jsKB} KB gzip (${b.jsFiles} files + ${b.inlineScripts} inline, ${b.idleKB} KB idle) · total ${b.totalKB} KB · ${b.requests} requests · hydrated ${b.hydrated}/${b.islands}`);
+      console.log(`  browser ${url}: JS ${b.jsKB} KB gzip (${b.jsFiles} files + ${b.inlineScripts} inline, ${b.idleKB} KB idle) · total ${b.totalKB} KB · ${b.requests} requests · hydrated ${b.hydrated}/${b.islandsOnPage}`);
     }
   } finally {
     server.close();
