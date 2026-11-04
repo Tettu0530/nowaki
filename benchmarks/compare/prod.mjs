@@ -1,5 +1,5 @@
 // Production server benchmark: each framework's own Node server for the server-mode build.
-// Usage: node benchmarks/compare/prod.mjs <framework> [--pages 100] [--islands 1] [--runs 3]
+// Usage: node benchmarks/compare/prod.mjs <framework> [--pages 100] [--islands 1] [--runs 3] [--isr]
 //        [--label name] [--env KEY=VALUE,...]
 // Needs `oha` (https://github.com/hatoo/oha) for the throughput step.
 //
@@ -11,7 +11,8 @@
 //                post pages (random slug per request) and `/`; req/s, p50 / p99, non-2xx count
 //   memory       RSS of the server's whole process tree (MB): idle after the warm-up, and the
 //                peak sampled every 100 ms during the post-page throughput step
-// Pages are rendered per request: no ISR or page cache is enabled in any framework.
+// Pages are rendered per request (no ISR or page cache), unless --isr: then post pages use the
+// framework's own ISR, revalidated every 60 s (Nowaki, Next.js, Nuxt; Astro and SvelteKit have none).
 
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -44,7 +45,8 @@ if (!fw) {
 const pages = Number(arg("pages", 100));
 const islands = Number(arg("islands", 1));
 const RUNS = Number(arg("runs", 3));
-const label = arg("label", fwName);
+const isr = process.argv.includes("--isr");
+const label = arg("label", isr ? `${fwName}+isr` : fwName);
 const extraEnv = Object.fromEntries(
   (arg("env", "") || "")
     .split(",")
@@ -103,7 +105,7 @@ mkdirSync(RESULTS, { recursive: true });
 const record = (row) =>
   appendFileSync(
     path.join(RESULTS, "prod.jsonl"),
-    `${JSON.stringify({ framework: fwName, label, fwLabel: fw.label, version, pages, islands, env: extraEnv, ...row, series, at: new Date().toISOString(), machine, commit, oha: ohaVersion })}\n`,
+    `${JSON.stringify({ framework: fwName, label, fwLabel: fw.label, version, pages, islands, env: extraEnv, isr, ...row, series, at: new Date().toISOString(), machine, commit, oha: ohaVersion })}\n`,
   );
 
 function rssTreeMB(pgid) {
@@ -202,7 +204,7 @@ async function ohaWithPeak(pgid, url, opts) {
 }
 
 console.log(`${label}: ${fw.label} ${version} · ${pages} pages · ${islands} islands · ${RUNS} runs · ${machine} · ${commit}`);
-generate(fwName, { pages, islands, mode: "server" });
+generate(fwName, { pages, islands, mode: "server", isr });
 for (const c of fw.caches) spawnSync("rm", ["-rf", path.join(dir, c)]);
 const build = spawnSync(bin, fw.serverBuild, { cwd: dir, env: { ...env, NODE_ENV: "production" }, encoding: "utf8", maxBuffer: 256 << 20 });
 if (build.status !== 0) {

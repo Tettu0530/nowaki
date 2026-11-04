@@ -114,6 +114,7 @@ for (const lab of [...new Set(prodRows.map((r) => r.label))]) {
     label: r0.fwLabel,
     version: r0.version,
     env: r0.env,
+    isr: Boolean(r0.isr),
     pages: r0.pages,
     islands: r0.islands,
     runs: rows.length,
@@ -188,7 +189,8 @@ if (Object.keys(prod).length) {
     "|---|---|---|---|---|---|---|",
   );
   for (const p of Object.values(prod)) {
-    const name = `${p.label} ${p.version}${Object.keys(p.env ?? {}).length ? ` (${Object.entries(p.env).map(([k, v]) => `${k}=${v}`).join(" ")})` : ""}`;
+    const notes = [...Object.entries(p.env ?? {}).map(([k, v]) => `${k}=${v}`), ...(p.isr ? ["ISR on post pages, 60 s"] : [])];
+    const name = `${p.label} ${p.version}${notes.length ? ` (${notes.join(", ")})` : ""}`;
     md.push(`| ${name} | ${p.startMs} | ${p.idleMB} | ${p.peakMB} | ${p.ttfbP50} / ${p.ttfbP99} | ${p.postRps} (${p.postP99}) | ${p.homeRps} (${p.homeP99}) |`);
   }
 }
