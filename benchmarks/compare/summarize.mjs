@@ -183,7 +183,7 @@ if (Object.keys(prod).length) {
   const p0 = Object.values(prod)[0];
   md.push(
     "",
-    `### Production servers — ${p0.pages} pages × ${p0.islands} island, rendered per request, median of runs`,
+    `### Production servers — ${p0.pages} pages × ${p0.islands} island, rendered per request unless noted, median of runs`,
     "",
     "| server | start (ms) | idle RSS (MB) | peak RSS (MB) | TTFB p50 / p99 (ms, 1 conn) | post pages req/s (p99 ms, 50 conns) | `/` req/s (p99 ms, 50 conns) |",
     "|---|---|---|---|---|---|---|",
