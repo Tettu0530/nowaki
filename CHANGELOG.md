@@ -10,6 +10,14 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **Jetstream request context:** live handlers can call `getContext()` to read
+  the cookies and `authorization` / `accept-language` / `user-agent` headers of
+  the WebSocket upgrade, and `live.authorize({ name, handler, state, payload })`
+  runs before each handler (after the signature check); anything but `true`
+  refuses the event with `{ type: "error", reason: "forbidden" }`. Cookies set
+  after the socket opened are seen after the next reconnect.
+
 ## [0.14.0] — 2026-11-04 · "Gale" (and "Zephyr" complete)
 
 Packages: `nowaki` / `nowaki-core` 0.14.0 (crates.io, npm), `@nowaki-dev/runtime`

@@ -120,5 +120,31 @@ check(seen.filter((m) => m.type === "patch").length === 2 && Boolean(last), "eve
 d.close();
 e.close();
 
+// Request context: handlers see the upgrade request's cookies via getContext(), and
+// `live.authorize` refuses adminReset unless the role cookie is admin.
+const withCookie = (cookie) =>
+  new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsUrl, { headers: { cookie } });
+    ws.addEventListener("open", () => resolve(ws));
+    ws.addEventListener("error", reject);
+  });
+const u = await withCookie("user=alice");
+await recvUntil(u, (m) => m.type === "presence");
+u.send(JSON.stringify({ type: "join", islands: [{ nid, name: "LiveCounter", state, sig }] }));
+u.send(JSON.stringify({ type: "event", nid, handler: "greet" }));
+const greeted = await recvUntil(u, (m) => m.type === "patch" && m.nid === nid);
+check(/hi\s*alice/.test(greeted.html), "handler reads the cookie through getContext() (hi alice)");
+u.send(JSON.stringify({ type: "event", nid, handler: "adminReset" }));
+const denied = await recvUntil(u, (m) => m.type === "error" && m.nid === nid);
+check(denied.reason === "forbidden", `live.authorize refuses adminReset without the role (reason=${denied.reason})`);
+u.close();
+const admin = await withCookie("role=admin");
+await recvUntil(admin, (m) => m.type === "presence");
+admin.send(JSON.stringify({ type: "join", islands: [{ nid, name: "LiveCounter", state: greeted.state, sig: greeted.sig }] }));
+admin.send(JSON.stringify({ type: "event", nid, handler: "adminReset" }));
+const reset = await recvUntil(admin, (m) => m.type === "patch" && m.nid === nid);
+check(/live:\s*0/.test(reset.html), "live.authorize allows adminReset with role=admin (live: 0)");
+admin.close();
+
 console.log(failed ? "\nLIVETEST FAILED" : "\nLIVETEST PASSED");
 process.exit(failed ? 1 : 0);

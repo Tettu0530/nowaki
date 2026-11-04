@@ -189,7 +189,8 @@ async fn live_ws(
     let port = state.sidecar_port;
     let version = state.ssr_version.load(Ordering::SeqCst).to_string();
     let hub = state.live_hub.clone();
-    ws.on_upgrade(move |socket| crate::live::handle(socket, hub, http, port, version))
+    let request = crate::live::context_headers(&headers);
+    ws.on_upgrade(move |socket| crate::live::handle(socket, hub, http, port, version, request))
 }
 
 async fn handle_hmr(mut socket: WebSocket, state: Arc<DevState>) {
