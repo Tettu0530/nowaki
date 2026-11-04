@@ -22,7 +22,20 @@ const homeHtml = await home.text();
 check("page renders with islands (200)", home.status === 200 && homeHtml.includes("nowaki-island"));
 check("page has the default security headers", secure(home));
 const live = await req("/live");
-check("live island renders its initial state", live.status === 200 && /live:\s*0/.test(await live.text()));
+const liveHtml = await live.text();
+check("live island renders its initial state", live.status === 200 && /live:\s*0/.test(liveHtml));
+check("live page ships live.js in POST mode", /<script[^>]*\/_nowaki\/live\.[0-9a-f]+\.js"[^>]*data-live-transport="post"/.test(liveHtml));
+const liveTag = liveHtml.match(/<nowaki-live\b[^>]*>/)?.[0] ?? "";
+const liveAttr = (n) => liveTag.match(new RegExp(`${n}="([^"]*)"`))?.[1];
+const liveEv = (body, h = {}) =>
+  req("/__nowaki/live-event", { method: "POST", headers: { "content-type": "application/json", "x-nowaki-live": "1", ...h }, body: JSON.stringify(body) });
+const ev = { name: "LiveCounter", state: { count: 0 }, sig: liveAttr("sig"), handler: "inc" };
+const inc = await liveEv(ev, { origin: ORIGIN });
+const incBody = inc.status === 200 ? await inc.json() : {};
+check("live-event inc → live: 1 with a new signature",
+  /live:\s*1/.test(incBody.html ?? "") && incBody.state?.count === 1 && /^v1\./.test(incBody.sig ?? "") && incBody.sig !== ev.sig);
+check("live-event cross-site rejected (403)", (await liveEv(ev, { origin: "https://evil.test" })).status === 403);
+check("live-event forged signature rejected (403)", (await liveEv({ ...ev, sig: "FORGED" })).status === 403);
 const api = await req("/api/hello");
 check("API route returns JSON", api.status === 200 && (await api.json()).hello === "nowaki");
 check("unknown path is 404", (await req("/nope")).status === 404);

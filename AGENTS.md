@@ -100,6 +100,7 @@ code locations and CI coverage.
   `functions.mjs` aligned with `dist/server/functions.json`.
 - **Do not weaken default CSRF / CSWSH gates** without an explicit opt-in API and
   ROADMAP/SECURITY updates: JSON + `x-nowaki-rpc` + Origin/Host for RPC;
+  JSON + `x-nowaki-live` + `isCrossSite` for `/__nowaki/live-event`;
   Origin checks on `/__nowaki/live` and `/__nowaki/hmr` upgrades.
 - **Server function errors stay generic in production.** Only a `ServerFnError`'s
   status, message, and `data` reach the client; anything else is logged and sent
@@ -125,16 +126,21 @@ code locations and CI coverage.
 - **Internal sidecar endpoints stay internal.** Anything the sidecar trusts
   without checks (today `/__nowaki/live-render`) must be listed in
   `forward::is_internal_path`, so dev/start return 404 instead of proxying it.
+- **`publish()` has no network endpoint.** The sidecar reaches the Rust hub only
+  through its stdout with `NOWAKI_PUBLISH_TOKEN`; keep it that way, and keep the
+  topic caps in `live.rs` and `live.mjs` in step.
 - **Sidecar requests go through `forward::apply`** (`crates/nowaki/src/forward.rs`).
   Clients never set `x-forwarded-*` or internal `x-nowaki-*` headers on the
   sidecar hop unless `NOWAKI_TRUST_PROXY` is set; new client-facing `x-nowaki-*`
   request headers must be added to its allowlist. Adapter runtimes (Node/Edge)
   apply the same host trust in `server/origin.mjs` (`browserHost`) for CSRF
-  checks — when `Host` and `x-forwarded-host` disagree, pick using `Origin` so
-  sidecar hops stay correct and forged forwarded headers cannot bypass adapters.
+  checks — `NOWAKI_TRUST_PROXY`, loopback sidecar `Host`, Vercel `x-forwarded-host`,
+  otherwise `Host`; do not derive the comparison host from `Origin`.
 - **Client-supplied Jetstream state is used only after its signature verifies**
   (`live.mjs` checks before every render and handler run); do not skip or bypass
-  that path.
+  that path. The POST transport (`server/live-event.mjs`, `/__nowaki/live-event`)
+  goes through the same `liveRender` and keeps the RPC-style CSRF gate (JSON +
+  `x-nowaki-live` + `isCrossSite`) and its 64 KiB body cap ahead of parsing.
 - **ISR keys must include learned `Vary` inputs** (`context.mjs` `__vary()` →
   `x-nowaki-vary`, folded in `isr_key` in `start.rs`) so cached pages cannot
   bleed across users. The query string is part of the key only when the route reads
@@ -154,7 +160,10 @@ code locations and CI coverage.
   (detect, id, client proxy, discover) + `packages/nowaki-runtime/server/functions.mjs`
   (dispatch + `getContext`). Allowlist: `dist/server/functions.json`.
 - **Jetstream islands** — `crates/nowaki/src/live.rs` (`LiveHub` + WS session),
-  `server/live.mjs`, `client/live.js`. State on the server, HTML patches over WS.
+  `server/live.mjs`, `client/live.js`. State on the server, HTML patches over WS;
+  `server/live-event.mjs` is the per-event POST transport (all servers, the only
+  one on the adapters). `server/live-hub.mjs` is a runtime-neutral JS port of the
+  WS session, not wired into a server yet.
 - **Plugins / virtual modules** — `PluginBridge` (`transform`, `compile_tsrx`,
   `resolve_id`, `load`); `NowakiCore::resolve_spec` + the `VirtualResolve` trait.
 - **Scope hoisting / chunking** — `crates/nowaki-core/src/chunk.rs`.

@@ -10,10 +10,11 @@ const check = (label, cond) => {
 const hdr = (map) => (name) => map[name.toLowerCase()];
 
 delete process.env.NOWAKI_TRUST_PROXY;
+delete process.env.VERCEL;
 check("trustProxy defaults false", !trustProxy());
 
 check(
-  "browserHost ignores client x-forwarded-host without trust",
+  "browserHost ignores client x-forwarded-host on adapters",
   browserHost(hdr({ host: "app.example", "x-forwarded-host": "evil.test" })) === "app.example",
 );
 
@@ -45,25 +46,13 @@ check(
 );
 
 check(
-  "sidecar hop: Origin matches x-forwarded-host, not connection Host",
+  "browserHost uses x-forwarded-host when connection Host is loopback",
   browserHost(
     hdr({
-      origin: "http://127.0.0.1:3300",
       host: "127.0.0.1:3301",
       "x-forwarded-host": "127.0.0.1:3300",
     }),
   ) === "127.0.0.1:3300",
-);
-
-check(
-  "adapter spoof: cross-site Origin cannot match via x-forwarded-host alone",
-  browserHost(
-    hdr({
-      origin: "https://evil.test",
-      host: "app.example",
-      "x-forwarded-host": "evil.test",
-    }),
-  ) === "app.example",
 );
 
 check(
@@ -75,6 +64,15 @@ check(
     }),
   ),
 );
+
+process.env.VERCEL = "1";
+check(
+  "browserHost uses Vercel edge x-forwarded-host for the public hostname",
+  browserHost(
+    hdr({ host: "my-app.vercel.app", "x-forwarded-host": "www.example.com" }),
+  ) === "www.example.com",
+);
+delete process.env.VERCEL;
 
 process.env.NOWAKI_TRUST_PROXY = "1";
 check("trustProxy reads env", trustProxy());

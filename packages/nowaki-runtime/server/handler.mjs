@@ -7,8 +7,9 @@ import { renderToReadableStream } from "preact-render-to-string/stream";
 
 import { matchRoute } from "./router.mjs";
 import { makeContext } from "./context.mjs";
-import { dispatchServerFn, SERVER_FN_PATH } from "./functions.mjs";
+import { dispatchServerFn, runWithContext, SERVER_FN_PATH } from "./functions.mjs";
 import { isCrossSite } from "./origin.mjs";
+import { dispatchLiveEvent, LIVE_EVENT_PATH } from "./live-event.mjs";
 
 // Internal path the client router fetches loading/error boundary HTML from, once.
 export const BOUNDARIES_PATH = "/__nowaki/boundaries";
@@ -31,6 +32,7 @@ const JSON_CT = { "content-type": "application/json; charset=utf-8" };
 ///   ensureIslands(version) -> prepares the island registry (call before rendering)
 ///   renderDocument({ mod, body }) -> final HTML string
 ///   renderError(err) -> { status, headers, body } (500 page differs between dev/prod)
+///   live (optional) -> { lookup(name, version), render } for POST /__nowaki/live-event
 export async function handleRequest(env, info) {
   const { method, url, version } = info;
   const table = await env.routeTable(version);
@@ -40,6 +42,10 @@ export async function handleRequest(env, info) {
   // Handle server function RPC before routing.
   if (env.serverFunctions && url.pathname === SERVER_FN_PATH) {
     return finalize(ctx, await dispatchServerFn(ctx, info, env.serverFunctions, { dev: env.dev === true }));
+  }
+  if (env.live && url.pathname === LIVE_EVENT_PATH) {
+    // The event runs with this request as getContext() (handlers and live.authorize see its cookies).
+    return finalize(ctx, await runWithContext(ctx, () => dispatchLiveEvent(ctx, info, env.live)));
   }
 
   if (method === "GET" && url.pathname === BOUNDARIES_PATH) {

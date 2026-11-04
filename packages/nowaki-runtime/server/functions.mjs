@@ -55,9 +55,8 @@ export async function dispatchServerFn(ctx, info, sf, { dev = false } = {}) {
   if (ctx.get("x-nowaki-rpc") !== "1") {
     return errBody(403, "Forbidden");
   }
-  // Same host resolution as page actions (`origin.mjs` / Rust `forward.rs`). Prefer `Host` when
-  // present so adapter clients cannot spoof `x-forwarded-host`; fall back to `x-forwarded-host`
-  // on the sidecar hop where the Rust front strips `Host`.
+  // Same host resolution as page actions (`origin.mjs` / Rust `forward.rs`): trusted proxy,
+  // loopback sidecar hop, Vercel edge host, else `Host` (see `browserHost`).
   const origin = ctx.get("origin");
   const host = browserHost((name) => ctx.get(name));
   if (origin && !sameOrigin(origin, host)) {

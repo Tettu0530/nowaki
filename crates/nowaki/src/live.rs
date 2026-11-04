@@ -30,13 +30,57 @@ fn render_timeout() -> Duration {
     Duration::from_millis(ms)
 }
 
-/// nid -> (island name, current state, state signature)
-type Islands = HashMap<String, (String, Value, String)>;
+/// nid -> (island name, current state, state signature, subscribed topics)
+type Islands = HashMap<String, (String, Value, String, Vec<String>)>;
+
+/// Topics an island listens to (`live.subscribe`), capped so a client can't make one huge list.
+const MAX_TOPICS: usize = 16;
+const MAX_TOPIC_LEN: usize = 128;
+
+pub fn parse_topics(v: Option<&Value>) -> Vec<String> {
+    let Some(arr) = v.and_then(|t| t.as_array()) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|t| t.as_str())
+        .filter(|t| !t.is_empty() && t.len() <= MAX_TOPIC_LEN)
+        .take(MAX_TOPICS)
+        .map(str::to_string)
+        .collect()
+}
+
+/// Random per process; only the sidecars Nowaki spawned get it (NOWAKI_PUBLISH_TOKEN), so a log
+/// line can't be mistaken for a publish.
+pub fn publish_token() -> &'static str {
+    static TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TOKEN.get_or_init(crate::csp::new_nonce)
+}
+
+/// Called for every sidecar stdout line. `NOWAKI_PUBLISH <token> <topic>` is a `publish(topic)`
+/// from server code (consumed, returns true); anything else is a log line.
+pub fn handle_sidecar_line(hub: &LiveHub, line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("NOWAKI_PUBLISH ") else {
+        return false;
+    };
+    let Some((token, topic)) = rest.split_once(' ') else {
+        return false;
+    };
+    if token != publish_token() {
+        return false;
+    }
+    let topic = topic.trim();
+    if !topic.is_empty() && topic.len() <= MAX_TOPIC_LEN {
+        let _ = hub.topics.send(topic.to_string());
+    }
+    true
+}
 
 struct PendingEvent {
     nid: String,
     handler: Value,
     payload: Value,
+    /// A `publish(topic)` refresh: runs `live.load` instead of a handler.
+    load: Option<String>,
 }
 
 /// FIFO of events behind the in-flight render, capped at `max`.
@@ -65,6 +109,11 @@ impl EventQueue {
     fn pop(&mut self) -> Option<PendingEvent> {
         self.items.pop_front()
     }
+
+    /// A refresh already waiting for this island covers another publish.
+    fn has_load(&self, nid: &str) -> bool {
+        self.items.iter().any(|e| e.load.is_some() && e.nid == nid)
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -84,10 +133,18 @@ impl RenderError {
     }
 }
 
+struct RenderOk {
+    html: String,
+    state: Option<Value>,
+    sig: String,
+    /// Present when the render reported the island's topics (`live.subscribe`).
+    topics: Option<Vec<String>>,
+}
+
 struct Rendered {
     nid: String,
     name: String,
-    result: Result<(String, Option<Value>, String), RenderError>,
+    result: Result<RenderOk, RenderError>,
 }
 
 /// Hub for all connections. Enforces the concurrent connection cap and broadcasts presence (connection count).
@@ -95,6 +152,11 @@ pub struct LiveHub {
     active: AtomicUsize,
     max: usize,
     presence: broadcast::Sender<usize>,
+    /// `publish(topic)` from the sidecar, fanned out to every session in this process.
+    topics: broadcast::Sender<String>,
+    /// Connections per room (sessions with an island subscribed to `room:<id>`), and its changes.
+    rooms: std::sync::Mutex<HashMap<String, usize>>,
+    room_presence: broadcast::Sender<(String, usize)>,
 }
 
 impl LiveHub {
@@ -105,10 +167,15 @@ impl LiveHub {
             .filter(|&n| n > 0)
             .unwrap_or(10_000);
         let (presence, _) = broadcast::channel(64);
+        let (topics, _) = broadcast::channel(256);
+        let (room_presence, _) = broadcast::channel(256);
         Arc::new(Self {
             active: AtomicUsize::new(0),
             max,
             presence,
+            topics,
+            rooms: std::sync::Mutex::new(HashMap::new()),
+            room_presence,
         })
     }
 
@@ -132,6 +199,56 @@ impl LiveHub {
     fn count(&self) -> usize {
         self.active.load(Ordering::SeqCst)
     }
+
+    fn room_enter(&self, room: &str) {
+        let n = {
+            let mut m = self.rooms.lock().unwrap();
+            let c = m.entry(room.to_string()).or_insert(0);
+            *c += 1;
+            *c
+        };
+        let _ = self.room_presence.send((room.to_string(), n));
+    }
+
+    fn room_exit(&self, room: &str) {
+        let n = {
+            let mut m = self.rooms.lock().unwrap();
+            let Some(c) = m.get_mut(room) else { return };
+            *c = c.saturating_sub(1);
+            let n = *c;
+            if n == 0 {
+                m.remove(room);
+            }
+            n
+        };
+        let _ = self.room_presence.send((room.to_string(), n));
+    }
+
+    fn room_count(&self, room: &str) -> usize {
+        self.rooms.lock().unwrap().get(room).copied().unwrap_or(0)
+    }
+}
+
+/// Rooms this session is in: its islands' `room:<id>` topics.
+fn rooms_of(islands: &Islands) -> std::collections::HashSet<String> {
+    islands
+        .values()
+        .flat_map(|(_, _, _, topics)| topics.iter())
+        .filter_map(|t| t.strip_prefix("room:"))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Enter rooms the session joined and leave the ones it no longer has an island in.
+fn sync_rooms(hub: &LiveHub, mine: &mut std::collections::HashSet<String>, islands: &Islands) {
+    let now = rooms_of(islands);
+    for r in mine.difference(&now) {
+        hub.room_exit(r);
+    }
+    for r in now.difference(mine) {
+        hub.room_enter(r);
+    }
+    *mine = now;
 }
 
 /// Upgrade request headers live handlers may read through getContext(). Captured once per
@@ -178,6 +295,9 @@ pub async fn handle(
     };
 
     let mut presence_rx = hub.presence.subscribe();
+    let mut topic_rx = hub.topics.subscribe();
+    let mut room_rx = hub.room_presence.subscribe();
+    let mut my_rooms = std::collections::HashSet::new();
     let _ = socket
         .send(Message::Text(
             json!({ "type": "presence", "count": count })
@@ -211,6 +331,7 @@ pub async fn handle(
                             break;
                         }
                     }
+                    sync_rooms(&hub, &mut my_rooms, &islands);
                 }
                 // Ping/Pong/Binary/Close only update last_seen (Close makes recv return None).
             }
@@ -219,6 +340,39 @@ pub async fn handle(
                 let Ok(r) = done else { continue };
                 if !apply_rendered(&mut socket, &mut islands, r).await {
                     break;
+                }
+                sync_rooms(&hub, &mut my_rooms, &islands);
+            }
+            t = topic_rx.recv() => {
+                let topic = match t {
+                    Ok(t) => t,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
+                for (nid, (_, _, _, topics)) in &islands {
+                    if topics.contains(&topic) && !queue.has_load(nid) {
+                        // A full queue drops the refresh; the next publish or event catches up.
+                        let _ = queue.push(PendingEvent {
+                            nid: nid.clone(),
+                            handler: Value::Null,
+                            payload: Value::Null,
+                            load: Some(topic.clone()),
+                        });
+                    }
+                }
+            }
+            rp = room_rx.recv() => {
+                let (room, n) = match rp {
+                    Ok(v) => v,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
+                if my_rooms.contains(&room) {
+                    let n = if n == 0 { hub.room_count(&room) } else { n };
+                    let msg = json!({ "type": "presence", "room": room, "count": n });
+                    if socket.send(Message::Text(msg.to_string().into())).await.is_err() {
+                        break;
+                    }
                 }
             }
             p = presence_rx.recv() => {
@@ -242,7 +396,7 @@ pub async fn handle(
         }
         if inflight.is_none() {
             while let Some(ev) = queue.pop() {
-                if let Some((name, st, sig)) = islands.get(&ev.nid).cloned() {
+                if let Some((name, st, sig, _)) = islands.get(&ev.nid).cloned() {
                     inflight = Some(tokio::spawn(render(ctx.clone(), ev, name, st, sig)));
                     break;
                 }
@@ -252,6 +406,9 @@ pub async fn handle(
 
     if let Some(h) = inflight {
         h.abort();
+    }
+    for r in &my_rooms {
+        hub.room_exit(r);
     }
     hub.leave();
 }
@@ -288,7 +445,8 @@ fn handle_text(islands: &mut Islands, txt: &str) -> Option<PendingEvent> {
                         .and_then(|x| x.as_str())
                         .unwrap_or("")
                         .to_string();
-                    islands.insert(nid.to_string(), (name, st, sig));
+                    let topics = parse_topics(it.get("topics"));
+                    islands.insert(nid.to_string(), (name, st, sig, topics));
                 }
             }
             None
@@ -302,6 +460,7 @@ fn handle_text(islands: &mut Islands, txt: &str) -> Option<PendingEvent> {
                 nid: nid.to_string(),
                 handler: v.get("handler").cloned().unwrap_or(Value::Null),
                 payload: v.get("payload").cloned().unwrap_or(Value::Null),
+                load: None,
             })
         }
         _ => None,
@@ -323,6 +482,7 @@ async fn render(
         "payload": ev.payload,
         "version": ctx.version,
         "request": *ctx.request,
+        "load": ev.load.as_ref().map(|topic| json!({ "topic": topic })),
     });
     let url = format!("http://127.0.0.1:{}/__nowaki/live-render", ctx.sidecar_port);
     let call = async {
@@ -350,7 +510,13 @@ async fn render(
             .and_then(|x| x.as_str())
             .unwrap_or("")
             .to_string();
-        Ok((html, rv.get("state").cloned(), nsig))
+        let topics = rv.get("topics").map(|t| parse_topics(Some(t)));
+        Ok(RenderOk {
+            html,
+            state: rv.get("state").cloned(),
+            sig: nsig,
+            topics,
+        })
     };
     let result = match tokio::time::timeout(ctx.timeout, call).await {
         Ok(r) => r,
@@ -366,7 +532,12 @@ async fn render(
 /// Store the new state and push the patch, or tell the client the event failed.
 /// false when the socket is gone.
 async fn apply_rendered(socket: &mut WebSocket, islands: &mut Islands, r: Rendered) -> bool {
-    let (html, new_state, nsig) = match r.result {
+    let RenderOk {
+        html,
+        state: new_state,
+        sig: nsig,
+        topics,
+    } = match r.result {
         Ok(v) => v,
         Err(e) => {
             eprintln!("[nowaki live] {} re-render {}", r.name, e.reason());
@@ -375,9 +546,12 @@ async fn apply_rendered(socket: &mut WebSocket, islands: &mut Islands, r: Render
     };
     // Keep the new signature too so the next event can be verified.
     if let Some(ns) = new_state {
-        islands.insert(r.nid.clone(), (r.name, ns, nsig));
+        let topics = topics
+            .or_else(|| islands.get(&r.nid).map(|e| e.3.clone()))
+            .unwrap_or_default();
+        islands.insert(r.nid.clone(), (r.name, ns, nsig, topics));
     }
-    let Some((_, st, sig)) = islands.get(&r.nid) else {
+    let Some((_, st, sig, _)) = islands.get(&r.nid) else {
         return true;
     };
     // The client stores state+sig on the element so a re-join after a reconnect resumes here.
@@ -405,6 +579,7 @@ mod tests {
             nid: nid.into(),
             handler: json!("inc"),
             payload: Value::Null,
+            load: None,
         }
     }
 
@@ -468,5 +643,58 @@ mod tests {
         assert_eq!(m["x-forwarded-host"], "app.example");
         assert_eq!(m["x-forwarded-proto"], "http");
         assert!(!m.contains_key("x-nowaki-page") && !m.contains_key("sec-websocket-key"));
+    }
+
+    #[test]
+    fn topics_are_capped_and_sidecar_lines_need_the_token() {
+        let many: Vec<Value> = (0..40).map(|i| json!(format!("t{i}"))).collect();
+        assert_eq!(parse_topics(Some(&Value::Array(many))).len(), MAX_TOPICS);
+        assert!(parse_topics(Some(&json!(["", "x".repeat(200), "ok"]))).eq(&vec!["ok".to_string()]));
+
+        let hub = LiveHub::new();
+        let mut rx = hub.topics.subscribe();
+        assert!(!handle_sidecar_line(&hub, "hello"));
+        assert!(!handle_sidecar_line(&hub, "NOWAKI_PUBLISH wrong todos"));
+        assert!(handle_sidecar_line(
+            &hub,
+            &format!("NOWAKI_PUBLISH {} todos", publish_token())
+        ));
+        assert_eq!(rx.try_recv().ok().as_deref(), Some("todos"));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_queued_refresh_covers_later_publishes() {
+        let mut q = EventQueue::new(4);
+        let mut refresh = ev("L0");
+        refresh.load = Some("todos".into());
+        q.push(refresh).unwrap();
+        assert!(q.has_load("L0"));
+        assert!(!q.has_load("L1"));
+    }
+
+    #[test]
+    fn room_presence_counts_sessions_per_room() {
+        let hub = LiveHub::new();
+        let mut rx = hub.room_presence.subscribe();
+        let mut islands = Islands::new();
+        islands.insert(
+            "L0".into(),
+            (
+                "Poll".into(),
+                json!({ "room": "p" }),
+                "s".into(),
+                vec!["room:p".into(), "ticks".into()],
+            ),
+        );
+        let (mut a, mut b) = (Default::default(), Default::default());
+        sync_rooms(&hub, &mut a, &islands);
+        sync_rooms(&hub, &mut b, &islands);
+        assert_eq!(hub.room_count("p"), 2);
+        assert_eq!(rx.try_recv().unwrap(), ("p".to_string(), 1));
+        assert_eq!(rx.try_recv().unwrap(), ("p".to_string(), 2));
+        sync_rooms(&hub, &mut b, &Islands::new());
+        assert_eq!(hub.room_count("p"), 1);
+        assert!(!b.contains("p") && a.contains("p"));
     }
 }

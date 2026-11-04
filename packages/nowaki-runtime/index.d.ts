@@ -155,7 +155,28 @@ export interface Live<S = any> {
    * returns the WebSocket upgrade's cookies and headers here and in handlers.
    */
   authorize?: (event: { name: string; handler: string; state: S; payload?: any }) => boolean | Promise<boolean>;
+  /** Live query topics (or a function of the state): `publish(topic)` refreshes these islands. */
+  subscribe?: string[] | ((state: S) => string[]);
+  /** Runs on `publish(topic)` for a subscribed island; returns the new state to push. */
+  load?: (state: S, info: { topic: string }) => S | Promise<S>;
+  /**
+   * Makes this a room island: every instance with the same room id (1-120 characters, no
+   * whitespace) shares one state, `shared()`. Handlers then receive and return the shared state,
+   * and every member gets the new HTML. Held in the server process's memory (`nowaki dev` /
+   * `nowaki start`); not shared across instances, and lost on restart.
+   */
+  room?: (props: any) => string;
+  /** Initial shared state of a room (`live.room`). */
+  shared?: (props?: any) => S;
 }
+
+/**
+ * Refreshes every live island subscribed to `topic` (`live.subscribe`) by running its `live.load`
+ * and pushing the patch. Call it from actions, server functions, or API routes after data changes.
+ * Reaches connections in the same process under `nowaki dev` / `nowaki start`; a no-op on the
+ * deploy adapters for now.
+ */
+export function publish(topic: string): void;
 
 /**
  * While a server function (`"use server"`) or a live handler / `live.authorize` is running, returns
