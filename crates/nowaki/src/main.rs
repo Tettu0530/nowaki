@@ -1,6 +1,7 @@
 mod adapter;
 mod csp;
 mod dev;
+mod encoding;
 mod forward;
 mod live;
 mod mcp;

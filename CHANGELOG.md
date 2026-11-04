@@ -43,6 +43,23 @@ milestone's worth of work; the codename is noted per entry.
   process only: `nowaki dev` and the adapters don't save rooms.
 
 ### Changed
+- **Compressed responses and 304s on `nowaki start`.** Before this change,
+  every response went out uncompressed, and `/_nowaki/*` assets were read
+  from disk on each request.
+  - `nowaki build` now writes `.br` (quality 11) and `.gz` (level 9)
+    siblings for client JS, CSS, JSON, and SVG files of 1 KB or more. Source
+    maps are skipped. The output is reproducible.
+  - `nowaki start` holds the assets in memory and picks br, gzip, or none
+    from `Accept-Encoding` (q-values included).
+  - ISR pages are compressed once, when they are stored.
+  - Both send a weak `ETag` and `Vary: Accept-Encoding`, and answer a
+    matching `If-None-Match` with `304`.
+  - With `NOWAKI_CSP` on, ISR pages are left uncompressed and get no ETag,
+    because each response carries a new nonce.
+  - Uncached (proxied) responses are not compressed yet.
+
+  The preact runtime chunk in `examples/hello` drops from 12.0 KB to 4.6 KB
+  on the wire.
 - **About 4x the throughput on `nowaki start` and the Node adapters.** In
   production, every request ran `import()` on the route's module again. The
   module was cached, but with the react-alias loader hooks registered, each
