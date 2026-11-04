@@ -11,6 +11,7 @@
 //
 // opts: { pages, islands, mode, isr }  mode: "static" (every page prerendered) | "server" (rendered per request)
 //   isr (server mode, Nowaki / Next.js / Nuxt): post pages cached and revalidated every 60 s
+//       (Nowaki and Next.js `revalidate = 60`; Nuxt `swr: 60`, its cache for a self-hosted server)
 
 import { postsModule } from "./content.mjs";
 
@@ -551,7 +552,7 @@ export const metadata = { title: "Post — Next" };
 ${
   server
     ? isr
-      ? "\nexport const revalidate = 60;\n"
+      ? "\nexport const revalidate = 60;\n\n// No paths at build time: each post is rendered on its first request, then cached.\nexport function generateStaticParams() {\n  return [];\n}\n"
       : dynamic
     : `
 export const dynamicParams = false;
@@ -602,7 +603,7 @@ function nuxt({ pages, islands, mode, isr }) {
   f["nuxt.config.ts"] = `export default defineNuxtConfig({
   compatibilityDate: "2026-11-01",
   devtools: { enabled: false },
-  telemetry: false,${mode === "static" ? `\n  nitro: { prerender: { crawlLinks: true, routes: ["/"] } },` : ""}${isr ? `\n  routeRules: { "/posts/**": { isr: 60 } },` : ""}
+  telemetry: false,${mode === "static" ? `\n  nitro: { prerender: { crawlLinks: true, routes: ["/"] } },` : ""}${isr ? `\n  routeRules: { "/posts/**": { swr: 60 } },` : ""}
 });
 `;
   f["tsconfig.json"] = `{ "files": [], "references": [{ "path": "./.nuxt/tsconfig.app.json" }, { "path": "./.nuxt/tsconfig.server.json" }, { "path": "./.nuxt/tsconfig.shared.json" }, { "path": "./.nuxt/tsconfig.node.json" }] }\n`;
