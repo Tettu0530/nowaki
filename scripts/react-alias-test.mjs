@@ -34,6 +34,20 @@ check(
   JSON.stringify([...hookKeys].sort()) === JSON.stringify([...ALIAS_SPECS, "react/compiler-runtime"].sort()),
 );
 
+const resolvePath = new URL("../crates/nowaki-core/src/resolve.rs", import.meta.url);
+const resolveSrc = readFileSync(resolvePath, "utf8");
+const aliasBlock = resolveSrc.slice(
+  resolveSrc.indexOf("pub fn alias_specifier"),
+  resolveSrc.indexOf("pub fn fs_path_to_url"),
+);
+const rustSpecs = [...aliasBlock.matchAll(/"([^"]+)"/g)]
+  .map((m) => m[1])
+  .filter((k) => k.startsWith("react") || k === "scheduler");
+check(
+  "resolve.rs alias_specifier keys match ALIAS_SPECS + compiler-runtime",
+  JSON.stringify([...rustSpecs].sort()) === JSON.stringify([...ALIAS_SPECS, "react/compiler-runtime"].sort()),
+);
+
 const react = await import("react");
 const compat = await import(new URL("../packages/nowaki-runtime/node_modules/preact/compat/dist/compat.mjs", import.meta.url).href).catch(() => null);
 check("react resolves to preact/compat (has hooks)", typeof react.useState === "function");
