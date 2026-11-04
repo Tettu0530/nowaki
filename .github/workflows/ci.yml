@@ -129,6 +129,8 @@ jobs:
         run: node scripts/csp-test.mjs
       - name: Live state signing (iat, max age, tampering)
         run: node scripts/live-sign-test.mjs
+      - name: Jetstream rooms file (save, load, corrupt files)
+        run: node scripts/live-rooms-file-test.mjs
       - name: Same-origin host resolution (adapters + trust proxy)
         run: node scripts/origin-test.mjs
       - name: Live session hub (join/event, queue, timeout, cap, presence)

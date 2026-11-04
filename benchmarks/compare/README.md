@@ -99,9 +99,12 @@ Notes:
 - Nowaki's Rust binary is started directly. The npm `nowaki` command is a Node shim that
   `spawnSync`s the binary and stays resident (about 45 MB); no other framework has such a
   launcher, but an app started with `npx nowaki start` pays it.
-- `nowaki start` proxies each uncached request from its Rust front to the Node renderer over
-  loopback HTTP, and reads the whole response before sending it on, so uncached pages make two HTTP
-  hops where the other servers make one. ISR hits are served by the Rust front alone.
+- The current Nowaki numbers predate #101. An earlier version of this note put Nowaki's lower
+  uncached throughput down to the Rust → Node proxy hop; that was not measured, and it was wrong.
+  Measured since (#90): `examples/hello` `/about` was about as fast through `nowaki start`
+  (6,056 req/s), on the Node sidecar directly (6,492) and on the node adapter (6,180), and a CPU
+  profile spent 52% of its time in the ESM loader hooks. #101 changed that path; these tables
+  will be re-measured with the next npm release. ISR hits are served by the Rust front alone.
 - The load generator runs on the same machine. Above roughly 100k req/s (Nowaki's ISR hits) the
   number is likely bounded by `oha` and the loopback, not the server.
 

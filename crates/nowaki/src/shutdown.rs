@@ -24,3 +24,23 @@ pub async fn signal() {
         _ = terminate => {}
     }
 }
+
+/// Stops a Node child: SIGTERM first (Unix) so it can flush state, such as Jetstream rooms, then a
+/// kill if it is still running after `grace`. Elsewhere, or without a pid, it just kills.
+pub async fn stop_child(child: &mut tokio::process::Child, grace: std::time::Duration) {
+    #[cfg(unix)]
+    if let Some(pid) = child.id() {
+        let sent = std::process::Command::new("kill")
+            .arg("-TERM")
+            .arg(pid.to_string())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if sent && tokio::time::timeout(grace, child.wait()).await.is_ok() {
+            return;
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = grace;
+    let _ = child.kill().await;
+}
