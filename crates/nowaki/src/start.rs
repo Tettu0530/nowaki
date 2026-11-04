@@ -195,7 +195,10 @@ async fn live_ws(
     let http = state.http.clone();
     let port = state.sidecar_port;
     let hub = state.live_hub.clone();
-    ws.on_upgrade(move |socket| crate::live::handle(socket, hub, http, port, "prod".to_string()))
+    let request = crate::live::context_headers(&headers);
+    ws.on_upgrade(move |socket| {
+        crate::live::handle(socket, hub, http, port, "prod".to_string(), request)
+    })
 }
 
 /// Validate the WS upgrade Origin (CSWSH guard). Prod is assumed public, so only Origin==Host is allowed
