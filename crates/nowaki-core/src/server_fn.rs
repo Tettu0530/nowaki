@@ -239,8 +239,6 @@ pub struct DiscoveredFn {
     /// moduleKey without extension
     pub module_key: String,
     pub export: String,
-    /// Takes arguments without `serverFn(schema, impl)` validation (see `unvalidated_exports`).
-    pub unvalidated: bool,
 }
 
 /// Scans the given directories (root-relative names) and collects every server function.
@@ -270,17 +268,35 @@ pub fn discover(core: &crate::NowakiCore, dirs: &[&str]) -> Vec<DiscoveredFn> {
             let Ok(exports) = collect_exports(&abs, &src) else {
                 continue;
             };
-            let unvalidated = unvalidated_exports(&abs, &src).unwrap_or_default();
             for ex in exports {
-                let is_unvalidated = unvalidated.contains(&ex);
                 out.push(DiscoveredFn {
                     id: server_fn_id(&key, &ex),
                     source_rel: rel.clone(),
                     module_key: key.clone(),
                     export: ex,
-                    unvalidated: is_unvalidated,
                 });
             }
+        }
+    }
+    out
+}
+
+/// `<source_rel>#<export>` for each discovered server function that takes unvalidated input
+/// (see `unvalidated_exports`). `nowaki build` warns about these.
+pub fn discover_unvalidated(core: &crate::NowakiCore, dirs: &[&str]) -> Vec<String> {
+    let mut by_file: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for f in discover(core, dirs) {
+        by_file.entry(f.source_rel).or_default().push(f.export);
+    }
+    let mut out = Vec::new();
+    for (rel, exports) in by_file {
+        let abs = core.root.join(&rel);
+        let Ok(src) = core.read_source(&abs) else {
+            continue;
+        };
+        let unvalidated = unvalidated_exports(&abs, &src).unwrap_or_default();
+        for ex in exports.into_iter().filter(|e| unvalidated.contains(e)) {
+            out.push(format!("{rel}#{ex}"));
         }
     }
     out
