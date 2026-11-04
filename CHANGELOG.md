@@ -43,6 +43,35 @@ milestone's worth of work; the codename is noted per entry.
   process only: `nowaki dev` and the adapters don't save rooms.
 
 ### Changed
+- **ISR pages are cached from the first request.** Right after startup,
+  `nowaki start` renders every ISR page once in the background, so the first
+  visitor gets a page from the Rust front instead of waiting for a render.
+  - Covered: static routes with `export const revalidate` > 0, plus each
+    `staticPaths` entry of dynamic ones. The list is capped at
+    `NOWAKI_ISR_MAX`.
+  - It renders two pages at a time, through the normal request path, with
+    no cookies. A page that varies on a header is stored only under the
+    empty value of that header, so it never serves someone else's variant.
+  - The renders run route middleware and loaders like any request.
+    `NOWAKI_ISR_WARM=0` turns this off.
+  - `examples/hello`: 2 pages in 16 ms.
+- **Compressed responses and 304s on `nowaki start`.** Before this change,
+  every response went out uncompressed, and `/_nowaki/*` assets were read
+  from disk on each request.
+  - `nowaki build` now writes `.br` (quality 11) and `.gz` (level 9)
+    siblings for client JS, CSS, JSON, and SVG files of 1 KB or more. Source
+    maps are skipped. The output is reproducible.
+  - `nowaki start` holds the assets in memory and picks br, gzip, or none
+    from `Accept-Encoding` (q-values included).
+  - ISR pages are compressed once, when they are stored.
+  - Both send a weak `ETag` and `Vary: Accept-Encoding`, and answer a
+    matching `If-None-Match` with `304`.
+  - With `NOWAKI_CSP` on, ISR pages are left uncompressed and get no ETag,
+    because each response carries a new nonce.
+  - Uncached (proxied) responses are not compressed yet.
+
+  The preact runtime chunk in `examples/hello` drops from 12.0 KB to 4.6 KB
+  on the wire.
 - **About 4x the throughput on `nowaki start` and the Node adapters.** In
   production, every request ran `import()` on the route's module again. The
   module was cached, but with the react-alias loader hooks registered, each

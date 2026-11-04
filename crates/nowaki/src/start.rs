@@ -43,6 +43,8 @@ struct PageMeta {
 
 struct ProdState {
     client_dir: PathBuf,
+    /// `/_nowaki/*` files held in memory with their `.br` / `.gz` siblings (see `load_assets`).
+    assets: HashMap<String, Asset>,
     sidecar_port: u16,
     http: reqwest::Client,
     manifest: Manifest,
@@ -69,7 +71,10 @@ struct VarySpec {
 
 struct CacheEntry {
     status: u16,
-    html: String,
+    /// The page, pre-compressed once when stored. With CSP on, every response gets a fresh nonce,
+    /// so only `plain` is kept and no ETag is sent (see `isr_store`).
+    body: crate::encoding::Variants,
+    with_etag: bool,
     headers: Vec<(String, String)>, // response headers to restore (cookie/length headers excluded)
     stored_at: Instant,
     revalidate: Duration,
@@ -151,7 +156,9 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
     } else {
         std::env::var("NOWAKI_HOST").unwrap_or_else(|_| "127.0.0.1".to_string())
     };
+    let assets = load_assets(&client_dir);
     let state = Arc::new(ProdState {
+        assets,
         client_dir,
         sidecar_port,
         http: reqwest::Client::builder()
@@ -162,6 +169,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         isr: IsrCache::new(),
     });
 
+    let warm_state = state.clone();
     let app = Router::new()
         .route("/__nowaki/live", get(live_ws))
         .fallback(any(handle))
@@ -181,6 +189,9 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         expose || host == "0.0.0.0",
         None,
     );
+    if isr_warm_enabled() {
+        tokio::spawn(warm_isr(warm_state, format!("127.0.0.1:{actual}")));
+    }
     // The sidecar lives outside the shared state (request tasks hold that), so it is killed here on shutdown.
     tokio::select! {
         r = std::future::IntoFuture::into_future(axum::serve(listener, app)) => r?,
@@ -230,7 +241,7 @@ async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
     }
     // Rust serves static assets directly (high-volume hot path).
     if req.method() == Method::GET && path.starts_with("/_nowaki/") {
-        return serve_static(&state, &path).await;
+        return serve_static(&state, &path, req.headers()).await;
     }
     if req.method() == Method::GET {
         let pathname = req.uri().path().to_string();
@@ -245,7 +256,7 @@ async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
             .unwrap_or_default();
         if !spec.no_cache {
             let key = isr_key(&pathname, query.as_deref(), req.headers(), &spec);
-            if let Some(resp) = isr_lookup(&state, &key) {
+            if let Some(resp) = isr_lookup(&state, &key, req.headers()) {
                 return resp;
             }
         }
@@ -281,16 +292,24 @@ fn isr_key(
     k
 }
 
-fn isr_lookup(state: &Arc<ProdState>, key: &str) -> Option<Response> {
+fn isr_lookup(state: &Arc<ProdState>, key: &str, req: &axum::http::HeaderMap) -> Option<Response> {
     let entry = state.isr.entries.lock().unwrap().get(key).cloned()?;
     let stale = entry.stored_at.elapsed() >= entry.revalidate;
     if stale {
         spawn_revalidate(state.clone(), key.to_string());
     }
-    Some(cached_response(&entry, if stale { "STALE" } else { "HIT" }))
+    Some(cached_response(
+        &entry,
+        if stale { "STALE" } else { "HIT" },
+        req,
+    ))
 }
 
-fn cached_response(entry: &CacheEntry, cache_status: &str) -> Response {
+fn cached_response(
+    entry: &CacheEntry,
+    cache_status: &str,
+    req: &axum::http::HeaderMap,
+) -> Response {
     let mut builder = Response::builder()
         .status(entry.status)
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
@@ -298,9 +317,76 @@ fn cached_response(entry: &CacheEntry, cache_status: &str) -> Response {
     for (n, v) in &entry.headers {
         builder = builder.header(n.as_str(), v.as_str());
     }
+    if entry.with_etag {
+        return entry.body.respond(req, builder, entry.status);
+    }
     builder
-        .body(Body::from(entry.html.clone()))
+        .body(Body::from(entry.body.plain.clone()))
         .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
+}
+
+fn isr_warm_enabled() -> bool {
+    !matches!(
+        std::env::var("NOWAKI_ISR_WARM")
+            .ok()
+            .as_deref()
+            .map(str::trim),
+        Some("0" | "off" | "false" | "no")
+    )
+}
+
+/// Renders every ISR page once in the background right after startup (`NOWAKI_ISR_WARM=0` turns
+/// it off), so the first visitor already gets a cached page from Rust. Each page goes through the
+/// normal request path with no cookies, so it is stored exactly as an anonymous visit would be:
+/// pages that vary on a header are keyed by that header's (empty) value and never serve someone
+/// with a different one. Two at a time, to leave the renderer free for real traffic.
+async fn warm_isr(state: Arc<ProdState>, host: String) {
+    use futures_util::StreamExt;
+    let started = Instant::now();
+    let url = format!(
+        "http://127.0.0.1:{}/__nowaki/isr-urls?max={}",
+        state.sidecar_port, state.isr.max
+    );
+    let urls: Vec<String> = match state.http.get(&url).send().await {
+        Ok(r) if r.status().is_success() => r
+            .bytes()
+            .await
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default(),
+        _ => return,
+    };
+    if urls.is_empty() {
+        return;
+    }
+    let total = urls.len();
+    let warmed = futures_util::stream::iter(urls)
+        .map(|path| {
+            let state = state.clone();
+            let host = host.clone();
+            async move {
+                let Ok(req) = Request::builder()
+                    .method(Method::GET)
+                    .uri(&path)
+                    .header(header::HOST, host)
+                    .body(Body::empty())
+                else {
+                    return false;
+                };
+                let resp = proxy(state, req, true).await;
+                // MISS = rendered and stored (a Set-Cookie response is served but never stored).
+                resp.headers().get("x-nowaki-cache").is_some()
+                    && !resp.headers().contains_key(header::SET_COOKIE)
+            }
+        })
+        .buffer_unordered(2)
+        .filter(|ok| std::future::ready(*ok))
+        .count()
+        .await;
+    println!(
+        "[nowaki] ISR warm-up: {warmed} of {total} pages cached in {} ms",
+        started.elapsed().as_millis()
+    );
 }
 
 /// Single-flight: only one revalidation runs per key.
@@ -356,7 +442,8 @@ async fn page_to_entry(
     let html = assemble(&state.manifest, &meta);
     Some(CacheEntry {
         status,
-        html,
+        body: crate::encoding::Variants::new(html.into(), None, None),
+        with_etag: false,
         headers: kept,
         stored_at: Instant::now(),
         revalidate: Duration::from_secs(secs),
@@ -457,7 +544,8 @@ fn maybe_store(
         &key,
         CacheEntry {
             status,
-            html: html.to_string(),
+            body: crate::encoding::Variants::new(html.to_string().into(), None, None),
+            with_etag: false,
             headers: kept_headers(resp_headers),
             stored_at: Instant::now(),
             revalidate: Duration::from_secs(secs),
@@ -468,7 +556,13 @@ fn maybe_store(
 }
 
 /// When over the cap, evict the oldest entry of the same pathname first (a query/header flood doesn't hit other routes).
-fn isr_store(state: &ProdState, key: &str, entry: CacheEntry) {
+fn isr_store(state: &ProdState, key: &str, mut entry: CacheEntry) {
+    // Compress and tag once here, outside the lock. Not with CSP: the CSP layer rewrites each
+    // HTML response with a new nonce, so a compressed body or a 304 would carry a stale one.
+    if crate::csp::mode() == crate::csp::Mode::Off {
+        entry.body = crate::encoding::Variants::compressed(entry.body.plain.clone());
+        entry.with_etag = true;
+    }
     let mut map = state.isr.entries.lock().unwrap();
     if map.len() >= state.isr.max && !map.contains_key(key) {
         let path = key.split(['?', '\u{1f}']).next().unwrap_or(key);
@@ -489,10 +583,69 @@ fn isr_store(state: &ProdState, key: &str, entry: CacheEntry) {
     map.insert(key.to_string(), Arc::new(entry));
 }
 
-async fn serve_static(state: &ProdState, path: &str) -> Response {
+/// A `/_nowaki/*` file in memory. Names are content-hashed, so they never change while running.
+struct Asset {
+    content_type: &'static str,
+    body: crate::encoding::Variants,
+}
+
+/// Files above this stay on disk and are read per request, uncompressed.
+const ASSET_MEMORY_MAX: u64 = 8 * 1024 * 1024;
+
+/// Loads `dist/client` (flat) into memory, pairing each file with the `.br` / `.gz` siblings that
+/// `nowaki build` wrote.
+fn load_assets(client_dir: &std::path::Path) -> HashMap<String, Asset> {
+    let mut out = HashMap::new();
+    let Ok(dir) = std::fs::read_dir(client_dir) else {
+        return out;
+    };
+    for entry in dir.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if name.ends_with(".gz")
+            || name.ends_with(".br")
+            || asset_name(&format!("/_nowaki/{name}")).is_none()
+        {
+            continue;
+        }
+        let path = entry.path();
+        if !entry
+            .metadata()
+            .is_ok_and(|m| m.is_file() && m.len() <= ASSET_MEMORY_MAX)
+        {
+            continue;
+        }
+        let Ok(plain) = std::fs::read(&path) else {
+            continue;
+        };
+        let sibling = |ext: &str| {
+            std::fs::read(client_dir.join(format!("{name}.{ext}")))
+                .ok()
+                .map(axum::body::Bytes::from)
+        };
+        let body = crate::encoding::Variants::new(plain.into(), sibling("gz"), sibling("br"));
+        out.insert(
+            name.clone(),
+            Asset {
+                content_type: content_type(&name),
+                body,
+            },
+        );
+    }
+    out
+}
+
+async fn serve_static(state: &ProdState, path: &str, req: &axum::http::HeaderMap) -> Response {
     let Some(name) = asset_name(path) else {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     };
+    if let Some(asset) = state.assets.get(name) {
+        let builder = Response::builder()
+            .header(header::CONTENT_TYPE, asset.content_type)
+            .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable");
+        return asset.body.respond(req, builder, 200);
+    }
     let file = state.client_dir.join(name);
     match tokio::fs::read(&file).await {
         Ok(bytes) => (

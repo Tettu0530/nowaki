@@ -31,10 +31,19 @@ ls examples/hello/dist/client/live.*.js >/dev/null 2>&1
 test -f examples/hello/dist/server/islands/LiveCounter.js
 # nowaki start (Rust front) serves the live island, assembled with live.js
 rm -f examples/hello/.nowaki/live-rooms.json   # rooms start empty; the livetest votes in /poll
-./target/debug/nowaki start examples/hello --port 3300 &
+# No ISR warm-up here: the ISR checks below start from an empty cache (MISS → HIT → STALE).
+NOWAKI_ISR_WARM=0 ./target/debug/nowaki start examples/hello --port 3300 &
 START_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3300/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3300/ | grep -q "modulepreload"
+# Pre-compressed assets and ISR pages: br / gzip by Accept-Encoding, weak ETag, 304 on a match.
+ls examples/hello/dist/client/preact.*.js.br examples/hello/dist/client/preact.*.js.gz >/dev/null
+ASSET=http://127.0.0.1:3300/_nowaki/$(basename "$(ls examples/hello/dist/client/preact.*.js | head -1)")
+curl -s -o /dev/null -D - -H 'Accept-Encoding: gzip, br' "$ASSET" | grep -qi '^content-encoding: br'
+curl -s -o /dev/null -D - -H 'Accept-Encoding: gzip' "$ASSET" | grep -qi '^content-encoding: gzip'
+! curl -s -o /dev/null -D - "$ASSET" | grep -qi '^content-encoding'
+ETAG=$(curl -s -o /dev/null -D - "$ASSET" | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]: //p')
+test "$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $ETAG" "$ASSET")" = 304
 curl -sf http://127.0.0.1:3300/ | grep -q '<code>a→b</code>'
 # CSS Modules: prod SSR must use the same scoped class names as dev (css_scope_id).
 PROD_BADGE=$(curl -sf http://127.0.0.1:3300/ | grep -oE 'badge_[0-9a-f]{8}' | head -1)
@@ -77,6 +86,11 @@ sleep 1                                            # let background revalidation
 isr regenerated; test "$S" = "HIT"; test "$N" -gt "$R1"
 # a cookie-setting response is per-user and must never be ISR-cached
 test -z "$(curl -s -D - -o /dev/null "$ISR" | grep -i '^set-cookie:')"
+# ISR hits are compressed once and answer If-None-Match with 304.
+curl -s -o /dev/null -D - -H 'Accept-Encoding: br' http://127.0.0.1:3300/isr | grep -qi '^content-encoding: br'
+ISR_ETAG=$(curl -s -o /dev/null -D - http://127.0.0.1:3300/isr | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]: //p')
+test "$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $ISR_ETAG" http://127.0.0.1:3300/isr)" = 304
+curl -s --compressed http://127.0.0.1:3300/isr | grep -q '</html>'
 # loading/error boundaries are served through the Rust front too
 curl -sf http://127.0.0.1:3300/__nowaki/boundaries | grep -q 'data-nowaki-reset'
 # v0.9 Jetstream presence + connection scaling: WS join->presence,
@@ -116,6 +130,18 @@ for i in $(seq 1 20); do curl -sf http://127.0.0.1:3301/ >/dev/null && break; sl
 node scripts/livetest.mjs http://127.0.0.1:3301 --expect-timeout
 kill $TIMEOUT_PID
 bash scripts/ci/assert-no-orphans.sh $TIMEOUT_PID
+
+# ISR warm-up (on by default): right after startup the ISR pages are already cached, so the
+# first request is a HIT (or STALE), never a MISS. The internal URL list is not public.
+./target/debug/nowaki start examples/hello --port 3304 > /tmp/nowaki-warm.log &
+WARM_PID=$!
+for i in $(seq 1 20); do grep -q 'ISR warm-up' /tmp/nowaki-warm.log && break; sleep 1; done
+grep -q 'ISR warm-up: 2 of 2 pages cached' /tmp/nowaki-warm.log
+FIRST=$(curl -s -o /dev/null -D - http://127.0.0.1:3304/vary | tr -d '\r' | sed -n 's/^[Xx]-[Nn]owaki-[Cc]ache: //p')
+test "$FIRST" = HIT -o "$FIRST" = STALE
+test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3304/__nowaki/isr-urls)" = 404
+kill $WARM_PID
+bash scripts/ci/assert-no-orphans.sh $WARM_PID
 
 # Expired live signatures: with a 3 s max age, an old page's events come back as "stale" (WS) / 409 (POST).
 NOWAKI_LIVE_MAX_AGE=3 ./target/debug/nowaki start examples/hello --port 3303 &

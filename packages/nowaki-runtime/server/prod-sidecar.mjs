@@ -11,6 +11,7 @@ import { liveContext, liveRender, LiveForbiddenError } from "./live.mjs";
 import { runWithContext } from "./functions.mjs";
 import { pageMeta } from "./document.mjs";
 import { persistRooms } from "./live-rooms-file.mjs";
+import { isrUrls } from "./isr-urls.mjs";
 
 const appRoot = process.cwd();
 persistRooms(appRoot);
@@ -26,6 +27,12 @@ env.renderDocument = ({ mod, body, meta }) => {
 };
 
 const server = createServer(async (req, res) => {
+  if (req.method === "GET" && req.url.split("?")[0] === "/__nowaki/isr-urls") {
+    const max = Number(new URL(req.url, "http://x").searchParams.get("max")) || 1024;
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(await isrUrls(env, { max })));
+    return;
+  }
   if (req.method === "POST" && req.url.split("?")[0] === "/__nowaki/live-render") {
     try {
       const chunks = [];
