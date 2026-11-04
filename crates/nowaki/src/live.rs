@@ -121,6 +121,8 @@ enum RenderError {
     Timeout,
     Failed,
     Forbidden,
+    /// The signature is genuine but past NOWAKI_LIVE_MAX_AGE; the client reloads the page.
+    Stale,
 }
 
 impl RenderError {
@@ -129,6 +131,7 @@ impl RenderError {
             RenderError::Timeout => "timeout",
             RenderError::Failed => "render failed",
             RenderError::Forbidden => "forbidden",
+            RenderError::Stale => "stale",
         }
     }
 }
@@ -226,6 +229,19 @@ impl LiveHub {
 
     fn room_count(&self, room: &str) -> usize {
         self.rooms.lock().unwrap().get(room).copied().unwrap_or(0)
+    }
+
+    /// Open connections and (room, connections), sorted by room. For the dev MCP.
+    pub fn snapshot(&self) -> (usize, Vec<(String, usize)>) {
+        let mut rooms: Vec<_> = self
+            .rooms
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(r, n)| (r.clone(), *n))
+            .collect();
+        rooms.sort();
+        (self.count(), rooms)
     }
 }
 
@@ -497,6 +513,9 @@ async fn render(
         if r.status() == reqwest::StatusCode::FORBIDDEN {
             return Err(RenderError::Forbidden);
         }
+        if r.status() == reqwest::StatusCode::CONFLICT {
+            return Err(RenderError::Stale);
+        }
         let rv: Value = serde_json::from_str(&r.text().await.map_err(|_| RenderError::Failed)?)
             .map_err(|_| RenderError::Failed)?;
         // No html (e.g. a failed signature check): never keep forged state or send an empty render.
@@ -622,6 +641,7 @@ mod tests {
         assert_eq!(RenderError::Timeout.reason(), "timeout");
         assert_eq!(RenderError::Failed.reason(), "render failed");
         assert_eq!(RenderError::Forbidden.reason(), "forbidden");
+        assert_eq!(RenderError::Stale.reason(), "stale");
     }
 
     #[test]

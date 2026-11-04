@@ -10,6 +10,48 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **`nowaki dev` MCP endpoint:** while `nowaki dev` runs, a coding agent can
+  inspect the app over MCP (Streamable HTTP) at
+  `http://127.0.0.1:<port>/__nowaki/mcp`. The startup banner prints the URL and
+  the command that adds it to Claude Code:
+  `claude mcp add --transport http nowaki http://127.0.0.1:<port>/__nowaki/mcp`.
+  The tools are read-only. `routes` lists the route table in match order, with
+  kind, file, exports, ISR `revalidate`, and `csrf`. It also lists layouts,
+  middleware, and boundaries. `module_graph` shows a file's imports and
+  importers, and the islands with their `live` flag. `recent_errors` returns
+  the last 50 build (transform), SSR, live, and HMR errors with timestamps,
+  file, and stack. `dev_config` shows the port, the `NOWAKI_*` flags, and the
+  Jetstream connections and rooms. The endpoint answers only loopback clients
+  with a loopback `Host` / `Origin`, also under `--host`. `nowaki start` and
+  the adapters don't serve it.
+- **Jetstream stale notifications:** an event on a page older than
+  `NOWAKI_LIVE_MAX_AGE` (24 h by default) used to fail like a forged one.
+  The server now tells the two apart. A genuine, expired signature comes back
+  as `reason: "stale"` over WebSocket and as HTTP 409 over POST. The client
+  dispatches a cancelable `nowaki:live-stale` event and, unless the app calls
+  `preventDefault()`, reloads the page to get fresh signed state. A tampered
+  or future-dated signature is still rejected as before (`403`).
+- **Jetstream rooms survive a restart:** `nowaki start` writes the rooms'
+  shared state to `.nowaki/live-rooms.json` and loads it on the next start.
+  It writes at most every 2 s after a change, through a temp file and a
+  rename, and once more on shutdown. `nowaki start` now stops its Node
+  process with SIGTERM and a 3 s grace period before killing it. Set
+  `NOWAKI_LIVE_ROOMS_FILE` to choose another file (relative to the app), or
+  `off` to keep rooms in memory only. A shared state that JSON can't hold
+  (BigInt, a cycle) logs a warning and is not saved. This applies to a single
+  process only: `nowaki dev` and the adapters don't save rooms.
+
+### Changed
+- **About 4x the throughput on `nowaki start` and the Node adapters.** In
+  production, every request ran `import()` on the route's module again. The
+  module was cached, but with the react-alias loader hooks registered, each
+  `import()` made a synchronous round trip to the hooks thread, and that took
+  half the CPU time of a page. Production modules are now imported once.
+  Measured on `examples/hello`, 50 connections, Apple M2: `/about` on
+  `nowaki start` went from 6,056 to 28,752 req/s, and `/api/hello` from
+  8,895 to 32,101 req/s. Dev mode is unchanged: it re-imports on every edit.
+
 ## [0.15.0] — 2026-11-04 · "Cyclone" (part 1)
 
 Packages: `nowaki` / `nowaki-core` 0.15.0 (crates.io, npm), `@nowaki-dev/runtime`

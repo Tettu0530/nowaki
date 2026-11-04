@@ -8,10 +8,20 @@ use std::sync::OnceLock;
 
 use axum::http::{header, HeaderMap, HeaderName};
 
-/// Sidecar-only endpoints Rust calls itself (`live.rs`); never proxied from a client. The sidecar
-/// trusts their bodies (state to re-render, the request context for `getContext()`).
+/// Never proxied from a client: sidecar-only endpoints Rust calls itself (the sidecar trusts
+/// `live-render` bodies: state to re-render, the request context for `getContext()`; `dev-info`
+/// lists app files), and the dev MCP path, which only `nowaki dev` mounts (loopback-only).
+const INTERNAL_PATHS: [&str; 3] = [
+    "/__nowaki/live-render",
+    "/__nowaki/dev-info",
+    "/__nowaki/mcp",
+];
+
 pub fn is_internal_path(path: &str) -> bool {
-    path == "/__nowaki/live-render" || path.starts_with("/__nowaki/live-render/")
+    INTERNAL_PATHS.iter().any(|p| {
+        path.strip_prefix(p)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    })
 }
 
 /// `x-nowaki-*` request headers the browser runtime sends on purpose; every other one is internal.
@@ -176,5 +186,8 @@ mod tests {
         assert!(!is_internal_path("/__nowaki/live"));
         assert!(!is_internal_path("/__nowaki/live-render-not"));
         assert!(!is_internal_path("/__nowaki/fn"));
+        assert!(is_internal_path("/__nowaki/dev-info"));
+        assert!(is_internal_path("/__nowaki/mcp"));
+        assert!(!is_internal_path("/__nowaki/mcpx"));
     }
 }

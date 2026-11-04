@@ -32,6 +32,7 @@ const JSON_CT = { "content-type": "application/json; charset=utf-8" };
 ///   ensureIslands(version) -> prepares the island registry (call before rendering)
 ///   renderDocument({ mod, body }) -> final HTML string
 ///   renderError(err) -> { status, headers, body } (500 page differs between dev/prod)
+///   onError(err, ctx) (optional) -> called for every error that becomes a 500 page
 ///   live (optional) -> { lookup(name, version), render } for POST /__nowaki/live-event
 export async function handleRequest(env, info) {
   const { method, url, version } = info;
@@ -298,6 +299,7 @@ async function render404(env, table, ctx, version) {
 }
 
 async function render500(env, table, ctx, version, err) {
+  env.onError?.(err, ctx);
   if (table.errorRoute && !ctx._inErrorPage) {
     try {
       ctx._inErrorPage = true;

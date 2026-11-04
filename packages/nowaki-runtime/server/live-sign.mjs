@@ -57,15 +57,23 @@ export function sign(name, state, { now = nowS() } = {}) {
   return `v1.${now}.${mac(name, now, state)}`;
 }
 
-export function verify(name, state, sig, { now = nowS() } = {}) {
-  if (typeof sig !== "string") return false;
+/// "ok", "expired" (a genuine signature past NOWAKI_LIVE_MAX_AGE: the page is just old), or
+/// "invalid" (malformed, tampered, or dated in the future). The MAC is checked before the age, so
+/// a forged signature with an old timestamp is "invalid", never "expired".
+export function verifyStatus(name, state, sig, { now = nowS() } = {}) {
+  if (typeof sig !== "string") return "invalid";
   const m = /^v1\.(\d{1,12})\.([A-Za-z0-9_-]+)$/.exec(sig);
-  if (!m) return false;
+  if (!m) return "invalid";
   const iat = Number(m[1]);
-  if (iat > now + CLOCK_SKEW_S || now - iat > MAX_AGE_S) return false;
   const expected = Buffer.from(mac(String(name), iat, state));
   const got = Buffer.from(m[2]);
-  return expected.length === got.length && timingSafeEqual(expected, got);
+  if (expected.length !== got.length || !timingSafeEqual(expected, got)) return "invalid";
+  if (iat > now + CLOCK_SKEW_S) return "invalid";
+  return now - iat > MAX_AGE_S ? "expired" : "ok";
+}
+
+export function verify(name, state, sig, opts) {
+  return verifyStatus(name, state, sig, opts) === "ok";
 }
 
 // Shared by dev (render.mjs) and prod (app.mjs) so neither drifts by forgetting to sign.

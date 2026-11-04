@@ -92,6 +92,48 @@ host** (it has a config plugin and `.tsrx` islands compiled by `@tsrx/preact`).
 That overhead only applies to apps that use plugins or TSRX — a plain app pays
 none of it (see the nowaki.dev site above).
 
+## Jetstream fan-out — 1000 connections
+
+How long one change on the server takes to reach every subscribed connection, on
+`nowaki start` (the adapters run Jetstream over POST and have no push).
+[`benchmarks/live-fanout.mjs`](./benchmarks/live-fanout.mjs) opens 1000 WebSocket connections
+to `examples/hello`, joins each one, then repeats one change 50 times (after 3 warm-up rounds):
+
+- **live query:** every connection joins `LiveTicks` (`live.subscribe: ["ticks"]`); one
+  `POST /api/tick` (which calls `publish("ticks")`) → each connection's first patch.
+- **rooms:** every connection joins `LivePoll` on `/poll` (room `poll:demo`); connection 0
+  votes → the first patch on each of the other 999.
+
+t0 is taken just before the change is sent. Every patch in a round must carry the same new
+value (`ticks: N`, `a: N`), so a late patch from an earlier round is never counted.
+*Delivery* is the latency of each single patch, all rounds pooled; *everyone* is, per round,
+the latency of the last patch. The table is the median of 3 sets (server restarted for each):
+
+| scenario | receivers | delivery p50 | **delivery p95** | delivery p99 | everyone p50 | everyone p95 | missed |
+|---|---|---|---|---|---|---|---|
+| live query (`publish`) | 1000 | 34.3 ms | **63.2 ms** | 72.7 ms | 59.5 ms | 76.3 ms | 0 |
+| rooms (`vote`) | 999 | 37.6 ms | **67.5 ms** | 73.6 ms | 65.7 ms | 77.4 ms | 0 |
+
+Measured 2026-11-04 on an Apple M2 (8 cores, 16 GB), macOS 26 (darwin 25.6.0), Node 24.14.0,
+Nowaki 0.15.0 built from `main` at `0fba471` (`cargo build --release`); 150 rounds and
+149,850+ deliveries per scenario, none missed. Raw sets: `benchmarks/results/live-fanout.jsonl`.
+
+The client is one Node process on the same machine, so the time it takes to handle 1000
+messages is part of each number. Deliveries spread evenly from ~0 to ~65 ms, which looks like
+the patches are rendered or sent one connection after another; rooms (one shared state) take
+as long as the live query, so a render per shared state rather than per connection may be
+the next thing to look at.
+
+Reproduce (raise the file-descriptor limit in both shells; macOS defaults to 256):
+
+```bash
+cargo build --release -p nowaki
+ulimit -n 8192
+./target/release/nowaki build examples/hello
+./target/release/nowaki start examples/hello --port 8250 &
+node benchmarks/live-fanout.mjs http://127.0.0.1:8250 --conns 1000 --rounds 50 --scenario both
+```
+
 ## Methodology
 
 - **Machine/run dependent.** Numbers are representative of one machine; treat

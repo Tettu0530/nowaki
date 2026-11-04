@@ -16,6 +16,7 @@ pub async fn spawn(
     root: &Path,
     rust_port: u16,
     live_hub: std::sync::Arc<crate::live::LiveHub>,
+    errors: std::sync::Arc<crate::mcp::ErrorLog>,
 ) -> Result<Sidecar> {
     let entry = root.join("node_modules/@nowaki-dev/runtime/server/sidecar.mjs");
     if !entry.exists() {
@@ -52,7 +53,9 @@ pub async fn spawn(
     // Keep streaming the rest of stdout as logs
     tokio::spawn(async move {
         while let Ok(Some(line)) = lines.next_line().await {
-            if !crate::live::handle_sidecar_line(&live_hub, &line) {
+            if !crate::live::handle_sidecar_line(&live_hub, &line)
+                && !errors.handle_sidecar_line(&line)
+            {
                 println!("[sidecar] {line}");
             }
         }

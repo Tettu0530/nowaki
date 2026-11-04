@@ -5,7 +5,7 @@ import { h } from "preact";
 import { renderToStringAsync } from "preact-render-to-string";
 
 import { makeContext } from "./context.mjs";
-import { sign, verify } from "./live-sign.mjs";
+import { sign, verifyStatus } from "./live-sign.mjs";
 import { publish } from "./publish.mjs";
 
 // Rooms: islands with `live.room(props)` share one state per room id (`live.shared()`), held here in
@@ -19,6 +19,26 @@ function roomIdOf(mod, props) {
   const id = String(mod.live.room(props ?? {}));
   if (!ROOM_ID.test(id)) throw new Error("live.room must return 1-120 characters without whitespace");
   return id;
+}
+
+// Persistence hooks (Node only: live-rooms-file.mjs uses them; edge bundles never call them).
+let roomsChanged = null;
+export function onRoomsChange(cb) {
+  roomsChanged = cb;
+}
+export function exportRooms() {
+  return Object.fromEntries(rooms);
+}
+/// Restores saved rooms; ids that wouldn't pass `live.room` are dropped. Returns the count kept.
+export function importRooms(saved) {
+  let n = 0;
+  for (const [id, value] of Object.entries(saved ?? {})) {
+    if (ROOM_ID.test(id) && value !== undefined) {
+      rooms.set(id, value);
+      n++;
+    }
+  }
+  return n;
 }
 
 function sharedOf(mod, room, props) {
@@ -83,7 +103,12 @@ export function liveTopics(mod, state) {
 /// `load: { topic }` is a `publish(topic)` refresh: `live.load(state, { topic })` replaces the
 /// handler. The result carries the island's current topics.
 export async function liveRender(mod, state, handler, payload, name, sig, { load } = {}) {
-  if (!verify(name, state, sig)) {
+  const status = verifyStatus(name, state, sig);
+  if (status === "expired") {
+    // The page outlived NOWAKI_LIVE_MAX_AGE: the client reloads it for a fresh signature.
+    throw Object.assign(new Error("live state signature expired"), { code: "NOWAKI_LIVE_STALE" });
+  }
+  if (status !== "ok") {
     throw Object.assign(new Error("live state signature invalid"), { code: "NOWAKI_LIVE_SIG" });
   }
   const authorize = mod.live?.authorize;
@@ -119,6 +144,7 @@ async function roomRender(mod, state, handler, payload, name, sig) {
     next = (await on[handler](shared, payload)) ?? shared;
     if (next !== shared) {
       rooms.set(room, next);
+      roomsChanged?.();
       publish(`room:${room}`);
     }
   }

@@ -36,10 +36,21 @@ function apply(el, msg) {
   }
 }
 
+let reloading = false;
+
 function failed(nid, reason) {
   // The event was not applied (render timeout / failure / queue full); the island keeps its last HTML.
   console.warn(`[nowaki live] event on ${nid} not applied: ${reason}`);
   window.dispatchEvent(new CustomEvent("nowaki:live-error", { detail: { nid, reason } }));
+  // The page outlived its signed state (NOWAKI_LIVE_MAX_AGE): reload for a fresh one, unless the
+  // app calls preventDefault() on nowaki:live-stale (e.g. to save a draft first).
+  if (reason === "stale" && !reloading) {
+    const ev = new CustomEvent("nowaki:live-stale", { cancelable: true, detail: { nid } });
+    if (window.dispatchEvent(ev)) {
+      reloading = true;
+      location.reload();
+    }
+  }
 }
 
 function connect() {
@@ -106,6 +117,7 @@ function connect() {
             payload,
           }),
         });
+        if (r.status === 409) return failed(el.getAttribute("nid"), "stale");
         const msg = r.ok ? await r.json() : null;
         if (typeof msg?.html !== "string") throw 0;
         apply(el, msg);

@@ -79,14 +79,15 @@ Make "LiveView for the npm ecosystem, with 0KB of component JS" practical. Forms
 
 **Exit criteria**: State survives reconnects and server restarts. `publish()` delivers patches to islands on other connections. A two-tab voting demo works with per-room presence. Fan-out p95 at 1000 connections is recorded in BENCHMARKS.md.
 
-**Status**: 0.15.0 ships the checked items below, live islands on every deploy adapter (per event over POST), and the two-tab demo (`/poll`). Still open: rooms surviving a server restart (they're held in memory), stale notifications / resume token, the fan-out p95 in BENCHMARKS.md, and the single-process note on nowaki.dev.
+**Status**: 0.15.0 ships the checked items below, live islands on every deploy adapter (per event over POST), and the two-tab demo (`/poll`). Since 0.15.0, every exit criterion is met: stale notifications, rooms that survive a `nowaki start` restart (saved to `.nowaki/live-rooms.json`), and the fan-out p95 in BENCHMARKS.md (63 ms at 1000 connections). Deferred: the resume token, and rooms shared across instances (a pluggable store).
 
 - [x] More events (submit / input / change, debounce, keyed morph)
-- [ ] Stable signing key, stale notifications, resume token (optional)
+- [x] Stable signing key (`NOWAKI_LIVE_SECRET`) and stale notifications; resume token (optional) deferred
 - [x] Read request context from handlers (`getContext()`, `live.authorize`)
 - [x] Live queries (`subscribe` / `load` / `publish`, a Node→Rust event path)
-- [x] Multiplayer rooms (`room` / `shared` / per-room presence)
-- [ ] Document in the docs that it assumes a single process and does not support edge
+- [x] Multiplayer rooms (`room` / `shared` / per-room presence), kept across a restart
+- [x] Fan-out p95 at 1000 connections in BENCHMARKS.md
+- [x] Document in the docs that it assumes a single process and does not support edge (nowaki.dev Jetstream page)
 
 ### v0.16 "Chinook": Show it with numbers
 Prove the differentiation with numbers and tooling.
@@ -96,7 +97,7 @@ Prove the differentiation with numbers and tooling.
 - [ ] Per-route client JS budgets (`export const budget`)
 - [ ] Build-time "this island could be live" suggestions (including moving live detection to the AST)
 - [ ] Serve ISR / static pages from Rust alone right after startup (prerender ingestion, ETag / 304, pre-gzip, TTFB measurement)
-- [ ] An MCP endpoint for `nowaki dev` (routes, module graph, recent errors)
+- [x] An MCP endpoint for `nowaki dev` (routes, module graph, recent errors)
 - [ ] Polish Jetstream docs, demos, and benchmarks
 
 ### v1.0 "Nowaki": Stable release

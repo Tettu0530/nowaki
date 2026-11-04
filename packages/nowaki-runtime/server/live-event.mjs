@@ -46,6 +46,7 @@ export async function dispatchLiveEvent(ctx, info, live) {
     );
     return { status: 200, headers: JSON_CT, body: JSON.stringify({ html, state, sig }) };
   } catch (err) {
+    if (err?.code === "NOWAKI_LIVE_STALE") return errBody(409, "stale");
     if (err?.code === "NOWAKI_LIVE_SIG") return errBody(403, "Forbidden");
     if (err?.name === "LiveForbiddenError") return errBody(403, "forbidden");
     console.error(`[nowaki live] ${name} event failed:`, err);
