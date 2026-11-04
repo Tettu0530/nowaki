@@ -31,7 +31,8 @@ ls examples/hello/dist/client/live.*.js >/dev/null 2>&1
 test -f examples/hello/dist/server/islands/LiveCounter.js
 # nowaki start (Rust front) serves the live island, assembled with live.js
 rm -f examples/hello/.nowaki/live-rooms.json   # rooms start empty; the livetest votes in /poll
-./target/debug/nowaki start examples/hello --port 3300 &
+# No ISR warm-up here: the ISR checks below start from an empty cache (MISS → HIT → STALE).
+NOWAKI_ISR_WARM=0 ./target/debug/nowaki start examples/hello --port 3300 &
 START_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3300/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3300/ | grep -q "modulepreload"
@@ -129,6 +130,18 @@ for i in $(seq 1 20); do curl -sf http://127.0.0.1:3301/ >/dev/null && break; sl
 node scripts/livetest.mjs http://127.0.0.1:3301 --expect-timeout
 kill $TIMEOUT_PID
 bash scripts/ci/assert-no-orphans.sh $TIMEOUT_PID
+
+# ISR warm-up (on by default): right after startup the ISR pages are already cached, so the
+# first request is a HIT (or STALE), never a MISS. The internal URL list is not public.
+./target/debug/nowaki start examples/hello --port 3304 > /tmp/nowaki-warm.log &
+WARM_PID=$!
+for i in $(seq 1 20); do grep -q 'ISR warm-up' /tmp/nowaki-warm.log && break; sleep 1; done
+grep -q 'ISR warm-up: 2 of 2 pages cached' /tmp/nowaki-warm.log
+FIRST=$(curl -s -o /dev/null -D - http://127.0.0.1:3304/vary | tr -d '\r' | sed -n 's/^[Xx]-[Nn]owaki-[Cc]ache: //p')
+test "$FIRST" = HIT -o "$FIRST" = STALE
+test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3304/__nowaki/isr-urls)" = 404
+kill $WARM_PID
+bash scripts/ci/assert-no-orphans.sh $WARM_PID
 
 # Expired live signatures: with a 3 s max age, an old page's events come back as "stale" (WS) / 409 (POST).
 NOWAKI_LIVE_MAX_AGE=3 ./target/debug/nowaki start examples/hello --port 3303 &

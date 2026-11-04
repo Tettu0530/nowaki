@@ -10,10 +10,12 @@ use axum::http::{header, HeaderMap, HeaderName};
 
 /// Never proxied from a client: sidecar-only endpoints Rust calls itself (the sidecar trusts
 /// `live-render` bodies: state to re-render, the request context for `getContext()`; `dev-info`
-/// lists app files), and the dev MCP path, which only `nowaki dev` mounts (loopback-only).
-const INTERNAL_PATHS: [&str; 3] = [
+/// lists app files; `isr-urls` lists ISR pages and renders `staticPaths`), and the dev MCP path,
+/// which only `nowaki dev` mounts (loopback-only).
+const INTERNAL_PATHS: [&str; 4] = [
     "/__nowaki/live-render",
     "/__nowaki/dev-info",
+    "/__nowaki/isr-urls",
     "/__nowaki/mcp",
 ];
 
@@ -187,6 +189,7 @@ mod tests {
         assert!(!is_internal_path("/__nowaki/live-render-not"));
         assert!(!is_internal_path("/__nowaki/fn"));
         assert!(is_internal_path("/__nowaki/dev-info"));
+        assert!(is_internal_path("/__nowaki/isr-urls"));
         assert!(is_internal_path("/__nowaki/mcp"));
         assert!(!is_internal_path("/__nowaki/mcpx"));
     }

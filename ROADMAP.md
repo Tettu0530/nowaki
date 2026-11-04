@@ -96,7 +96,8 @@ Prove the differentiation with numbers and tooling.
 
 - [ ] Per-route client JS budgets (`export const budget`)
 - [ ] Build-time "this island could be live" suggestions (including moving live detection to the AST)
-- [ ] Serve ISR / static pages from Rust alone right after startup (prerender ingestion, ETag / 304, pre-gzip, TTFB measurement)
+- [x] Serve ISR pages from Rust alone right after startup (a warm-up render at startup instead of prerender ingestion, ETag / 304, pre-compressed br / gzip)
+- [ ] TTFB measurement in BENCHMARKS.md (with the 0.16.0 re-run of `benchmarks/compare`)
 - [x] An MCP endpoint for `nowaki dev` (routes, module graph, recent errors)
 - [ ] Polish Jetstream docs, demos, and benchmarks
 
