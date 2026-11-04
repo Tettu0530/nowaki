@@ -10,6 +10,11 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **`npm create nowaki` templates:** `.env.example`, a Security section in scaffolded
+  `AGENTS.md`, and (basics template only) `routes/_404.tsx`, `routes/api/health.ts`,
+  and a validated `"use server"` example in `actions/echo.ts`.
+
 ## [0.13.0] — 2026-11-03 · "Zephyr" (part 1)
 
 Packages: `nowaki` / `nowaki-core` 0.13.0 (crates.io, npm), `@nowaki-dev/runtime`

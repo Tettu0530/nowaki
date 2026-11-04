@@ -55,26 +55,6 @@ const TEMPLATES = [
   { value: "minimal", hint: "a single page, zero islands" },
 ];
 
-function fail(msg) {
-  console.error(`\n  ${red("✗")} ${msg}\n`);
-  rl?.close();
-  process.exit(1);
-}
-
-/** Reject path traversal and unsafe directory names before writing under cwd. */
-function assertSafeProjectDir(name, dest) {
-  if (!name || !String(name).trim()) fail("project name is required.");
-  if (String(name).includes("\0")) fail("invalid project name.");
-  if (/[/\\]/.test(name)) fail("project name must not contain path separators.");
-  const cwd = path.resolve(process.cwd());
-  const resolved = path.resolve(dest);
-  const rel = path.relative(cwd, resolved);
-
-  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
-    fail("project directory must stay inside the current working directory.");
-  }
-}
-
 function detectPM() {
   const ua = env.npm_config_user_agent || "";
   if (ua.startsWith("pnpm")) return "pnpm";
@@ -118,7 +98,6 @@ name = name.trim() || "nowaki-app";
 // Keep the directory name as typed; normalize only package.json's name to a valid npm name.
 const pkgName = name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[._-]+/, "") || "nowaki-app";
 const dest = path.resolve(process.cwd(), name);
-assertSafeProjectDir(name, dest);
 
 try {
   const existing = await readdir(dest);
