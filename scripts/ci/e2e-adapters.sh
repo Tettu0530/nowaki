@@ -23,9 +23,17 @@ curl -sf http://127.0.0.1:3310/stream | grep -q "nowaki-island"
 # ISR signal is universal: the node adapter emits the same Cache-Control,
 # so the page gets stale-while-revalidate on any CDN/edge without the Rust front.
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr | grep -qi 'cache-control: public, s-maxage=2, stale-while-revalidate'
-# adapters have no live transport: live islands render their initial SSR, and live.js isn't shipped
+# live islands on adapters: live.js ships in POST mode, and POST /__nowaki/live-event applies an
+# event (signed state in, `live: 1` + a new signature out) behind the RPC-style CSRF gate
 curl -sf http://127.0.0.1:3310/live | grep -q 'nowaki-live name="LiveCounter"'
-! curl -sf http://127.0.0.1:3310/live | grep -qE '/_nowaki/live\.[0-9a-f]+\.js'
+curl -sf http://127.0.0.1:3310/live | grep -qE '/_nowaki/live\.[0-9a-f]+\.js" data-live-transport="post"'
+LIVE_SIG=$(curl -sf http://127.0.0.1:3310/live | grep -oE 'sig="v1\.[^"]+"' | head -1 | cut -d'"' -f2)
+LIVE_EV="{\"name\":\"LiveCounter\",\"state\":{\"count\":0},\"sig\":\"$LIVE_SIG\",\"handler\":\"inc\"}"
+LIVE_OUT=$(curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-live: 1' -H 'origin: http://127.0.0.1:3310' -d "$LIVE_EV" http://127.0.0.1:3310/__nowaki/live-event)
+echo "$LIVE_OUT" | grep -qE 'live: (<!-- -->)?1'
+echo "$LIVE_OUT" | grep -qE '"sig":"v1\.[^"]+"'
+test "$(echo "$LIVE_OUT" | grep -cF "$LIVE_SIG")" = 0
+test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'content-type: application/json' -H 'x-nowaki-live: 1' -H 'origin: http://evil.test' -d "$LIVE_EV" http://127.0.0.1:3310/__nowaki/live-event)" = "403"
 kill $NODE_PID
 # CSP on the node adapter (report-only): nonce on every script/style
 NOWAKI_CSP=report-only PORT=3312 node examples/hello/dist/server/index.mjs &

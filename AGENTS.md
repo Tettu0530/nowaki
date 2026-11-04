@@ -100,6 +100,7 @@ code locations and CI coverage.
   `functions.mjs` aligned with `dist/server/functions.json`.
 - **Do not weaken default CSRF / CSWSH gates** without an explicit opt-in API and
   ROADMAP/SECURITY updates: JSON + `x-nowaki-rpc` + Origin/Host for RPC;
+  JSON + `x-nowaki-live` + `isCrossSite` for `/__nowaki/live-event`;
   Origin checks on `/__nowaki/live` and `/__nowaki/hmr` upgrades.
 - **Server function errors stay generic in production.** Only a `ServerFnError`'s
   status, message, and `data` reach the client; anything else is logged and sent
@@ -131,7 +132,9 @@ code locations and CI coverage.
   request headers must be added to its allowlist.
 - **Client-supplied Jetstream state is used only after its signature verifies**
   (`live.mjs` checks before every render and handler run); do not skip or bypass
-  that path.
+  that path. The POST transport (`server/live-event.mjs`, `/__nowaki/live-event`)
+  goes through the same `liveRender` and keeps the RPC-style CSRF gate (JSON +
+  `x-nowaki-live` + `isCrossSite`) and its 64 KiB body cap ahead of parsing.
 - **ISR keys must include learned `Vary` inputs** (`context.mjs` `__vary()` →
   `x-nowaki-vary`, folded in `isr_key` in `start.rs`) so cached pages cannot
   bleed across users. The query string is part of the key only when the route reads
@@ -151,7 +154,10 @@ code locations and CI coverage.
   (detect, id, client proxy, discover) + `packages/nowaki-runtime/server/functions.mjs`
   (dispatch + `getContext`). Allowlist: `dist/server/functions.json`.
 - **Jetstream islands** — `crates/nowaki/src/live.rs` (`LiveHub` + WS session),
-  `server/live.mjs`, `client/live.js`. State on the server, HTML patches over WS.
+  `server/live.mjs`, `client/live.js`. State on the server, HTML patches over WS;
+  `server/live-event.mjs` is the per-event POST transport (all servers, the only
+  one on the adapters). `server/live-hub.mjs` is a runtime-neutral JS port of the
+  WS session, not wired into a server yet.
 - **Plugins / virtual modules** — `PluginBridge` (`transform`, `compile_tsrx`,
   `resolve_id`, `load`); `NowakiCore::resolve_spec` + the `VirtualResolve` trait.
 - **Scope hoisting / chunking** — `crates/nowaki-core/src/chunk.rs`.

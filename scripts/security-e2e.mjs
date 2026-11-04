@@ -1,7 +1,7 @@
 // App-layer security regression suite. Deterministically checks defenses for regressions (no Chrome). Called from CI e2e.
 //   node scripts/security-e2e.mjs dev  <devBase>  <appRoot>
 //   node scripts/security-e2e.mjs prod <prodBase>
-// Covers (dev + prod unless noted): RPC CSRF, CSWSH, forged live state, server functions,
+// Covers (dev + prod unless noted): RPC CSRF, CSWSH, forged live state, the live-event POST gate, server functions,
 //         cross-site writes, default headers. Dev only: arbitrary file read (@fs/ssr-module/.env/
 //         virtual ..), the HMR socket. Prod only: generic 500s, ISR isolation and query-flood
 //         collapsing, /_nowaki/* basename static serving (path traversal).
@@ -159,6 +159,49 @@ async function liveForgeryRejected(b) {
   });
 }
 
+// POST /__nowaki/live-event (the WS fallback) keeps the RPC-style CSRF gate, a body cap, and
+// signature verification before any handler.
+async function liveEventGate(b) {
+  const tag = (await (await fetch(`${b}/live`)).text()).match(/<nowaki-live\b[^>]*>/)?.[0] ?? "";
+  const attr = (n) => tag.match(new RegExp(`${n}="([^"]*)"`))?.[1];
+  const ev = { name: attr("name"), state: JSON.parse((attr("state") ?? "{}").replace(/&quot;/g, '"')), sig: attr("sig"), handler: "inc" };
+  const post = (h, body = ev) =>
+    fetch(`${b}/__nowaki/live-event`, {
+      method: "POST",
+      headers: Object.fromEntries(
+        Object.entries({ "content-type": "application/json", "x-nowaki-live": "1", ...h }).filter(([, v]) => v !== null),
+      ),
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    });
+  const ok = await post({ origin: b });
+  const okBody = ok.status === 200 ? await ok.json() : {};
+  check("live-event same-origin POST applies the event (live: 1, new sig)",
+    /live:\s*1/.test(okBody.html ?? "") && okBody.state?.count === 1 && okBody.sig && okBody.sig !== ev.sig);
+  check("live-event cross-site Origin rejected (403)", (await post({ origin: "http://evil.test" })).status === 403);
+  check("live-event Sec-Fetch-Site cross-site rejected (403)", (await post({ "sec-fetch-site": "cross-site" })).status === 403);
+  check("live-event missing x-nowaki-live rejected (403)", (await post({ "x-nowaki-live": null })).status === 403);
+  check("live-event text/plain rejected (415)", (await post({ "content-type": "text/plain" })).status === 415);
+  const forged = await post({}, { ...ev, state: { count: 9999 }, sig: "FORGED" });
+  const forgedText = await forged.text();
+  check(`live-event forged signature gets no html (${forged.status})`, forged.status === 403 && !forgedText.includes("html"));
+  check("live-event oversized body rejected (413)",
+    (await post({}, { ...ev, payload: "x".repeat(70 * 1024) })).status === 413);
+  // The sidecar's internal render hook has no CSRF gate, so the Rust front must not proxy it.
+  // The POST runs in its own request: live.authorize sees the request's real cookies.
+  const admin = (cookie) =>
+    fetch(`${b}/__nowaki/live-event`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-nowaki-live": "1", ...(cookie ? { cookie } : {}) },
+      body: JSON.stringify({ ...ev, handler: "adminReset" }),
+    });
+  const denied = await admin(null);
+  check(`live-event: live.authorize refuses without the role cookie (${denied.status})`,
+    denied.status === 403 && (await denied.json()).error === "forbidden");
+  check("live-event: live.authorize allows with role=admin", (await admin("role=admin")).status === 200);
+  const internal = await fetch(`${b}/__nowaki/live-render`, { method: "POST", headers: { "content-type": "text/plain" }, body: JSON.stringify(ev) });
+  check(`internal /__nowaki/live-render not reachable (${internal.status})`, internal.status === 404);
+}
+
 if (mode === "dev") {
   const enc = encodeURIComponent;
   // Arbitrary file read surface (canonicalize + allow-root + deny + transformable gates)
@@ -218,6 +261,7 @@ if (mode === "dev") {
   check("internal /__nowaki/live-render is not reachable (404)",
     (await fetch(`${base}/__nowaki/live-render`, { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "LiveCounter", state: {}, sig: "", handler: "adminReset", request: { headers: { cookie: "role=admin" } } }) })).status === 404);
+  await liveEventGate(base);
 }
 
 if (mode === "prod") {

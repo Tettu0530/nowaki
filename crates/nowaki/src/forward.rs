@@ -15,7 +15,7 @@ pub fn is_internal_path(path: &str) -> bool {
 }
 
 /// `x-nowaki-*` request headers the browser runtime sends on purpose; every other one is internal.
-const CLIENT_NOWAKI_HEADERS: [&str; 2] = ["x-nowaki-rpc", "x-nowaki-nav"];
+const CLIENT_NOWAKI_HEADERS: [&str; 3] = ["x-nowaki-rpc", "x-nowaki-nav", "x-nowaki-live"];
 
 pub fn trust_proxy() -> bool {
     static TRUST: OnceLock<bool> = OnceLock::new();
@@ -149,6 +149,7 @@ mod tests {
         for n in [
             "x-nowaki-rpc",
             "x-nowaki-nav",
+            "x-nowaki-live",
             "content-type",
             "cookie",
             "origin",

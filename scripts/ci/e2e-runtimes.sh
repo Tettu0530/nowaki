@@ -36,8 +36,12 @@ curl -sf $B/ | grep -q "nowaki-island"
 curl -sf $B/api/hello | grep -q '"hello":"nowaki"'
 curl -s -D - -o /dev/null $B/ | grep -qi '^x-content-type-options: nosniff'
 curl -sf $B/blog/hello | grep -q "Post: hello"
-# live islands render their initial state (no live transport on these adapters yet)
+# live islands render their initial state, and a POST /__nowaki/live-event applies an event
 curl -sf $B/live | grep -q 'live: 0'
+LIVE_SIG=$(curl -sf $B/live | grep -oE 'sig="v1\.[^"]+"' | head -1 | cut -d'"' -f2)
+curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-live: 1' \
+  -d "{\"name\":\"LiveCounter\",\"state\":{\"count\":0},\"sig\":\"$LIVE_SIG\",\"handler\":\"inc\"}" \
+  $B/__nowaki/live-event | grep -qE 'live: (<!-- -->)?1'
 test "$(curl -s -o /dev/null -w '%{http_code}' $B/nope)" = "404"
 curl -sf -XPOST -H 'content-type: application/json' -d '{"a":1}' $B/api/echo | grep -q '"received":{"a":1}'
 echo "runtime e2e ($target): OK"

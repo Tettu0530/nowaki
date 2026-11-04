@@ -51,6 +51,13 @@ const env = {
     importModule: (m, version) =>
       import(`${pathToFileURL(path.join(appRoot, m)).href}?v=${version}`),
   },
+  live: {
+    async lookup(name, version) {
+      const reg = await loadIslandRegistry(appRoot, String(version ?? "0"));
+      return [...reg.values()].find((e) => e.name === name && e.live)?.mod ?? null;
+    },
+    render: liveRender,
+  },
   renderDocument,
   renderShell,
   renderError: (err) => {
