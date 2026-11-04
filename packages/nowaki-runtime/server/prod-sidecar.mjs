@@ -23,7 +23,7 @@ env.renderDocument = ({ mod, body, meta }) => {
 };
 
 const server = createServer(async (req, res) => {
-  if (req.method === "POST" && req.url.startsWith("/__nowaki/live-render")) {
+  if (req.method === "POST" && req.url.split("?")[0] === "/__nowaki/live-render") {
     try {
       const chunks = [];
       for await (const c of req) chunks.push(c);

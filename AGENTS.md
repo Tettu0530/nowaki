@@ -118,6 +118,9 @@ code locations and CI coverage.
   `<style>` (CSS shims, router head/body swaps, boundaries) must set
   `window.__nowakiNonce` on it. Re-run the browser tests with
   `NOWAKI_CSP=enforce` when touching those paths.
+- **Internal sidecar endpoints stay internal.** Anything the sidecar trusts
+  without checks (today `/__nowaki/live-render`) must be listed in
+  `forward::is_internal_path`, so dev/start return 404 instead of proxying it.
 - **Sidecar requests go through `forward::apply`** (`crates/nowaki/src/forward.rs`).
   Clients never set `x-forwarded-*` or internal `x-nowaki-*` headers on the
   sidecar hop unless `NOWAKI_TRUST_PROXY` is set; new client-facing `x-nowaki-*`
