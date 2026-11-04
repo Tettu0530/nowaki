@@ -50,6 +50,19 @@ milestone's worth of work; the codename is noted per entry.
 - A Jetstream event can only call the island's own `live.on` handlers, not
   inherited object methods such as `toString`.
 
+## [0.14.1] — 2026-11-04 · security patch
+
+Packages: `nowaki` / `nowaki-core` 0.14.1, `@nowaki-dev/runtime` 0.13.1
+(`create-nowaki` is unchanged; new apps already get these through `^` ranges).
+
+### Fixed
+- **Security:** `nowaki dev` / `nowaki start` no longer proxy
+  `/__nowaki/live-render` (404). That endpoint is the sidecar's internal
+  re-render call from the Rust live session, and it trusts its body. Reached
+  through the public port, a cross-site `text/plain` POST could run any live
+  island handler on a signed state copied from a page, with no CSRF gate. The
+  sidecars also match the path exactly.
+
 ## [0.14.0] — 2026-11-04 · "Gale" (and "Zephyr" complete)
 
 Packages: `nowaki` / `nowaki-core` 0.14.0 (crates.io, npm), `@nowaki-dev/runtime`
@@ -397,7 +410,8 @@ and the runtime at 0.9.0.
 - Published to crates.io (`nowaki-core`, `nowaki`) and npm (`@nowaki-dev/runtime`,
   `create-nowaki`, `create-nowaki-app`).
 
-[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.14.1
 [0.14.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.14.0
 [0.13.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.13.0
 [0.12.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.12.1
