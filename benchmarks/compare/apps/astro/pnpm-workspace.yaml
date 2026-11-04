@@ -1,0 +1,5 @@
+# Standalone project: keeps pnpm from treating the repo root as this app's workspace.
+packages: []
+allowBuilds:
+  'esbuild': true
+  'sharp': false
