@@ -16,7 +16,7 @@ use oxc::ast::ast::{
     Declaration, ExportDefaultDeclarationKind, ImportDeclarationSpecifier, ModuleExportName,
     Statement,
 };
-use oxc::codegen::{Codegen, CodegenOptions};
+use oxc::codegen::{Codegen, CodegenOptions, CommentOptions, LegalComment};
 use oxc::minifier::{Minifier, MinifierOptions};
 use oxc::span::SourceType;
 use xxhash_rust::xxh3::xxh3_64;
@@ -122,8 +122,7 @@ pub fn hoist_chunk(
         Some(format!("{local}${}", m.idx))
     };
 
-    let mut ext_imports: Vec<String> = Vec::new();
-    let mut ext_seen: HashSet<String> = HashSet::new();
+    let mut ext_imports = ExternalImports::default();
     let mut bodies: Vec<String> = Vec::new();
 
     for abs in &order {
@@ -142,11 +141,9 @@ pub fn hoist_chunk(
                             let renamed = format!("{local}${}", meta.idx);
                             wiring.rename_local.insert(local.clone(), renamed.clone());
                             if let Some(file) = external_name.get(&imp.source_abs) {
-                                ext_imports_push(
-                                    &mut ext_imports,
-                                    &mut ext_seen,
-                                    format!("import{{{imported} as {renamed}}}from\"./{file}\";"),
-                                );
+                                ext_imports
+                                    .file(file)
+                                    .add_named(format!("{imported} as {renamed}"));
                             }
                         }
                     }
@@ -159,22 +156,14 @@ pub fn hoist_chunk(
                             let renamed = format!("{local}${}", meta.idx);
                             wiring.rename_local.insert(local.clone(), renamed.clone());
                             if let Some(file) = external_name.get(&imp.source_abs) {
-                                ext_imports_push(
-                                    &mut ext_imports,
-                                    &mut ext_seen,
-                                    format!("import {renamed} from\"./{file}\";"),
-                                );
+                                ext_imports.file(file).add_default(renamed);
                             }
                         }
                     }
                     ImportItem::SideEffect => {
                         if !internal_dep {
                             if let Some(file) = external_name.get(&imp.source_abs) {
-                                ext_imports_push(
-                                    &mut ext_imports,
-                                    &mut ext_seen,
-                                    format!("import\"./{file}\";"),
-                                );
+                                ext_imports.file(file);
                             }
                         }
                     }
@@ -188,11 +177,7 @@ pub fn hoist_chunk(
     let entry_default = renamed_export(entry, "default")
         .ok_or_else(|| anyhow!("island has no default export: {}", entry.display()))?;
 
-    let mut out = String::new();
-    for imp in &ext_imports {
-        out.push_str(imp);
-        out.push('\n');
-    }
+    let mut out = ext_imports.render();
     for body in &bodies {
         out.push_str(body);
         out.push('\n');
@@ -207,9 +192,74 @@ struct ImportWiring {
     rename_local: HashMap<String, String>,
 }
 
-fn ext_imports_push(list: &mut Vec<String>, seen: &mut HashSet<String>, line: String) {
-    if seen.insert(line.clone()) {
-        list.push(line);
+/// The chunk's imports from other chunks, one statement per file (in first-use order), so
+/// `import{a}from"x";import{b}from"x"` becomes `import{a,b}from"x"`.
+#[derive(Default)]
+struct ExternalImports {
+    files: Vec<ExternalImport>,
+}
+
+struct ExternalImport {
+    file: String,
+    default: Option<String>,
+    named: Vec<String>,
+}
+
+impl ExternalImports {
+    fn file(&mut self, file: &str) -> &mut ExternalImport {
+        let i = match self.files.iter().position(|f| f.file == file) {
+            Some(i) => i,
+            None => {
+                self.files.push(ExternalImport {
+                    file: file.to_string(),
+                    default: None,
+                    named: Vec::new(),
+                });
+                self.files.len() - 1
+            }
+        };
+        &mut self.files[i]
+    }
+
+    fn render(&self) -> String {
+        let mut out = String::new();
+        for f in &self.files {
+            let mut clause = Vec::new();
+            if let Some(d) = &f.default {
+                clause.push(d.clone());
+            }
+            if !f.named.is_empty() {
+                clause.push(format!("{{{}}}", f.named.join(",")));
+            }
+            if clause.is_empty() {
+                out.push_str(&format!("import\"./{}\";\n", f.file));
+            } else {
+                out.push_str(&format!(
+                    "import {} from\"./{}\";\n",
+                    clause.join(","),
+                    f.file
+                ));
+            }
+        }
+        out
+    }
+}
+
+impl ExternalImport {
+    fn add_named(&mut self, spec: String) {
+        if !self.named.contains(&spec) {
+            self.named.push(spec);
+        }
+    }
+
+    // Two modules can default-import the same file under different names; the second one
+    // becomes a named `default as` import so both bindings stay.
+    fn add_default(&mut self, local: String) {
+        match &self.default {
+            None => self.default = Some(local),
+            Some(d) if *d == local => {}
+            Some(_) => self.add_named(format!("default as {local}")),
+        }
     }
 }
 
@@ -476,19 +526,31 @@ fn order_modules(
     order.push(abs.to_path_buf());
 }
 
+/// Codegen options for client JS: minified, with a source map, keeping only legal comments.
+/// Pass the minifier's scoping with `with_scoping`, or the mangled names are not printed.
+pub(crate) fn client_codegen_options(source_map_path: PathBuf) -> CodegenOptions {
+    CodegenOptions {
+        minify: true,
+        source_map_path: Some(source_map_path),
+        // Nothing bundles the output again, so `/* @__PURE__ */` and other annotations are dead bytes.
+        comments: CommentOptions {
+            legal: LegalComment::Inline,
+            ..CommentOptions::disabled()
+        },
+        ..CodegenOptions::default()
+    }
+}
+
 /// Re-parses the concatenated chunk source, then minifies + codegens it (with an external source map).
 /// Returns (final code, source map JSON).
 pub fn minify_chunk(name: &str, source: &str) -> Result<(String, Option<String>)> {
     let allocator = Allocator::default();
     let path = Path::new(name);
     let mut program = crate::transform::parse_program(&allocator, path, source, SourceType::mjs())?;
-    Minifier::new(MinifierOptions::default()).minify(&allocator, &mut program);
+    let minified = Minifier::new(MinifierOptions::default()).minify(&allocator, &mut program);
     let ret = Codegen::new()
-        .with_options(CodegenOptions {
-            minify: true,
-            source_map_path: Some(PathBuf::from(name)),
-            ..CodegenOptions::default()
-        })
+        .with_options(client_codegen_options(PathBuf::from(name)))
+        .with_scoping(minified.scoping)
         .build(&program);
     let map = ret.map.map(|m| m.to_json_string());
     let _ = xxh3_64(source.as_bytes());
