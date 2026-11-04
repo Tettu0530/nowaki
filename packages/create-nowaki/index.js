@@ -141,6 +141,9 @@ await cp(path.join(templatesDir, template), dest, { recursive: true });
 try {
   await rename(path.join(dest, "_gitignore"), path.join(dest, ".gitignore"));
 } catch {}
+try {
+  await rename(path.join(dest, "env.example"), path.join(dest, ".env.example"));
+} catch {}
 
 try {
   const pkgPath = path.join(dest, "package.json");
