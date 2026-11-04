@@ -2,8 +2,9 @@
 extend-exclude = ["*.lock", "pnpm-lock.yaml", "*.svg"]
 
 [default]
-# Hex ids in server-function fixtures, and plurals of acronyms the word splitter cuts up.
-extend-ignore-re = ["[0-9a-f]{16}", "PNGs", "MISSes"]
+# Hex ids in server-function fixtures, content hashes in built file names (benchmark results
+# list them, e.g. islands.8916abd3.js), and plurals of acronyms the word splitter cuts up.
+extend-ignore-re = ["[0-9a-f]{16}", "\\.[0-9a-f]{8}\\.(js|css)", "PNGs", "MISSes"]
 
 [default.extend-identifiers]
 als = "als" # AsyncLocalStorage instance
