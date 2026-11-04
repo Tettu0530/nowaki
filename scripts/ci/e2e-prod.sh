@@ -87,6 +87,9 @@ node scripts/livetest.mjs http://127.0.0.1:3300
 # leak) and collapse unused-query floods (#6/#7).
 ! grep -rl "$HOME" examples/hello/dist/client
 node scripts/security-e2e.mjs prod http://127.0.0.1:3300
+# Windows has no SIGTERM for the sidecar, so rooms rely on the periodic write (every 2 s): wait for
+# it there. Elsewhere `kill` is a SIGTERM, and the sidecar must write the rooms on its way out.
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) sleep 3 ;; esac
 kill $START_PID
 bash scripts/ci/assert-no-orphans.sh $START_PID
 # Rooms survive a restart: on SIGTERM the sidecar wrote them to .nowaki/live-rooms.json.
