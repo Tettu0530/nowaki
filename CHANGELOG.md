@@ -10,6 +10,15 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **Jetstream stale notifications:** an event on a page older than
+  `NOWAKI_LIVE_MAX_AGE` (24 h by default) used to fail like a forged one.
+  The server now tells the two apart. A genuine, expired signature comes back
+  as `reason: "stale"` over WebSocket and as HTTP 409 over POST. The client
+  dispatches a cancelable `nowaki:live-stale` event and, unless the app calls
+  `preventDefault()`, reloads the page to get fresh signed state. A tampered
+  or future-dated signature is still rejected as before (`403`).
+
 ## [0.15.0] — 2026-11-04 · "Cyclone" (part 1)
 
 Packages: `nowaki` / `nowaki-core` 0.15.0 (crates.io, npm), `@nowaki-dev/runtime`

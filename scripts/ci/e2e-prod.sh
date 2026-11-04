@@ -105,3 +105,11 @@ for i in $(seq 1 20); do curl -sf http://127.0.0.1:3301/ >/dev/null && break; sl
 node scripts/livetest.mjs http://127.0.0.1:3301 --expect-timeout
 kill $TIMEOUT_PID
 bash scripts/ci/assert-no-orphans.sh $TIMEOUT_PID
+
+# Expired live signatures: with a 3 s max age, an old page's events come back as "stale" (WS) / 409 (POST).
+NOWAKI_LIVE_MAX_AGE=3 ./target/debug/nowaki start examples/hello --port 3303 &
+STALE_PID=$!
+for i in $(seq 1 20); do curl -sf http://127.0.0.1:3303/ >/dev/null && break; sleep 1; done
+node scripts/livetest.mjs http://127.0.0.1:3303 --expect-stale 3
+kill $STALE_PID
+bash scripts/ci/assert-no-orphans.sh $STALE_PID

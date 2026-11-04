@@ -5,7 +5,7 @@ import { h } from "preact";
 import { renderToStringAsync } from "preact-render-to-string";
 
 import { makeContext } from "./context.mjs";
-import { sign, verify } from "./live-sign.mjs";
+import { sign, verifyStatus } from "./live-sign.mjs";
 import { publish } from "./publish.mjs";
 
 // Rooms: islands with `live.room(props)` share one state per room id (`live.shared()`), held here in
@@ -83,7 +83,12 @@ export function liveTopics(mod, state) {
 /// `load: { topic }` is a `publish(topic)` refresh: `live.load(state, { topic })` replaces the
 /// handler. The result carries the island's current topics.
 export async function liveRender(mod, state, handler, payload, name, sig, { load } = {}) {
-  if (!verify(name, state, sig)) {
+  const status = verifyStatus(name, state, sig);
+  if (status === "expired") {
+    // The page outlived NOWAKI_LIVE_MAX_AGE: the client reloads it for a fresh signature.
+    throw Object.assign(new Error("live state signature expired"), { code: "NOWAKI_LIVE_STALE" });
+  }
+  if (status !== "ok") {
     throw Object.assign(new Error("live state signature invalid"), { code: "NOWAKI_LIVE_SIG" });
   }
   const authorize = mod.live?.authorize;

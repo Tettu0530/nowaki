@@ -49,6 +49,34 @@ const check = (cond, label) => {
   if (!cond) failed = true;
 };
 
+// Against a server started with a short NOWAKI_LIVE_MAX_AGE: a page older than that gets "stale"
+// (over WS and over POST), so the client can reload it instead of failing silently.
+if (process.argv[3] === "--expect-stale") {
+  const wait = Number(process.argv[4] ?? 3) * 1000 + 1000;
+  await new Promise((r) => setTimeout(r, wait));
+  const t = await open(wsUrl);
+  await recvUntil(t, (m) => m.type === "presence");
+  t.send(JSON.stringify({ type: "join", islands: [{ nid, name: "LiveCounter", state, sig }] }));
+  t.send(JSON.stringify({ type: "event", nid, handler: "inc" }));
+  const err = await recvUntil(t, (m) => m.type === "error" && m.nid === nid);
+  check(err.reason === "stale", `an expired signature is reported as stale over WS (reason=${err.reason})`);
+  t.close();
+  const r = await fetch(base + "/__nowaki/live-event", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-nowaki-live": "1" },
+    body: JSON.stringify({ name: "LiveCounter", state, sig, handler: "inc" }),
+  });
+  check(r.status === 409, `an expired signature is 409 over POST (${r.status})`);
+  const forged = await fetch(base + "/__nowaki/live-event", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-nowaki-live": "1" },
+    body: JSON.stringify({ name: "LiveCounter", state: { count: 999 }, sig, handler: "inc" }),
+  });
+  check(forged.status === 403, `a tampered state is still 403, not stale (${forged.status})`);
+  console.log(failed ? "\nLIVETEST (stale) FAILED" : "\nLIVETEST (stale) PASSED");
+  process.exit(failed ? 1 : 0);
+}
+
 // Against a server started with a short NOWAKI_LIVE_RENDER_TIMEOUT_MS: a render past it is
 // reported as an error, the state is unchanged, and the connection keeps working.
 if (process.argv[3] === "--expect-timeout") {

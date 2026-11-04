@@ -91,6 +91,11 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(result));
     } catch (err) {
+      if (err?.code === "NOWAKI_LIVE_STALE") {
+        res.writeHead(409, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "stale" }));
+        return;
+      }
       if (err instanceof LiveForbiddenError) {
         res.writeHead(403, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: "forbidden" }));

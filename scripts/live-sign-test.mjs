@@ -3,7 +3,7 @@
 // Usage: node scripts/live-sign-test.mjs
 process.env.NOWAKI_LIVE_SECRET = "test-secret";
 process.env.NOWAKI_LIVE_MAX_AGE = "3600";
-const { sign, verify } = await import("../packages/nowaki-runtime/server/live-sign.mjs");
+const { sign, verify, verifyStatus } = await import("../packages/nowaki-runtime/server/live-sign.mjs");
 
 let failures = 0;
 const check = (label, cond) => {
@@ -25,6 +25,13 @@ check("rejects a future-dated signature", !verify("Counter", st, sign("Counter",
 check("rejects a changed issue time", !verify("Counter", st, sig.replace("v1.1800000000.", "v1.1800000500."), { now: now + 600 }));
 check("rejects a legacy unversioned signature", !verify("Counter", st, sig.split(".")[2], { now }));
 check("rejects empty and non-string", !verify("Counter", st, "", { now }) && !verify("Counter", st, undefined, { now }));
+
+check("a fresh signature is ok", verifyStatus("Counter", st, sig, { now }) === "ok");
+check("a genuine old signature is expired (not invalid)", verifyStatus("Counter", st, sig, { now: now + 3601 }) === "expired");
+const forgedOld = `v1.${now - 99999}.${sig.split(".")[2]}`;
+check("a forged signature with an old timestamp is invalid (never expired)", verifyStatus("Counter", st, forgedOld, { now }) === "invalid");
+check("a future-dated signature is invalid", verifyStatus("Counter", st, sign("Counter", st, { now: now + 120 }), { now }) === "invalid");
+check("tampered state is invalid even when old", verifyStatus("Counter", { count: 99 }, sig, { now: now + 3601 }) === "invalid");
 
 console.log(failures ? `\nLIVE SIGN TEST FAILED (${failures})` : "\nLIVE SIGN TEST PASSED");
 process.exit(failures ? 1 : 0);

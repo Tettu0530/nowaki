@@ -108,7 +108,13 @@ export function createLiveHub({
             inflight = false;
             if (closed) return;
             const reason =
-              err?.message === "timeout" ? "timeout" : err?.name === "LiveForbiddenError" ? "forbidden" : "render failed";
+              err?.message === "timeout"
+                ? "timeout"
+                : err?.name === "LiveForbiddenError"
+                  ? "forbidden"
+                  : err?.code === "NOWAKI_LIVE_STALE"
+                    ? "stale"
+                    : "render failed";
             console.error(`[nowaki live] ${isl.name} re-render ${reason}`);
             send(sock, { type: "error", nid: ev.nid, reason });
             pump();
