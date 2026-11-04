@@ -79,14 +79,14 @@ Make "LiveView for the npm ecosystem, with 0KB of component JS" practical. Forms
 
 **Exit criteria**: State survives reconnects and server restarts. `publish()` delivers patches to islands on other connections. A two-tab voting demo works with per-room presence. Fan-out p95 at 1000 connections is recorded in BENCHMARKS.md.
 
-**Status**: 0.15.0 ships the checked items below, live islands on every deploy adapter (per event over POST), and the two-tab demo (`/poll`). Still open: rooms surviving a server restart (they're held in memory), stale notifications / resume token, the fan-out p95 in BENCHMARKS.md, and the single-process note on nowaki.dev.
+**Status**: 0.15.0 ships the checked items below, live islands on every deploy adapter (per event over POST), and the two-tab demo (`/poll`). Still open: rooms surviving a server restart (they're held in memory) and the fan-out p95 in BENCHMARKS.md. Stale notifications landed after 0.15.0; the resume token is deferred.
 
 - [x] More events (submit / input / change, debounce, keyed morph)
-- [ ] Stable signing key, stale notifications, resume token (optional)
+- [x] Stable signing key (`NOWAKI_LIVE_SECRET`) and stale notifications; resume token (optional) deferred
 - [x] Read request context from handlers (`getContext()`, `live.authorize`)
 - [x] Live queries (`subscribe` / `load` / `publish`, a Node→Rust event path)
 - [x] Multiplayer rooms (`room` / `shared` / per-room presence)
-- [ ] Document in the docs that it assumes a single process and does not support edge
+- [x] Document in the docs that it assumes a single process and does not support edge (nowaki.dev Jetstream page)
 
 ### v0.16 "Chinook": Show it with numbers
 Prove the differentiation with numbers and tooling.
