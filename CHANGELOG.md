@@ -19,6 +19,16 @@ milestone's worth of work; the codename is noted per entry.
   `preventDefault()`, reloads the page to get fresh signed state. A tampered
   or future-dated signature is still rejected as before (`403`).
 
+### Changed
+- **About 4x the throughput on `nowaki start` and the Node adapters.** In
+  production, every request ran `import()` on the route's module again. The
+  module was cached, but with the react-alias loader hooks registered, each
+  `import()` made a synchronous round trip to the hooks thread, and that took
+  half the CPU time of a page. Production modules are now imported once.
+  Measured on `examples/hello`, 50 connections, Apple M2: `/about` on
+  `nowaki start` went from 6,056 to 28,752 req/s, and `/api/hello` from
+  8,895 to 32,101 req/s. Dev mode is unchanged: it re-imports on every edit.
+
 ## [0.15.0] — 2026-11-04 · "Cyclone" (part 1)
 
 Packages: `nowaki` / `nowaki-core` 0.15.0 (crates.io, npm), `@nowaki-dev/runtime`
