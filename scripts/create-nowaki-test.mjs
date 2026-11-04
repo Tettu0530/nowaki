@@ -40,7 +40,7 @@ try {
         check(`basics: ${rel} exists`, existsSync(path.join(app, rel)));
       }
       const echo = readFileSync(path.join(app, "actions/echo.ts"), "utf8");
-      check("basics: echo validates input", echo.includes('"use server"') && echo.includes("invalid message"));
+      check("basics: echo uses serverFn validation", echo.includes('"use server"') && echo.includes("serverFn("));
     } else {
       check("minimal: no islands directory", !existsSync(path.join(app, "islands")));
       check("minimal: no _404 route file", !existsSync(path.join(app, "routes/_404.tsx")));
