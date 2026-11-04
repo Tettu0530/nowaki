@@ -132,7 +132,10 @@ code locations and CI coverage.
 - **Sidecar requests go through `forward::apply`** (`crates/nowaki/src/forward.rs`).
   Clients never set `x-forwarded-*` or internal `x-nowaki-*` headers on the
   sidecar hop unless `NOWAKI_TRUST_PROXY` is set; new client-facing `x-nowaki-*`
-  request headers must be added to its allowlist.
+  request headers must be added to its allowlist. Adapter runtimes (Node/Edge)
+  apply the same host trust in `server/origin.mjs` (`browserHost`) for CSRF
+  checks — `NOWAKI_TRUST_PROXY`, loopback sidecar `Host`, Vercel `x-forwarded-host`,
+  otherwise `Host`; do not derive the comparison host from `Origin`.
 - **Client-supplied Jetstream state is used only after its signature verifies**
   (`live.mjs` checks before every render and handler run); do not skip or bypass
   that path. The POST transport (`server/live-event.mjs`, `/__nowaki/live-event`)

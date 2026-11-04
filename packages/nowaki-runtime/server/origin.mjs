@@ -7,6 +7,53 @@ export function sameOrigin(origin, host) {
   return originHost === host;
 }
 
+/// Matches `crates/nowaki/src/forward.rs` `trust_proxy()`.
+export function trustProxy() {
+  const v = String(globalThis.process?.env?.NOWAKI_TRUST_PROXY ?? "")
+    .trim()
+    .toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+function vercelHosted() {
+  const v = String(globalThis.process?.env?.VERCEL ?? "")
+    .trim()
+    .toLowerCase();
+  return v === "1" || v === "true";
+}
+
+function firstCommaSeparated(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const first = String(value).split(",")[0].trim();
+  return first || undefined;
+}
+
+function isLoopbackHost(host) {
+  if (!host) return false;
+  const name = host.split(":")[0].replace(/^\[|\]$/g, "").toLowerCase();
+  return name === "localhost" || name === "127.0.0.1" || name === "::1";
+}
+
+/// Host the browser used for same-origin checks. Does not read `Origin` (that would let the
+/// value under test pick its own comparison host). Order: trusted proxy `x-forwarded-host`;
+/// loopback connection `Host` → canonical `x-forwarded-host` (Rust sidecar hop); on Vercel,
+/// edge-set `x-forwarded-host` (public/custom domain); otherwise `Host`.
+export function browserHost(get) {
+  if (trustProxy()) {
+    const forwarded = firstCommaSeparated(get("x-forwarded-host"));
+    if (forwarded) return forwarded;
+  }
+  const host = get("host");
+  const forwarded = firstCommaSeparated(get("x-forwarded-host"));
+  if (isLoopbackHost(host)) {
+    return forwarded ?? host;
+  }
+  if (vercelHosted() && forwarded) {
+    return forwarded;
+  }
+  return host ?? forwarded;
+}
+
 /// Whether a non-GET request came from another site. Browsers send Origin on POST; when
 /// Origin is absent, Sec-Fetch-Site may still mark cross-site requests. When neither
 /// header is present (curl, server-to-server), the request is not treated as cross-site
@@ -16,7 +63,7 @@ export function isCrossSite(get) {
   const origin = get("origin");
   if (origin) {
     if (origin === "null") return true; // sandboxed iframes, opaque redirects
-    return !sameOrigin(origin, get("x-forwarded-host") ?? get("host"));
+    return !sameOrigin(origin, browserHost(get));
   }
   return get("sec-fetch-site") === "cross-site";
 }

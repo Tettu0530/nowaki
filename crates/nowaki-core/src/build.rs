@@ -574,15 +574,20 @@ fn emit_island(
     if crate::chunk::needs_fallback(core, island) {
         return emit(core, island, out_dir, ctx);
     }
-    let mut internal: Vec<PathBuf> = vec![island.to_path_buf()];
+    let mut others: Vec<PathBuf> = Vec::new();
     for m in app_set {
         if m == island {
             continue;
         }
         if app_count.get(m).copied().unwrap_or(0) == 1 && !crate::chunk::needs_fallback(core, m) {
-            internal.push(m.clone());
+            others.push(m.clone());
         }
     }
+    // Each module's index becomes its rename suffix, so the order must not depend on HashSet
+    // iteration: otherwise the chunk's names, bytes and hash change from one build to the next.
+    others.sort();
+    let mut internal: Vec<PathBuf> = vec![island.to_path_buf()];
+    internal.extend(others);
     let internal_set: HashSet<&Path> = internal.iter().map(|p| p.as_path()).collect();
 
     let mut external_name: HashMap<PathBuf, String> = HashMap::new();
@@ -612,8 +617,9 @@ fn emit_island(
             }
             fs::write(out_dir.join(&filename), &code)?;
             // Record direct deps only (render_manifest walks the transitive ones)
-            ctx.deps
-                .insert(filename.clone(), external_name.values().cloned().collect());
+            let mut deps: Vec<String> = external_name.values().cloned().collect();
+            deps.sort();
+            ctx.deps.insert(filename.clone(), deps);
             ctx.emitted.insert(island.to_path_buf(), filename.clone());
             Ok(filename)
         }
@@ -686,7 +692,7 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
 
     // Tree shaking / DCE / mangle. Remove unused imports and dead code before
     // recording deps (removed imports don't enter deps).
-    Minifier::new(MinifierOptions::default()).minify(&allocator, &mut program);
+    let minified = Minifier::new(MinifierOptions::default()).minify(&allocator, &mut program);
 
     let dir = path.parent().unwrap_or(&core.root);
     let mut deps = Vec::new();
@@ -720,12 +726,10 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
 
     // Make sources root-relative; never expose absolute paths, including out-of-root deps (pnpm store).
     let rel = client_source_name(&core.root, path);
+    // Only import sources were rewritten since minifying, so the scoping still matches.
     let ret = Codegen::new()
-        .with_options(CodegenOptions {
-            minify: true,
-            source_map_path: Some(rel),
-            ..CodegenOptions::default()
-        })
+        .with_options(crate::chunk::client_codegen_options(rel))
+        .with_scoping(minified.scoping)
         .build(&program);
     let map = ret.map.map(|m| m.to_json_string());
 
