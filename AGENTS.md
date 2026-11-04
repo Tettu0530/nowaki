@@ -122,6 +122,9 @@ code locations and CI coverage.
   picks cookie / authorization / accept-language / user-agent and the public
   host from the upgrade; `live.authorize` runs after the signature check and
   before the handler. Keep both orders.
+- **Internal sidecar endpoints stay internal.** Anything the sidecar trusts
+  without checks (today `/__nowaki/live-render`) must be listed in
+  `forward::is_internal_path`, so dev/start return 404 instead of proxying it.
 - **Sidecar requests go through `forward::apply`** (`crates/nowaki/src/forward.rs`).
   Clients never set `x-forwarded-*` or internal `x-nowaki-*` headers on the
   sidecar hop unless `NOWAKI_TRUST_PROXY` is set; new client-facing `x-nowaki-*`
