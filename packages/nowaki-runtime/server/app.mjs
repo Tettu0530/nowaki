@@ -123,17 +123,30 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
   try {
     serverFnTable = JSON.parse(await readFile(path.join(serverDir, "functions.json"), "utf8"));
   } catch {}
+  // Production modules never change, so each is imported once. A bare `import()` per request is
+  // not free: with the react-alias loader hooks registered, every call does a synchronous round
+  // trip to the hooks thread to resolve the specifier, which was half the CPU time of a page.
+  const modules = new Map();
+  const importOnce = (href) => {
+    let p = modules.get(href);
+    if (!p) {
+      p = import(href);
+      modules.set(href, p);
+      p.catch(() => modules.delete(href));
+    }
+    return p;
+  };
   const serverFunctions = Object.keys(serverFnTable).length
     ? {
         lookup: (id) => serverFnTable[id] ?? null,
-        importModule: (m) => import(pathToFileURL(path.join(serverDir, m)).href),
+        importModule: (m) => importOnce(pathToFileURL(path.join(serverDir, m)).href),
       }
     : null;
 
   const env = {
     dev: false,
     routeTable: () => routeTable,
-    importModule: (file) => import(pathToFileURL(file).href),
+    importModule: (file) => importOnce(pathToFileURL(file).href),
     ensureIslands: () => {},
     serverFunctions,
     live: liveByName.size
