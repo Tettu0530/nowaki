@@ -21,6 +21,26 @@ function roomIdOf(mod, props) {
   return id;
 }
 
+// Persistence hooks (Node only: live-rooms-file.mjs uses them; edge bundles never call them).
+let roomsChanged = null;
+export function onRoomsChange(cb) {
+  roomsChanged = cb;
+}
+export function exportRooms() {
+  return Object.fromEntries(rooms);
+}
+/// Restores saved rooms; ids that wouldn't pass `live.room` are dropped. Returns the count kept.
+export function importRooms(saved) {
+  let n = 0;
+  for (const [id, value] of Object.entries(saved ?? {})) {
+    if (ROOM_ID.test(id) && value !== undefined) {
+      rooms.set(id, value);
+      n++;
+    }
+  }
+  return n;
+}
+
 function sharedOf(mod, room, props) {
   if (!rooms.has(room)) {
     const init = mod.live?.shared;
@@ -124,6 +144,7 @@ async function roomRender(mod, state, handler, payload, name, sig) {
     next = (await on[handler](shared, payload)) ?? shared;
     if (next !== shared) {
       rooms.set(room, next);
+      roomsChanged?.();
       publish(`room:${room}`);
     }
   }
