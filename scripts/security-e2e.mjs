@@ -65,6 +65,27 @@ async function forwardedHostIgnored(b) {
     (await call({ origin: b, "x-forwarded-host": "evil.test" })) === 200);
 }
 
+// Page actions reject cross-site non-GET requests by default; API routes warn unless they opt in.
+async function crossSiteWritesRejected(b) {
+  const send = (path, h) =>
+    fetch(`${b}${path}`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded", ...h },
+      body: "text=csrf-check",
+    }).then((r) => r.status);
+  check("action: cross-site Origin rejected (403)", (await send("/todos", { origin: "http://evil.test" })) === 403);
+  check("action: Origin null rejected (403)", (await send("/todos", { origin: "null" })) === 403);
+  check("action: Sec-Fetch-Site cross-site rejected (403)",
+    (await send("/todos", { "sec-fetch-site": "cross-site" })) === 403);
+  check("action: same-origin POST allowed", (await send("/todos", { origin: b })) === 302);
+  check("action: POST without Origin (non-browser) allowed", (await send("/todos", {})) === 302);
+  check("API with `csrf = true`: cross-site Origin rejected (403)",
+    (await send("/api/echo", { origin: "http://evil.test" })) === 403);
+  check("API without `csrf`: cross-site Origin still allowed (warn phase)",
+    (await send("/api/hello", { origin: "http://evil.test" })) === 200);
+}
+
 // Default security headers on pages, 404s, and static assets (both modes) and on ISR hits (prod).
 async function securityHeadersPresent(b, paths) {
   for (const p of paths) {
@@ -137,6 +158,7 @@ if (mode === "dev") {
   check("RPC cross-origin rejected (403)",
     (await post({ "content-type": "application/json", "x-nowaki-rpc": "1", origin: "http://evil.test" })) === 403);
   await forwardedHostIgnored(base);
+  await crossSiteWritesRejected(base);
   await securityHeadersPresent(base, ["/", "/nope"]);
 
   // CSWSH (Origin check on WS upgrade)
@@ -153,6 +175,7 @@ if (mode === "dev") {
 
 if (mode === "prod") {
   await forwardedHostIgnored(base);
+  await crossSiteWritesRejected(base);
   // 500s never carry a stack trace (file paths, code) in production — neither the app's _500 page
   // nor the built-in fallback used when _500 itself throws.
   const stackLike = /\n\s+at |\(file:\/\/|node:internal/;

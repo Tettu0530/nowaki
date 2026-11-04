@@ -43,6 +43,13 @@ milestone's worth of work; the codename is noted per entry.
   state. It ignored `liveIslands`, so a page with a live island returned 500.
 
 ### Changed
+- **Security:** page actions reject cross-site non-GET requests with 403: an
+  `Origin` from another site or `null`, or `Sec-Fetch-Site: cross-site`.
+  Same-origin form posts and requests without either header (curl,
+  server-to-server) are unaffected. API routes log a one-time warning for now;
+  `export const csrf = true` rejects there too, and `export const csrf = false`
+  opts any route out. Behind a proxy that rewrites `Host`, forward the public
+  host as `x-forwarded-host`.
 - Docs: clearer SECURITY.md layout (audience map, defenses ↔ AGENTS invariants) and
   contributor pointers in CONTRIBUTING.md.
 

@@ -67,7 +67,7 @@ Safe without any configuration. Every claim is verified in CI on every push.
 
 **Exit criteria**: Each row of SECURITY.md's "defenses enabled by default" maps to an implementation location and a CI check. security-e2e passes the same checks in both dev and prod.
 
-- [ ] Origin checks by default for page actions and non-GET requests (phased rollout for API routes; opt out with `export const csrf = false`)
+- [x] Origin checks by default for page actions and non-GET requests (phased rollout for API routes; opt out with `export const csrf = false`)
 - [x] Default security headers (nosniff / frame-ancestors / Referrer-Policy / COOP, also on ISR HITs)
 - [ ] Body and argument limits for server functions, `serverFn(schema, impl)` (Standard Schema), a build warning for unvalidated exports
 - [ ] Less error detail exposed in prod (`ServerFnError`); hardened handling of the live signing key (warning when unset, `iat` and max lifetime)

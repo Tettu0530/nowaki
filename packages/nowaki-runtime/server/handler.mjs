@@ -8,6 +8,7 @@ import { renderToReadableStream } from "preact-render-to-string/stream";
 import { matchRoute } from "./router.mjs";
 import { makeContext } from "./context.mjs";
 import { dispatchServerFn, SERVER_FN_PATH } from "./functions.mjs";
+import { isCrossSite } from "./origin.mjs";
 
 // Internal path the client router fetches loading/error boundary HTML from, once.
 export const BOUNDARIES_PATH = "/__nowaki/boundaries";
@@ -54,7 +55,19 @@ export async function handleRequest(env, info) {
 
     const mod = await env.importModule(match.file, version);
 
-    if (match.isApi) return finalize(ctx, await handleApi(mod, ctx));
+    const unsafe = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
+    const crossSite = unsafe && mod.csrf !== false && isCrossSite(rawHeader(info));
+
+    if (match.isApi) {
+      if (crossSite) {
+        // Phase 1 for API routes: warn; `export const csrf = true` enforces now.
+        if (mod.csrf === true) return finalize(ctx, FORBIDDEN);
+        warnCrossSiteApi(match.file, url.pathname);
+      }
+      return finalize(ctx, await handleApi(mod, ctx));
+    }
+
+    if (crossSite && typeof mod.action === "function") return finalize(ctx, FORBIDDEN);
 
     if (method !== "GET" && method !== "HEAD" && typeof mod.action === "function") {
       const out = await mod.action(ctx);
@@ -68,6 +81,23 @@ export async function handleRequest(env, info) {
     if (ctx._redirect) return finalize(ctx, ctx._redirect); // throw path of ctx.redirect()
     return finalize(ctx, await render500(env, table, ctx, version, err));
   }
+}
+
+const FORBIDDEN = { status: 403, headers: { "content-type": "text/plain; charset=utf-8" }, body: "Forbidden" };
+
+// Read request headers without going through ctx.get, which records Vary inputs for ISR.
+function rawHeader(info) {
+  const h = info.headers ?? info.req?.headers ?? {};
+  return typeof h.get === "function" ? (n) => h.get(n) ?? undefined : (n) => h[n];
+}
+
+const warnedApi = new Set();
+function warnCrossSiteApi(file, pathname) {
+  if (warnedApi.has(file)) return;
+  warnedApi.add(file);
+  console.warn(
+    `[nowaki] cross-site non-GET request to API route ${pathname} was allowed. A later release rejects these by default; add \`export const csrf = true\` to reject now, or \`export const csrf = false\` to keep allowing them.`,
+  );
 }
 
 function finalize(ctx, result) {

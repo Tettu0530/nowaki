@@ -101,6 +101,10 @@ code locations and CI coverage.
 - **Do not weaken default CSRF / CSWSH gates** without an explicit opt-in API and
   ROADMAP/SECURITY updates: JSON + `x-nowaki-rpc` + Origin/Host for RPC;
   Origin checks on `/__nowaki/live` and `/__nowaki/hmr` upgrades.
+- **State-changing routes check the origin.** `handler.mjs` rejects cross-site
+  non-GET requests to page actions (and to API routes with `csrf = true`) via
+  `server/origin.mjs`, before the action runs. Don't move the check after the
+  action, and keep `csrf = false` as the only opt-out.
 - **Every server sets the default security headers** (`security_headers.rs` for
   dev/start, `server/security-headers.mjs` for the adapters, `_headers` for
   static output). Add new defaults to both lists, and never overwrite a header
