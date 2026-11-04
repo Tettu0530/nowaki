@@ -7,9 +7,11 @@ export function sameOrigin(origin, host) {
   return originHost === host;
 }
 
-/// Whether a non-GET request came from another site. Browsers send Origin on POST; without it,
-/// Sec-Fetch-Site still identifies a cross-site request. Neither header (curl, server-to-server)
-/// is allowed. `get(name)` reads a request header. The Rust front sets x-forwarded-host itself.
+/// Whether a non-GET request came from another site. Browsers send Origin on POST; when
+/// Origin is absent, Sec-Fetch-Site may still mark cross-site requests. When neither
+/// header is present (curl, server-to-server), the request is not treated as cross-site
+/// here—authenticate those callers separately. `get(name)` reads a request header. On the
+/// `nowaki start` path the Rust front sets `x-forwarded-host` from the browser Host.
 export function isCrossSite(get) {
   const origin = get("origin");
   if (origin) {

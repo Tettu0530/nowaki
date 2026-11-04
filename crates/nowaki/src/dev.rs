@@ -36,7 +36,8 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
 
     crate::typegen::write(&root).ok();
 
-    let sidecar = sidecar::spawn(&root, port).await?;
+    let live_hub = crate::live::LiveHub::new();
+    let sidecar = sidecar::spawn(&root, port, live_hub.clone()).await?;
 
     let plugin_host = crate::plugins::start(&root)?;
     let mut core = NowakiCore::new(root.clone());
@@ -55,7 +56,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("failed to build reqwest client"),
-        live_hub: crate::live::LiveHub::new(),
+        live_hub,
         fs_allow: compute_fs_allow(&root),
         expose,
     });
@@ -189,7 +190,8 @@ async fn live_ws(
     let port = state.sidecar_port;
     let version = state.ssr_version.load(Ordering::SeqCst).to_string();
     let hub = state.live_hub.clone();
-    ws.on_upgrade(move |socket| crate::live::handle(socket, hub, http, port, version))
+    let request = crate::live::context_headers(&headers);
+    ws.on_upgrade(move |socket| crate::live::handle(socket, hub, http, port, version, request))
 }
 
 async fn handle_hmr(mut socket: WebSocket, state: Arc<DevState>) {
@@ -281,6 +283,9 @@ async fn serve_fs(
 /// Fallback: serve the file if it's under the app root, otherwise proxy SSR to the sidecar
 async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Response {
     let path = req.uri().path().to_string();
+    if crate::forward::is_internal_path(&path) {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    }
     // Virtual ids never contain `..`, so reject it (prevents traversal via root.join when the synthetic dir exists).
     if path.starts_with(&format!("/{VIRTUAL_DIR}/")) {
         if path.split('/').any(|seg| seg == "..") {

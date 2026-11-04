@@ -111,10 +111,12 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         );
     }
 
+    let live_hub = crate::live::LiveHub::new();
     let mut child = Command::new("node")
         .arg("--enable-source-maps")
         .arg(&entry)
         .current_dir(&root)
+        .env("NOWAKI_PUBLISH_TOKEN", crate::live::publish_token())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .kill_on_drop(true)
@@ -132,9 +134,12 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
     }
     let sidecar_port =
         sidecar_port.ok_or_else(|| anyhow!("prod-sidecar exited without reporting READY"))?;
+    let hub_for_lines = live_hub.clone();
     tokio::spawn(async move {
         while let Ok(Some(l)) = lines.next_line().await {
-            println!("[sidecar] {l}");
+            if !crate::live::handle_sidecar_line(&hub_for_lines, &l) {
+                println!("[sidecar] {l}");
+            }
         }
     });
 
@@ -153,7 +158,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
             .redirect(reqwest::redirect::Policy::none())
             .build()?,
         manifest,
-        live_hub: crate::live::LiveHub::new(),
+        live_hub,
         isr: IsrCache::new(),
     });
 
@@ -195,7 +200,10 @@ async fn live_ws(
     let http = state.http.clone();
     let port = state.sidecar_port;
     let hub = state.live_hub.clone();
-    ws.on_upgrade(move |socket| crate::live::handle(socket, hub, http, port, "prod".to_string()))
+    let request = crate::live::context_headers(&headers);
+    ws.on_upgrade(move |socket| {
+        crate::live::handle(socket, hub, http, port, "prod".to_string(), request)
+    })
 }
 
 /// Validate the WS upgrade Origin (CSWSH guard). Prod is assumed public, so only Origin==Host is allowed
@@ -215,6 +223,9 @@ fn prod_ws_origin_ok(headers: &axum::http::HeaderMap) -> bool {
 
 async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
     let path = req.uri().path().to_string();
+    if crate::forward::is_internal_path(&path) {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    }
     // Rust serves static assets directly (high-volume hot path).
     if req.method() == Method::GET && path.starts_with("/_nowaki/") {
         return serve_static(&state, &path).await;

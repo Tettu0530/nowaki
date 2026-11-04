@@ -10,6 +10,74 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Upgrade notes
+- On the adapters, set `NOWAKI_LIVE_SECRET` when more than one instance (or
+  Worker isolate) can serve a request, or live events fail signature checks.
+  The Cloudflare `wrangler.jsonc` now enables `nodejs_compat_populate_process_env`
+  so Worker vars and secrets reach `process.env`.
+
+### Added
+- **Jetstream rooms:** `live.room(props)` names a room and `live.shared()` is
+  its initial state; every island in the same room shares that state, handlers
+  receive and return it, and a change re-renders every member (on any
+  connection in the process). `data-nowaki-presence="<room>"` shows how many
+  connections are in the room. Rooms are held in the server process's memory
+  (single process, lost on restart); on the deploy adapters a room island
+  renders and handles events, but other members aren't pushed. See `/poll` in
+  `examples/hello` for the two-tab demo.
+- **Jetstream form events:** `data-live-submit="handler"` on a `<form>` sends
+  its fields as an object (no navigation); `data-live-input="handler"` sends a
+  field's value while typing, debounced by `data-live-debounce` (ms, default
+  150); `data-live-change="handler"` fires on commit. Checkboxes and radios
+  send `{ value, checked }`. Children with `data-key` are matched by key when
+  a patch is applied, so reordered or filtered rows keep their elements, and a
+  focused field's value is never overwritten by a patch.
+- **Jetstream live queries:** `live.subscribe` (topics, or a function of the
+  state) and `live.load(state, { topic })` on an island, plus `publish(topic)`
+  from `@nowaki-dev/runtime`: after server code changes data (an action, a
+  server function, an API route), every subscribed island reloads and gets a
+  pushed patch without a client event. Under `nowaki dev` / `nowaki start` it
+  reaches connections in the same process; on the deploy adapters it is a no-op
+  for now.
+- **Jetstream request context:** live handlers can call `getContext()` to read
+  the cookies and `authorization` / `accept-language` / `user-agent` headers of
+  the WebSocket upgrade, and `live.authorize({ name, handler, state, payload })`
+  runs before each handler (after the signature check); anything but `true`
+  refuses the event with `{ type: "error", reason: "forbidden" }`. Cookies set
+  after the socket opened are seen after the next reconnect.
+- **Jetstream on the deploy adapters.** Live islands are now interactive on the
+  node / bun / deno / vercel / cloudflare adapters: each event is a
+  `POST /__nowaki/live-event` carrying the island's signed state, and the reply
+  is the new HTML, state, and signature. `nowaki dev` / `start` keep the
+  WebSocket and fall back to POST for any event sent while the socket isn't
+  open. `<meta name="nowaki-live" content="post">` (or `"ws"`) in a page's
+  `head` pins the transport. Presence is only available over the WebSocket.
+  The route has the same CSRF gate as server functions (JSON,
+  `x-nowaki-live: 1`, cross-site requests rejected) and a 64 KiB body cap.
+
+### Fixed
+- **Security:** `nowaki dev` / `nowaki start` no longer proxy
+  `/__nowaki/live-render` (404). That endpoint is the sidecar's internal
+  re-render call from `live.rs`, and it trusts its body; reached through the
+  public port, a cross-site `text/plain` POST could run live handlers with a
+  replayed signed state, and with the new request context it could claim any
+  cookie and pass `live.authorize`. The sidecars also match the path exactly.
+- A Jetstream event can only call the island's own `live.on` handlers, not
+  inherited object methods such as `toString`.
+
+## [0.14.1] — 2026-11-04 · security patch
+
+Packages: `nowaki` / `nowaki-core` 0.14.1, `@nowaki-dev/runtime` 0.13.1
+(`create-nowaki` is unchanged; new apps already get these through `^` ranges).
+
+### Fixed
+- **Security:** `nowaki dev` / `nowaki start` no longer proxy
+  `/__nowaki/live-render` (404). That endpoint is the sidecar's internal
+  re-render call from the Rust live session, and it trusts its body. Reached
+  through the public port, a cross-site `text/plain` POST could run any live
+  island handler on a signed state copied from a page, with no CSRF gate. The
+  sidecars also match the path exactly.
+
 ## [0.14.0] — 2026-11-04 · "Gale" (and "Zephyr" complete)
 
 Packages: `nowaki` / `nowaki-core` 0.14.0 (crates.io, npm), `@nowaki-dev/runtime`
@@ -357,7 +425,8 @@ and the runtime at 0.9.0.
 - Published to crates.io (`nowaki-core`, `nowaki`) and npm (`@nowaki-dev/runtime`,
   `create-nowaki`, `create-nowaki-app`).
 
-[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.14.1
 [0.14.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.14.0
 [0.13.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.13.0
 [0.12.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.12.1

@@ -148,12 +148,40 @@ export interface Live<S = any> {
   /** Initial state (may take props). */
   state: (props?: any) => S;
   /** Handlers keyed by `data-live="name"` event, each returning the new state. */
-  on: Record<string, (state: S, payload?: any) => S>;
+  on: Record<string, (state: S, payload?: any) => S | Promise<S>>;
+  /**
+   * Runs after the state signature is verified and before each handler; anything but `true`
+   * refuses the event (the client gets `{ type: "error", reason: "forbidden" }`). `getContext()`
+   * returns the WebSocket upgrade's cookies and headers here and in handlers.
+   */
+  authorize?: (event: { name: string; handler: string; state: S; payload?: any }) => boolean | Promise<boolean>;
+  /** Live query topics (or a function of the state): `publish(topic)` refreshes these islands. */
+  subscribe?: string[] | ((state: S) => string[]);
+  /** Runs on `publish(topic)` for a subscribed island; returns the new state to push. */
+  load?: (state: S, info: { topic: string }) => S | Promise<S>;
+  /**
+   * Makes this a room island: every instance with the same room id (1-120 characters, no
+   * whitespace) shares one state, `shared()`. Handlers then receive and return the shared state,
+   * and every member gets the new HTML. Held in the server process's memory (`nowaki dev` /
+   * `nowaki start`); not shared across instances, and lost on restart.
+   */
+  room?: (props: any) => string;
+  /** Initial shared state of a room (`live.room`). */
+  shared?: (props?: any) => S;
 }
 
 /**
- * While a server function (`"use server"`) is running, returns that call's LoaderContext.
- * Returns null outside an RPC. Use it to read cookies/headers or for auth.
+ * Refreshes every live island subscribed to `topic` (`live.subscribe`) by running its `live.load`
+ * and pushing the patch. Call it from actions, server functions, or API routes after data changes.
+ * Reaches connections in the same process under `nowaki dev` / `nowaki start`; a no-op on the
+ * deploy adapters for now.
+ */
+export function publish(topic: string): void;
+
+/**
+ * While a server function (`"use server"`) or a live handler / `live.authorize` is running, returns
+ * that call's LoaderContext (for live, the WebSocket upgrade's cookie, authorization,
+ * accept-language, and user-agent headers). Returns null elsewhere. Use it for auth.
  */
 export function getContext(): LoaderContext | null;
 

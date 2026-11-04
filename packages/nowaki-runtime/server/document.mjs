@@ -41,8 +41,12 @@ export function prodDocument(manifest, { mod, body, meta }) {
   const runtime = hasIslands
     ? `<script id="nowaki-runtime" type="module" src="/_nowaki/${manifest.runtime}"${dataRouter(manifest)}></script>`
     : "";
-  // Adapter outputs have no live transport (/__nowaki/live terminates in the Rust server), so live
-  // islands stay on their initial SSR and live.js isn't shipped.
+  // Only `nowaki dev` / `nowaki start` terminate the /__nowaki/live WebSocket, and they assemble
+  // their own documents, so this one tells live.js to go straight to POST /__nowaki/live-event.
+  const live =
+    manifest.liveRuntime && body.includes("<nowaki-live")
+      ? `<script type="module" src="/_nowaki/${manifest.liveRuntime}" data-live-transport="post"></script>`
+      : "";
 
   return `<!DOCTYPE html>
 <html lang="${escapeHtml(m.lang)}">
@@ -58,6 +62,7 @@ ${m.head}
 <body>
 ${body}
 ${runtime}
+${live}
 </body>
 </html>`;
 }

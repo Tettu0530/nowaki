@@ -65,6 +65,14 @@ for (const [i, name] of (manifest.liveIslands ?? []).entries()) {
   liveImports.push(`import * as live${i} from ${JSON.stringify(specOf(`islands/${name}.js`))};`);
   liveEntries.push(`  ${JSON.stringify(name)}: live${i},`);
 }
+// Signing needs node:crypto (nodejs_compat), so only apps with live islands import it.
+const hasLive = liveImports.length > 0;
+if (hasLive) {
+  liveImports.unshift(
+    `import { liveInitialState, liveRender, liveView } from "@nowaki-dev/runtime/server/live.mjs";`,
+    `import { liveProps } from "@nowaki-dev/runtime/server/live-sign.mjs";`,
+  );
+}
 
 let serverFnTable = {};
 try {
@@ -104,7 +112,7 @@ const handler = createFetchHandler({
   islandComponents,
   liveIslands,
   routeTable,
-  serverFunctions,
+  serverFunctions,${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}
 });
 
 export default {
@@ -121,11 +129,13 @@ export default {
 };
 `;
 
+// populate_process_env: Worker vars/secrets (NOWAKI_LIVE_SECRET, NOWAKI_CSP, ...) reach process.env,
+// where the runtime reads them; without it every isolate signs live state with its own random key.
 const wrangler = `{
   "name": ${JSON.stringify(appName)},
   "main": "index.js",
   "compatibility_date": "2024-11-01",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "nodejs_compat_populate_process_env"],
   "assets": {
     "directory": "../client",
     "binding": "ASSETS",

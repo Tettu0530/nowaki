@@ -120,5 +120,91 @@ check(seen.filter((m) => m.type === "patch").length === 2 && Boolean(last), "eve
 d.close();
 e.close();
 
+// Request context: handlers see the upgrade request's cookies via getContext(), and
+// `live.authorize` refuses adminReset unless the role cookie is admin.
+const withCookie = (cookie) =>
+  new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsUrl, { headers: { cookie } });
+    ws.addEventListener("open", () => resolve(ws));
+    ws.addEventListener("error", reject);
+  });
+const u = await withCookie("user=alice");
+await recvUntil(u, (m) => m.type === "presence");
+u.send(JSON.stringify({ type: "join", islands: [{ nid, name: "LiveCounter", state, sig }] }));
+u.send(JSON.stringify({ type: "event", nid, handler: "greet" }));
+const greeted = await recvUntil(u, (m) => m.type === "patch" && m.nid === nid);
+check(/hi\s*alice/.test(greeted.html), "handler reads the cookie through getContext() (hi alice)");
+u.send(JSON.stringify({ type: "event", nid, handler: "adminReset" }));
+const denied = await recvUntil(u, (m) => m.type === "error" && m.nid === nid);
+check(denied.reason === "forbidden", `live.authorize refuses adminReset without the role (reason=${denied.reason})`);
+u.close();
+const admin = await withCookie("role=admin");
+await recvUntil(admin, (m) => m.type === "presence");
+admin.send(JSON.stringify({ type: "join", islands: [{ nid, name: "LiveCounter", state: greeted.state, sig: greeted.sig }] }));
+admin.send(JSON.stringify({ type: "event", nid, handler: "adminReset" }));
+const reset = await recvUntil(admin, (m) => m.type === "patch" && m.nid === nid);
+check(/live:\s*0/.test(reset.html), "live.authorize allows adminReset with role=admin (live: 0)");
+admin.close();
+
+// Live query: LiveTicks subscribes to "ticks"; POST /api/tick calls publish("ticks"), and the
+// server pushes a fresh patch to the subscribed island without any client event.
+{
+  const page = await (await fetch(base + "/live")).text();
+  const ttag = page.match(/<nowaki-live\b[^>]*name="LiveTicks"[^>]*>/)?.[0] ?? page.match(/<nowaki-live\b(?=[^>]*name="LiveTicks")[^>]*>/)?.[0];
+  const tattr = (n) => ttag?.match(new RegExp(`${n}="([^"]*)"`))?.[1];
+  check(Boolean(ttag) && /ticks/.test(tattr("topics")?.replace(/&quot;/g, '"') ?? ""), "LiveTicks is rendered with its topics");
+  const tnid = tattr("nid");
+  const tstate = JSON.parse((tattr("state") ?? "{}").replace(/&quot;/g, '"'));
+  const topics = JSON.parse((tattr("topics") ?? "[]").replace(/&quot;/g, '"'));
+  const q = await open(wsUrl);
+  await recvUntil(q, (m) => m.type === "presence");
+  q.send(JSON.stringify({ type: "join", islands: [{ nid: tnid, name: "LiveTicks", state: tstate, sig: tattr("sig"), topics }] }));
+  await new Promise((r) => setTimeout(r, 100)); // let the join land before publishing
+  const pushed = recvUntil(q, (m) => m.type === "patch" && m.nid === tnid);
+  const r = await (await fetch(base + "/api/tick", { method: "POST" })).json();
+  const patch = await pushed;
+  check(new RegExp(`ticks:\\s*${r.ticks}`).test(patch.html), `publish("ticks") pushes a patch (ticks: ${r.ticks})`);
+  q.close();
+}
+
+// Rooms: two connections on /poll share one state; a vote on one is pushed to the other.
+{
+  const page = await (await fetch(base + "/poll")).text();
+  const ptag = page.match(/<nowaki-live\b(?=[^>]*name="LivePoll")[^>]*>/)?.[0];
+  const pattr = (n) => ptag?.match(new RegExp(`${n}="([^"]*)"`))?.[1];
+  const pstate = JSON.parse((pattr("state") ?? "{}").replace(/&quot;/g, '"'));
+  const ptopics = JSON.parse((pattr("topics") ?? "[]").replace(/&quot;/g, '"'));
+  check(pstate.room === "poll:demo" && ptopics.includes("room:poll:demo"), "LivePoll's signed state names its room");
+  const votes = (html) => /a:\s*(\d+)\s*·\s*b:\s*(\d+)/.exec(html)?.slice(1).map(Number);
+  const before = votes(page) ?? [0, 0];
+  const joinPoll = async () => {
+    const ws = await open(wsUrl);
+    await recvUntil(ws, (m) => m.type === "presence");
+    ws.send(JSON.stringify({ type: "join", islands: [{ nid: pattr("nid"), name: "LivePoll", state: pstate, sig: pattr("sig"), topics: ptopics }] }));
+    return ws;
+  };
+  const tabA = await joinPoll();
+  const roomOfTwo = recvUntil(tabA, (m) => m.type === "presence" && m.room === "poll:demo" && m.count >= 2);
+  const tabB = await joinPoll();
+  const rp = await roomOfTwo;
+  check(rp.count === 2, `room presence counts both tabs (room=${rp.room}, count=${rp.count})`);
+  await new Promise((r) => setTimeout(r, 100));
+  const pushedToB = recvUntil(tabB, (m) => m.type === "patch" && m.nid === pattr("nid"));
+  tabA.send(JSON.stringify({ type: "event", nid: pattr("nid"), handler: "vote", payload: "a" }));
+  const onA = await recvUntil(tabA, (m) => m.type === "patch" && m.nid === pattr("nid"));
+  const onB = await pushedToB;
+  check(votes(onA.html)?.[0] === before[0] + 1, `the voter sees its vote (a: ${votes(onA.html)?.[0]})`);
+  check(votes(onB.html)?.[0] === before[0] + 1, `the other tab gets the room's new state pushed (a: ${votes(onB.html)?.[0]})`);
+  // A forged room in the signed state is rejected (no patch, an error instead).
+  tabB.send(JSON.stringify({ type: "join", islands: [{ nid: "X1", name: "LivePoll", state: { room: "poll:secret" }, sig: pattr("sig"), topics: ["room:poll:secret"] }] }));
+  tabB.send(JSON.stringify({ type: "event", nid: "X1", handler: "vote", payload: "a" }));
+  const forged = await recvUntil(tabB, (m) => m.nid === "X1");
+  check(forged.type === "error", `a forged room is refused (${forged.type})`);
+  const roomOfOne = recvUntil(tabA, (m) => m.type === "presence" && m.room === "poll:demo" && m.count === 1);
+  tabB.close();
+  check((await roomOfOne).count === 1, "room presence drops when a tab leaves");
+  tabA.close();
+}
+
 console.log(failed ? "\nLIVETEST FAILED" : "\nLIVETEST PASSED");
 process.exit(failed ? 1 : 0);

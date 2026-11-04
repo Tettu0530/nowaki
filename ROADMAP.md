@@ -15,7 +15,7 @@ A "structural answer to the slowness of Next.js", built on three pillars:
 
 ## Where we are
 
-**alpha (CLI / crates 0.14.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands, on `nowaki dev` / `nowaki start`; the deploy adapters render them as initial SSR only), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Production use is not yet recommended (the API is still stabilizing).
+**alpha (CLI / crates 0.14.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands: WebSocket on `nowaki dev` / `nowaki start`, per-event HTTP POST on every deploy adapter), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Production use is not yet recommended (the API is still stabilizing).
 
 ## Milestones
 
@@ -37,7 +37,7 @@ Real chunk bundling + scope hoisting, tree shaking, persistent disk cache, end-t
 5 deploy adapters (node / static / bun / deno / cloudflare edge), streaming SSR, plugin transform hooks, TSRX bridge, a Rust production hot path for `nowaki start`.
 
 ### v0.6 "Jetstream": Server-reactive islands ★flagship ✅
-With **Jetstream islands**, an island that has `export const live = { state, on }` works without shipping its component JS to the client. The server holds state per WebSocket connection and pushes HTML patches. It coexists with client islands (optimistic UI) and degrades to the initial SSR on static deploys and the deploy adapters, which have no live transport yet.
+With **Jetstream islands**, an island that has `export const live = { state, on }` works without shipping its component JS to the client. The server holds state per WebSocket connection and pushes HTML patches. It coexists with client islands (optimistic UI) and degrades to the initial SSR on static deploys. The deploy adapters (Cloudflare included) send each event as an HTTP POST instead (no presence there yet).
 
 ### v0.7 "Beta": Groundwork for stability ✅
 A `cargo test` suite, reproducible benchmarks ([BENCHMARKS.md](./BENCHMARKS.md)), documented trust boundaries ([SECURITY.md](./SECURITY.md)) with dependency auditing in CI, SemVer discipline and [CHANGELOG.md](./CHANGELOG.md).
@@ -79,11 +79,11 @@ Make "LiveView for the npm ecosystem, with 0KB of component JS" practical. Forms
 
 **Exit criteria**: State survives reconnects and server restarts. `publish()` delivers patches to islands on other connections. A two-tab voting demo works with per-room presence. Fan-out p95 at 1000 connections is recorded in BENCHMARKS.md.
 
-- [ ] More events (submit / input / change, debounce, keyed morph)
+- [x] More events (submit / input / change, debounce, keyed morph)
 - [ ] Stable signing key, stale notifications, resume token (optional)
-- [ ] Read request context from handlers (`getContext()`, `live.authorize`)
-- [ ] Live queries (`subscribe` / `load` / `publish`, a Node→Rust event path)
-- [ ] Multiplayer rooms (`room` / `shared` / per-room presence)
+- [x] Read request context from handlers (`getContext()`, `live.authorize`)
+- [x] Live queries (`subscribe` / `load` / `publish`, a Node→Rust event path)
+- [x] Multiplayer rooms (`room` / `shared` / per-room presence)
 - [ ] Document in the docs that it assumes a single process and does not support edge
 
 ### v0.16 "Chinook": Show it with numbers
