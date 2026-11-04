@@ -146,5 +146,26 @@ const reset = await recvUntil(admin, (m) => m.type === "patch" && m.nid === nid)
 check(/live:\s*0/.test(reset.html), "live.authorize allows adminReset with role=admin (live: 0)");
 admin.close();
 
+// Live query: LiveTicks subscribes to "ticks"; POST /api/tick calls publish("ticks"), and the
+// server pushes a fresh patch to the subscribed island without any client event.
+{
+  const page = await (await fetch(base + "/live")).text();
+  const ttag = page.match(/<nowaki-live\b[^>]*name="LiveTicks"[^>]*>/)?.[0] ?? page.match(/<nowaki-live\b(?=[^>]*name="LiveTicks")[^>]*>/)?.[0];
+  const tattr = (n) => ttag?.match(new RegExp(`${n}="([^"]*)"`))?.[1];
+  check(Boolean(ttag) && /ticks/.test(tattr("topics")?.replace(/&quot;/g, '"') ?? ""), "LiveTicks is rendered with its topics");
+  const tnid = tattr("nid");
+  const tstate = JSON.parse((tattr("state") ?? "{}").replace(/&quot;/g, '"'));
+  const topics = JSON.parse((tattr("topics") ?? "[]").replace(/&quot;/g, '"'));
+  const q = await open(wsUrl);
+  await recvUntil(q, (m) => m.type === "presence");
+  q.send(JSON.stringify({ type: "join", islands: [{ nid: tnid, name: "LiveTicks", state: tstate, sig: tattr("sig"), topics }] }));
+  await new Promise((r) => setTimeout(r, 100)); // let the join land before publishing
+  const pushed = recvUntil(q, (m) => m.type === "patch" && m.nid === tnid);
+  const r = await (await fetch(base + "/api/tick", { method: "POST" })).json();
+  const patch = await pushed;
+  check(new RegExp(`ticks:\\s*${r.ticks}`).test(patch.html), `publish("ticks") pushes a patch (ticks: ${r.ticks})`);
+  q.close();
+}
+
 console.log(failed ? "\nLIVETEST FAILED" : "\nLIVETEST PASSED");
 process.exit(failed ? 1 : 0);

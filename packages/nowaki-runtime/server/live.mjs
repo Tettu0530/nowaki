@@ -34,7 +34,25 @@ export class LiveForbiddenError extends Error {
 // To prevent state forgery, always verifies sig before running the handler, and signs the new state on return.
 // `live.authorize({ name, handler, state, payload })` runs after the signature check and before the
 // handler; anything but `true` refuses the event. getContext() works in both (see sidecars).
-export async function liveRender(mod, state, handler, payload, name, sig) {
+/// `live.subscribe`: an array of topics, or a function of the state returning one. Capped like live.rs
+/// (16 topics, 128 chars each) since the client echoes them back on join.
+export function liveTopics(mod, state) {
+  const sub = mod.live?.subscribe;
+  let topics;
+  try {
+    topics = typeof sub === "function" ? sub(state) : sub;
+  } catch {
+    topics = null;
+  }
+  if (!Array.isArray(topics)) return [];
+  return topics
+    .filter((t) => typeof t === "string" && t.length > 0 && t.length <= 128 && !/[\r\n]/.test(t))
+    .slice(0, 16);
+}
+
+/// `load: { topic }` is a `publish(topic)` refresh: `live.load(state, { topic })` replaces the
+/// handler. The result carries the island's current topics.
+export async function liveRender(mod, state, handler, payload, name, sig, { load } = {}) {
   if (!verify(name, state, sig)) {
     throw Object.assign(new Error("live state signature invalid"), { code: "NOWAKI_LIVE_SIG" });
   }
@@ -43,6 +61,11 @@ export async function liveRender(mod, state, handler, payload, name, sig) {
     throw new LiveForbiddenError();
   }
   let next = state;
+  if (load && typeof mod.live?.load === "function") {
+    next = (await mod.live.load(state, { topic: String(load.topic ?? "") })) ?? state;
+    const html = await renderToStringAsync(h(mod.default, { state: next, __nowakiLiveInner: true }));
+    return { state: next, html, sig: sign(name, next), topics: liveTopics(mod, next) };
+  }
   const on = mod.live?.on;
   // Own keys only: the name comes from the client, so inherited ones like `toString` must not run.
   if (handler && on && Object.hasOwn(on, handler) && typeof on[handler] === "function") {
@@ -50,7 +73,7 @@ export async function liveRender(mod, state, handler, payload, name, sig) {
     if (next === undefined) next = state;
   }
   const html = await renderToStringAsync(h(mod.default, { state: next, __nowakiLiveInner: true }));
-  return { state: next, html, sig: sign(name, next) };
+  return { state: next, html, sig: sign(name, next), topics: liveTopics(mod, next) };
 }
 
 export function liveInitialState(mod, props) {

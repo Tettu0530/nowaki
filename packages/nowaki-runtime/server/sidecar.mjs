@@ -75,7 +75,7 @@ const server = createServer(async (req, res) => {
     try {
       const chunks = [];
       for await (const c of req) chunks.push(c);
-      const { name, state, handler, payload, version, sig, request } = JSON.parse(
+      const { name, state, handler, payload, version, sig, request, load } = JSON.parse(
         Buffer.concat(chunks).toString("utf8"),
       );
       const reg = await loadIslandRegistry(appRoot, String(version ?? "0"));
@@ -86,7 +86,7 @@ const server = createServer(async (req, res) => {
         return;
       }
       const result = await runWithContext(liveContext(request), () =>
-        liveRender(entry.mod, state, handler, payload, name, sig),
+        liveRender(entry.mod, state, handler, payload, name, sig, { load }),
       );
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(result));

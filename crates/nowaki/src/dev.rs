@@ -36,7 +36,8 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
 
     crate::typegen::write(&root).ok();
 
-    let sidecar = sidecar::spawn(&root, port).await?;
+    let live_hub = crate::live::LiveHub::new();
+    let sidecar = sidecar::spawn(&root, port, live_hub.clone()).await?;
 
     let plugin_host = crate::plugins::start(&root)?;
     let mut core = NowakiCore::new(root.clone());
@@ -55,7 +56,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("failed to build reqwest client"),
-        live_hub: crate::live::LiveHub::new(),
+        live_hub,
         fs_allow: compute_fs_allow(&root),
         expose,
     });

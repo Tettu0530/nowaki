@@ -2,6 +2,7 @@
 // Also shows it coexisting with a client island (Counter, optimistic UI).
 import LiveCounter from "../islands/LiveCounter.tsx";
 import Counter from "../islands/Counter.tsx";
+import LiveTicks from "../islands/LiveTicks.tsx";
 
 export default function LivePage() {
   return (
@@ -15,6 +16,11 @@ export default function LivePage() {
       <p style="margin-top:1rem;color:#667">
         connected clients (presence): <strong data-nowaki-presence>0</strong>
       </p>
+      <p style="margin-top:1rem">
+        A live query: <code>POST /api/tick</code> calls <code>publish("ticks")</code> and this
+        island updates without being clicked.
+      </p>
+      <LiveTicks />
       <p style="margin-top:2rem">
         Below is a regular client island (hydrated, optimistic) on the same page — the two kinds
         coexist:

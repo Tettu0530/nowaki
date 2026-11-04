@@ -23,6 +23,7 @@ const joinMsg = (els) =>
       name: el.getAttribute("name"),
       state: parse(el.getAttribute("state")),
       sig: el.getAttribute("sig"),
+      topics: parse(el.getAttribute("topics")),
     })),
   });
 
