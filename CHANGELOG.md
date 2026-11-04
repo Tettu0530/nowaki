@@ -18,6 +18,15 @@ milestone's worth of work; the codename is noted per entry.
   dispatches a cancelable `nowaki:live-stale` event and, unless the app calls
   `preventDefault()`, reloads the page to get fresh signed state. A tampered
   or future-dated signature is still rejected as before (`403`).
+- **Jetstream rooms survive a restart:** `nowaki start` writes the rooms'
+  shared state to `.nowaki/live-rooms.json` and loads it on the next start.
+  It writes at most every 2 s after a change, through a temp file and a
+  rename, and once more on shutdown. `nowaki start` now stops its Node
+  process with SIGTERM and a 3 s grace period before killing it. Set
+  `NOWAKI_LIVE_ROOMS_FILE` to choose another file (relative to the app), or
+  `off` to keep rooms in memory only. A shared state that JSON can't hold
+  (BigInt, a cycle) logs a warning and is not saved. This applies to a single
+  process only: `nowaki dev` and the adapters don't save rooms.
 
 ### Changed
 - **About 4x the throughput on `nowaki start` and the Node adapters.** In

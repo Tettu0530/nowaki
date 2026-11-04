@@ -185,7 +185,8 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         r = std::future::IntoFuture::into_future(axum::serve(listener, app)) => r?,
         _ = crate::shutdown::signal() => {}
     }
-    let _ = child.kill().await;
+    // SIGTERM first: the sidecar writes Jetstream rooms to disk before it exits.
+    crate::shutdown::stop_child(&mut child, std::time::Duration::from_secs(3)).await;
     Ok(())
 }
 
