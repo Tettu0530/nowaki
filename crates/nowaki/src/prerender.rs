@@ -2,9 +2,13 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use anyhow::{anyhow, Context, Result};
+use futures_util::StreamExt;
 use nowaki_core::NowakiCore;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+
+/// Pages requested from the temporary prod server at once.
+const PRERENDER_JOBS: usize = 8;
 
 /// Static site generation: build → start a temporary prod server → render each static route to HTML → write out.
 pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
@@ -76,23 +80,37 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         nowaki_core::build::clear_dir(&out)?;
     }
     std::fs::create_dir_all(&out)?;
+    // A few requests in flight keep the single-threaded renderer busy while Rust waits on the
+    // socket and writes files (2 already saturates a plain app; I/O-bound loaders gain more).
+    // `buffered` keeps the original order, so logs and the first error stay deterministic.
+    let mut rendered = futures_util::stream::iter(&pages)
+        .map(|(url_path, file)| {
+            let client = &client;
+            async move {
+                let resp = client
+                    .get(format!("http://127.0.0.1:{port}{url_path}"))
+                    .send()
+                    .await?;
+                if !resp.status().is_success() {
+                    eprintln!("[nowaki] {url_path}: skipped ({})", resp.status());
+                    return Ok::<_, anyhow::Error>(false);
+                }
+                let html = resp.text().await?;
+                if let Some(parent) = file.parent() {
+                    tokio::fs::create_dir_all(parent).await?;
+                }
+                tokio::fs::write(file, html).await?;
+                Ok(true)
+            }
+        })
+        .buffered(PRERENDER_JOBS);
     let mut count = 0;
-    for (url_path, file) in &pages {
-        let resp = client
-            .get(format!("http://127.0.0.1:{port}{url_path}"))
-            .send()
-            .await?;
-        if !resp.status().is_success() {
-            eprintln!("[nowaki] {url_path}: skipped ({})", resp.status());
-            continue;
+    while let Some(written) = rendered.next().await {
+        if written? {
+            count += 1;
         }
-        let html = resp.text().await?;
-        if let Some(parent) = file.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(file, html)?;
-        count += 1;
     }
+    drop(rendered);
 
     // Static hosts (Cloudflare Pages, Netlify, GitHub Pages) serve 404.html for unknown paths.
     // Rendered for /404, since a static page can't know the path that was actually requested.
