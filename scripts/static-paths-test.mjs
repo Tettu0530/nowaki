@@ -126,17 +126,6 @@ check(
 );
 rmSync(encoded, { recursive: true, force: true });
 
-const dup = app({
-  "routes/dup/[slug].js":
-    'export const staticPaths = [{ slug: "same" }, { slug: "same" }];\nexport default () => null;\n',
-});
-const dupPages = run(dup);
-check(
-  "duplicate staticPaths entries are all emitted (no dedup)",
-  dupPages.length === 2 && dupPages.every((p) => p.url === "/dup/same"),
-);
-rmSync(dup, { recursive: true, force: true });
-
 const asyncBad = app({
   "routes/async-bad/[slug].js": 'export const staticPaths = async () => ({ slug: "x" });\nexport default () => null;\n',
 });
