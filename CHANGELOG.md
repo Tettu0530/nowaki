@@ -10,6 +10,17 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **Default security headers** on every response from `nowaki dev`,
+  `nowaki start` (ISR hits and static assets included), all deploy adapters,
+  and the `_headers` file `nowaki prerender` writes:
+  `x-content-type-options: nosniff`, `x-frame-options: SAMEORIGIN`,
+  `referrer-policy: strict-origin-when-cross-origin`,
+  `cross-origin-opener-policy: same-origin`, and
+  `content-security-policy: frame-ancestors 'self'` when the app sends no CSP.
+  A header the response already sets is kept; `NOWAKI_SECURITY_HEADERS=off`
+  turns them off.
+
 ### Fixed
 - Jetstream: a live connection no longer stalls while the sidecar re-renders.
   The render runs off the session loop (pings, presence, and new events keep
@@ -39,6 +50,13 @@ milestone's worth of work; the codename is noted per entry.
   versions no longer verify (live islands on an open page re-render from the
   server after a reload). The key is created on first use, and production
   servers warn at startup when `NOWAKI_LIVE_SECRET` is unset.
+- **Security:** page actions reject cross-site non-GET requests with 403: an
+  `Origin` from another site or `null`, or `Sec-Fetch-Site: cross-site`.
+  Same-origin form posts and requests without either header (curl,
+  server-to-server) are unaffected. API routes log a one-time warning for now;
+  `export const csrf = true` rejects there too, and `export const csrf = false`
+  opts any route out. Behind a proxy that rewrites `Host`, forward the public
+  host as `x-forwarded-host`.
 - Docs: clearer SECURITY.md layout (audience map, defenses ↔ AGENTS invariants) and
   contributor pointers in CONTRIBUTING.md.
 

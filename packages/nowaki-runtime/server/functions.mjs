@@ -5,6 +5,7 @@
 // A client can't call arbitrary functions by naming a module/export.
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { sameOrigin } from "./origin.mjs";
 
 export const SERVER_FN_PATH = "/__nowaki/fn";
 
@@ -84,9 +85,3 @@ function errBody(status, message) {
   return { status, headers: JSON_CT, body: JSON.stringify({ error: message }) };
 }
 
-function sameOrigin(origin, host) {
-  if (!host) return false;
-  const i = origin.indexOf("://");
-  const originHost = i >= 0 ? origin.slice(i + 3).replace(/\/$/, "") : origin;
-  return originHost === host;
-}

@@ -60,13 +60,16 @@ curl -sf http://127.0.0.1:3300/virtual | grep -q 'VIRTUAL_OK · nowaki-plugin'
 ISR=http://127.0.0.1:3300/isr
 chit() { curl -s -D - -o /tmp/isr.html "$ISR" | grep -i '^x-nowaki-cache:' | tr -d '\r' | awk '{print $2}'; }
 rnum() { grep -o 'isr-renders">[0-9]*' /tmp/isr.html | grep -o '[0-9]*'; }
-test "$(chit)" = "MISS"; R1=$(rnum)
+# Each step logs the cache status, render number, and time, so a failure shows what was served.
+T0=$(date +%s)
+isr() { S=$(chit); N=$(rnum); echo "ISR $1: status=$S render=$N (R1=${R1:-?}, +$(( $(date +%s) - T0 ))s)"; }
+isr miss; test "$S" = "MISS"; R1=$N
 curl -s -D - -o /dev/null "$ISR" | grep -qi 'cache-control: public, s-maxage=2, stale-while-revalidate'
-test "$(chit)" = "HIT"; test "$(rnum)" = "$R1"
+isr hit; test "$S" = "HIT"; test "$N" = "$R1"
 sleep 3
-test "$(chit)" = "STALE"; test "$(rnum)" = "$R1"   # stale HTML served immediately
+isr stale; test "$S" = "STALE"; test "$N" = "$R1"   # stale HTML served immediately
 sleep 1                                            # let background revalidation finish
-test "$(chit)" = "HIT"; test "$(rnum)" -gt "$R1"   # regenerated
+isr regenerated; test "$S" = "HIT"; test "$N" -gt "$R1"
 # a cookie-setting response is per-user and must never be ISR-cached
 test -z "$(curl -s -D - -o /dev/null "$ISR" | grep -i '^set-cookie:')"
 # loading/error boundaries are served through the Rust front too

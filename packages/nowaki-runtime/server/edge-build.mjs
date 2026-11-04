@@ -80,6 +80,7 @@ const moduleEntries = order.map((key) => `  ${JSON.stringify(key)}: ${seen.get(k
 const worker = `// Generated: worker entry for the Cloudflare Workers (Edge) adapter.
 // Statically imports every server module and passes them to the @nowaki-dev/runtime web handler.
 import { createFetchHandler } from "@nowaki-dev/runtime/server/web.mjs";
+import { withSecurityHeaders } from "@nowaki-dev/runtime/server/security-headers.mjs";
 ${moduleImports.join("\n")}
 ${islandImports.join("\n")}
 ${liveImports.join("\n")}
@@ -113,7 +114,7 @@ export default {
     if (url.pathname.startsWith("/_nowaki/") && env.ASSETS) {
       const assetUrl = new URL(url);
       assetUrl.pathname = url.pathname.slice("/_nowaki".length);
-      return env.ASSETS.fetch(new Request(assetUrl, request));
+      return withSecurityHeaders(await env.ASSETS.fetch(new Request(assetUrl, request)));
     }
     return handler(request);
   },

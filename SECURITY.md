@@ -91,6 +91,21 @@ not run on the production request path unless you embed their output in the app.
   Without it, each process signs live state with its own random key: state
   can't resume after a restart or on another instance, and `nowaki start` /
   the node adapter log a warning at startup.
+- **Cross-site writes.** Page actions reject cross-site non-GET requests. API
+  routes still accept them (with a one-time warning) unless they
+  `export const csrf = true`; a later release makes that the default. Requests
+  without `Origin` or `Sec-Fetch-Site` (curl, server-to-server) are allowed, so
+  authenticate those another way. `_middleware` runs before the check. Behind a
+  proxy that rewrites `Host`, forward the public host as `x-forwarded-host` (and
+  set `NOWAKI_TRUST_PROXY=1` for `nowaki start`), or same-origin posts are
+  rejected too.
+- **Default security headers are only defaults.** A response that sets one of
+  them (or its own `content-security-policy`) keeps its value. For example, an
+  OAuth popup flow that needs `window.opener` can send
+  `cross-origin-opener-policy: same-origin-allow-popups`.
+  `NOWAKI_SECURITY_HEADERS=off` removes them all (on the Vercel adapter, also
+  set it at build time: the headers for static files are written into the route
+  config).
 
 Framework defaults do not replace app-level checks:
 
@@ -117,6 +132,8 @@ both dev and prod; coverage is noted in the last column.
 | Virtual module `..` rejected | Path traversal in plugin URLs | `crates/nowaki/src/dev.rs` | `scripts/security-e2e.mjs` (dev) |
 | Server function allowlist | Calling arbitrary server exports | `nowaki-core` + `dist/server/functions.json` + `functions.mjs` | e2e scripts (`/__nowaki/fn` unknown id → 404) |
 | RPC CSRF gate (JSON + `x-nowaki-rpc` + Origin/Host) | Cross-site POST with victim cookies | `packages/nowaki-runtime/server/functions.mjs`; Rust sets `x-forwarded-host` from browser `Host` on the sidecar hop | `scripts/security-e2e.mjs` (dev) |
+| Same-origin check on page actions and API routes (`server/origin.mjs`) | Cross-site form posts and `fetch` writes with the victim's cookies | `server/handler.mjs`: a non-GET to a route with `action` is rejected (403) when `Origin` is another site or `null`, or `Sec-Fetch-Site` is `cross-site`. API routes only warn for now unless they `export const csrf = true`; `export const csrf = false` opts a route out | `scripts/security-e2e.mjs` (dev + prod) |
+| Default security headers (`x-content-type-options: nosniff`, `x-frame-options: SAMEORIGIN`, `referrer-policy: strict-origin-when-cross-origin`, `cross-origin-opener-policy: same-origin`, and `content-security-policy: frame-ancestors 'self'` when the app sends no CSP) | MIME sniffing, clickjacking, cross-origin referrer and `window.opener` leaks | `crates/nowaki/src/security_headers.rs` (dev/start, ISR hits, static assets); `server/security-headers.mjs` (node/bun/deno/vercel/cloudflare adapters); `_headers` from `nowaki prerender` | `scripts/security-e2e.mjs` (dev + prod), `scripts/ci/e2e-adapters.sh`, `scripts/ci/e2e-runtimes.sh` |
 | Forwarding and internal headers sanitized at the Rust front | Spoofing the host the same-origin checks use; forging internal `x-nowaki-*` headers | `crates/nowaki/src/forward.rs` (`NOWAKI_TRUST_PROXY` opt-in) | `scripts/security-e2e.mjs` (dev + prod) |
 | WebSocket Origin check (CSWSH) | Cross-origin upgrades to HMR / Jetstream | `crates/nowaki/src/dev.rs`, `crates/nowaki/src/start.rs` | `scripts/security-e2e.mjs` (dev) |
 | Jetstream state signature | Forged live state used in render/handlers; replaying a captured state indefinitely | `server/live-sign.mjs` (`v1.<iat>.<mac>`: HMAC over name, issue time, and state; rejected after `NOWAKI_LIVE_MAX_AGE`, default 24 h); `server/live.mjs` (verify before each render/handler); `crates/nowaki/src/live.rs` (holds state per session) | `scripts/security-e2e.mjs` (dev), `scripts/live-sign-test.mjs` |

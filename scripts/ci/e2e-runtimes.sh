@@ -34,6 +34,7 @@ B=http://127.0.0.1:$port
 for i in $(seq 1 90); do curl -sf $B/ >/dev/null && break; sleep 1; done
 curl -sf $B/ | grep -q "nowaki-island"
 curl -sf $B/api/hello | grep -q '"hello":"nowaki"'
+curl -s -D - -o /dev/null $B/ | grep -qi '^x-content-type-options: nosniff'
 curl -sf $B/blog/hello | grep -q "Post: hello"
 # live islands render their initial state (no live transport on these adapters yet)
 curl -sf $B/live | grep -q 'live: 0'
