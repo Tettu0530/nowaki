@@ -199,39 +199,42 @@ pub async fn layer(req: Request, next: Next) -> Response {
 mod tests {
     use super::*;
 
-    fn inject(chunks: &[&str]) -> String {
-        let mut inj = Injector::new("abc");
+    /// Runs the injector with a fresh nonce; expectations use `{n}` for it.
+    fn inject(chunks: &[&str], expected: &str) {
+        let n = new_nonce();
+        let mut inj = Injector::new(&n);
         let mut out = Vec::new();
         for c in chunks {
             out.extend(inj.push(c.as_bytes()));
         }
         out.extend(inj.finish());
-        String::from_utf8(out).unwrap()
+        assert_eq!(String::from_utf8(out).unwrap(), expected.replace("{n}", &n));
     }
 
     #[test]
     fn adds_nonce_to_script_and_style_tags() {
-        let html = r#"<head><style>a{}</style><script type="module" src="/x.js"></script><SCRIPT>1</SCRIPT></head>"#;
-        assert_eq!(
-            inject(&[html]),
-            r#"<head><style nonce="abc">a{}</style><script nonce="abc" type="module" src="/x.js"></script><SCRIPT nonce="abc">1</SCRIPT></head>"#
+        inject(
+            &[
+                r#"<head><style>a{}</style><script type="module" src="/x.js"></script><SCRIPT>1</SCRIPT></head>"#,
+            ],
+            r#"<head><style nonce="{n}">a{}</style><script nonce="{n}" type="module" src="/x.js"></script><SCRIPT nonce="{n}">1</SCRIPT></head>"#,
         );
     }
 
     #[test]
     fn leaves_other_tags_alone() {
         let html = "<scripts></scripts><styled-x></styled-x><p>&lt;script&gt;</p><s>x</s>";
-        assert_eq!(inject(&[html]), html);
+        inject(&[html], html);
     }
 
     #[test]
     fn works_across_chunk_boundaries() {
-        assert_eq!(
-            inject(&["<p>a</p><scr", "ipt>1</script><sty", "le", ">b</style>"]),
-            r#"<p>a</p><script nonce="abc">1</script><style nonce="abc">b</style>"#
+        inject(
+            &["<p>a</p><scr", "ipt>1</script><sty", "le", ">b</style>"],
+            r#"<p>a</p><script nonce="{n}">1</script><style nonce="{n}">b</style>"#,
         );
-        assert_eq!(inject(&["end <", "scrap"]), "end <scrap");
-        assert_eq!(inject(&["tail <scri"]), "tail <scri");
+        inject(&["end <", "scrap"], "end <scrap");
+        inject(&["tail <scri"], "tail <scri");
     }
 
     #[test]
@@ -239,11 +242,12 @@ mod tests {
         assert_eq!(parse_mode("report-only"), Mode::ReportOnly);
         assert_eq!(parse_mode("Enforce"), Mode::Enforce);
         assert_eq!(parse_mode(""), Mode::Off);
-        let p = policy("n1", Some("/csp"));
-        assert!(p.contains("script-src 'self' 'nonce-n1'"));
+        let n = new_nonce();
+        let p = policy(&n, Some("/csp"));
+        assert!(p.contains(&format!("script-src 'self' 'nonce-{n}'")));
         assert!(p.contains("style-src-attr 'unsafe-inline'"));
         assert!(p.ends_with("; report-uri /csp"));
-        assert_eq!(new_nonce().len(), 32);
-        assert_ne!(new_nonce(), new_nonce());
+        assert_eq!(n.len(), 32);
+        assert_ne!(n, new_nonce());
     }
 }
