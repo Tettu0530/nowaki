@@ -140,6 +140,9 @@ pub fn build_client(
             &ctx.deps,
         ),
     )?;
+    // `.gz` / `.br` siblings: `nowaki start` serves them by Accept-Encoding, and most static hosts
+    // pick them up too.
+    crate::compress::precompress_dir(&client_dir)?;
 
     Ok((
         BuildReport {

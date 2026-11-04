@@ -2,6 +2,7 @@ pub mod asset;
 pub mod build;
 pub mod cache;
 pub mod chunk;
+pub mod compress;
 pub mod css;
 pub mod env;
 pub mod graph;

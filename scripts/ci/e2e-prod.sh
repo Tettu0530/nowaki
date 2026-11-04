@@ -35,6 +35,14 @@ rm -f examples/hello/.nowaki/live-rooms.json   # rooms start empty; the livetest
 START_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3300/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3300/ | grep -q "modulepreload"
+# Pre-compressed assets and ISR pages: br / gzip by Accept-Encoding, weak ETag, 304 on a match.
+ls examples/hello/dist/client/preact.*.js.br examples/hello/dist/client/preact.*.js.gz >/dev/null
+ASSET=http://127.0.0.1:3300/_nowaki/$(basename "$(ls examples/hello/dist/client/preact.*.js | head -1)")
+curl -s -o /dev/null -D - -H 'Accept-Encoding: gzip, br' "$ASSET" | grep -qi '^content-encoding: br'
+curl -s -o /dev/null -D - -H 'Accept-Encoding: gzip' "$ASSET" | grep -qi '^content-encoding: gzip'
+! curl -s -o /dev/null -D - "$ASSET" | grep -qi '^content-encoding'
+ETAG=$(curl -s -o /dev/null -D - "$ASSET" | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]: //p')
+test "$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $ETAG" "$ASSET")" = 304
 curl -sf http://127.0.0.1:3300/ | grep -q '<code>a→b</code>'
 # CSS Modules: prod SSR must use the same scoped class names as dev (css_scope_id).
 PROD_BADGE=$(curl -sf http://127.0.0.1:3300/ | grep -oE 'badge_[0-9a-f]{8}' | head -1)
@@ -77,6 +85,11 @@ sleep 1                                            # let background revalidation
 isr regenerated; test "$S" = "HIT"; test "$N" -gt "$R1"
 # a cookie-setting response is per-user and must never be ISR-cached
 test -z "$(curl -s -D - -o /dev/null "$ISR" | grep -i '^set-cookie:')"
+# ISR hits are compressed once and answer If-None-Match with 304.
+curl -s -o /dev/null -D - -H 'Accept-Encoding: br' http://127.0.0.1:3300/isr | grep -qi '^content-encoding: br'
+ISR_ETAG=$(curl -s -o /dev/null -D - http://127.0.0.1:3300/isr | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]: //p')
+test "$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $ISR_ETAG" http://127.0.0.1:3300/isr)" = 304
+curl -s --compressed http://127.0.0.1:3300/isr | grep -q '</html>'
 # loading/error boundaries are served through the Rust front too
 curl -sf http://127.0.0.1:3300/__nowaki/boundaries | grep -q 'data-nowaki-reset'
 # v0.9 Jetstream presence + connection scaling: WS join->presence,
