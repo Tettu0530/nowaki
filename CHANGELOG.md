@@ -55,6 +55,14 @@ milestone's worth of work; the codename is noted per entry.
   The route has the same CSRF gate as server functions (JSON,
   `x-nowaki-live: 1`, cross-site requests rejected) and a 64 KiB body cap.
 
+### Changed
+- **Faster `nowaki prerender`:** the temporary prod server and the
+  `staticPaths` evaluation (two Node processes) now start together instead of
+  one after the other, and up to 8 pages are requested at once (results are
+  written in the original order). On an M2, a 10-page blog prerenders in
+  119 ms instead of 157 ms and a 1000-page one in 488 ms instead of 675 ms;
+  the output is unchanged.
+
 ### Fixed
 - **Security:** `nowaki dev` / `nowaki start` no longer proxy
   `/__nowaki/live-render` (404). That endpoint is the sidecar's internal
