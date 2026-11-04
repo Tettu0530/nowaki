@@ -12,7 +12,11 @@ pub struct Sidecar {
     child: Child,
 }
 
-pub async fn spawn(root: &Path, rust_port: u16) -> Result<Sidecar> {
+pub async fn spawn(
+    root: &Path,
+    rust_port: u16,
+    live_hub: std::sync::Arc<crate::live::LiveHub>,
+) -> Result<Sidecar> {
     let entry = root.join("node_modules/@nowaki-dev/runtime/server/sidecar.mjs");
     if !entry.exists() {
         return Err(anyhow!(
@@ -26,6 +30,7 @@ pub async fn spawn(root: &Path, rust_port: u16) -> Result<Sidecar> {
         .arg(&entry)
         .current_dir(root)
         .env("NOWAKI_RUST_PORT", rust_port.to_string())
+        .env("NOWAKI_PUBLISH_TOKEN", crate::live::publish_token())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .kill_on_drop(true)
@@ -47,7 +52,9 @@ pub async fn spawn(root: &Path, rust_port: u16) -> Result<Sidecar> {
     // Keep streaming the rest of stdout as logs
     tokio::spawn(async move {
         while let Ok(Some(line)) = lines.next_line().await {
-            println!("[sidecar] {line}");
+            if !crate::live::handle_sidecar_line(&live_hub, &line) {
+                println!("[sidecar] {line}");
+            }
         }
     });
 

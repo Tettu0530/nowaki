@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { h, options } from "preact";
 
 import { wrapIsland } from "./island-directive.mjs";
-import { liveInitialState } from "./live.mjs";
+import { liveInitialState, liveTopics } from "./live.mjs";
 import { liveProps } from "./live-sign.mjs";
 import { pageMeta } from "./document.mjs";
 
@@ -62,7 +62,7 @@ options.vnode = (vnode) => {
         // liveProps HMAC-signs the initial state (verified on join to reject forged state).
         return h(
           "nowaki-live",
-          liveProps(island.name, nid, state),
+          liveProps(island.name, nid, state, liveTopics(island.mod, state)),
           h(Original, { state, __nowakiLiveInner: true }),
         );
       };

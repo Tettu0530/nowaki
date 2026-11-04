@@ -17,6 +17,13 @@ milestone's worth of work; the codename is noted per entry.
   so Worker vars and secrets reach `process.env`.
 
 ### Added
+- **Jetstream live queries:** `live.subscribe` (topics, or a function of the
+  state) and `live.load(state, { topic })` on an island, plus `publish(topic)`
+  from `@nowaki-dev/runtime`: after server code changes data (an action, a
+  server function, an API route), every subscribed island reloads and gets a
+  pushed patch without a client event. Under `nowaki dev` / `nowaki start` it
+  reaches connections in the same process; on the deploy adapters it is a no-op
+  for now.
 - **Jetstream request context:** live handlers can call `getContext()` to read
   the cookies and `authorization` / `accept-language` / `user-agent` headers of
   the WebSocket upgrade, and `live.authorize({ name, handler, state, payload })`

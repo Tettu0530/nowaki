@@ -111,10 +111,12 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         );
     }
 
+    let live_hub = crate::live::LiveHub::new();
     let mut child = Command::new("node")
         .arg("--enable-source-maps")
         .arg(&entry)
         .current_dir(&root)
+        .env("NOWAKI_PUBLISH_TOKEN", crate::live::publish_token())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .kill_on_drop(true)
@@ -132,9 +134,12 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
     }
     let sidecar_port =
         sidecar_port.ok_or_else(|| anyhow!("prod-sidecar exited without reporting READY"))?;
+    let hub_for_lines = live_hub.clone();
     tokio::spawn(async move {
         while let Ok(Some(l)) = lines.next_line().await {
-            println!("[sidecar] {l}");
+            if !crate::live::handle_sidecar_line(&hub_for_lines, &l) {
+                println!("[sidecar] {l}");
+            }
         }
     });
 
@@ -153,7 +158,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
             .redirect(reqwest::redirect::Policy::none())
             .build()?,
         manifest,
-        live_hub: crate::live::LiveHub::new(),
+        live_hub,
         isr: IsrCache::new(),
     });
 
