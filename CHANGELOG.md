@@ -62,6 +62,12 @@ milestone's worth of work; the codename is noted per entry.
   chunk imports each shared chunk in one statement. On the counter benchmark,
   first-load JS goes from 9.29 to 8.69 KB gzip and the idle-loaded router from
   4.05 to 2.77 KB.
+- **Faster `nowaki prerender`:** the temporary prod server and the
+  `staticPaths` evaluation (two Node processes) now start together instead of
+  one after the other, and up to 8 pages are requested at once (results are
+  written in the original order). On an M2, a 10-page blog prerenders in
+  119 ms instead of 157 ms and a 1000-page one in 488 ms instead of 675 ms;
+  the output is unchanged.
 
 ### Fixed
 - **Builds are reproducible:** an island that hoists several app modules (for

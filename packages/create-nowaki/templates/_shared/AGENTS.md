@@ -137,6 +137,17 @@ nowaki.config.mjs   plugins (optional)
   `.env.example` to `.env` and keep database URLs, API keys, and tokens unprefixed.
 - **Server functions and API routes are public endpoints.** Validate and bound every
   argument; authorize with `getContext()` (cookies/headers) before mutating data.
+  Use `serverFn(schema, impl)` for `"use server"` exports that take arguments (see
+  `actions/echo.ts` in the **basics** template).
+- **Cross-site writes.** Page `action`s reject cross-site non-GET requests by default.
+  **`routes/_middleware.ts` runs before that check** — do not perform sensitive
+  mutations in middleware unless you validate the caller yourself. API routes log a
+  warning and still accept cross-site POSTs unless you `export const csrf = true` on
+  the route (recommended for cookie-authenticated APIs).
+- **Production checklist** (when you deploy): set `NOWAKI_LIVE_SECRET` if the app
+  uses Jetstream live islands; try `NOWAKI_CSP=report-only` before `enforce`; behind
+  a reverse proxy on `nowaki start`, set `NOWAKI_TRUST_PROXY=1` and forward the public
+  host as `x-forwarded-host`. See the upstream [SECURITY.md](https://github.com/Tettu0530/nowaki/blob/main/SECURITY.md).
 - **Do not embed secrets** in client islands, loaders returned to the page, or static
   prerender output. ISR pages must not include per-user secrets.
 

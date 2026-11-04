@@ -6,7 +6,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ServerFnError } from "./server-fn.mjs";
-import { sameOrigin } from "./origin.mjs";
+import { sameOrigin, browserHost } from "./origin.mjs";
 
 export const SERVER_FN_PATH = "/__nowaki/fn";
 
@@ -55,11 +55,10 @@ export async function dispatchServerFn(ctx, info, sf, { dev = false } = {}) {
   if (ctx.get("x-nowaki-rpc") !== "1") {
     return errBody(403, "Forbidden");
   }
-  // The Rust front strips Host when proxying, so prefer x-forwarded-host for the original browser Host.
-  // An Origin with no host to compare against is rejected (fail closed); without Origin, the rpc
-  // header + JSON requirement above still stop cross-site calls.
+  // Same host resolution as page actions (`origin.mjs` / Rust `forward.rs`): trusted proxy,
+  // loopback sidecar hop, Vercel edge host, else `Host` (see `browserHost`).
   const origin = ctx.get("origin");
-  const host = ctx.get("x-forwarded-host") ?? ctx.get("host");
+  const host = browserHost((name) => ctx.get(name));
   if (origin && !sameOrigin(origin, host)) {
     return errBody(403, "cross-origin request forbidden");
   }
