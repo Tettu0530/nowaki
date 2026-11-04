@@ -3562,5 +3562,213 @@
         }
       }
     }
+  },
+  "prod": {
+    "nowaki": {
+      "framework": "nowaki",
+      "label": "Nowaki",
+      "version": "0.14.0",
+      "env": {},
+      "pages": 100,
+      "islands": 1,
+      "runs": 5,
+      "startMs": 143,
+      "idleMB": 301.6,
+      "peakMB": 367.3,
+      "ttfbP50": 0.42,
+      "ttfbP99": 1.01,
+      "totalP50": 0.44,
+      "postRps": 4168,
+      "postP99": 24.04,
+      "homeRps": 6644,
+      "homeP99": 14.75,
+      "postRpsRuns": [
+        4213,
+        4150,
+        4138,
+        4225,
+        4168
+      ],
+      "homeRpsRuns": [
+        6644,
+        6777,
+        6165,
+        6765,
+        5719
+      ],
+      "oha": "oha 1.16.0"
+    },
+    "astro": {
+      "framework": "astro",
+      "label": "Astro",
+      "version": "7.4.5",
+      "env": {},
+      "pages": 100,
+      "islands": 1,
+      "runs": 5,
+      "startMs": 122,
+      "idleMB": 322,
+      "peakMB": 322.4,
+      "ttfbP50": 0.23,
+      "ttfbP99": 0.94,
+      "totalP50": 0.25,
+      "postRps": 6818,
+      "postP99": 14.63,
+      "homeRps": 8187,
+      "homeP99": 13.06,
+      "postRpsRuns": [
+        5694,
+        6787,
+        6818,
+        7049,
+        7010
+      ],
+      "homeRpsRuns": [
+        7085,
+        8410,
+        8344,
+        8187,
+        7736
+      ],
+      "oha": "oha 1.16.0"
+    },
+    "sveltekit": {
+      "framework": "sveltekit",
+      "label": "SvelteKit",
+      "version": "3.1.1",
+      "env": {},
+      "pages": 100,
+      "islands": 1,
+      "runs": 5,
+      "startMs": 122,
+      "idleMB": 336.9,
+      "peakMB": 337.3,
+      "ttfbP50": 0.22,
+      "ttfbP99": 1.01,
+      "totalP50": 0.24,
+      "postRps": 6783,
+      "postP99": 12.41,
+      "homeRps": 4513,
+      "homeP99": 21.28,
+      "postRpsRuns": [
+        6377,
+        6783,
+        6837,
+        6827,
+        6397
+      ],
+      "homeRpsRuns": [
+        4451,
+        4735,
+        4678,
+        4513,
+        4450
+      ],
+      "oha": "oha 1.16.0"
+    },
+    "next": {
+      "framework": "next",
+      "label": "Next.js",
+      "version": "16.4.5",
+      "env": {},
+      "pages": 100,
+      "islands": 1,
+      "runs": 5,
+      "startMs": 352,
+      "idleMB": 430.6,
+      "peakMB": 441.7,
+      "ttfbP50": 0.98,
+      "ttfbP99": 2.48,
+      "totalP50": 1.01,
+      "postRps": 1210,
+      "postP99": 60.85,
+      "homeRps": 1448,
+      "homeP99": 46.06,
+      "postRpsRuns": [
+        1167,
+        1210,
+        1164,
+        1247,
+        1236
+      ],
+      "homeRpsRuns": [
+        1457,
+        1323,
+        1469,
+        1448,
+        1370
+      ],
+      "oha": "oha 1.16.0"
+    },
+    "nuxt": {
+      "framework": "nuxt",
+      "label": "Nuxt",
+      "version": "4.6.4",
+      "env": {},
+      "pages": 100,
+      "islands": 1,
+      "runs": 5,
+      "startMs": 147,
+      "idleMB": 441.5,
+      "peakMB": 445.4,
+      "ttfbP50": 0.62,
+      "ttfbP99": 4.59,
+      "totalP50": 0.64,
+      "postRps": 1952,
+      "postP99": 66.99,
+      "homeRps": 2102,
+      "homeP99": 45.12,
+      "postRpsRuns": [
+        2009,
+        1863,
+        1952,
+        1935,
+        1984
+      ],
+      "homeRpsRuns": [
+        2102,
+        1944,
+        2234,
+        2120,
+        1911
+      ],
+      "oha": "oha 1.16.0"
+    },
+    "nowaki+csp": {
+      "framework": "nowaki",
+      "label": "Nowaki",
+      "version": "0.14.0",
+      "env": {
+        "NOWAKI_CSP": "enforce"
+      },
+      "pages": 100,
+      "islands": 1,
+      "runs": 5,
+      "startMs": 143,
+      "idleMB": 302.5,
+      "peakMB": 382.7,
+      "ttfbP50": 0.42,
+      "ttfbP99": 0.99,
+      "totalP50": 0.43,
+      "postRps": 4317,
+      "postP99": 22.53,
+      "homeRps": 6849,
+      "homeP99": 13.86,
+      "postRpsRuns": [
+        4250,
+        4317,
+        4341,
+        4300,
+        4396
+      ],
+      "homeRpsRuns": [
+        6889,
+        6849,
+        6854,
+        6829,
+        6677
+      ],
+      "oha": "oha 1.16.0"
+    }
   }
 }
