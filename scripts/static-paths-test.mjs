@@ -126,5 +126,23 @@ check(
 );
 rmSync(encoded, { recursive: true, force: true });
 
+const asyncBad = app({
+  "routes/async-bad/[slug].js": 'export const staticPaths = async () => ({ slug: "x" });\nexport default () => null;\n',
+});
+const rAsyncBad = runFail(asyncBad);
+check(
+  "async staticPaths must resolve to an array",
+  rAsyncBad.status !== 0 && /must be an array/.test(rAsyncBad.stderr),
+);
+rmSync(asyncBad, { recursive: true, force: true });
+
+const asyncReject = app({
+  "routes/async-reject/[slug].js":
+    'export const staticPaths = async () => { throw new Error("staticPaths failed"); };\nexport default () => null;\n',
+});
+const rAsyncReject = runFail(asyncReject);
+check("async staticPaths rejection fails the script", rAsyncReject.status !== 0 && /staticPaths failed/.test(rAsyncReject.stderr));
+rmSync(asyncReject, { recursive: true, force: true });
+
 console.log(failures ? `\nSTATIC PATHS TEST FAILED (${failures})` : "\nSTATIC PATHS TEST PASSED");
 process.exit(failures ? 1 : 0);
