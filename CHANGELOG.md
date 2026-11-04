@@ -72,6 +72,9 @@ survive a server restart, stale-state notifications, and a fan-out benchmark.
   `x-nowaki-live: 1`, cross-site requests rejected) and a 64 KiB body cap.
 
 ### Changed
+- The scaffolded `AGENTS.md` and `README.md` gain a security checklist
+  (`serverFn`, middleware running before the CSRF check, `csrf = true` for
+  cookie-authenticated APIs, and the production env vars).
 - **Smaller client JS:** the build mangled names but never printed them, so
   client chunks kept their full local names. They are now mangled, annotation
   comments (`/* @__PURE__ */`) are dropped (legal comments stay), and an island
@@ -86,6 +89,11 @@ survive a server restart, stale-state notifications, and a fan-out benchmark.
   the output is unchanged.
 
 ### Fixed
+- **Security:** on the node / bun / deno / vercel adapters, the action and
+  server-function same-origin checks compare against `Host`, not a
+  client-sent `x-forwarded-host`. `x-forwarded-host` is used only behind
+  `NOWAKI_TRUST_PROXY=1`, on the Rust front's own sidecar hop (loopback
+  `Host`), or on Vercel, whose edge sets it.
 - **Builds are reproducible:** an island that hoists several app modules (for
   example two modules in an import cycle) got a different chunk, hash and
   manifest from one build to the next, because the modules' order followed
