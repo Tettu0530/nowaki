@@ -169,6 +169,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         isr: IsrCache::new(),
     });
 
+    let warm_state = state.clone();
     let app = Router::new()
         .route("/__nowaki/live", get(live_ws))
         .fallback(any(handle))
@@ -188,6 +189,9 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         expose || host == "0.0.0.0",
         None,
     );
+    if isr_warm_enabled() {
+        tokio::spawn(warm_isr(warm_state, format!("127.0.0.1:{actual}")));
+    }
     // The sidecar lives outside the shared state (request tasks hold that), so it is killed here on shutdown.
     tokio::select! {
         r = std::future::IntoFuture::into_future(axum::serve(listener, app)) => r?,
@@ -319,6 +323,70 @@ fn cached_response(
     builder
         .body(Body::from(entry.body.plain.clone()))
         .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
+}
+
+fn isr_warm_enabled() -> bool {
+    !matches!(
+        std::env::var("NOWAKI_ISR_WARM")
+            .ok()
+            .as_deref()
+            .map(str::trim),
+        Some("0" | "off" | "false" | "no")
+    )
+}
+
+/// Renders every ISR page once in the background right after startup (`NOWAKI_ISR_WARM=0` turns
+/// it off), so the first visitor already gets a cached page from Rust. Each page goes through the
+/// normal request path with no cookies, so it is stored exactly as an anonymous visit would be:
+/// pages that vary on a header are keyed by that header's (empty) value and never serve someone
+/// with a different one. Two at a time, to leave the renderer free for real traffic.
+async fn warm_isr(state: Arc<ProdState>, host: String) {
+    use futures_util::StreamExt;
+    let started = Instant::now();
+    let url = format!(
+        "http://127.0.0.1:{}/__nowaki/isr-urls?max={}",
+        state.sidecar_port, state.isr.max
+    );
+    let urls: Vec<String> = match state.http.get(&url).send().await {
+        Ok(r) if r.status().is_success() => r
+            .bytes()
+            .await
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default(),
+        _ => return,
+    };
+    if urls.is_empty() {
+        return;
+    }
+    let total = urls.len();
+    let warmed = futures_util::stream::iter(urls)
+        .map(|path| {
+            let state = state.clone();
+            let host = host.clone();
+            async move {
+                let Ok(req) = Request::builder()
+                    .method(Method::GET)
+                    .uri(&path)
+                    .header(header::HOST, host)
+                    .body(Body::empty())
+                else {
+                    return false;
+                };
+                let resp = proxy(state, req, true).await;
+                // MISS = rendered and stored (a Set-Cookie response is served but never stored).
+                resp.headers().get("x-nowaki-cache").is_some()
+                    && !resp.headers().contains_key(header::SET_COOKIE)
+            }
+        })
+        .buffer_unordered(2)
+        .filter(|ok| std::future::ready(*ok))
+        .count()
+        .await;
+    println!(
+        "[nowaki] ISR warm-up: {warmed} of {total} pages cached in {} ms",
+        started.elapsed().as_millis()
+    );
 }
 
 /// Single-flight: only one revalidation runs per key.

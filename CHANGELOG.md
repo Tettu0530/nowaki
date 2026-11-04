@@ -43,6 +43,18 @@ milestone's worth of work; the codename is noted per entry.
   process only: `nowaki dev` and the adapters don't save rooms.
 
 ### Changed
+- **ISR pages are cached from the first request.** Right after startup,
+  `nowaki start` renders every ISR page once in the background, so the first
+  visitor gets a page from the Rust front instead of waiting for a render.
+  - Covered: static routes with `export const revalidate` > 0, plus each
+    `staticPaths` entry of dynamic ones. The list is capped at
+    `NOWAKI_ISR_MAX`.
+  - It renders two pages at a time, through the normal request path, with
+    no cookies. A page that varies on a header is stored only under the
+    empty value of that header, so it never serves someone else's variant.
+  - The renders run route middleware and loaders like any request.
+    `NOWAKI_ISR_WARM=0` turns this off.
+  - `examples/hello`: 2 pages in 16 ms.
 - **Compressed responses and 304s on `nowaki start`.** Before this change,
   every response went out uncompressed, and `/_nowaki/*` assets were read
   from disk on each request.

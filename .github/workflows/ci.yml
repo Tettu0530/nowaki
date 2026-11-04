@@ -131,6 +131,8 @@ jobs:
         run: node scripts/live-sign-test.mjs
       - name: Jetstream rooms file (save, load, corrupt files)
         run: node scripts/live-rooms-file-test.mjs
+      - name: ISR warm-up URL list
+        run: node scripts/isr-urls-test.mjs
       - name: Same-origin host resolution (adapters + trust proxy)
         run: node scripts/origin-test.mjs
       - name: Live session hub (join/event, queue, timeout, cap, presence)
