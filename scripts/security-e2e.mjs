@@ -48,8 +48,6 @@ function wsUpgrade(b, path, origin) {
   });
 }
 
-// Checks that a forged live join gets no patch (rejected by signature verification).
-// The global WebSocket connects without Origin (ws_origin_ok allows it) -> tests the signature alone.
 // Client-sent x-forwarded-host is dropped by the Rust front (no NOWAKI_TRUST_PROXY), so it can
 // neither spoof the RPC same-origin check nor break a genuine same-origin call.
 async function forwardedHostIgnored(b) {
@@ -63,6 +61,40 @@ async function forwardedHostIgnored(b) {
     (await call({ origin: "http://evil.test", "x-forwarded-host": "evil.test" })) === 403);
   check("RPC same-origin call unaffected by a client x-forwarded-host (200)",
     (await call({ origin: b, "x-forwarded-host": "evil.test" })) === 200);
+}
+
+// Server functions: Standard Schema validation (addTodo), body/argument limits, and no internal
+// error details in production (brokenTodo throws "db password is hunter2").
+async function serverFnHardening(b, m) {
+  const rpc = async (body) => {
+    const r = await fetch(`${b}/__nowaki/fn`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-nowaki-rpc": "1" },
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    });
+    let data = null;
+    try {
+      data = await r.json();
+    } catch {}
+    return { status: r.status, data };
+  };
+  const bad = await rpc({ id: "675f80133a1699f8", args: [""] });
+  check("serverFn rejects invalid input (400 + issues)",
+    bad.status === 400 && bad.data?.error === "Invalid input" && bad.data?.data?.issues?.length === 1);
+  const good = await rpc({ id: "675f80133a1699f8", args: ["  schema-ok  "] });
+  check("serverFn passes the validated value", good.status === 200 && good.data?.result?.includes("schema-ok"));
+  const broken = await rpc({ id: "96224074eee5e982", args: [] });
+  if (m === "prod") {
+    check("prod: unexpected server function error is generic (500, no message)",
+      broken.status === 500 && broken.data?.error === "Internal Server Error");
+  } else {
+    check("dev: unexpected server function error keeps its message",
+      broken.status === 500 && /hunter2/.test(broken.data?.error ?? ""));
+  }
+  check("server function argument count limit (400)",
+    (await rpc({ id: "6c90d7dc921a9a3f", args: Array(17).fill(0) })).status === 400);
+  check("server function body size limit (413)",
+    (await rpc(JSON.stringify({ id: "6c90d7dc921a9a3f", args: ["x".repeat(1100 * 1024)] }))).status === 413);
 }
 
 // Page actions reject cross-site non-GET requests by default; API routes warn unless they opt in.
@@ -99,6 +131,8 @@ async function securityHeadersPresent(b, paths) {
   }
 }
 
+// Checks that a forged live join gets no patch (rejected by signature verification).
+// The global WebSocket connects without Origin (ws_origin_ok allows it) -> tests the signature alone.
 async function liveForgeryRejected(b) {
   const html = await (await fetch(`${b}/live`)).text();
   const tag = html.match(/<nowaki-live\b[^>]*>/)?.[0];
@@ -158,6 +192,7 @@ if (mode === "dev") {
   check("RPC cross-origin rejected (403)",
     (await post({ "content-type": "application/json", "x-nowaki-rpc": "1", origin: "http://evil.test" })) === 403);
   await forwardedHostIgnored(base);
+  await serverFnHardening(base, "dev");
   await crossSiteWritesRejected(base);
   await securityHeadersPresent(base, ["/", "/nope"]);
 
@@ -175,6 +210,7 @@ if (mode === "dev") {
 
 if (mode === "prod") {
   await forwardedHostIgnored(base);
+  await serverFnHardening(base, "prod");
   await crossSiteWritesRejected(base);
   // 500s never carry a stack trace (file paths, code) in production — neither the app's _500 page
   // nor the built-in fallback used when _500 itself throws.

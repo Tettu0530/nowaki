@@ -156,3 +156,61 @@ export interface Live<S = any> {
  * Returns null outside an RPC. Use it to read cookies/headers or for auth.
  */
 export function getContext(): LoaderContext | null;
+
+/** A [Standard Schema](https://standardschema.dev) (zod, valibot, arktype, ...). */
+export interface StandardSchemaV1<Input = unknown, Output = Input> {
+  readonly "~standard": {
+    readonly version: 1;
+    readonly vendor: string;
+    readonly validate: (
+      value: unknown,
+    ) => StandardSchemaResult<Output> | Promise<StandardSchemaResult<Output>>;
+    readonly types?: { readonly input: Input; readonly output: Output };
+  };
+}
+
+export type StandardSchemaResult<Output> =
+  | { readonly value: Output; readonly issues?: undefined }
+  | {
+      readonly issues: ReadonlyArray<{
+        readonly message: string;
+        readonly path?: ReadonlyArray<PropertyKey | { readonly key: PropertyKey }>;
+      }>;
+    };
+
+// Libraries declare `types`; a hand-written schema falls back to what `validate` resolves with.
+type SchemaInput<S> = S extends { readonly "~standard": { readonly types?: { readonly input: infer I } } }
+  ? unknown extends I
+    ? unknown
+    : I
+  : unknown;
+type ValidatedValue<S> = S extends { readonly "~standard": { readonly validate: (v: unknown) => infer R } }
+  ? Extract<Awaited<R>, { readonly value: unknown }> extends { readonly value: infer V }
+    ? V
+    : unknown
+  : unknown;
+type SchemaOutput<S> = S extends { readonly "~standard": { readonly types?: { readonly output: infer O } } }
+  ? unknown extends O
+    ? ValidatedValue<S>
+    : O
+  : ValidatedValue<S>;
+
+/**
+ * A server function whose first argument is validated against `schema` before `impl` runs.
+ * Invalid input is rejected with a 400 (`ServerFnError`, `data.issues`).
+ * @example export const addTodo = serverFn(z.string().min(1), async (text) => save(text));
+ */
+export declare function serverFn<S extends StandardSchemaV1, R, Rest extends unknown[] = []>(
+  schema: S,
+  impl: (input: SchemaOutput<S>, ...rest: Rest) => R | Promise<R>,
+): (input: SchemaInput<S>, ...rest: Rest) => Promise<Awaited<R>>;
+
+/**
+ * Throw from a server function to send `status` and `message` (and `data`) to the client.
+ * Any other error becomes a generic 500 in production.
+ */
+export declare class ServerFnError extends Error {
+  constructor(message: string, options?: { status?: number; data?: unknown });
+  readonly status: number;
+  readonly data?: unknown;
+}

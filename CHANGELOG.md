@@ -11,6 +11,14 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **`serverFn(schema, impl)`** validates a server function's first argument
+  with any [Standard Schema](https://standardschema.dev) library (zod, valibot,
+  arktype) before `impl` runs; invalid input is a 400 with `data.issues`.
+  `nowaki build` warns about `"use server"` exports that take arguments without
+  it.
+- **`ServerFnError(message, { status, data })`**: thrown from a server function,
+  its status, message, and `data` reach the client, where the thrown `Error`
+  carries `status` and `data`.
 - **Default security headers** on every response from `nowaki dev`,
   `nowaki start` (ISR hits and static assets included), all deploy adapters,
   and the `_headers` file `nowaki prerender` writes:
@@ -43,6 +51,11 @@ milestone's worth of work; the codename is noted per entry.
   state. It ignored `liveIslands`, so a page with a live island returned 500.
 
 ### Changed
+- **Security:** in production, a server function error other than
+  `ServerFnError` returns a generic `Internal Server Error` (500) and is logged;
+  before, its message was sent to the client. Dev still shows the message.
+  Request bodies over `NOWAKI_FN_BODY_LIMIT` (default 1 MiB) get 413, and calls
+  with more than 16 arguments get 400.
 - **Security:** page actions reject cross-site non-GET requests with 403: an
   `Origin` from another site or `null`, or `Sec-Fetch-Site: cross-site`.
   Same-origin form posts and requests without either header (curl,

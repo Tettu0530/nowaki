@@ -39,7 +39,7 @@ export async function handleRequest(env, info) {
 
   // Handle server function RPC before routing.
   if (env.serverFunctions && url.pathname === SERVER_FN_PATH) {
-    return finalize(ctx, await dispatchServerFn(ctx, info, env.serverFunctions));
+    return finalize(ctx, await dispatchServerFn(ctx, info, env.serverFunctions, { dev: env.dev === true }));
   }
 
   if (method === "GET" && url.pathname === BOUNDARIES_PATH) {
