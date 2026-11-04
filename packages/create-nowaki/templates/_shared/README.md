@@ -44,7 +44,15 @@ actions/     "use server" RPC modules (optional)
   `preact/compat`, so many React libraries work.)
 - Use **explicit file extensions** in relative imports: `../islands/Counter.tsx`.
 - A route's `loader` runs only on the server; `action` handles non-GET requests.
-- `routes/api/health.ts` is a minimal JSON API example; `routes/_404.tsx` handles unknown paths.
-- `AGENTS.md` documents the conventions for AI coding agents.
+- The **basics** template adds `routes/_404.tsx`, `routes/api/health.ts`, and
+  `actions/echo.ts`; **minimal** is a single page with no islands.
+- `AGENTS.md` documents conventions (including security) for AI coding agents.
+
+## Production
+
+Use `npm run build` then `npm run start` (or a deploy adapter). Do not run
+`nowaki dev` on the public internet. Cookie-authenticated API routes should export
+`csrf = true`; live islands need a stable `NOWAKI_LIVE_SECRET`. See `AGENTS.md`
+§ Security and [nowaki.dev/docs](https://nowaki.dev/docs).
 
 Docs: <https://nowaki.dev/docs>
