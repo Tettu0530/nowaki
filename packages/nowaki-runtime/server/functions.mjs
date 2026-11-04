@@ -51,10 +51,11 @@ export async function dispatchServerFn(ctx, info, sf, { dev = false } = {}) {
     return errBody(403, "Forbidden");
   }
   // The Rust front strips Host when proxying, so prefer x-forwarded-host for the original browser Host.
-  // With neither, there's nothing to compare, so skip the Origin check and rely on the rpc header + JSON requirement above.
+  // An Origin with no host to compare against is rejected (fail closed); without Origin, the rpc
+  // header + JSON requirement above still stop cross-site calls.
   const origin = ctx.get("origin");
   const host = ctx.get("x-forwarded-host") ?? ctx.get("host");
-  if (origin && host && !sameOrigin(origin, host)) {
+  if (origin && !sameOrigin(origin, host)) {
     return errBody(403, "cross-origin request forbidden");
   }
   if (Number(ctx.get("content-length")) > BODY_LIMIT) {
