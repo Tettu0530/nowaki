@@ -10,7 +10,23 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-11-04 · "Cyclone" (part 1)
+
+Packages: `nowaki` / `nowaki-core` 0.15.0 (crates.io, npm), `@nowaki-dev/runtime`
+0.14.0, `create-nowaki` / `create-nowaki-app` 0.16.0. New apps get
+`@nowaki-dev/runtime@^0.14.0` and `nowaki@^0.15.0`.
+
+Jetstream 2: live islands work on every deploy adapter (per event over POST),
+handlers see the request, `publish()` pushes server-side changes, islands can
+share a room, and forms and inputs are live. Still open in v0.15: rooms that
+survive a server restart, stale-state notifications, and a fan-out benchmark.
+
 ### Upgrade notes
+- The deploy adapters now ship `live.js`, so live islands that were static on
+  them become interactive (over POST). Pin a page to the old behavior with
+  `<meta name="nowaki-live" content="ws">`, which never falls back to POST.
+- Room state and `publish()` live in one server process: they don't reach
+  other instances, and rooms start empty after a restart.
 - On the adapters, set `NOWAKI_LIVE_SECRET` when more than one instance (or
   Worker isolate) can serve a request, or live events fail signature checks.
   The Cloudflare `wrangler.jsonc` now enables `nodejs_compat_populate_process_env`
@@ -70,6 +86,7 @@ milestone's worth of work; the codename is noted per entry.
   public port, a cross-site `text/plain` POST could run live handlers with a
   replayed signed state, and with the new request context it could claim any
   cookie and pass `live.authorize`. The sidecars also match the path exactly.
+  (The replay part also shipped in 0.14.1.)
 - A Jetstream event can only call the island's own `live.on` handlers, not
   inherited object methods such as `toString`.
 
@@ -433,7 +450,8 @@ and the runtime at 0.9.0.
 - Published to crates.io (`nowaki-core`, `nowaki`) and npm (`@nowaki-dev/runtime`,
   `create-nowaki`, `create-nowaki-app`).
 
-[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.15.0
 [0.14.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.14.1
 [0.14.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.14.0
 [0.13.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.13.0
