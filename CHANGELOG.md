@@ -19,8 +19,26 @@ milestone's worth of work; the codename is noted per entry.
 - **`ServerFnError(message, { status, data })`**: thrown from a server function,
   its status, message, and `data` reach the client, where the thrown `Error`
   carries `status` and `data`.
+- **Default security headers** on every response from `nowaki dev`,
+  `nowaki start` (ISR hits and static assets included), all deploy adapters,
+  and the `_headers` file `nowaki prerender` writes:
+  `x-content-type-options: nosniff`, `x-frame-options: SAMEORIGIN`,
+  `referrer-policy: strict-origin-when-cross-origin`,
+  `cross-origin-opener-policy: same-origin`, and
+  `content-security-policy: frame-ancestors 'self'` when the app sends no CSP.
+  A header the response already sets is kept; `NOWAKI_SECURITY_HEADERS=off`
+  turns them off.
 
 ### Fixed
+- Jetstream: a live connection no longer stalls while the sidecar re-renders.
+  The render runs off the session loop (pings, presence, and new events keep
+  flowing), one at a time per connection so each island's state stays in
+  order, with up to 32 events queued behind it. A render that takes longer
+  than `NOWAKI_LIVE_RENDER_TIMEOUT_MS` (default 10000) or fails is reported to
+  the client as `{ type: "error", nid, reason }` (`timeout`, `render failed`,
+  or `busy` when the queue is full) and dispatched as a `nowaki:live-error`
+  window event; the island keeps its last HTML and state. Before, a hung
+  sidecar call blocked the connection with no timeout.
 - **Security:** the Rust front (`nowaki dev` / `nowaki start`) no longer passes
   client-sent `x-forwarded-*`, `forwarded`, `x-real-ip`, or internal
   `x-nowaki-*` headers to the Node sidecar. It sets `x-forwarded-host` from
@@ -29,6 +47,8 @@ milestone's worth of work; the codename is noted per entry.
   headers, `NOWAKI_TRUST_PROXY=1` uses its `x-forwarded-host` /
   `x-forwarded-proto` (also for the WebSocket Origin check) and keeps
   `x-forwarded-for`.
+- The cloudflare adapter renders live (Jetstream) islands with their initial
+  state. It ignored `liveIslands`, so a page with a live island returned 500.
 
 ### Changed
 - **Security:** in production, a server function error other than
@@ -36,6 +56,13 @@ milestone's worth of work; the codename is noted per entry.
   before, its message was sent to the client. Dev still shows the message.
   Request bodies over `NOWAKI_FN_BODY_LIMIT` (default 1 MiB) get 413, and calls
   with more than 16 arguments get 400.
+- **Security:** page actions reject cross-site non-GET requests with 403: an
+  `Origin` from another site or `null`, or `Sec-Fetch-Site: cross-site`.
+  Same-origin form posts and requests without either header (curl,
+  server-to-server) are unaffected. API routes log a one-time warning for now;
+  `export const csrf = true` rejects there too, and `export const csrf = false`
+  opts any route out. Behind a proxy that rewrites `Host`, forward the public
+  host as `x-forwarded-host`.
 - Docs: clearer SECURITY.md layout (audience map, defenses ↔ AGENTS invariants) and
   contributor pointers in CONTRIBUTING.md.
 

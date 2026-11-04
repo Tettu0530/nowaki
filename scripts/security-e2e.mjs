@@ -48,8 +48,6 @@ function wsUpgrade(b, path, origin) {
   });
 }
 
-// Checks that a forged live join gets no patch (rejected by signature verification).
-// The global WebSocket connects without Origin (ws_origin_ok allows it) -> tests the signature alone.
 // Client-sent x-forwarded-host is dropped by the Rust front (no NOWAKI_TRUST_PROXY), so it can
 // neither spoof the RPC same-origin check nor break a genuine same-origin call.
 async function forwardedHostIgnored(b) {
@@ -99,6 +97,42 @@ async function serverFnHardening(b, m) {
     (await rpc(JSON.stringify({ id: "6c90d7dc921a9a3f", args: ["x".repeat(1100 * 1024)] }))).status === 413);
 }
 
+// Page actions reject cross-site non-GET requests by default; API routes warn unless they opt in.
+async function crossSiteWritesRejected(b) {
+  const send = (path, h) =>
+    fetch(`${b}${path}`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded", ...h },
+      body: "text=csrf-check",
+    }).then((r) => r.status);
+  check("action: cross-site Origin rejected (403)", (await send("/todos", { origin: "http://evil.test" })) === 403);
+  check("action: Origin null rejected (403)", (await send("/todos", { origin: "null" })) === 403);
+  check("action: Sec-Fetch-Site cross-site rejected (403)",
+    (await send("/todos", { "sec-fetch-site": "cross-site" })) === 403);
+  check("action: same-origin POST allowed", (await send("/todos", { origin: b })) === 302);
+  check("action: POST without Origin (non-browser) allowed", (await send("/todos", {})) === 302);
+  check("API with `csrf = true`: cross-site Origin rejected (403)",
+    (await send("/api/echo", { origin: "http://evil.test" })) === 403);
+  check("API without `csrf`: cross-site Origin still allowed (warn phase)",
+    (await send("/api/hello", { origin: "http://evil.test" })) === 200);
+}
+
+// Default security headers on pages, 404s, and static assets (both modes) and on ISR hits (prod).
+async function securityHeadersPresent(b, paths) {
+  for (const p of paths) {
+    const h = (await fetch(`${b}${p}`)).headers;
+    check(`security headers on ${p}`,
+      h.get("x-content-type-options") === "nosniff" &&
+        h.get("x-frame-options") === "SAMEORIGIN" &&
+        h.get("referrer-policy") === "strict-origin-when-cross-origin" &&
+        h.get("cross-origin-opener-policy") === "same-origin" &&
+        /frame-ancestors 'self'/.test(h.get("content-security-policy") || ""));
+  }
+}
+
+// Checks that a forged live join gets no patch (rejected by signature verification).
+// The global WebSocket connects without Origin (ws_origin_ok allows it) -> tests the signature alone.
 async function liveForgeryRejected(b) {
   const html = await (await fetch(`${b}/live`)).text();
   const tag = html.match(/<nowaki-live\b[^>]*>/)?.[0];
@@ -159,6 +193,8 @@ if (mode === "dev") {
     (await post({ "content-type": "application/json", "x-nowaki-rpc": "1", origin: "http://evil.test" })) === 403);
   await forwardedHostIgnored(base);
   await serverFnHardening(base, "dev");
+  await crossSiteWritesRejected(base);
+  await securityHeadersPresent(base, ["/", "/nope"]);
 
   // CSWSH (Origin check on WS upgrade)
   check("CSWSH /__nowaki/live cross-origin upgrade rejected (403)",
@@ -175,6 +211,7 @@ if (mode === "dev") {
 if (mode === "prod") {
   await forwardedHostIgnored(base);
   await serverFnHardening(base, "prod");
+  await crossSiteWritesRejected(base);
   // 500s never carry a stack trace (file paths, code) in production — neither the app's _500 page
   // nor the built-in fallback used when _500 itself throws.
   const stackLike = /\n\s+at |\(file:\/\/|node:internal/;
@@ -210,6 +247,8 @@ if (mode === "prod") {
   if (hashed) {
     check("legit /_nowaki client asset (200)", (await statusOf(`${base}/_nowaki/${hashed}`)) === 200);
   }
+  // /isr twice: the second response is an ISR HIT/STALE served from the Rust cache.
+  await securityHeadersPresent(base, ["/", "/nope", "/isr", "/isr", ...(hashed ? [`/_nowaki/${hashed}`] : [])]);
   for (const p of [
     "/_nowaki/../../../etc/passwd",
     "/_nowaki/foo/../../../../etc/passwd",

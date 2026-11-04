@@ -60,15 +60,15 @@ Before adding big features, make the code easier to read and harder to break.
 - [x] Restructure SECURITY.md and add a "Security invariants" section to AGENTS.md
 - [x] Sanitize incoming headers at the Rust front (`x-forwarded-host` / `x-nowaki-*`, `NOWAKI_TRUST_PROXY`)
 - [x] Jetstream: carry signed state in patches (fixes state resetting to initial values on reconnect)
-- [ ] Jetstream: make the session loop async; sidecar timeouts and error reporting
+- [x] Jetstream: make the session loop async; sidecar timeouts and error reporting
 
 ### v0.14 "Gale": Secure by default
 Safe without any configuration. Every claim is verified in CI on every push.
 
 **Exit criteria**: Each row of SECURITY.md's "defenses enabled by default" maps to an implementation location and a CI check. security-e2e passes the same checks in both dev and prod.
 
-- [ ] Origin checks by default for page actions and non-GET requests (phased rollout for API routes; opt out with `export const csrf = false`)
-- [ ] Default security headers (nosniff / frame-ancestors / Referrer-Policy / COOP, also on ISR HITs)
+- [x] Origin checks by default for page actions and non-GET requests (phased rollout for API routes; opt out with `export const csrf = false`)
+- [x] Default security headers (nosniff / frame-ancestors / Referrer-Policy / COOP, also on ISR HITs)
 - [x] Body and argument limits for server functions, `serverFn(schema, impl)` (Standard Schema), a build warning for unvalidated exports
 - [ ] Less error detail exposed in prod (`ServerFnError`); hardened handling of the live signing key (warning when unset, `iat` and max lifetime)
 - [ ] CI: all checks in all modes, unit tests for the edge path, make `pnpm audit` required

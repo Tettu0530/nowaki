@@ -56,6 +56,10 @@ function connect() {
       } else if (msg.type === "error" && msg.reason === "at capacity") {
         // Limit reached: the server closed the connection. Degrade to the initial SSR (still tries to reconnect).
         console.warn("[nowaki live] server at capacity; staying on the initial SSR view");
+      } else if (msg.type === "error" && msg.nid) {
+        // The event was not applied (render timeout / failure / queue full); the island keeps its last HTML.
+        console.warn(`[nowaki live] event on ${msg.nid} not applied: ${msg.reason}`);
+        window.dispatchEvent(new CustomEvent("nowaki:live-error", { detail: { nid: msg.nid, reason: msg.reason } }));
       }
     };
     // Reconnect (exponential backoff, capped). Re-joining restores state. Give up after

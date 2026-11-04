@@ -4,6 +4,7 @@ mod forward;
 mod live;
 mod plugins;
 mod prerender;
+mod security_headers;
 mod shutdown;
 mod sidecar;
 mod start;

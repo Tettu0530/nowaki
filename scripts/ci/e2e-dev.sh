@@ -2,6 +2,7 @@
 # CI: Start dev server and verify SSR, islands, API, and v0.3 routing
 # Run from the repo root after `cargo build -p nowaki` and `pnpm install`.
 set -e
+trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 cd "$(dirname "$0")/../.."
 
 ./target/debug/nowaki dev examples/hello &
