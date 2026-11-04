@@ -123,6 +123,8 @@ jobs:
         run: node scripts/router-cache-test.mjs
       - name: SSG staticPaths expansion
         run: node scripts/static-paths-test.mjs
+      - name: Route client JS budgets (export const budget)
+        run: node scripts/route-budget-test.mjs
       - name: SSR React alias (react* in node_modules → preact/compat)
         run: node scripts/react-alias-test.mjs
       - name: CSP nonce injection (adapters)

@@ -18,7 +18,7 @@ fn server_only_asset_is_emitted_with_a_hashed_url() {
     .unwrap();
 
     NowakiCore::new(root.clone())
-        .build(&root.join("dist"))
+        .build(&root.join("dist"), Default::default())
         .expect("build ok");
     let server = fs::read_to_string(root.join("dist/server/lib/style.js")).unwrap();
     let emitted: Vec<String> = fs::read_dir(root.join("dist/client"))

@@ -91,9 +91,9 @@ Make "LiveView for the npm ecosystem, with 0KB of component JS" practical. Forms
 ### v0.16 "Chinook": Show it with numbers
 Prove the differentiation with numbers and tooling.
 
-**Exit criteria**: `nowaki build` reports first-load JS per route and fails when a budget is exceeded. TTFB and Jetstream benchmark results are in the docs. Claude Code can connect to the `nowaki dev` MCP.
+**Exit criteria**: `nowaki build` reports first-load JS per route; exceeding `export const budget` warns by default and fails with `--strict-budget` (or `NOWAKI_BUDGET_STRICT=1`). TTFB and Jetstream benchmark results are in the docs. Claude Code can connect to the `nowaki dev` MCP.
 
-- [ ] Per-route client JS budgets (`export const budget`)
+- [x] Per-route client JS budgets (`export const budget`; warns on exceed, `--strict-budget` fails; within-budget routes log only with `NOWAKI_BUDGET_VERBOSE=1`)
 - [ ] Build-time "this island could be live" suggestions (including moving live detection to the AST)
 - [ ] Serve ISR / static pages from Rust alone right after startup (prerender ingestion, ETag / 304, pre-gzip, TTFB measurement)
 - [ ] An MCP endpoint for `nowaki dev` (routes, module graph, recent errors)

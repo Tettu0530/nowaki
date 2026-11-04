@@ -5,6 +5,9 @@ import Cycle from "../islands/Cycle.tsx";
 
 export const title = "Nowaki demo";
 
+/** First-load JS for `/` (runtime + four islands); headroom for CI on slower machines. */
+export const budget = { gzipJs: 96_000 };
+
 export const loader = async () => {
   return { message: "Welcome to Nowaki 🍃", renderedAt: new Date().toISOString() };
 };

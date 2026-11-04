@@ -1,5 +1,8 @@
 export const title = "About — Nowaki";
 
+/** No client islands on this route — budget guards against accidental hydration JS. */
+export const budget = { gzipJs: 2048 };
+
 export default function About() {
   return (
     <main style="font-family:sans-serif;max-width:640px;margin:4rem auto">

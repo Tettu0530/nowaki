@@ -1,4 +1,5 @@
 pub mod asset;
+pub mod budget;
 pub mod build;
 pub mod cache;
 pub mod chunk;
@@ -18,6 +19,13 @@ use oxc_resolver::Resolver;
 use xxhash_rust::xxh3::xxh3_64;
 
 pub use cache::Mode;
+
+/// Options for [`NowakiCore::build`].
+#[derive(Debug, Clone, Default)]
+pub struct BuildOptions {
+    /// Fail the build when a route's estimated first-load JS gzip exceeds `export const budget`.
+    pub strict_budget: bool,
+}
 
 /// Synthetic directory name for plugin virtual modules (doesn't exist on disk).
 /// A virtual id returned by `resolveId` maps to `<root>/__nowaki_virtual__/<hash>.js`;
@@ -249,8 +257,15 @@ impl NowakiCore {
 
     /// Production build: writes the client graph to dist/client/ and server modules
     /// to dist/server/.
-    pub fn build(&self, dist: &Path) -> Result<build::BuildReport> {
+    pub fn build(&self, dist: &Path, opts: BuildOptions) -> Result<build::BuildReport> {
         let (mut report, assets) = build::build_client(self, dist)?;
+        budget::check_route_budgets(
+            self,
+            dist,
+            &budget::BudgetOptions {
+                strict: opts.strict_budget,
+            },
+        )?;
         report.server_modules = build::build_server(self, dist, &assets)?;
         Ok(report)
     }

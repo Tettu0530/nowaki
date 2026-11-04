@@ -53,6 +53,9 @@ enum Command {
         /// Deploy target adapter (node|static|bun|deno|cloudflare|vercel)
         #[arg(long, value_enum, default_value_t = Adapter::Node)]
         adapter: Adapter,
+        /// Fail the build when a route exceeds `export const budget` (gzip first-load JS).
+        #[arg(long)]
+        strict_budget: bool,
     },
     /// Serve a built app in production mode
     Start {
@@ -73,6 +76,9 @@ enum Command {
         /// Output directory (relative to dir, or absolute)
         #[arg(short, long, default_value = "dist/static")]
         out: PathBuf,
+        /// Fail the build when a route exceeds `export const budget` (gzip first-load JS).
+        #[arg(long)]
+        strict_budget: bool,
     },
     /// Update nowaki (CLI) and @nowaki-dev/runtime to the latest version
     Upgrade {
@@ -91,6 +97,12 @@ enum Command {
     },
 }
 
+fn strict_route_budget(cli: bool) -> bool {
+    cli || std::env::var("NOWAKI_BUDGET_STRICT")
+        .ok()
+        .is_some_and(|v| matches!(v.trim(), "1" | "true" | "yes"))
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -106,16 +118,21 @@ fn main() -> anyhow::Result<()> {
                 .build()?
                 .block_on(dev::run(root, port, host, open))
         }
-        Command::Build { dir, adapter } => {
+        Command::Build {
+            dir,
+            adapter,
+            strict_budget,
+        } => {
             let root = dunce::canonicalize(&dir)?;
             typegen::write(&root)?;
             // The static adapter delegates to prerender (build → temporary server → render each route).
             if adapter == Adapter::Static {
                 let out = root.join("dist/static");
+                let strict_budget = strict_route_budget(strict_budget);
                 return tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()?
-                    .block_on(prerender::run(root.clone(), out));
+                    .block_on(prerender::run(root.clone(), out, strict_budget));
             }
             let dist = root.join("dist");
             // Keep alive until the build finishes (drop kills the host).
@@ -125,7 +142,8 @@ fn main() -> anyhow::Result<()> {
                 core.set_plugins(host.bridge.clone());
             }
             let started = std::time::Instant::now();
-            let report = core.build(&dist)?;
+            let strict_budget = strict_route_budget(strict_budget);
+            let report = core.build(&dist, nowaki_core::BuildOptions { strict_budget })?;
             let client_js_kb = ui::dir_js_kb(&report.out_dir);
             ui::build_summary(
                 report.modules,
@@ -163,17 +181,22 @@ fn main() -> anyhow::Result<()> {
                 .build()?
                 .block_on(start::run(root, port, host))
         }
-        Command::Prerender { dir, out } => {
+        Command::Prerender {
+            dir,
+            out,
+            strict_budget,
+        } => {
             let root = dunce::canonicalize(&dir)?;
             let out = if out.is_absolute() {
                 out
             } else {
                 root.join(out)
             };
+            let strict_budget = strict_route_budget(strict_budget);
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
-                .block_on(prerender::run(root, out))
+                .block_on(prerender::run(root, out, strict_budget))
         }
         Command::Upgrade { dir, to } => {
             let root = dunce::canonicalize(&dir)?;

@@ -89,6 +89,15 @@ export type Action = (ctx: LoaderContext) => unknown | Promise<unknown>;
  */
 export type StaticPaths<P extends RouteParams = RouteParams> = P[] | (() => P[] | Promise<P[]>);
 
+/**
+ * `export const budget` on a page route: max first-load client JS for that route (gzip bytes).
+ * Exceeding the limit logs a warning; `nowaki build --strict-budget` or
+ * `nowaki prerender --strict-budget` fails the build (`NOWAKI_BUDGET_STRICT=1` also applies).
+ * Set `NOWAKI_BUDGET_VERBOSE=1` to log within-budget routes on each build.
+ * @example export const budget = { gzipJs: 48_000 };
+ */
+export type RouteBudget = { gzipJs?: number };
+
 /** API route handler (per-method export or default). */
 export type ApiHandler = (
   ctx: LoaderContext,

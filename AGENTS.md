@@ -40,6 +40,7 @@ cargo test --workspace                               # unit + integration + CLI
 # JS / app-level
 pnpm install                                         # workspace deps (frozen in CI)
 node scripts/router-test.mjs                         # router snapshot/unit test
+node scripts/route-budget-test.mjs                   # per-route `export const budget` (nowaki-core)
 node benchmarks/check-regression.mjs                 # client-JS size gate
 
 # Run the example app end to end
@@ -167,6 +168,9 @@ code locations and CI coverage.
 - **Plugins / virtual modules** — `PluginBridge` (`transform`, `compile_tsrx`,
   `resolve_id`, `load`); `NowakiCore::resolve_spec` + the `VirtualResolve` trait.
 - **Scope hoisting / chunking** — `crates/nowaki-core/src/chunk.rs`.
+- **Per-route client JS budgets** — `crates/nowaki-core/src/budget.rs` (`export const budget`
+  on page routes; build-time gzip first-load estimate). CLI: `--strict-budget`,
+  `NOWAKI_BUDGET_STRICT`, `NOWAKI_BUDGET_VERBOSE`.
 - **Deploy adapters** — `crates/nowaki/src/adapter.rs` (+ `server/edge-build.mjs`).
 
 ## Conventions

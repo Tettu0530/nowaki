@@ -11,13 +11,16 @@ use tokio::process::Command;
 const PRERENDER_JOBS: usize = 8;
 
 /// Static site generation: build → start a temporary prod server → render each static route to HTML → write out.
-pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
+pub async fn run(root: PathBuf, out: PathBuf, strict_budget: bool) -> Result<()> {
     let _plugin_host = crate::plugins::start(&root)?;
     let mut core = NowakiCore::new(root.clone());
     if let Some(host) = &_plugin_host {
         core.set_plugins(host.bridge.clone());
     }
-    let report = core.build(&root.join("dist"))?;
+    let report = core.build(
+        &root.join("dist"),
+        nowaki_core::BuildOptions { strict_budget },
+    )?;
     println!(
         "[nowaki] build: client {} / server {} modules",
         report.modules, report.server_modules

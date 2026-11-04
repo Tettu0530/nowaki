@@ -1390,6 +1390,7 @@ dependencies = [
  "anyhow",
  "dashmap",
  "dunce",
+ "flate2",
  "image",
  "oxc",
  "oxc_resolver",
