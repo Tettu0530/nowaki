@@ -4,7 +4,7 @@
 //! chunks (and `liveRuntime` when the route imports a live island). Lazy `routerRuntime`
 //! is excluded (see `document.mjs` / `benchmarks/check-regression.mjs`).
 //! Within-budget routes are silent unless `NOWAKI_BUDGET_VERBOSE=1`.
-//! Only top-level static `import … from "../islands/…"` lines are included.
+//! Only top-level static `import ... from "../islands/..."` lines are included.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -36,7 +36,11 @@ pub(crate) struct BudgetOptions {
 }
 
 /// After `dist/client/` exists, check every route that declares `export const budget`.
-pub(crate) fn check_route_budgets(core: &NowakiCore, dist: &Path, opts: &BudgetOptions) -> Result<()> {
+pub(crate) fn check_route_budgets(
+    core: &NowakiCore,
+    dist: &Path,
+    opts: &BudgetOptions,
+) -> Result<()> {
     let client_dir = dist.join("client");
     let manifest_path = client_dir.join("manifest.json");
     if !manifest_path.is_file() {
@@ -137,7 +141,7 @@ pub(crate) fn check_route_budgets(core: &NowakiCore, dist: &Path, opts: &BudgetO
     Ok(())
 }
 
-pub fn parse_gzip_budget(source: &str) -> Option<u64> {
+pub(crate) fn parse_gzip_budget(source: &str) -> Option<u64> {
     let tail = source.find("export const budget")?;
     let slice = &source[tail..];
     if let Some(n) = slice
@@ -292,10 +296,7 @@ fn gzip_client_chunks(client_dir: &Path) -> Result<HashMap<String, u64>> {
 }
 
 fn is_safe_chunk_name(name: &str) -> bool {
-    !name.is_empty()
-        && !name.contains('/')
-        && !name.contains('\\')
-        && !name.contains("..")
+    !name.is_empty() && !name.contains('/') && !name.contains('\\') && !name.contains("..")
 }
 
 fn add_preloaded(out: &mut HashSet<String>, entry: &str, manifest: &ClientManifest) {

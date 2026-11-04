@@ -1,5 +1,5 @@
 pub mod asset;
-pub mod budget;
+mod budget;
 pub mod build;
 pub mod cache;
 pub mod chunk;
@@ -257,7 +257,12 @@ impl NowakiCore {
 
     /// Production build: writes the client graph to dist/client/ and server modules
     /// to dist/server/.
-    pub fn build(&self, dist: &Path, opts: BuildOptions) -> Result<build::BuildReport> {
+    pub fn build(&self, dist: &Path) -> Result<build::BuildReport> {
+        self.build_opts(dist, BuildOptions::default())
+    }
+
+    /// Like [`build`](Self::build) with route JS budget options (`strict_budget`).
+    pub fn build_opts(&self, dist: &Path, opts: BuildOptions) -> Result<build::BuildReport> {
         let (mut report, assets) = build::build_client(self, dist)?;
         budget::check_route_budgets(
             self,

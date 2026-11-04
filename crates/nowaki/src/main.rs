@@ -143,7 +143,7 @@ fn main() -> anyhow::Result<()> {
             }
             let started = std::time::Instant::now();
             let strict_budget = strict_route_budget(strict_budget);
-            let report = core.build(&dist, nowaki_core::BuildOptions { strict_budget })?;
+            let report = core.build_opts(&dist, nowaki_core::BuildOptions { strict_budget })?;
             let client_js_kb = ui::dir_js_kb(&report.out_dir);
             ui::build_summary(
                 report.modules,

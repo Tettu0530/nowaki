@@ -17,7 +17,7 @@ pub async fn run(root: PathBuf, out: PathBuf, strict_budget: bool) -> Result<()>
     if let Some(host) = &_plugin_host {
         core.set_plugins(host.bridge.clone());
     }
-    let report = core.build(
+    let report = core.build_opts(
         &root.join("dist"),
         nowaki_core::BuildOptions { strict_budget },
     )?;
