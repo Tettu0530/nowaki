@@ -104,11 +104,10 @@ const HOISTED_APP: &[(&str, &str)] = &[
 
 #[test]
 fn build_output_is_the_same_every_time() {
-    // Canonical root: on macOS the temp dir is a symlink, and modules resolved outside the
-    // literal root are not hoisted.
-    let root = temp_app("deterministic", HOISTED_APP)
-        .canonicalize()
-        .unwrap();
+    // Canonical root, as the CLI resolves it: on macOS the temp dir is a symlink, and modules
+    // resolved outside the literal root are not hoisted. dunce, because std's canonicalize
+    // gives a verbatim `\\?\C:\…` path on Windows that resolved modules never match.
+    let root = dunce::canonicalize(temp_app("deterministic", HOISTED_APP)).unwrap();
     let core = NowakiCore::new(root.clone());
     let mut builds = Vec::new();
     for i in 0..8 {
@@ -133,7 +132,7 @@ fn build_output_is_the_same_every_time() {
 
 #[test]
 fn island_chunk_imports_each_shared_file_once_with_mangled_names() {
-    let root = temp_app("one-import", HOISTED_APP).canonicalize().unwrap();
+    let root = dunce::canonicalize(temp_app("one-import", HOISTED_APP)).unwrap();
     let core = NowakiCore::new(root.clone());
     build_client(&core, &root.join("dist")).expect("build ok");
     let code = island_chunk(&root, "Many");
