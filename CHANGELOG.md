@@ -11,6 +11,25 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **First-load JS per route, and budgets that fail the build.** Every
+  `nowaki build` and `nowaki prerender` now prints the gzip size of the JS
+  each page route loads first, and writes the same data to
+  `dist/route-js.json`.
+  - Counted: the islands runtime and its preloads, every client island the
+    page can render (found through the import graph from the route and each
+    `_layout` above it, components included), and the live runtime for live
+    islands. The lazy SPA router chunk is not counted.
+  - A route sets `export const budget = { js: <KB> }`, and the build fails
+    when the route goes over it. `{ js: 0 }` means the page ships no client
+    JS.
+  - The value is read from the AST. It must be a number literal, and an
+    unreadable `budget` fails the build instead of being ignored.
+  - `examples/hello` sets `{ js: 12 }` on `/` (9.76 KB today) and
+    `{ js: 0 }` on `/about`.
+  - `scripts/route-js-e2e.mjs` checks the report against the pages
+    `nowaki start` serves. Each served chunk must be one the report counted;
+    18 of 19 static routes match exactly. The other one is `/stream`, whose
+    islands load later.
 - **`nowaki dev` MCP endpoint:** while `nowaki dev` runs, a coding agent can
   inspect the app over MCP (Streamable HTTP) at
   `http://127.0.0.1:<port>/__nowaki/mcp`. The startup banner prints the URL and

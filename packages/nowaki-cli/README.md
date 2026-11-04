@@ -31,6 +31,23 @@ nowaki prerender [dir]    # Static site generation (SSG)
 
 Scaffold a new app with `npm create nowaki@latest my-app`.
 
+### First-load JS per route
+
+`nowaki build` (and `nowaki prerender`) prints the gzip size of the JS each page route loads
+first: the islands runtime and the islands the page can render, through its layouts and
+components, plus the live runtime for live islands. The lazy SPA router chunk is not counted.
+The same data goes to `dist/route-js.json`.
+
+A route can set a budget in KB. The build **fails** when the route goes over it:
+
+```tsx
+export const budget = { js: 12 };   // at most 12 KB of gzip JS on first load
+export const budget = { js: 0 };    // a content page: no client JS at all
+```
+
+The value must be a number literal. An unreadable `budget` fails the build instead of being
+ignored.
+
 ### MCP for coding agents
 
 While `nowaki dev` runs, it serves a read-only [MCP](https://modelcontextprotocol.io)

@@ -161,3 +161,92 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
 
     let _ = std::fs::remove_dir_all(root.join("dist"));
 }
+
+/// A small app next to examples/hello (sharing its node_modules) with one island page.
+fn budget_app(budget: &str) -> tempfile::TempDir {
+    let root = example_root();
+    let dir = tempfile::Builder::new()
+        .prefix("budget-app-")
+        .tempdir_in(root.parent().unwrap())
+        .expect("tempdir");
+    let app = dir.path();
+    std::fs::create_dir_all(app.join("routes")).unwrap();
+    std::fs::create_dir_all(app.join("islands")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(root.join("node_modules"), app.join("node_modules")).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(root.join("node_modules"), app.join("node_modules")).unwrap();
+    std::fs::write(app.join("package.json"), r#"{"type":"module"}"#).unwrap();
+    std::fs::write(
+        app.join("islands/Clock.tsx"),
+        "import { useState } from \"preact/hooks\";\nexport default function Clock() { const [n, set] = useState(0); return <button onClick={() => set(n + 1)}>{n}</button>; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("routes/index.tsx"),
+        format!("import Clock from \"../islands/Clock.tsx\";\nexport const budget = {budget};\nexport default function Home() {{ return <Clock />; }}\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("routes/about.tsx"),
+        "export const budget = { js: 0.1 };\nexport default function About() { return <p>about</p>; }\n",
+    )
+    .unwrap();
+    dir
+}
+
+#[test]
+fn build_reports_route_js_and_fails_over_budget() {
+    let root = example_root();
+    if !deps_installed(&root) {
+        eprintln!("skip: examples/hello deps not installed");
+        return;
+    }
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+
+    let ok = budget_app("{ js: 100 }");
+    let out = Command::new(bin)
+        .arg("build")
+        .arg(ok.path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "within budget must build: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("first-load JS per route"),
+        "the report is always printed:\n{stdout}"
+    );
+    let report = std::fs::read_to_string(ok.path().join("dist/route-js.json")).unwrap();
+    assert!(
+        report.contains("\"url\": \"/\"") && report.contains("\"Clock\""),
+        "{report}"
+    );
+    // A page with no islands ships no JS, so even a tiny budget passes.
+    assert!(report.contains("\"url\": \"/about\""), "{report}");
+
+    let over = budget_app("{ js: 0.5 }");
+    let out = Command::new(bin)
+        .arg("build")
+        .arg(over.path())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "over budget must fail the build");
+    assert!(stderr.contains("over their JS budget"), "{stderr}");
+
+    let typo = budget_app("{ js: \"8\" }");
+    let out = Command::new(bin)
+        .arg("build")
+        .arg(typo.path())
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "an unreadable budget must fail, not be ignored"
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("budget.js"));
+}
