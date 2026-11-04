@@ -21,15 +21,40 @@ function firstCommaSeparated(value) {
   return first || undefined;
 }
 
-/// Host the browser used for same-origin checks (matches `forward.rs` `public_host`).
-/// On `nowaki start`, the Rust front sets `x-forwarded-host` on the sidecar hop; adapter-only
-/// deploys must not trust a client-supplied `x-forwarded-host` unless `NOWAKI_TRUST_PROXY` is set.
+function isLoopbackHost(host) {
+  if (!host) return false;
+  const name = host.split(":")[0].replace(/^\[|\]$/g, "").toLowerCase();
+  return name === "localhost" || name === "127.0.0.1" || name === "::1";
+}
+
+/// Host the browser used for same-origin checks (aligned with `forward.rs` on the Rust hop).
+/// When `Host` and `x-forwarded-host` disagree, the Rust sidecar sets canonical
+/// `x-forwarded-host` from the browser while the HTTP client keeps the loopback connection
+/// `Host`; adapters set `Host` from the request URL. Origin is used to pick the right one,
+/// and a cross-site Origin never wins via a forged `x-forwarded-host` alone.
 export function browserHost(get) {
   if (trustProxy()) {
     const forwarded = firstCommaSeparated(get("x-forwarded-host"));
     if (forwarded) return forwarded;
   }
-  return get("host") ?? undefined;
+  const host = get("host");
+  const forwarded = firstCommaSeparated(get("x-forwarded-host"));
+  if (host && forwarded && host !== forwarded) {
+    const origin = get("origin");
+    if (origin && origin !== "null") {
+      if (sameOrigin(origin, host)) return host;
+      if (
+        sameOrigin(origin, forwarded) &&
+        !sameOrigin(origin, host) &&
+        isLoopbackHost(host)
+      ) {
+        return forwarded;
+      }
+      return host;
+    }
+    return host;
+  }
+  return host ?? forwarded;
 }
 
 /// Whether a non-GET request came from another site. Browsers send Origin on POST; without it,

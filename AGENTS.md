@@ -123,7 +123,8 @@ code locations and CI coverage.
   sidecar hop unless `NOWAKI_TRUST_PROXY` is set; new client-facing `x-nowaki-*`
   request headers must be added to its allowlist. Adapter runtimes (Node/Edge)
   apply the same host trust in `server/origin.mjs` (`browserHost`) for CSRF
-  checks — do not use client `x-forwarded-host` when trust is off.
+  checks — when `Host` and `x-forwarded-host` disagree, pick using `Origin` so
+  sidecar hops stay correct and forged forwarded headers cannot bypass adapters.
 - **Client-supplied Jetstream state is used only after its signature verifies**
   (`live.mjs` checks before every render and handler run); do not skip or bypass
   that path.

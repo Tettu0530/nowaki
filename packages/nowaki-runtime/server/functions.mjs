@@ -50,9 +50,9 @@ export async function dispatchServerFn(ctx, info, sf, { dev = false } = {}) {
   if (ctx.get("x-nowaki-rpc") !== "1") {
     return errBody(403, "Forbidden");
   }
-  // Same host resolution as page actions (`origin.mjs` / Rust `forward.rs`). The Rust front sets
-  // canonical `x-forwarded-host` on the sidecar hop; adapter-only deploys ignore client
-  // `x-forwarded-host` unless `NOWAKI_TRUST_PROXY` is set.
+  // Same host resolution as page actions (`origin.mjs` / Rust `forward.rs`). Prefer `Host` when
+  // present so adapter clients cannot spoof `x-forwarded-host`; fall back to `x-forwarded-host`
+  // on the sidecar hop where the Rust front strips `Host`.
   const origin = ctx.get("origin");
   const host = browserHost((name) => ctx.get(name));
   if (origin && !sameOrigin(origin, host)) {
