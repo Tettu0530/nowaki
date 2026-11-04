@@ -81,6 +81,14 @@ milestone's worth of work; the codename is noted per entry.
   `nowaki start` went from 6,056 to 28,752 req/s, and `/api/hello` from
   8,895 to 32,101 req/s. Dev mode is unchanged: it re-imports on every edit.
 
+### Fixed
+- **Static output no longer ships a live.js that can't work** (#93). Pages
+  from `nowaki prerender` and the static adapter used to include live.js in
+  POST mode. A static host has no server for its events, so every click
+  logged "not applied". Live islands now keep their first HTML and ship no
+  script. The build also lists the pages they are on, as a note. The node,
+  bun, deno, vercel, and cloudflare adapters still ship live.js.
+
 ## [0.15.0] — 2026-11-04 · "Cyclone" (part 1)
 
 Packages: `nowaki` / `nowaki-core` 0.15.0 (crates.io, npm), `@nowaki-dev/runtime`
