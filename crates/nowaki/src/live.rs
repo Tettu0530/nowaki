@@ -230,6 +230,19 @@ impl LiveHub {
     fn room_count(&self, room: &str) -> usize {
         self.rooms.lock().unwrap().get(room).copied().unwrap_or(0)
     }
+
+    /// Open connections and (room, connections), sorted by room. For the dev MCP.
+    pub fn snapshot(&self) -> (usize, Vec<(String, usize)>) {
+        let mut rooms: Vec<_> = self
+            .rooms
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(r, n)| (r.clone(), *n))
+            .collect();
+        rooms.sort();
+        (self.count(), rooms)
+    }
 }
 
 /// Rooms this session is in: its islands' `room:<id>` topics.

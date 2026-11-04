@@ -3,6 +3,7 @@ mod csp;
 mod dev;
 mod forward;
 mod live;
+mod mcp;
 mod plugins;
 mod prerender;
 mod security_headers;

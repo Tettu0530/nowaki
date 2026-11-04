@@ -4,6 +4,7 @@ pub mod cache;
 pub mod chunk;
 pub mod css;
 pub mod env;
+pub mod graph;
 pub mod resolve;
 pub mod routes;
 pub mod server_fn;

@@ -11,6 +11,20 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **`nowaki dev` MCP endpoint:** while `nowaki dev` runs, a coding agent can
+  inspect the app over MCP (Streamable HTTP) at
+  `http://127.0.0.1:<port>/__nowaki/mcp`. The startup banner prints the URL and
+  the command that adds it to Claude Code:
+  `claude mcp add --transport http nowaki http://127.0.0.1:<port>/__nowaki/mcp`.
+  The tools are read-only. `routes` lists the route table in match order, with
+  kind, file, exports, ISR `revalidate`, and `csrf`. It also lists layouts,
+  middleware, and boundaries. `module_graph` shows a file's imports and
+  importers, and the islands with their `live` flag. `recent_errors` returns
+  the last 50 build (transform), SSR, live, and HMR errors with timestamps,
+  file, and stack. `dev_config` shows the port, the `NOWAKI_*` flags, and the
+  Jetstream connections and rooms. The endpoint answers only loopback clients
+  with a loopback `Host` / `Origin`, also under `--host`. `nowaki start` and
+  the adapters don't serve it.
 - **Jetstream stale notifications:** an event on a page older than
   `NOWAKI_LIVE_MAX_AGE` (24 h by default) used to fail like a forged one.
   The server now tells the two apart. A genuine, expired signature comes back

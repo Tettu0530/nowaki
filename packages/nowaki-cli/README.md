@@ -31,6 +31,26 @@ nowaki prerender [dir]    # Static site generation (SSG)
 
 Scaffold a new app with `npm create nowaki@latest my-app`.
 
+### MCP for coding agents
+
+While `nowaki dev` runs, it serves a read-only [MCP](https://modelcontextprotocol.io)
+endpoint at `http://127.0.0.1:<port>/__nowaki/mcp`; the startup banner prints it.
+Add it to Claude Code with:
+
+```bash
+claude mcp add --transport http nowaki http://127.0.0.1:3000/__nowaki/mcp
+```
+
+Tools:
+
+- `routes`: the route table in match order (pattern, file, page/API, exports such as `revalidate` and `csrf`), plus layouts, middleware, and boundaries
+- `module_graph`: what a file imports and which files import it, and the islands with their `live` flag
+- `recent_errors`: the last 50 build, SSR, live, and HMR errors, with time, file, and stack
+- `dev_config`: port, `--host`, plugins, `NOWAKI_*` flags, and Jetstream connections and rooms
+
+The endpoint answers only requests from this machine (loopback peer, `Host`, and
+`Origin`), even with `--host`. `nowaki start` and the deploy adapters don't serve it.
+
 ## How it works
 
 The native binary is distributed as platform-specific optional dependencies

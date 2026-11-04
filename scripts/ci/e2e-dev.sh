@@ -5,13 +5,15 @@ set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 cd "$(dirname "$0")/../.."
 
-./target/debug/nowaki dev examples/hello &
+# PORT overrides 3000 for local runs where that port is taken.
+PORT=${PORT:-3000}
+./target/debug/nowaki dev examples/hello --port "$PORT" &
 SERVER_PID=$!
 for i in $(seq 1 30); do
-  curl -sf http://127.0.0.1:3000/ >/dev/null && break
+  curl -sf "http://127.0.0.1:$PORT/" >/dev/null && break
   sleep 1
 done
-B=http://127.0.0.1:3000
+B=http://127.0.0.1:$PORT
 status() { echo "$(curl -s -o /dev/null -w '%{http_code}' "$@")"; }
 
 # SSR + islands + transform. The eager runtime is islands.js; the SPA router
@@ -140,6 +142,9 @@ curl -sf "$B/slow?ms=0" | grep -q 'data-testid="slow"'
 printf 'DATABASE_URL=postgres://u:supersecretpw@db/prod\nSESSION_SECRET=ci-do-not-leak\n' > examples/hello/.env
 node scripts/security-e2e.mjs dev "$B" "$(pwd)/examples/hello"
 rm -f examples/hello/.env
+
+# dev MCP endpoint (/__nowaki/mcp): tools + loopback/Host/Origin gate
+node scripts/mcp-e2e.mjs "$B"
 
 kill $SERVER_PID
 bash scripts/ci/assert-no-orphans.sh $SERVER_PID
