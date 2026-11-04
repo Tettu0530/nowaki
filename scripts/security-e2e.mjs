@@ -86,6 +86,19 @@ async function crossSiteWritesRejected(b) {
     (await send("/api/hello", { origin: "http://evil.test" })) === 200);
 }
 
+// Default security headers on pages, 404s, and static assets (both modes) and on ISR hits (prod).
+async function securityHeadersPresent(b, paths) {
+  for (const p of paths) {
+    const h = (await fetch(`${b}${p}`)).headers;
+    check(`security headers on ${p}`,
+      h.get("x-content-type-options") === "nosniff" &&
+        h.get("x-frame-options") === "SAMEORIGIN" &&
+        h.get("referrer-policy") === "strict-origin-when-cross-origin" &&
+        h.get("cross-origin-opener-policy") === "same-origin" &&
+        /frame-ancestors 'self'/.test(h.get("content-security-policy") || ""));
+  }
+}
+
 async function liveForgeryRejected(b) {
   const html = await (await fetch(`${b}/live`)).text();
   const tag = html.match(/<nowaki-live\b[^>]*>/)?.[0];
@@ -146,6 +159,7 @@ if (mode === "dev") {
     (await post({ "content-type": "application/json", "x-nowaki-rpc": "1", origin: "http://evil.test" })) === 403);
   await forwardedHostIgnored(base);
   await crossSiteWritesRejected(base);
+  await securityHeadersPresent(base, ["/", "/nope"]);
 
   // CSWSH (Origin check on WS upgrade)
   check("CSWSH /__nowaki/live cross-origin upgrade rejected (403)",
@@ -197,6 +211,8 @@ if (mode === "prod") {
   if (hashed) {
     check("legit /_nowaki client asset (200)", (await statusOf(`${base}/_nowaki/${hashed}`)) === 200);
   }
+  // /isr twice: the second response is an ISR HIT/STALE served from the Rust cache.
+  await securityHeadersPresent(base, ["/", "/nope", "/isr", "/isr", ...(hashed ? [`/_nowaki/${hashed}`] : [])]);
   for (const p of [
     "/_nowaki/../../../etc/passwd",
     "/_nowaki/foo/../../../../etc/passwd",

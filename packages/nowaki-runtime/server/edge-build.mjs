@@ -59,6 +59,13 @@ for (const name of Object.keys(manifest.islands ?? {})) {
   islandEntries.push(`  ${JSON.stringify(name)}: ${v}.default,`);
 }
 
+const liveImports = [];
+const liveEntries = [];
+for (const [i, name] of (manifest.liveIslands ?? []).entries()) {
+  liveImports.push(`import * as live${i} from ${JSON.stringify(specOf(`islands/${name}.js`))};`);
+  liveEntries.push(`  ${JSON.stringify(name)}: live${i},`);
+}
+
 let serverFnTable = {};
 try {
   serverFnTable = JSON.parse(await readFile(path.join(serverDir, "functions.json"), "utf8"));
@@ -73,8 +80,10 @@ const moduleEntries = order.map((key) => `  ${JSON.stringify(key)}: ${seen.get(k
 const worker = `// Generated: worker entry for the Cloudflare Workers (Edge) adapter.
 // Statically imports every server module and passes them to the @nowaki-dev/runtime web handler.
 import { createFetchHandler } from "@nowaki-dev/runtime/server/web.mjs";
+import { withSecurityHeaders } from "@nowaki-dev/runtime/server/security-headers.mjs";
 ${moduleImports.join("\n")}
 ${islandImports.join("\n")}
+${liveImports.join("\n")}
 
 const manifest = ${JSON.stringify(manifest)};
 const modules = {
@@ -83,10 +92,20 @@ ${moduleEntries.join("\n")}
 const islandComponents = {
 ${islandEntries.join("\n")}
 };
+const liveIslands = {
+${liveEntries.join("\n")}
+};
 const routeTable = ${JSON.stringify(routeTable)};
 const serverFunctions = ${JSON.stringify(serverFnTable)};
 
-const handler = createFetchHandler({ manifest, modules, islandComponents, routeTable, serverFunctions });
+const handler = createFetchHandler({
+  manifest,
+  modules,
+  islandComponents,
+  liveIslands,
+  routeTable,
+  serverFunctions,
+});
 
 export default {
   async fetch(request, env) {
@@ -95,7 +114,7 @@ export default {
     if (url.pathname.startsWith("/_nowaki/") && env.ASSETS) {
       const assetUrl = new URL(url);
       assetUrl.pathname = url.pathname.slice("/_nowaki".length);
-      return env.ASSETS.fetch(new Request(assetUrl, request));
+      return withSecurityHeaders(await env.ASSETS.fetch(new Request(assetUrl, request)));
     }
     return handler(request);
   },

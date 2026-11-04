@@ -49,6 +49,23 @@ const check = (cond, label) => {
   if (!cond) failed = true;
 };
 
+// Against a server started with a short NOWAKI_LIVE_RENDER_TIMEOUT_MS: a render past it is
+// reported as an error, the state is unchanged, and the connection keeps working.
+if (process.argv[3] === "--expect-timeout") {
+  const t = await open(wsUrl);
+  await recvUntil(t, (m) => m.type === "presence");
+  t.send(JSON.stringify({ type: "join", islands: [{ nid, name: "LiveCounter", state, sig }] }));
+  t.send(JSON.stringify({ type: "event", nid, handler: "slow" }));
+  const err = await recvUntil(t, (m) => m.type === "error" && m.nid === nid);
+  check(err.reason === "timeout", `slow render reported as a timeout (reason=${err.reason})`);
+  t.send(JSON.stringify({ type: "event", nid, handler: "inc" }));
+  const after = await recvUntil(t, (m) => m.type === "patch" && m.nid === nid);
+  check(/live:\s*1/.test(after.html), `next event still applies after a timeout (html has "live: 1")`);
+  t.close();
+  console.log(failed ? "\nLIVETEST (timeout) FAILED" : "\nLIVETEST (timeout) PASSED");
+  process.exit(failed ? 1 : 0);
+}
+
 const a = await open(wsUrl);
 const p1 = await recvUntil(a, (m) => m.type === "presence");
 check(p1.count >= 1, `presence after first connect (count=${p1.count})`);
@@ -79,6 +96,29 @@ c.send(JSON.stringify({ type: "event", nid, handler: "inc" }));
 const resumed = await recvUntil(c, (m) => m.type === "patch" && m.nid === nid);
 check(/live:\s*2/.test(resumed.html), `state survives a reconnect (html has "live: 2")`);
 c.close();
+
+// A slow render runs off the session loop: presence from a new connection is delivered before the
+// slow event's patch, and an event sent after it is still applied after it (live: 3).
+const d = await open(wsUrl);
+await recvUntil(d, (m) => m.type === "presence");
+d.send(JSON.stringify({ type: "join", islands: [{ nid, name: "LiveCounter", state: resumed.state, sig: resumed.sig }] }));
+const seen = [];
+d.addEventListener("message", (e) => {
+  try {
+    const m = JSON.parse(e.data);
+    if (m.type === "presence" || m.type === "patch") seen.push(m);
+  } catch {}
+});
+d.send(JSON.stringify({ type: "event", nid, handler: "slow" }));
+d.send(JSON.stringify({ type: "event", nid, handler: "inc" }));
+const e = await open(wsUrl);
+const last = await recvUntil(d, (m) => m.type === "patch" && /live:\s*3/.test(m.html));
+const firstPresence = seen.findIndex((m) => m.type === "presence");
+const firstPatch = seen.findIndex((m) => m.type === "patch");
+check(firstPresence !== -1 && firstPresence < firstPatch, "presence arrives while a slow render is in flight");
+check(seen.filter((m) => m.type === "patch").length === 2 && Boolean(last), "events after a slow one apply in order (live: 3)");
+d.close();
+e.close();
 
 console.log(failed ? "\nLIVETEST FAILED" : "\nLIVETEST PASSED");
 process.exit(failed ? 1 : 0);

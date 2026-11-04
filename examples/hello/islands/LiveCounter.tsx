@@ -8,6 +8,11 @@ export const live = {
     inc: (s) => ({ ...s, count: s.count + 1 }),
     dec: (s) => ({ ...s, count: s.count - 1 }),
     reset: () => ({ count: 0 }),
+    // Test fixture (scripts/livetest.mjs): a render that takes a while, for ordering and timeouts.
+    slow: async (s) => {
+      await new Promise((r) => setTimeout(r, 400));
+      return s;
+    },
   },
 };
 

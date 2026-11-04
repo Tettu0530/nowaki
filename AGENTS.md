@@ -105,6 +105,10 @@ code locations and CI coverage.
   non-GET requests to page actions (and to API routes with `csrf = true`) via
   `server/origin.mjs`, before the action runs. Don't move the check after the
   action, and keep `csrf = false` as the only opt-out.
+- **Every server sets the default security headers** (`security_headers.rs` for
+  dev/start, `server/security-headers.mjs` for the adapters, `_headers` for
+  static output). Add new defaults to both lists, and never overwrite a header
+  the response already set.
 - **Sidecar requests go through `forward::apply`** (`crates/nowaki/src/forward.rs`).
   Clients never set `x-forwarded-*` or internal `x-nowaki-*` headers on the
   sidecar hop unless `NOWAKI_TRUST_PROXY` is set; new client-facing `x-nowaki-*`
