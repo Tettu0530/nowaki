@@ -79,7 +79,7 @@ Make "LiveView for the npm ecosystem, with 0KB of component JS" practical. Forms
 
 **Exit criteria**: State survives reconnects and server restarts. `publish()` delivers patches to islands on other connections. A two-tab voting demo works with per-room presence. Fan-out p95 at 1000 connections is recorded in BENCHMARKS.md.
 
-- [ ] More events (submit / input / change, debounce, keyed morph)
+- [x] More events (submit / input / change, debounce, keyed morph)
 - [ ] Stable signing key, stale notifications, resume token (optional)
 - [x] Read request context from handlers (`getContext()`, `live.authorize`)
 - [x] Live queries (`subscribe` / `load` / `publish`, a Node→Rust event path)

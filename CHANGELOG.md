@@ -17,6 +17,13 @@ milestone's worth of work; the codename is noted per entry.
   so Worker vars and secrets reach `process.env`.
 
 ### Added
+- **Jetstream form events:** `data-live-submit="handler"` on a `<form>` sends
+  its fields as an object (no navigation); `data-live-input="handler"` sends a
+  field's value while typing, debounced by `data-live-debounce` (ms, default
+  150); `data-live-change="handler"` fires on commit. Checkboxes and radios
+  send `{ value, checked }`. Children with `data-key` are matched by key when
+  a patch is applied, so reordered or filtered rows keep their elements, and a
+  focused field's value is never overwritten by a patch.
 - **Jetstream live queries:** `live.subscribe` (topics, or a function of the
   state) and `live.load(state, { topic })` on an island, plus `publish(topic)`
   from `@nowaki-dev/runtime`: after server code changes data (an action, a

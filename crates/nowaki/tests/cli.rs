@@ -39,8 +39,8 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
 
     // Jetstream island: registered, but no client chunk is emitted (zero added JS).
     assert!(
-        manifest.contains("\"liveIslands\": [\"LiveCounter\", \"LiveTicks\"]"),
-        "LiveCounter and LiveTicks should be live islands"
+        manifest.contains("\"liveIslands\": [\"LiveCounter\", \"LiveTicks\", \"LiveTodos\"]"),
+        "LiveCounter, LiveTicks, and LiveTodos should be live islands"
     );
     assert!(
         manifest.contains("\"liveRuntime\""),

@@ -105,6 +105,11 @@ nowaki.config.mjs   plugins (optional)
 8. **Jetstream islands** (server-reactive, zero client JS) — give an island
    `export const live = { state, on }`; buttons use `data-live="handler"` instead
    of `onClick`. State lives on the server; the server pushes HTML patches.
+   Forms use `data-live-submit="handler"` (gets the fields as an object), inputs
+   `data-live-input` (debounced; `data-live-debounce="ms"`) or `data-live-change`;
+   give list rows `data-key`. Read the request with `getContext()` and guard
+   events with `live.authorize`; `live.subscribe` + `live.load` + `publish(topic)`
+   push server-side changes.
 9. **Loading / error UI** (client navigation) — `routes/loading.tsx` renders
    while a navigation is in flight; `routes/error.tsx` (props `{ error, reset }`,
    type `ErrorPageProps`) renders if it fails. Both nest by directory. In
