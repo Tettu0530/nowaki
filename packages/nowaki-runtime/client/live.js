@@ -115,21 +115,52 @@ function connect() {
     });
   };
 
-  document.addEventListener("click", (ev) => {
-    const t = ev.target.closest("[data-live]");
-    if (!t) return;
-    const host = t.closest("nowaki-live");
-    if (!host) return;
-    const handler = t.getAttribute("data-live");
-    const payload = t.value !== undefined ? t.value : undefined;
+  // One path for every event kind: the open socket, else POST (unless the page pinned "ws").
+  const send = (host, handler, payload) => {
     if (ws?.readyState === 1) {
       ws.send(JSON.stringify({ type: "event", nid: host.getAttribute("nid"), handler, payload }));
     } else if (mode !== "ws") {
       post(host, handler, payload);
     } else {
-      return;
+      return false;
     }
-    ev.preventDefault();
+    return true;
+  };
+  // Checkboxes and radios send which one and whether it's on; other fields send their value.
+  const valueOf = (el) =>
+    el.type === "checkbox" || el.type === "radio" ? { value: el.value, checked: el.checked } : el.value;
+  const timers = new WeakMap();
+
+  document.addEventListener("click", (ev) => {
+    const t = ev.target.closest("[data-live]");
+    const host = t?.closest("nowaki-live");
+    if (!host) return;
+    if (send(host, t.getAttribute("data-live"), t.value !== undefined ? t.value : undefined)) ev.preventDefault();
+  });
+
+  // <form data-live-submit="handler">: the form's fields as an object, no page navigation.
+  document.addEventListener("submit", (ev) => {
+    const form = ev.target.closest?.("form[data-live-submit]");
+    const host = form?.closest("nowaki-live");
+    if (!host) return;
+    const data = Object.fromEntries(new FormData(form, ev.submitter));
+    if (send(host, form.getAttribute("data-live-submit"), data)) ev.preventDefault();
+  });
+
+  // data-live-input fires while typing (debounced by data-live-debounce ms, default 150);
+  // data-live-change fires on commit (blur, select, checkbox).
+  document.addEventListener("input", (ev) => {
+    const el = ev.target.closest?.("[data-live-input]");
+    const host = el?.closest("nowaki-live");
+    if (!host) return;
+    clearTimeout(timers.get(el));
+    const ms = Number(el.getAttribute("data-live-debounce") ?? 150);
+    timers.set(el, setTimeout(() => send(host, el.getAttribute("data-live-input"), valueOf(el)), ms));
+  });
+  document.addEventListener("change", (ev) => {
+    const el = ev.target.closest?.("[data-live-change]");
+    const host = el?.closest("nowaki-live");
+    if (host) send(host, el.getAttribute("data-live-change"), valueOf(el));
   });
 }
 
@@ -145,37 +176,46 @@ function cssEscape(s) {
   return CSS.escape(String(s));
 }
 
-// Minimal DOM morph (keyless, in-place updates).
+// Minimal DOM morph. Children with data-key are matched by key (so reorders and inserts keep
+// each element and its focus); the rest are matched by position.
 function morph(from, toHtml) {
   const tmp = document.createElement("template");
   tmp.innerHTML = toHtml;
   morphChildren(from, tmp.content);
 }
 
+const keyOf = (n) => (n.nodeType === 1 ? n.getAttribute("data-key") : null);
+
 function morphChildren(from, to) {
-  const fromNodes = from.childNodes;
-  const toNodes = to.childNodes;
-  let i = 0;
-  for (; i < toNodes.length; i++) {
-    const tn = toNodes[i];
-    const fn = fromNodes[i];
+  const keyed = new Map();
+  for (const n of from.childNodes) {
+    const k = keyOf(n);
+    if (k !== null) keyed.set(k, n);
+  }
+  let cur = from.firstChild;
+  for (const tn of [...to.childNodes]) {
+    const k = keyOf(tn);
+    let fn = k !== null ? keyed.get(k) : cur && keyOf(cur) === null ? cur : null;
+    if (k !== null) keyed.delete(k);
+    if (fn && (fn.nodeType !== tn.nodeType || (fn.nodeType === 1 && fn.tagName !== tn.tagName))) fn = null;
     if (!fn) {
-      from.appendChild(tn.cloneNode(true));
+      from.insertBefore(tn.cloneNode(true), cur);
       continue;
     }
-    if (fn.nodeType !== tn.nodeType || (fn.nodeType === 1 && fn.tagName !== tn.tagName)) {
-      from.replaceChild(tn.cloneNode(true), fn);
-      continue;
-    }
-    if (fn.nodeType === 3) {
+    if (fn !== cur) from.insertBefore(fn, cur);
+    else cur = cur.nextSibling;
+    if (fn.nodeType === 3 || fn.nodeType === 8) {
       if (fn.nodeValue !== tn.nodeValue) fn.nodeValue = tn.nodeValue;
     } else if (fn.nodeType === 1) {
       morphAttrs(fn, tn);
       morphChildren(fn, tn);
     }
   }
-  while (fromNodes.length > toNodes.length) {
-    from.removeChild(from.lastChild);
+  // Whatever wasn't matched is gone from the new HTML.
+  while (cur) {
+    const next = cur.nextSibling;
+    from.removeChild(cur);
+    cur = next;
   }
 }
 
@@ -187,11 +227,14 @@ function morphAttrs(from, to) {
   for (const a of to.attributes) {
     if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
   }
-  // also sync the value property (value only, so focus/input aren't disrupted)
+  // Sync the live value/checked properties, but never under the user's cursor: a patch for an
+  // earlier keystroke must not overwrite what they've typed since.
+  if (from === document.activeElement) return;
   if ("value" in from && to.hasAttribute("value")) {
     const v = to.getAttribute("value");
     if (from.value !== v) from.value = v;
   }
+  if (from.type === "checkbox" || from.type === "radio") from.checked = to.hasAttribute("checked");
 }
 
 connect();

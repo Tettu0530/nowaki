@@ -1,5 +1,6 @@
 // Jetstream in a real browser (Chrome over CDP, no puppeteer): clicking data-live buttons on /live
-// updates the island, over the transport the page is expected to pick.
+// updates the island, over the transport the page is expected to pick; /live-form covers submit,
+// debounced input, change, and keyed rows.
 // Usage: BASE=http://127.0.0.1:8243 EXPECT=post [PAGE=/live] node scripts/live-browser-test.mjs   (EXPECT=ws|post)
 import { spawn } from "node:child_process";
 
@@ -96,6 +97,34 @@ try {
     `return performance.getEntriesByType('resource').filter((e) => e.name.endsWith('/__nowaki/live-event')).length;`,
   );
   check(`events went over ${EXPECT} (${posts} POSTs)`, EXPECT === "post" ? posts === 3 : posts === 0);
+
+  // Form, input, and change events on /live-form, over the same transport.
+  await cdp.send("Page.navigate", { url: BASE + "/live-form" });
+  await sleep(1000);
+  const add = (text) =>
+    cdp.evalAsync(`const f = document.querySelector('nowaki-live form[data-live-submit]');
+      f.querySelector('[name=text]').value = ${JSON.stringify(text)}; f.requestSubmit(); return true;`);
+  const items = () => cdp.evalAsync(`return [...document.querySelectorAll('[data-testid=todo-list] li')].map((li) => li.textContent.trim());`);
+  await add("milk");
+  await sleep(600);
+  check(`data-live-submit adds a todo (${JSON.stringify(await items())})`, JSON.stringify(await items()) === '["milk"]');
+  check("the page didn't navigate on submit", (await cdp.evalAsync("return location.pathname;")) === "/live-form");
+  await cdp.evalAsync("window.__milk = document.querySelector('[data-testid=todo-list] li'); return true;");
+  await add("bread");
+  await sleep(600);
+  check(`new todo goes first (${JSON.stringify(await items())})`, JSON.stringify(await items()) === '["bread","milk"]');
+  check("keyed morph keeps the existing row's element",
+    await cdp.evalAsync("return document.querySelector('[data-testid=todo-list] li[data-key=\"1\"]') === window.__milk;"));
+  await cdp.evalAsync("document.querySelector('[data-testid=todo-list] li[data-key=\"1\"] input').click(); return true;");
+  await sleep(600);
+  check("data-live-change toggles the checkbox state on the server",
+    await cdp.evalAsync("return document.querySelector('[data-testid=todo-list] li[data-key=\"1\"] input').checked === true;"));
+  await cdp.evalAsync(`const i = document.querySelector('[data-testid=todo-filter]'); i.focus(); i.value = 'br';
+    i.dispatchEvent(new Event('input', { bubbles: true })); return true;`);
+  await sleep(700);
+  check(`data-live-input filters after the debounce (${JSON.stringify(await items())})`, JSON.stringify(await items()) === '["bread"]');
+  check("the focused input keeps what was typed",
+    (await cdp.evalAsync("return document.querySelector('[data-testid=todo-filter]').value;")) === "br");
 
   console.log(`\n${failures === 0 ? "LIVE BROWSER TEST PASSED" : `LIVE BROWSER TEST FAILED (${failures})`}`);
 } catch (err) {
