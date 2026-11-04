@@ -15,7 +15,7 @@ A "structural answer to the slowness of Next.js", built on three pillars:
 
 ## Where we are
 
-**alpha (CLI / crates 0.14.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands: WebSocket on `nowaki dev` / `nowaki start`, per-event HTTP POST on every deploy adapter), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Production use is not yet recommended (the API is still stabilizing).
+**alpha (CLI / crates 0.15.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands: WebSocket on `nowaki dev` / `nowaki start`, per-event HTTP POST on every deploy adapter), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Production use is not yet recommended (the API is still stabilizing).
 
 ## Milestones
 
@@ -78,6 +78,8 @@ Safe without any configuration. Every claim is verified in CI on every push.
 Make "LiveView for the npm ecosystem, with 0KB of component JS" practical. Forms and inputs, authenticated handlers, live queries that push external changes, and state shared across connections (rooms).
 
 **Exit criteria**: State survives reconnects and server restarts. `publish()` delivers patches to islands on other connections. A two-tab voting demo works with per-room presence. Fan-out p95 at 1000 connections is recorded in BENCHMARKS.md.
+
+**Status**: 0.15.0 ships the checked items below, live islands on every deploy adapter (per event over POST), and the two-tab demo (`/poll`). Still open: rooms surviving a server restart (they're held in memory), stale notifications / resume token, the fan-out p95 in BENCHMARKS.md, and the single-process note on nowaki.dev.
 
 - [x] More events (submit / input / change, debounce, keyed morph)
 - [ ] Stable signing key, stale notifications, resume token (optional)
