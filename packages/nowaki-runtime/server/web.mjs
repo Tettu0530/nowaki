@@ -6,6 +6,7 @@ import { handleRequest } from "./handler.mjs";
 import { wrapIsland } from "./island-directive.mjs";
 import { prodDocument, prodShell } from "./document.mjs";
 import { withSecurityHeaders } from "./security-headers.mjs";
+import { applyCsp } from "./csp.mjs";
 
 export function resultToResponse(result) {
   const headers = new Headers();
@@ -118,6 +119,6 @@ export function createFetchHandler({
       headers,
       readBody: async () => new Uint8Array(await request.arrayBuffer()),
     });
-    return resultToResponse(result);
+    return resultToResponse(applyCsp(result));
   };
 }

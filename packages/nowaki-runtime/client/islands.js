@@ -3,6 +3,12 @@
 
 import { h, hydrate, render } from "preact";
 
+// The CSP nonce of the initial response (NOWAKI_CSP). The router and CSS shims stamp it on <style>
+// they insert; read once because client navigation may replace the nonced <script>.
+if (typeof document !== "undefined" && !window.__nowakiNonce) {
+  window.__nowakiNonce = document.querySelector("script[nonce]")?.nonce || undefined;
+}
+
 export function hydrateIslands(root = document) {
   for (const el of root.querySelectorAll("nowaki-island")) {
     if (el.__nowakiHydrated) continue; // prevent double hydration (on SPA navigation)

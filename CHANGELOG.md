@@ -11,6 +11,13 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **Content Security Policy (opt-in):** `NOWAKI_CSP=report-only` or `enforce`
+  sends a policy limiting scripts and style elements to `'self'` plus a
+  per-response nonce, which Nowaki adds to every `<script>` / `<style>` in HTML
+  responses (`nowaki dev` / `start` while streaming, ISR hits included, and the
+  adapters). Island CSS and client navigation re-stamp the nonce on styles they
+  insert. `NOWAKI_CSP_REPORT_URI` adds a `report-uri`. A CDN that caches HTML
+  reuses the cached nonce.
 - **`serverFn(schema, impl)`** validates a server function's first argument
   with any [Standard Schema](https://standardschema.dev) library (zod, valibot,
   arktype) before `impl` runs; invalid input is a 400 with `data.issues`.
@@ -56,6 +63,13 @@ milestone's worth of work; the codename is noted per entry.
   state. It ignored `liveIslands`, so a page with a live island returned 500.
 
 ### Changed
+- **Security:** live (Jetstream) state signatures include their issue time
+  (`v1.<iat>.<mac>`) and are rejected after `NOWAKI_LIVE_MAX_AGE` seconds
+  (default 86400), so a captured state can't be replayed forever; every patch
+  is re-signed, so an active island doesn't expire. Signatures from earlier
+  versions no longer verify (live islands on an open page re-render from the
+  server after a reload). The key is created on first use, and production
+  servers warn at startup when `NOWAKI_LIVE_SECRET` is unset.
 - **Security:** in production, a server function error other than
   `ServerFnError` returns a generic `Internal Server Error` (500) and is logged;
   before, its message was sent to the client. Dev still shows the message.

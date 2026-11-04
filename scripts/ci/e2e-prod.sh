@@ -89,6 +89,14 @@ node scripts/security-e2e.mjs prod http://127.0.0.1:3300
 kill $START_PID
 bash scripts/ci/assert-no-orphans.sh $START_PID
 
+# CSP (opt-in): every script/style gets the response's nonce, ISR hits included.
+NOWAKI_CSP=enforce ./target/debug/nowaki start examples/hello --port 3302 &
+CSP_PID=$!
+for i in $(seq 1 20); do curl -sf http://127.0.0.1:3302/ >/dev/null && break; sleep 1; done
+node scripts/csp-e2e.mjs http://127.0.0.1:3302
+kill $CSP_PID
+bash scripts/ci/assert-no-orphans.sh $CSP_PID
+
 # Jetstream render timeout: with a 150 ms limit, the 400 ms `slow` handler is reported as an error
 # and the connection keeps working.
 NOWAKI_LIVE_RENDER_TIMEOUT_MS=150 ./target/debug/nowaki start examples/hello --port 3301 &

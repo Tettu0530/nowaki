@@ -70,9 +70,9 @@ Safe without any configuration. Every claim is verified in CI on every push.
 - [x] Origin checks by default for page actions and non-GET requests (phased rollout for API routes; opt out with `export const csrf = false`)
 - [x] Default security headers (nosniff / frame-ancestors / Referrer-Policy / COOP, also on ISR HITs)
 - [x] Body and argument limits for server functions, `serverFn(schema, impl)` (Standard Schema), a build warning for unvalidated exports
-- [ ] Less error detail exposed in prod (`ServerFnError`); hardened handling of the live signing key (warning when unset, `iat` and max lifetime)
+- [x] Less error detail exposed in prod (`ServerFnError`); hardened handling of the live signing key (warning when unset, `iat` and max lifetime)
 - [x] CI: all checks in all modes, unit tests for the edge path, make `pnpm audit` required
-- [ ] CSP nonce support (starting with Report-Only)
+- [x] CSP nonce support (starting with Report-Only)
 
 ### v0.15 "Cyclone": Jetstream 2 ★flagship
 Make "LiveView for the npm ecosystem, with 0KB of component JS" practical. Forms and inputs, authenticated handlers, live queries that push external changes, and state shared across connections (rooms).

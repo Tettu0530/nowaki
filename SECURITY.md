@@ -87,6 +87,22 @@ not run on the production request path unless you embed their output in the app.
 
 ### Application author responsibilities
 
+- **Content Security Policy (opt-in).** `NOWAKI_CSP=report-only` sends
+  `Content-Security-Policy-Report-Only` and `NOWAKI_CSP=enforce` sends
+  `Content-Security-Policy`, with `script-src` / `style-src-elem` limited to
+  `'self'` plus a nonce that Nowaki adds to every `<script>` and `<style>` in the
+  HTML (including `export const head`). `NOWAKI_CSP_REPORT_URI` adds a
+  `report-uri`. Start with `report-only`: inline event handlers (`onclick="…"`),
+  `javascript:` URLs, and third-party scripts are blocked under `enforce`. A
+  response that sets its own CSP is left alone. **A CDN that caches HTML**
+  (`s-maxage` on Vercel / Cloudflare) caches the nonce too, so every visitor of
+  a cached copy gets the same one; `nowaki start`'s own ISR cache re-nonces each
+  response.
+
+- **Set `NOWAKI_LIVE_SECRET`** in production when the app has live islands.
+  Without it, each process signs live state with its own random key: state
+  can't resume after a restart or on another instance, and `nowaki start` /
+  the node adapter log a warning at startup.
 - **Cross-site writes.** Page actions reject cross-site non-GET requests. API
   routes still accept them (with a one-time warning) unless they
   `export const csrf = true`; a later release makes that the default. Requests
@@ -131,9 +147,10 @@ both dev and prod; coverage is noted in the last column.
 | Server function input and error limits | Oversized or malformed RPC payloads; internal error messages reaching the client | `server/functions.mjs`: bodies over `NOWAKI_FN_BODY_LIMIT` (default 1 MiB) → 413, more than 16 arguments → 400, errors other than `ServerFnError` → generic 500 in production. `serverFn(schema, impl)` (`server/server-fn.mjs`) validates the first argument with a Standard Schema; `nowaki build` warns about exports that take arguments without it | `scripts/security-e2e.mjs` (dev + prod), `scripts/ci/e2e-prod.sh` (build warning) |
 | Same-origin check on page actions and API routes (`server/origin.mjs`) | Cross-site form posts and `fetch` writes with the victim's cookies | `server/handler.mjs`: a non-GET to a route with `action` is rejected (403) when `Origin` is another site or `null`, or `Sec-Fetch-Site` is `cross-site`. API routes only warn for now unless they `export const csrf = true`; `export const csrf = false` opts a route out | `scripts/security-e2e.mjs` (dev + prod) |
 | Default security headers (`x-content-type-options: nosniff`, `x-frame-options: SAMEORIGIN`, `referrer-policy: strict-origin-when-cross-origin`, `cross-origin-opener-policy: same-origin`, and `content-security-policy: frame-ancestors 'self'` when the app sends no CSP) | MIME sniffing, clickjacking, cross-origin referrer and `window.opener` leaks | `crates/nowaki/src/security_headers.rs` (dev/start, ISR hits, static assets); `server/security-headers.mjs` (node/bun/deno/vercel/cloudflare adapters); `_headers` from `nowaki prerender` | `scripts/security-e2e.mjs` (dev + prod), `scripts/ci/e2e-adapters.sh`, `scripts/ci/e2e-runtimes.sh` |
+| Opt-in CSP with a per-response nonce (`NOWAKI_CSP=report-only` or `enforce`) | Injected inline scripts and styles | `crates/nowaki/src/csp.rs` (dev/start, streamed and ISR responses), `server/csp.mjs` (adapters); every `<script>` / `<style>` gets the response's nonce; the client runtime stamps it on styles it inserts (island CSS, client navigation, boundaries) | `scripts/csp-e2e.mjs` (start + node adapter), `scripts/csp-test.mjs`, browser tests under `enforce` |
 | Forwarding and internal headers sanitized at the Rust front | Spoofing the host the same-origin checks use; forging internal `x-nowaki-*` headers | `crates/nowaki/src/forward.rs` (`NOWAKI_TRUST_PROXY` opt-in) | `scripts/security-e2e.mjs` (dev + prod) |
 | WebSocket Origin check (CSWSH) | Cross-origin upgrades to HMR / Jetstream | `crates/nowaki/src/dev.rs`, `crates/nowaki/src/start.rs` | `scripts/security-e2e.mjs` (dev + prod) |
-| Jetstream state signature | Forged live state used in render/handlers | `server/live.mjs` (verify before each render/handler); `crates/nowaki/src/live.rs` (holds state per session) | `scripts/security-e2e.mjs` (dev + prod) |
+| Jetstream state signature | Forged live state used in render/handlers; replaying a captured state indefinitely | `server/live-sign.mjs` (`v1.<iat>.<mac>`: HMAC over name, issue time, and state; rejected after `NOWAKI_LIVE_MAX_AGE`, default 24 h); `server/live.mjs` (verify before each render/handler); `crates/nowaki/src/live.rs` (holds state per session) | `scripts/security-e2e.mjs` (dev + prod), `scripts/live-sign-test.mjs` |
 | ISR cache key + `Vary` learning | Cross-user HTML cache bleed | `server/context.mjs` (`__vary()`), `server/handler.mjs` (`x-nowaki-vary`); `crates/nowaki/src/start.rs` (`isr_key`); e.g. `examples/hello/routes/vary.tsx` | `scripts/security-e2e.mjs` (prod) |
 | ISR query folding | Cache flood via distinct query strings | `crates/nowaki/src/start.rs` | `scripts/security-e2e.mjs` (prod) |
 | Static client assets by basename | Path traversal on `/_nowaki/*` | `crates/nowaki/src/start.rs` | `scripts/security-e2e.mjs` (prod) |
