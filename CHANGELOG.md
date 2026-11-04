@@ -10,6 +10,14 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Fixed
+- **Security:** `nowaki dev` / `nowaki start` no longer proxy
+  `/__nowaki/live-render` (404). That endpoint is the sidecar's internal
+  re-render call from `live.rs`, and it trusts its body; reached through the
+  public port, a cross-site `text/plain` POST could run live handlers with a
+  replayed signed state, and with the new request context it could claim any
+  cookie and pass `live.authorize`. The sidecars also match the path exactly.
+
 ### Added
 - **Jetstream request context:** live handlers can call `getContext()` to read
   the cookies and `authorization` / `accept-language` / `user-agent` headers of
