@@ -101,6 +101,10 @@ code locations and CI coverage.
 - **Do not weaken default CSRF / CSWSH gates** without an explicit opt-in API and
   ROADMAP/SECURITY updates: JSON + `x-nowaki-rpc` + Origin/Host for RPC;
   Origin checks on `/__nowaki/live` and `/__nowaki/hmr` upgrades.
+- **Server function errors stay generic in production.** Only a `ServerFnError`'s
+  status, message, and `data` reach the client; anything else is logged and sent
+  as "Internal Server Error" (dev keeps the message). Keep the body / argument
+  limits in `functions.mjs` ahead of parsing and dispatch.
 - **State-changing routes check the origin.** `handler.mjs` rejects cross-site
   non-GET requests to page actions (and to API routes with `csrf = true`) via
   `server/origin.mjs`, before the action runs. Don't move the check after the

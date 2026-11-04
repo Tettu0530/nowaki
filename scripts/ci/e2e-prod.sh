@@ -5,7 +5,11 @@ set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 cd "$(dirname "$0")/../.."
 
-./target/debug/nowaki build examples/hello
+# stdout stays in the log; stderr is captured for the unvalidated-server-function warning.
+{ BUILD_ERR=$(./target/debug/nowaki build examples/hello 2>&1 1>&3 3>&-); } 3>&1
+echo "$BUILD_ERR" >&2
+# actions/todos.ts#addTodoForm takes input without serverFn(schema, impl); addTodo is wrapped.
+echo "$BUILD_ERR" | grep -q 'take unvalidated input: actions/todos.ts#addTodoForm\.'
 test -f examples/hello/dist/client/manifest.json
 grep -q '"preload"' examples/hello/dist/client/manifest.json
 # asset optimization: the sub-optimal source photo.png (~256 KB, stored zlib)

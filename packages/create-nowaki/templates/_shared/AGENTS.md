@@ -84,12 +84,20 @@ nowaki.config.mjs   plugins (optional)
    islands to cut work on first load. The directives are typed (no prop leaks).
 7. **Server functions** — a module with a top-of-file `"use server"` directive
    becomes RPC; the client gets a tiny fetch proxy, the implementation stays on
-   the server. Validate arguments; read auth via `getContext()`:
+   the server. Validate the input with `serverFn(schema, impl)` (any Standard
+   Schema library: zod, valibot, arktype); `nowaki build` warns about exports that
+   take arguments without it. Read auth via `getContext()`, and throw
+   `ServerFnError` for messages the client may see (other errors are a generic
+   500 in production):
    ```ts
    // actions/todos.ts
    "use server";
-   import { getContext } from "@nowaki-dev/runtime";
-   export async function addTodo(text: string) { /* runs on the server */ }
+   import { z } from "zod";
+   import { getContext, serverFn, ServerFnError } from "@nowaki-dev/runtime";
+   export const addTodo = serverFn(z.string().min(1).max(200), async (text) => {
+     if (!getContext()?.cookies?.user) throw new ServerFnError("Sign in first", { status: 401 });
+     /* runs on the server with a validated string */
+   });
    ```
    Call it from an island like a normal async function:
    `import { addTodo } from "../actions/todos.ts";`
