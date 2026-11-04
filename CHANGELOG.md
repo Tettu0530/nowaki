@@ -11,6 +11,13 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **Content Security Policy (opt-in):** `NOWAKI_CSP=report-only` or `enforce`
+  sends a policy limiting scripts and style elements to `'self'` plus a
+  per-response nonce, which Nowaki adds to every `<script>` / `<style>` in HTML
+  responses (`nowaki dev` / `start` while streaming, ISR hits included, and the
+  adapters). Island CSS and client navigation re-stamp the nonce on styles they
+  insert. `NOWAKI_CSP_REPORT_URI` adds a `report-uri`. A CDN that caches HTML
+  reuses the cached nonce.
 - **Default security headers** on every response from `nowaki dev`,
   `nowaki start` (ISR hits and static assets included), all deploy adapters,
   and the `_headers` file `nowaki prerender` writes:

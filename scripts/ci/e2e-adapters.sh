@@ -27,6 +27,13 @@ curl -s -D - -o /dev/null http://127.0.0.1:3310/isr | grep -qi 'cache-control: p
 curl -sf http://127.0.0.1:3310/live | grep -q 'nowaki-live name="LiveCounter"'
 ! curl -sf http://127.0.0.1:3310/live | grep -qE '/_nowaki/live\.[0-9a-f]+\.js'
 kill $NODE_PID
+# CSP on the node adapter (report-only): nonce on every script/style
+NOWAKI_CSP=report-only PORT=3312 node examples/hello/dist/server/index.mjs &
+CSPN_PID=$!
+for i in $(seq 1 20); do curl -sf http://127.0.0.1:3312/ >/dev/null && break; sleep 1; done
+node scripts/csp-e2e.mjs http://127.0.0.1:3312 --report-only
+kill $CSPN_PID
+
 # the printed deploy command (`cd dist/server && ... && npm start`) works as written
 grep -q '"start": "node index.mjs"' examples/hello/dist/server/package.json
 (cd examples/hello/dist/server && PORT=3311 npm start --silent) &

@@ -111,7 +111,7 @@ function applyDocument(entry, push, token) {
   const { doc, finalUrl } = entry;
   document.title = doc.title;
   syncHead(doc);
-  document.body.replaceWith(doc.body.cloneNode(true));
+  document.body.replaceWith(stampNonce(doc.body.cloneNode(true)));
   if (push) {
     const k = String(Date.now()) + Math.round(performance.now());
     history.pushState({ nowaki: k }, "", finalUrl);
@@ -120,11 +120,20 @@ function applyDocument(entry, push, token) {
   removeProgressBar();
 }
 
+// Under a CSP nonce, <style> from another response carries that response's nonce; re-stamp it with
+// this document's (captured by islands.js at startup, since <head> swaps may drop the nonced script).
+function stampNonce(root) {
+  const nonce = window.__nowakiNonce;
+  if (!nonce) return root;
+  for (const el of root.querySelectorAll("style")) el.nonce = nonce;
+  return root;
+}
+
 // Loading boundary (swaps body for its skeleton if present). Otherwise, the default progress bar.
 function showLoading(boundary) {
   if (boundary) {
     const tmp = new DOMParser().parseFromString(`<body>${boundary.html}</body>`, "text/html");
-    document.body.replaceWith(tmp.body);
+    document.body.replaceWith(stampNonce(tmp.body));
   } else {
     showProgressBar();
   }
@@ -137,7 +146,7 @@ async function showError(url, message) {
   if (boundary) {
     const tmp = new DOMParser().parseFromString(`<body>${boundary.html}</body>`, "text/html");
     for (const slot of tmp.body.querySelectorAll("[data-nowaki-error]")) slot.textContent = message;
-    document.body.replaceWith(tmp.body);
+    document.body.replaceWith(stampNonce(tmp.body));
   } else {
     showDefaultError(message);
   }
@@ -204,7 +213,10 @@ function syncHead(doc) {
   if (cur && next) {
     while (cur[0].nextSibling && cur[0].nextSibling !== cur[1]) cur[0].nextSibling.remove();
     for (let n = next[0].nextSibling; n && n !== next[1]; n = n.nextSibling) {
-      if (n.nodeType === 1 && n.tagName !== "SCRIPT") cur[1].before(n.cloneNode(true));
+      if (n.nodeType !== 1 || n.tagName === "SCRIPT") continue;
+      const el = n.cloneNode(true);
+      if (window.__nowakiNonce && el.tagName === "STYLE") el.nonce = window.__nowakiNonce;
+      cur[1].before(el);
     }
   } else {
     // Older servers without markers: sync meta/link only, as before.

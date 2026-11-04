@@ -70,6 +70,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         .route("/@fs/{*path}", get(serve_fs))
         .fallback(serve_or_proxy)
         .with_state(state)
+        .layer(axum::middleware::from_fn(crate::csp::layer))
         .layer(axum::middleware::map_response(crate::security_headers::add));
 
     let bind_host = if expose { "0.0.0.0" } else { "127.0.0.1" };

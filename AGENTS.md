@@ -109,6 +109,11 @@ code locations and CI coverage.
   dev/start, `server/security-headers.mjs` for the adapters, `_headers` for
   static output). Add new defaults to both lists, and never overwrite a header
   the response already set.
+- **The CSP nonce covers everything Nowaki inserts.** `csp.rs` / `server/csp.mjs`
+  stamp `<script>` / `<style>` in HTML responses; client code that inserts a
+  `<style>` (CSS shims, router head/body swaps, boundaries) must set
+  `window.__nowakiNonce` on it. Re-run the browser tests with
+  `NOWAKI_CSP=enforce` when touching those paths.
 - **Sidecar requests go through `forward::apply`** (`crates/nowaki/src/forward.rs`).
   Clients never set `x-forwarded-*` or internal `x-nowaki-*` headers on the
   sidecar hop unless `NOWAKI_TRUST_PROXY` is set; new client-facing `x-nowaki-*`
