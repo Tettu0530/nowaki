@@ -51,6 +51,10 @@ const rpc = (body, h = {}) =>
 check("RPC without x-nowaki-rpc rejected (403)",
   (await req("/__nowaki/fn", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status === 403);
 check("RPC cross-origin rejected (403)", (await rpc({ id: "6c90d7dc921a9a3f", args: [] }, { origin: "https://evil.test" })).status === 403);
+check("RPC forged x-forwarded-host cannot spoof origin check (403)",
+  (await rpc({ id: "6c90d7dc921a9a3f", args: [] }, { origin: "https://evil.test", "x-forwarded-host": "app.example" })).status === 403);
+check("RPC same-origin call ignores forged x-forwarded-host (200)",
+  (await rpc({ id: "6c90d7dc921a9a3f", args: [] }, { origin: ORIGIN, "x-forwarded-host": "evil.test" })).status === 200);
 const bad = await rpc({ id: "675f80133a1699f8", args: [""] });
 check("serverFn rejects invalid input (400)", bad.status === 400 && (await bad.json()).error === "Invalid input");
 const broken = await rpc({ id: "96224074eee5e982", args: [] });
