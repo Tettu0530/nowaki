@@ -1,9 +1,10 @@
 // App-layer security regression suite. Deterministically checks defenses for regressions (no Chrome). Called from CI e2e.
 //   node scripts/security-e2e.mjs dev  <devBase>  <appRoot>
 //   node scripts/security-e2e.mjs prod <prodBase>
-// Covers: arbitrary file read (@fs/ssr-module/.env/virtual ..), RPC CSRF, CSWSH,
-//         forged live state, ISR cross-user isolation and query-flood collapsing,
-//         prod /_nowaki/* basename static serving (path traversal).
+// Covers (dev + prod unless noted): RPC CSRF, CSWSH, forged live state, server functions,
+//         cross-site writes, default headers. Dev only: arbitrary file read (@fs/ssr-module/.env/
+//         virtual ..), the HMR socket. Prod only: generic 500s, ISR isolation and query-flood
+//         collapsing, /_nowaki/* basename static serving (path traversal).
 
 import http from "node:http";
 
@@ -46,6 +47,89 @@ function wsUpgrade(b, path, origin) {
     req.on("error", () => resolve(0));
     req.end();
   });
+}
+
+// Client-sent x-forwarded-host is dropped by the Rust front (no NOWAKI_TRUST_PROXY), so it can
+// neither spoof the RPC same-origin check nor break a genuine same-origin call.
+async function forwardedHostIgnored(b) {
+  const call = (h) =>
+    fetch(`${b}/__nowaki/fn`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-nowaki-rpc": "1", ...h },
+      body: JSON.stringify({ id: "6c90d7dc921a9a3f", args: [] }),
+    }).then((r) => r.status);
+  check("RPC forged x-forwarded-host can't spoof the origin check (403)",
+    (await call({ origin: "http://evil.test", "x-forwarded-host": "evil.test" })) === 403);
+  check("RPC same-origin call unaffected by a client x-forwarded-host (200)",
+    (await call({ origin: b, "x-forwarded-host": "evil.test" })) === 200);
+}
+
+// Server functions: Standard Schema validation (addTodo), body/argument limits, and no internal
+// error details in production (brokenTodo throws "db password is hunter2").
+async function serverFnHardening(b, m) {
+  const rpc = async (body) => {
+    const r = await fetch(`${b}/__nowaki/fn`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-nowaki-rpc": "1" },
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    });
+    let data = null;
+    try {
+      data = await r.json();
+    } catch {}
+    return { status: r.status, data };
+  };
+  const bad = await rpc({ id: "675f80133a1699f8", args: [""] });
+  check("serverFn rejects invalid input (400 + issues)",
+    bad.status === 400 && bad.data?.error === "Invalid input" && bad.data?.data?.issues?.length === 1);
+  const good = await rpc({ id: "675f80133a1699f8", args: ["  schema-ok  "] });
+  check("serverFn passes the validated value", good.status === 200 && good.data?.result?.includes("schema-ok"));
+  const broken = await rpc({ id: "96224074eee5e982", args: [] });
+  if (m === "prod") {
+    check("prod: unexpected server function error is generic (500, no message)",
+      broken.status === 500 && broken.data?.error === "Internal Server Error");
+  } else {
+    check("dev: unexpected server function error keeps its message",
+      broken.status === 500 && /hunter2/.test(broken.data?.error ?? ""));
+  }
+  check("server function argument count limit (400)",
+    (await rpc({ id: "6c90d7dc921a9a3f", args: Array(17).fill(0) })).status === 400);
+  check("server function body size limit (413)",
+    (await rpc(JSON.stringify({ id: "6c90d7dc921a9a3f", args: ["x".repeat(1100 * 1024)] }))).status === 413);
+}
+
+// Page actions reject cross-site non-GET requests by default; API routes warn unless they opt in.
+async function crossSiteWritesRejected(b) {
+  const send = (path, h) =>
+    fetch(`${b}${path}`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded", ...h },
+      body: "text=csrf-check",
+    }).then((r) => r.status);
+  check("action: cross-site Origin rejected (403)", (await send("/todos", { origin: "http://evil.test" })) === 403);
+  check("action: Origin null rejected (403)", (await send("/todos", { origin: "null" })) === 403);
+  check("action: Sec-Fetch-Site cross-site rejected (403)",
+    (await send("/todos", { "sec-fetch-site": "cross-site" })) === 403);
+  check("action: same-origin POST allowed", (await send("/todos", { origin: b })) === 302);
+  check("action: POST without Origin (non-browser) allowed", (await send("/todos", {})) === 302);
+  check("API with `csrf = true`: cross-site Origin rejected (403)",
+    (await send("/api/echo", { origin: "http://evil.test" })) === 403);
+  check("API without `csrf`: cross-site Origin still allowed (warn phase)",
+    (await send("/api/hello", { origin: "http://evil.test" })) === 200);
+}
+
+// Default security headers on pages, 404s, and static assets (both modes) and on ISR hits (prod).
+async function securityHeadersPresent(b, paths) {
+  for (const p of paths) {
+    const h = (await fetch(`${b}${p}`)).headers;
+    check(`security headers on ${p}`,
+      h.get("x-content-type-options") === "nosniff" &&
+        h.get("x-frame-options") === "SAMEORIGIN" &&
+        h.get("referrer-policy") === "strict-origin-when-cross-origin" &&
+        h.get("cross-origin-opener-policy") === "same-origin" &&
+        /frame-ancestors 'self'/.test(h.get("content-security-policy") || ""));
+  }
 }
 
 // Checks that a forged live join gets no patch (rejected by signature verification).
@@ -98,6 +182,14 @@ if (mode === "dev") {
   check("virtual-module traversal rejected (.. → 404)",
     (await rawGet(base, "/__nowaki_virtual__/../../../../../../../etc/hosts")) === 404);
 
+  // HMR is dev-only.
+  check("CSWSH /__nowaki/hmr cross-origin upgrade rejected (403)",
+    (await wsUpgrade(base, "/__nowaki/hmr", "http://evil.test")) === 403);
+}
+
+// Checks that hold in both modes (dev and prod share the RPC gate, WS origin checks, live
+// signatures, and default headers).
+{
   // CSRF gate for server function RPC
   const fn = `${base}/__nowaki/fn`;
   const post = (h) =>
@@ -108,12 +200,14 @@ if (mode === "dev") {
     (await post({ "content-type": "application/json" })) === 403);
   check("RPC cross-origin rejected (403)",
     (await post({ "content-type": "application/json", "x-nowaki-rpc": "1", origin: "http://evil.test" })) === 403);
+  await forwardedHostIgnored(base);
+  await serverFnHardening(base, mode);
+  await crossSiteWritesRejected(base);
+  await securityHeadersPresent(base, ["/", "/nope"]);
 
   // CSWSH (Origin check on WS upgrade)
   check("CSWSH /__nowaki/live cross-origin upgrade rejected (403)",
     (await wsUpgrade(base, "/__nowaki/live", "http://evil.test")) === 403);
-  check("CSWSH /__nowaki/hmr cross-origin upgrade rejected (403)",
-    (await wsUpgrade(base, "/__nowaki/hmr", "http://evil.test")) === 403);
   check("WS same-origin upgrade allowed (101)",
     (await wsUpgrade(base, "/__nowaki/live", base)) === 101);
 
@@ -157,6 +251,8 @@ if (mode === "prod") {
   if (hashed) {
     check("legit /_nowaki client asset (200)", (await statusOf(`${base}/_nowaki/${hashed}`)) === 200);
   }
+  // /isr twice: the second response is an ISR HIT/STALE served from the Rust cache.
+  await securityHeadersPresent(base, ["/", "/nope", "/isr", "/isr", ...(hashed ? [`/_nowaki/${hashed}`] : [])]);
   for (const p of [
     "/_nowaki/../../../etc/passwd",
     "/_nowaki/foo/../../../../etc/passwd",

@@ -14,6 +14,79 @@ milestone's worth of work; the codename is noted per entry.
 - **`npm create nowaki` templates:** `.env.example`, a Security section in scaffolded
   `AGENTS.md`, and (basics template only) `routes/_404.tsx`, `routes/api/health.ts`,
   and a validated `"use server"` example in `actions/echo.ts`.
+- **Content Security Policy (opt-in):** `NOWAKI_CSP=report-only` or `enforce`
+  sends a policy limiting scripts and style elements to `'self'` plus a
+  per-response nonce, which Nowaki adds to every `<script>` / `<style>` in HTML
+  responses (`nowaki dev` / `start` while streaming, ISR hits included, and the
+  adapters). Island CSS and client navigation re-stamp the nonce on styles they
+  insert. `NOWAKI_CSP_REPORT_URI` adds a `report-uri`. A CDN that caches HTML
+  reuses the cached nonce.
+- **`serverFn(schema, impl)`** validates a server function's first argument
+  with any [Standard Schema](https://standardschema.dev) library (zod, valibot,
+  arktype) before `impl` runs; invalid input is a 400 with `data.issues`.
+  `nowaki build` warns about `"use server"` exports that take arguments without
+  it.
+- **`ServerFnError(message, { status, data })`**: thrown from a server function,
+  its status, message, and `data` reach the client, where the thrown `Error`
+  carries `status` and `data`.
+- **Default security headers** on every response from `nowaki dev`,
+  `nowaki start` (ISR hits and static assets included), all deploy adapters,
+  and the `_headers` file `nowaki prerender` writes:
+  `x-content-type-options: nosniff`, `x-frame-options: SAMEORIGIN`,
+  `referrer-policy: strict-origin-when-cross-origin`,
+  `cross-origin-opener-policy: same-origin`, and
+  `content-security-policy: frame-ancestors 'self'` when the app sends no CSP.
+  A header the response already sets is kept; `NOWAKI_SECURITY_HEADERS=off`
+  turns them off.
+
+### Fixed
+- **Security:** the cloudflare adapter fills a missing `Host` from the request
+  URL, so the action and server-function same-origin checks compare against the
+  real host; Web `Request`s may omit it, which made same-origin form posts
+  fail and let a cross-origin RPC through. The server-function check now also
+  rejects an `Origin` when there is no host to compare it with.
+- Jetstream: a live connection no longer stalls while the sidecar re-renders.
+  The render runs off the session loop (pings, presence, and new events keep
+  flowing), one at a time per connection so each island's state stays in
+  order, with up to 32 events queued behind it. A render that takes longer
+  than `NOWAKI_LIVE_RENDER_TIMEOUT_MS` (default 10000) or fails is reported to
+  the client as `{ type: "error", nid, reason }` (`timeout`, `render failed`,
+  or `busy` when the queue is full) and dispatched as a `nowaki:live-error`
+  window event; the island keeps its last HTML and state. Before, a hung
+  sidecar call blocked the connection with no timeout.
+- **Security:** the Rust front (`nowaki dev` / `nowaki start`) no longer passes
+  client-sent `x-forwarded-*`, `forwarded`, `x-real-ip`, or internal
+  `x-nowaki-*` headers to the Node sidecar. It sets `x-forwarded-host` from
+  `Host` itself, so a client can't choose the host the server-function
+  same-origin check compares against. Behind a reverse proxy that sets these
+  headers, `NOWAKI_TRUST_PROXY=1` uses its `x-forwarded-host` /
+  `x-forwarded-proto` (also for the WebSocket Origin check) and keeps
+  `x-forwarded-for`.
+- The cloudflare adapter renders live (Jetstream) islands with their initial
+  state. It ignored `liveIslands`, so a page with a live island returned 500.
+
+### Changed
+- **Security:** live (Jetstream) state signatures include their issue time
+  (`v1.<iat>.<mac>`) and are rejected after `NOWAKI_LIVE_MAX_AGE` seconds
+  (default 86400), so a captured state can't be replayed forever; every patch
+  is re-signed, so an active island doesn't expire. Signatures from earlier
+  versions no longer verify (live islands on an open page re-render from the
+  server after a reload). The key is created on first use, and production
+  servers warn at startup when `NOWAKI_LIVE_SECRET` is unset.
+- **Security:** in production, a server function error other than
+  `ServerFnError` returns a generic `Internal Server Error` (500) and is logged;
+  before, its message was sent to the client. Dev still shows the message.
+  Request bodies over `NOWAKI_FN_BODY_LIMIT` (default 1 MiB) get 413, and calls
+  with more than 16 arguments get 400.
+- **Security:** page actions reject cross-site non-GET requests with 403: an
+  `Origin` from another site or `null`, or `Sec-Fetch-Site: cross-site`.
+  Same-origin form posts and requests without either header (curl,
+  server-to-server) are unaffected. API routes log a one-time warning for now;
+  `export const csrf = true` rejects there too, and `export const csrf = false`
+  opts any route out. Behind a proxy that rewrites `Host`, forward the public
+  host as `x-forwarded-host`.
+- Docs: clearer SECURITY.md layout (audience map, defenses ↔ AGENTS invariants) and
+  contributor pointers in CONTRIBUTING.md.
 
 ## [0.13.0] — 2026-11-03 · "Zephyr" (part 1)
 

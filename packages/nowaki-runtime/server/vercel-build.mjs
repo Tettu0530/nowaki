@@ -5,6 +5,7 @@
 
 import { writeFile, mkdir, cp, rm } from "node:fs/promises";
 import path from "node:path";
+import { missingSecurityHeaders } from "./security-headers.mjs";
 
 const [serverDir, clientDir, outputDir, appRoot] = process.argv.slice(2);
 if (!serverDir || !clientDir || !outputDir || !appRoot) {
@@ -64,8 +65,13 @@ const config = {
   version: 3,
   routes: [
     {
+      // Static files skip the function, so they get the default security headers here; pages get
+      // them from app.mjs inside the function.
       src: "/_nowaki/(.*)",
-      headers: { "cache-control": "public, max-age=31536000, immutable" },
+      headers: {
+        "cache-control": "public, max-age=31536000, immutable",
+        ...Object.fromEntries(missingSecurityHeaders(() => false)),
+      },
       continue: true,
     },
     { handle: "filesystem" },

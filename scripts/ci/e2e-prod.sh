@@ -2,9 +2,14 @@
 # CI: Production build + scope hoisting + preload + serve
 # Run from the repo root after `cargo build -p nowaki` and `pnpm install`.
 set -e
+trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 cd "$(dirname "$0")/../.."
 
-./target/debug/nowaki build examples/hello
+# stdout stays in the log; stderr is captured for the unvalidated-server-function warning.
+{ BUILD_ERR=$(./target/debug/nowaki build examples/hello 2>&1 1>&3 3>&-); } 3>&1
+echo "$BUILD_ERR" >&2
+# actions/todos.ts#addTodoForm takes input without serverFn(schema, impl); addTodo is wrapped.
+echo "$BUILD_ERR" | grep -q 'take unvalidated input: actions/todos.ts#addTodoForm\.'
 test -f examples/hello/dist/client/manifest.json
 grep -q '"preload"' examples/hello/dist/client/manifest.json
 # asset optimization: the sub-optimal source photo.png (~256 KB, stored zlib)
@@ -59,13 +64,16 @@ curl -sf http://127.0.0.1:3300/virtual | grep -q 'VIRTUAL_OK · nowaki-plugin'
 ISR=http://127.0.0.1:3300/isr
 chit() { curl -s -D - -o /tmp/isr.html "$ISR" | grep -i '^x-nowaki-cache:' | tr -d '\r' | awk '{print $2}'; }
 rnum() { grep -o 'isr-renders">[0-9]*' /tmp/isr.html | grep -o '[0-9]*'; }
-test "$(chit)" = "MISS"; R1=$(rnum)
+# Each step logs the cache status, render number, and time, so a failure shows what was served.
+T0=$(date +%s)
+isr() { S=$(chit); N=$(rnum); echo "ISR $1: status=$S render=$N (R1=${R1:-?}, +$(( $(date +%s) - T0 ))s)"; }
+isr miss; test "$S" = "MISS"; R1=$N
 curl -s -D - -o /dev/null "$ISR" | grep -qi 'cache-control: public, s-maxage=2, stale-while-revalidate'
-test "$(chit)" = "HIT"; test "$(rnum)" = "$R1"
+isr hit; test "$S" = "HIT"; test "$N" = "$R1"
 sleep 3
-test "$(chit)" = "STALE"; test "$(rnum)" = "$R1"   # stale HTML served immediately
+isr stale; test "$S" = "STALE"; test "$N" = "$R1"   # stale HTML served immediately
 sleep 1                                            # let background revalidation finish
-test "$(chit)" = "HIT"; test "$(rnum)" -gt "$R1"   # regenerated
+isr regenerated; test "$S" = "HIT"; test "$N" -gt "$R1"
 # a cookie-setting response is per-user and must never be ISR-cached
 test -z "$(curl -s -D - -o /dev/null "$ISR" | grep -i '^set-cookie:')"
 # loading/error boundaries are served through the Rust front too
@@ -80,3 +88,20 @@ node scripts/livetest.mjs http://127.0.0.1:3300
 node scripts/security-e2e.mjs prod http://127.0.0.1:3300
 kill $START_PID
 bash scripts/ci/assert-no-orphans.sh $START_PID
+
+# CSP (opt-in): every script/style gets the response's nonce, ISR hits included.
+NOWAKI_CSP=enforce ./target/debug/nowaki start examples/hello --port 3302 &
+CSP_PID=$!
+for i in $(seq 1 20); do curl -sf http://127.0.0.1:3302/ >/dev/null && break; sleep 1; done
+node scripts/csp-e2e.mjs http://127.0.0.1:3302
+kill $CSP_PID
+bash scripts/ci/assert-no-orphans.sh $CSP_PID
+
+# Jetstream render timeout: with a 150 ms limit, the 400 ms `slow` handler is reported as an error
+# and the connection keeps working.
+NOWAKI_LIVE_RENDER_TIMEOUT_MS=150 ./target/debug/nowaki start examples/hello --port 3301 &
+TIMEOUT_PID=$!
+for i in $(seq 1 20); do curl -sf http://127.0.0.1:3301/ >/dev/null && break; sleep 1; done
+node scripts/livetest.mjs http://127.0.0.1:3301 --expect-timeout
+kill $TIMEOUT_PID
+bash scripts/ci/assert-no-orphans.sh $TIMEOUT_PID

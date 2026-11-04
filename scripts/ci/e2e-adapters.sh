@@ -2,6 +2,7 @@
 # CI: Deploy adapters — self-contained node entry + static + streaming SSR
 # Run from the repo root after `cargo build -p nowaki` and `pnpm install`.
 set -e
+trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 cd "$(dirname "$0")/../.."
 
 # node adapter: build emits a self-contained server entry runnable WITHOUT the nowaki binary
@@ -13,6 +14,9 @@ NODE_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3310/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3310/ | grep -q "nowaki-island"   # SSR + island marker
 curl -sf http://127.0.0.1:3310/api/hello | grep -q '"hello":"nowaki"'
+# default security headers on the node adapter (pages and static assets)
+curl -s -D - -o /dev/null http://127.0.0.1:3310/ | grep -qi '^x-content-type-options: nosniff'
+curl -s -D - -o /dev/null http://127.0.0.1:3310/ | grep -qi "^content-security-policy: frame-ancestors 'self'"
 # streaming SSR route (export const streaming = true) renders a complete document
 curl -sf http://127.0.0.1:3310/stream | grep -q "Streaming SSR"
 curl -sf http://127.0.0.1:3310/stream | grep -q "nowaki-island"
@@ -23,6 +27,13 @@ curl -s -D - -o /dev/null http://127.0.0.1:3310/isr | grep -qi 'cache-control: p
 curl -sf http://127.0.0.1:3310/live | grep -q 'nowaki-live name="LiveCounter"'
 ! curl -sf http://127.0.0.1:3310/live | grep -qE '/_nowaki/live\.[0-9a-f]+\.js'
 kill $NODE_PID
+# CSP on the node adapter (report-only): nonce on every script/style
+NOWAKI_CSP=report-only PORT=3312 node examples/hello/dist/server/index.mjs &
+CSPN_PID=$!
+for i in $(seq 1 20); do curl -sf http://127.0.0.1:3312/ >/dev/null && break; sleep 1; done
+node scripts/csp-e2e.mjs http://127.0.0.1:3312 --report-only
+kill $CSPN_PID
+
 # the printed deploy command (`cd dist/server && ... && npm start`) works as written
 grep -q '"start": "node index.mjs"' examples/hello/dist/server/package.json
 (cd examples/hello/dist/server && PORT=3311 npm start --silent) &
@@ -43,8 +54,11 @@ grep -q 'Page not found' examples/hello/dist/static/404.html
 # the SPA router's boundaries fetch is answered by a static file (no 404 on static hosts)
 node -e 'const b=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!Array.isArray(b.loading)||!Array.isArray(b.error)||!b.loading.length) process.exit(1)' examples/hello/dist/static/__nowaki/boundaries
 grep -q '/__nowaki/boundaries' examples/hello/dist/static/_headers
+grep -qi 'x-content-type-options: nosniff' examples/hello/dist/static/_headers
 # cloudflare (edge) adapter: generates a bundled fetch-handler worker + wrangler config
 ./target/debug/nowaki build examples/hello --adapter cloudflare
+# the worker's fetch handler, called directly in Node (web.mjs end to end, no wrangler)
+node scripts/edge-handler-test.mjs examples/hello/dist/worker
 test -f examples/hello/dist/worker/index.js
 test -f examples/hello/dist/worker/wrangler.jsonc
 grep -q "createFetchHandler" examples/hello/dist/worker/index.js
@@ -55,6 +69,7 @@ grep -q '"binding": "ASSETS"' examples/hello/dist/worker/wrangler.jsonc
 ./target/debug/nowaki build examples/hello --adapter vercel
 test -f examples/hello/.vercel/output/config.json
 grep -q '"version": 3' examples/hello/.vercel/output/config.json
+grep -q '"x-content-type-options": "nosniff"' examples/hello/.vercel/output/config.json
 test -f examples/hello/.vercel/output/functions/index.func/.vc-config.json
 grep -q '"launcherType": "Nodejs"' examples/hello/.vercel/output/functions/index.func/.vc-config.json
 test -d examples/hello/.vercel/output/static/_nowaki

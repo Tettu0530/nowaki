@@ -11,9 +11,11 @@ import { loadEnv } from "./env.mjs";
 import { wrapIsland } from "./island-directive.mjs";
 import { scanRoutes } from "./router.mjs";
 import { handleRequest, sendResult } from "./handler.mjs";
+import { missingSecurityHeaders } from "./security-headers.mjs";
+import { applyCsp } from "./csp.mjs";
 import { prodDocument, prodShell } from "./document.mjs";
 import { liveInitialState } from "./live.mjs";
-import { liveProps } from "./live-sign.mjs";
+import { liveProps, warnIfEphemeralLiveKey } from "./live-sign.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
 // Bun and Deno don't implement Node's module.register; their SSR keeps the old behavior.
@@ -73,6 +75,7 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
   // Live islands send no JS to the client (live.js updates <nowaki-live> over WS).
   const liveRegistry = new Map();
   let liveCounter = 0;
+  if ((manifest.liveIslands ?? []).length > 0) warnIfEphemeralLiveKey();
   for (const name of manifest.liveIslands ?? []) {
     const mod = await import(
       pathToFileURL(path.join(serverDir, "islands", `${name}.js`)).href
@@ -145,6 +148,8 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
   };
 
   const handle = async (req, res) => {
+    // Set before the response's own headers, which override any of these by name.
+    for (const [k, v] of missingSecurityHeaders(() => false)) res.setHeader(k, v);
     try {
       const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
 
@@ -170,7 +175,7 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
         version: "prod",
         req,
       });
-      await sendResult(res, result);
+      await sendResult(res, applyCsp(result));
     } catch (err) {
       console.error("[nowaki]", err);
       res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });

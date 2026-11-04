@@ -1,8 +1,11 @@
 mod adapter;
+mod csp;
 mod dev;
+mod forward;
 mod live;
 mod plugins;
 mod prerender;
+mod security_headers;
 mod shutdown;
 mod sidecar;
 mod start;
@@ -134,6 +137,17 @@ fn main() -> anyhow::Result<()> {
                 report.asset_in,
                 report.asset_out,
             );
+            let unvalidated = nowaki_core::server_fn::discover_unvalidated(
+                &core,
+                &["routes", "islands", "components", "lib", "actions"],
+            );
+            if !unvalidated.is_empty() {
+                eprintln!(
+                    "[nowaki] warning: {} server function(s) take unvalidated input: {}. Wrap them with serverFn(schema, impl) (any Standard Schema library).",
+                    unvalidated.len(),
+                    unvalidated.join(", ")
+                );
+            }
             match adapter {
                 Adapter::Cloudflare => adapter::emit_cloudflare(&root, &dist)?,
                 Adapter::Vercel => adapter::emit_vercel(&root, &dist)?,

@@ -89,6 +89,8 @@ pub fn css_module_mapping_js(map: &[(String, String)]) -> String {
 
 /// Converts .css into the source of a JS module that injects a <style> (shared by dev/build).
 /// Reuses the style with the same id (avoids duplicate injection and HMR re-injection).
+/// Copies the page's CSP nonce (set by islands.js, or from a nonced script) so an enforced
+/// `style-src-elem` allows it.
 pub fn css_shim(id: &str, css: &str) -> String {
     let css_lit = format!("{css:?}");
     let id_lit = format!("{id:?}");
@@ -96,7 +98,7 @@ pub fn css_shim(id: &str, css: &str) -> String {
         "const __css = {css_lit};\n\
 const __id = {id_lit};\n\
 let __el = document.querySelector('style[data-nowaki-css=' + JSON.stringify(__id) + ']');\n\
-if (!__el) {{ __el = document.createElement('style'); __el.setAttribute('data-nowaki-css', __id); document.head.appendChild(__el); }}\n\
+if (!__el) {{ __el = document.createElement('style'); __el.setAttribute('data-nowaki-css', __id); const __n = window.__nowakiNonce || document.querySelector('script[nonce]')?.nonce; if (__n) __el.nonce = __n; document.head.appendChild(__el); }}\n\
 __el.textContent = __css;\n"
     )
 }

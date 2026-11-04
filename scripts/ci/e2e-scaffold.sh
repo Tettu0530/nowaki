@@ -3,6 +3,7 @@
 # runtime, then build and serve it with the local CLI.
 # Run from the repo root after `cargo build -p nowaki`.
 set -e
+trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 cd "$(dirname "$0")/../.."
 ROOT=$(pwd)
 NOWAKI="$ROOT/target/debug/nowaki"

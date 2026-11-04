@@ -69,7 +69,9 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         .route("/__nowaki/ssr-module", get(ssr_module))
         .route("/@fs/{*path}", get(serve_fs))
         .fallback(serve_or_proxy)
-        .with_state(state);
+        .with_state(state)
+        .layer(axum::middleware::from_fn(crate::csp::layer))
+        .layer(axum::middleware::map_response(crate::security_headers::add));
 
     let bind_host = if expose { "0.0.0.0" } else { "127.0.0.1" };
     let listener = tokio::net::TcpListener::bind((bind_host, port)).await?;
@@ -389,15 +391,7 @@ async fn proxy_to_sidecar(state: Arc<DevState>, req: Request) -> Response {
             state.ssr_version.load(Ordering::SeqCst).to_string(),
         )
         .body(body.to_vec());
-    // Strip the original Host but forward it for the same-origin check (server function CSRF guard).
-    if let Some(host) = headers.get(header::HOST) {
-        builder = builder.header("x-forwarded-host", host);
-    }
-    for (name, value) in headers.iter() {
-        if name != header::HOST {
-            builder = builder.header(name, value);
-        }
-    }
+    builder = crate::forward::apply(builder, &headers, crate::forward::trust_proxy());
 
     match builder.send().await {
         Ok(resp) => {

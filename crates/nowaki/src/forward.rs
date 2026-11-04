@@ -1,0 +1,164 @@
+//! Request headers the Rust front passes on to the Node sidecar.
+//!
+//! The sidecar trusts `x-forwarded-host` (the server-function same-origin check) and reads internal
+//! `x-nowaki-*` headers, so neither may come from the client unchecked. Client-sent
+//! forwarding headers are honored only with `NOWAKI_TRUST_PROXY=1`, for a reverse proxy that sets them.
+
+use std::sync::OnceLock;
+
+use axum::http::{header, HeaderMap, HeaderName};
+
+/// `x-nowaki-*` request headers the browser runtime sends on purpose; every other one is internal.
+const CLIENT_NOWAKI_HEADERS: [&str; 2] = ["x-nowaki-rpc", "x-nowaki-nav"];
+
+pub fn trust_proxy() -> bool {
+    static TRUST: OnceLock<bool> = OnceLock::new();
+    *TRUST.get_or_init(|| {
+        std::env::var("NOWAKI_TRUST_PROXY")
+            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false)
+    })
+}
+
+fn first_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    let v = headers.get(name)?.to_str().ok()?;
+    let first = v.split(',').next()?.trim();
+    (!first.is_empty()).then(|| first.to_string())
+}
+
+/// The host the browser addressed: the proxy's `x-forwarded-host` when trusted, else `Host`.
+pub fn public_host(headers: &HeaderMap, trust: bool) -> Option<String> {
+    if trust {
+        if let Some(h) = first_value(headers, "x-forwarded-host") {
+            return Some(h);
+        }
+    }
+    headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
+}
+
+/// `https` only when a trusted proxy says so; the Rust server itself speaks plain HTTP.
+pub fn public_proto(headers: &HeaderMap, trust: bool) -> &'static str {
+    if trust && first_value(headers, "x-forwarded-proto").as_deref() == Some("https") {
+        "https"
+    } else {
+        "http"
+    }
+}
+
+/// Whether a client request header may be passed to the sidecar as-is.
+pub fn passes(name: &HeaderName, trust: bool) -> bool {
+    let n = name.as_str();
+    if name == header::HOST || n == "forwarded" || n == "x-real-ip" {
+        return false;
+    }
+    if n.starts_with("x-forwarded-") {
+        // Host and proto are re-set canonically; a trusted proxy's client-IP chain is kept.
+        return trust && n == "x-forwarded-for";
+    }
+    !n.starts_with("x-nowaki-") || CLIENT_NOWAKI_HEADERS.contains(&n)
+}
+
+/// Copy the client's headers onto a sidecar request, minus the ones it must not control, plus
+/// canonical `x-forwarded-host` / `x-forwarded-proto`.
+pub fn apply(
+    mut builder: reqwest::RequestBuilder,
+    headers: &HeaderMap,
+    trust: bool,
+) -> reqwest::RequestBuilder {
+    for (name, value) in headers.iter() {
+        if passes(name, trust) {
+            builder = builder.header(name, value);
+        }
+    }
+    if let Some(host) = public_host(headers, trust) {
+        builder = builder.header("x-forwarded-host", host);
+    }
+    builder.header("x-forwarded-proto", public_proto(headers, trust))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn map(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.append(
+                HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                v.parse().unwrap(),
+            );
+        }
+        h
+    }
+
+    #[test]
+    fn untrusted_forwarding_headers_are_ignored() {
+        let h = map(&[
+            ("host", "app.example"),
+            ("x-forwarded-host", "evil.test"),
+            ("x-forwarded-proto", "https"),
+        ]);
+        assert_eq!(public_host(&h, false).as_deref(), Some("app.example"));
+        assert_eq!(public_proto(&h, false), "http");
+        for n in [
+            "x-forwarded-host",
+            "x-forwarded-proto",
+            "x-forwarded-for",
+            "forwarded",
+            "x-real-ip",
+            "host",
+        ] {
+            assert!(
+                !passes(&HeaderName::from_static(n), false),
+                "{n} must not pass"
+            );
+        }
+    }
+
+    #[test]
+    fn trusted_proxy_headers_use_the_first_hop() {
+        let h = map(&[
+            ("host", "10.0.0.5:3000"),
+            ("x-forwarded-host", "app.example, inner.proxy"),
+            ("x-forwarded-proto", "https,http"),
+        ]);
+        assert_eq!(public_host(&h, true).as_deref(), Some("app.example"));
+        assert_eq!(public_proto(&h, true), "https");
+        assert!(passes(&HeaderName::from_static("x-forwarded-for"), true));
+        assert!(!passes(&HeaderName::from_static("x-forwarded-host"), true));
+    }
+
+    #[test]
+    fn trusted_without_forwarded_host_falls_back_to_host() {
+        let h = map(&[("host", "app.example")]);
+        assert_eq!(public_host(&h, true).as_deref(), Some("app.example"));
+        assert_eq!(public_proto(&h, true), "http");
+    }
+
+    #[test]
+    fn only_client_facing_nowaki_headers_pass() {
+        for n in [
+            "x-nowaki-rpc",
+            "x-nowaki-nav",
+            "content-type",
+            "cookie",
+            "origin",
+        ] {
+            assert!(passes(&HeaderName::from_static(n), false), "{n} must pass");
+        }
+        for n in [
+            "x-nowaki-ssr-version",
+            "x-nowaki-page",
+            "x-nowaki-vary",
+            "x-nowaki-revalidate",
+        ] {
+            assert!(
+                !passes(&HeaderName::from_static(n), false),
+                "{n} must not pass"
+            );
+        }
+    }
+}

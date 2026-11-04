@@ -160,7 +160,9 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
     let app = Router::new()
         .route("/__nowaki/live", get(live_ws))
         .fallback(any(handle))
-        .with_state(state);
+        .with_state(state)
+        .layer(axum::middleware::from_fn(crate::csp::layer))
+        .layer(axum::middleware::map_response(crate::security_headers::add));
     let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
     let actual = listener.local_addr()?.port();
     // Also report the actual port when PORT=0 (a marker grepped by prerender / adapters / bench; keep it).
@@ -205,7 +207,7 @@ fn prod_ws_origin_ok(headers: &axum::http::HeaderMap) -> bool {
     let Some(origin_host) = origin.split("://").nth(1).map(|h| h.trim_end_matches('/')) else {
         return false;
     };
-    match headers.get(header::HOST).and_then(|v| v.to_str().ok()) {
+    match crate::forward::public_host(headers, crate::forward::trust_proxy()) {
         Some(host) => origin_host == host,
         None => false,
     }
@@ -509,15 +511,7 @@ async fn proxy(state: Arc<ProdState>, req: Request, cacheable: bool) -> Response
     };
 
     let mut builder = state.http.request(method, &url).body(body.to_vec());
-    // Strip the original Host but forward it for the same-origin check (server function CSRF guard).
-    if let Some(host) = headers.get(header::HOST) {
-        builder = builder.header("x-forwarded-host", host);
-    }
-    for (name, value) in headers.iter() {
-        if name != header::HOST {
-            builder = builder.header(name, value);
-        }
-    }
+    builder = crate::forward::apply(builder, &headers, crate::forward::trust_proxy());
 
     let resp = match builder.send().await {
         Ok(r) => r,

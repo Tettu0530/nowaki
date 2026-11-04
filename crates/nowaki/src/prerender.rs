@@ -49,14 +49,14 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     }
     let port = port.ok_or_else(|| anyhow!("prod server exited without reporting READY"))?;
 
-    // (request path, file under `out`): static routes, then dynamic ones from `export const staticPaths`.
-    let mut pages: Vec<(String, PathBuf)> = enumerate_routes(&root.join("dist/server/routes"))?
-        .into_iter()
-        .map(|url| {
-            let file = out_file_for(&out, &url);
-            (url, file)
-        })
-        .collect();
+    let mut pages: Vec<(String, PathBuf)> =
+        nowaki_core::routes::enumerate_static_prerender_urls(&root.join("dist/server/routes"))?
+            .into_iter()
+            .map(|url| {
+                let file = out_file_for(&out, &url);
+                (url, file)
+            })
+            .collect();
     for (url, file) in static_paths(&root).await? {
         pages.push((url, out.join(file)));
     }
@@ -121,7 +121,10 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     copy_dir(&root.join("dist/client"), &assets)?;
     std::fs::write(
         out.join("_headers"),
-        "/_nowaki/*\n  Cache-Control: public, max-age=31536000, immutable\n/__nowaki/boundaries\n  Content-Type: application/json\n",
+        format!(
+            "/*\n{}/_nowaki/*\n  Cache-Control: public, max-age=31536000, immutable\n/__nowaki/boundaries\n  Content-Type: application/json\n",
+            static_security_headers()
+        ),
     )?;
 
     drop(child);
@@ -160,37 +163,17 @@ async fn static_paths(root: &Path) -> Result<Vec<(String, String)>> {
         .collect())
 }
 
-fn enumerate_routes(routes_dir: &Path) -> Result<Vec<String>> {
-    let mut urls = Vec::new();
-    if !routes_dir.is_dir() {
-        return Ok(urls);
+/// The default security headers as a `_headers` block (Cloudflare Pages / Netlify syntax).
+fn static_security_headers() -> String {
+    let mut out = String::new();
+    for (name, value) in crate::security_headers::DEFAULTS {
+        out.push_str(&format!("  {name}: {value}\n"));
     }
-    for path in walk(routes_dir)? {
-        let Ok(rel) = path.strip_prefix(routes_dir) else {
-            continue;
-        };
-        let rel_str = rel.to_string_lossy().replace('\\', "/");
-        let Some(stem) = rel_str.strip_suffix(".js") else {
-            continue;
-        };
-        // Not prerendered: api routes, dynamic [param], convention files (_layout/_middleware/_404/...)
-        if stem.starts_with("api/")
-            || stem.contains('[')
-            || stem.split('/').any(|seg| seg.starts_with('_'))
-        {
-            continue;
-        }
-        let url = if stem == "index" {
-            "/".to_string()
-        } else if let Some(dir) = stem.strip_suffix("/index") {
-            format!("/{dir}")
-        } else {
-            format!("/{stem}")
-        };
-        urls.push(url);
-    }
-    urls.sort();
-    Ok(urls)
+    out.push_str(&format!(
+        "  content-security-policy: {}\n",
+        crate::security_headers::FRAME_CSP
+    ));
+    out
 }
 
 /// URL to output file path. `/` → index.html, `/about` → about/index.html (clean URLs).
@@ -200,19 +183,6 @@ fn out_file_for(out: &Path, url: &str) -> PathBuf {
     } else {
         out.join(format!("{}/index.html", url.trim_start_matches('/')))
     }
-}
-
-fn walk(dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut out = Vec::new();
-    for entry in std::fs::read_dir(dir)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            out.extend(walk(&path)?);
-        } else {
-            out.push(path);
-        }
-    }
-    Ok(out)
 }
 
 fn copy_dir(from: &Path, to: &Path) -> Result<()> {

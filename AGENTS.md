@@ -78,8 +78,10 @@ required check is `CI OK`.
 ## Security invariants
 
 When you change dev/start, sidecars, Jetstream, or server functions, preserve
-these properties. Full context and the defenses table live in
-[SECURITY.md](./SECURITY.md).
+these properties. Trust boundaries and reporter guidance are in
+[SECURITY.md](./SECURITY.md); each default defense is listed in
+[Defenses enabled by default](./SECURITY.md#defenses-enabled-by-default) with
+code locations and CI coverage.
 
 - **`nowaki-core` stays JS-free.** Security logic belongs in the CLI (`dev.rs`,
   `start.rs`, `live.rs`), runtime (`packages/nowaki-runtime/server`), or
@@ -99,17 +101,42 @@ these properties. Full context and the defenses table live in
 - **Do not weaken default CSRF / CSWSH gates** without an explicit opt-in API and
   ROADMAP/SECURITY updates: JSON + `x-nowaki-rpc` + Origin/Host for RPC;
   Origin checks on `/__nowaki/live` and `/__nowaki/hmr` upgrades.
+- **Server function errors stay generic in production.** Only a `ServerFnError`'s
+  status, message, and `data` reach the client; anything else is logged and sent
+  as "Internal Server Error" (dev keeps the message). Keep the body / argument
+  limits in `functions.mjs` ahead of parsing and dispatch.
+- **State-changing routes check the origin.** `handler.mjs` rejects cross-site
+  non-GET requests to page actions (and to API routes with `csrf = true`) via
+  `server/origin.mjs`, before the action runs. Don't move the check after the
+  action, and keep `csrf = false` as the only opt-out.
+- **Every server sets the default security headers** (`security_headers.rs` for
+  dev/start, `server/security-headers.mjs` for the adapters, `_headers` for
+  static output). Add new defaults to both lists, and never overwrite a header
+  the response already set.
+- **The CSP nonce covers everything Nowaki inserts.** `csp.rs` / `server/csp.mjs`
+  stamp `<script>` / `<style>` in HTML responses; client code that inserts a
+  `<style>` (CSS shims, router head/body swaps, boundaries) must set
+  `window.__nowakiNonce` on it. Re-run the browser tests with
+  `NOWAKI_CSP=enforce` when touching those paths.
+- **Sidecar requests go through `forward::apply`** (`crates/nowaki/src/forward.rs`).
+  Clients never set `x-forwarded-*` or internal `x-nowaki-*` headers on the
+  sidecar hop unless `NOWAKI_TRUST_PROXY` is set; new client-facing `x-nowaki-*`
+  request headers must be added to its allowlist.
 - **Client-supplied Jetstream state is used only after its signature verifies**
   (`live.mjs` checks before every render and handler run); do not skip or bypass
   that path.
 - **ISR keys must include learned `Vary` inputs** (`context.mjs` `__vary()` →
   `x-nowaki-vary`, folded in `isr_key` in `start.rs`) so cached pages cannot
-  bleed across users.
+  bleed across users. The query string is part of the key only when the route reads
+  it; unread queries are dropped, so they can't grow the cache.
 - **Only `PUBLIC_*` (and `MODE`) reach client bundles** via env inlining; never
   ship secrets or raw `.env` contents to the browser.
+- **Production error responses stay generic.** Do not expose stack traces or other
+  internal details from prod SSR/sidecar paths (`server/app.mjs`, `server/web.mjs`,
+  `server/prod-sidecar.mjs`).
 - **Regressions need tests.** If you add or change a default defense, extend
   `scripts/security-e2e.mjs` and/or `scripts/ci/e2e-*.sh` when CI does not already
-  cover the behavior (see SECURITY.md “Defenses enabled by default”).
+  cover the behavior, and update the defenses table in SECURITY.md.
 
 ## Feature map (where things live)
 
