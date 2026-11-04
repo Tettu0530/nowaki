@@ -15,7 +15,7 @@ A "structural answer to the slowness of Next.js", built on three pillars:
 
 ## Where we are
 
-**alpha (CLI / crates 0.13.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands, on `nowaki dev` / `nowaki start`; the deploy adapters render them as initial SSR only), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Production use is not yet recommended (the API is still stabilizing).
+**alpha (CLI / crates 0.14.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands, on `nowaki dev` / `nowaki start`; the deploy adapters render them as initial SSR only), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Production use is not yet recommended (the API is still stabilizing).
 
 ## Milestones
 
@@ -50,7 +50,7 @@ A `cargo test` suite, reproducible benchmarks ([BENCHMARKS.md](./BENCHMARKS.md))
 ### v0.10–v0.12 "Beta": DX & security audit ✅
 An interactive wizard and template selection for `npm create nowaki`, dev/start banners. A multi-stage security audit of the dev/prod servers (15 issues, including file reads, CSRF on RPC, CSWSH, live state signing, and Vary on ISR), plus a CI regression suite that guards them (`scripts/security-e2e.mjs`).
 
-### v0.13 "Zephyr": Solid footing
+### v0.13 "Zephyr": Solid footing ✅
 Before adding big features, make the code easier to read and harder to break.
 
 **Exit criteria**: The comment policy is documented in AGENTS.md and the code follows it. Route enumeration has a single implementation on the Rust side. Live island state no longer resets to initial values on reconnect.
@@ -62,7 +62,7 @@ Before adding big features, make the code easier to read and harder to break.
 - [x] Jetstream: carry signed state in patches (fixes state resetting to initial values on reconnect)
 - [x] Jetstream: make the session loop async; sidecar timeouts and error reporting
 
-### v0.14 "Gale": Secure by default
+### v0.14 "Gale": Secure by default ✅
 Safe without any configuration. Every claim is verified in CI on every push.
 
 **Exit criteria**: Each row of SECURITY.md's "defenses enabled by default" maps to an implementation location and a CI check. security-e2e passes the same checks in both dev and prod.

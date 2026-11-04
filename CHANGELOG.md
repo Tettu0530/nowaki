@@ -10,6 +10,27 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-11-04 · "Gale" (and "Zephyr" complete)
+
+Packages: `nowaki` / `nowaki-core` 0.14.0 (crates.io, npm), `@nowaki-dev/runtime`
+0.13.0, `create-nowaki` / `create-nowaki-app` 0.15.0. New apps get
+`@nowaki-dev/runtime@^0.13.0` and `nowaki@^0.14.0`.
+
+### Upgrade notes
+- Cross-site non-GET requests to page actions now get **403**. Behind a proxy
+  that rewrites `Host`, forward the public host as `x-forwarded-host` (and set
+  `NOWAKI_TRUST_PROXY=1` for `nowaki start`). `export const csrf = false` opts
+  a route out.
+- In production, a server function error other than `ServerFnError` reaches
+  the client as a generic `Internal Server Error`. Throw `ServerFnError` for
+  messages users should see.
+- Live (Jetstream) signatures from earlier versions no longer verify; pages
+  left open across the deploy start from fresh state after a reload. Set
+  `NOWAKI_LIVE_SECRET` in production.
+- Every response now carries default security headers, including
+  `cross-origin-opener-policy: same-origin`; a popup flow that needs
+  `window.opener` should send its own value (or `NOWAKI_SECURITY_HEADERS=off`).
+
 ### Added
 - **`npm create nowaki` templates:** `.env.example`, a Security section in scaffolded
   `AGENTS.md`, and (basics template only) `routes/_404.tsx`, `routes/api/health.ts`,
@@ -336,7 +357,8 @@ and the runtime at 0.9.0.
 - Published to crates.io (`nowaki-core`, `nowaki`) and npm (`@nowaki-dev/runtime`,
   `create-nowaki`, `create-nowaki-app`).
 
-[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.14.0
 [0.13.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.13.0
 [0.12.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.12.1
 [0.12.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.12.0
