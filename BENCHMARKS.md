@@ -15,6 +15,14 @@ node benchmarks/bench.mjs examples/hello  # a kitchen-sink app
 node benchmarks/head-to-head.mjs          # Nowaki vs Next vs Astro (same counter app)
 ```
 
+## Five frameworks at several sizes
+
+[`benchmarks/compare`](./benchmarks/compare/README.md) builds the same blog in Nowaki, Astro,
+SvelteKit, Next.js and Nuxt at 1–1000 pages and 1–10 islands, and reports each framework's fixed
+cost and its cost per page and per island: dev first response, static and server builds, and
+first-load JS / total transfer in the browser. The static comparison times `nowaki prerender`,
+since `nowaki build` alone writes no HTML.
+
 ## Head-to-head: Nowaki vs Next.js vs Astro
 
 The same minimal app — one server-rendered page with a single interactive

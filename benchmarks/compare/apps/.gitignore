@@ -1,0 +1,5 @@
+# Only the pinned manifests and lockfiles are committed; gen.mjs writes the sources.
+*/*
+!*/package.json
+!*/pnpm-workspace.yaml
+!*/pnpm-lock.yaml

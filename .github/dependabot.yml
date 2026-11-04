@@ -26,9 +26,16 @@ updates:
         patterns: ["*"]
         update-types: [minor, patch]
 
-  # Comparison apps for benchmarks/head-to-head.mjs (outside the pnpm workspace).
+  # Comparison apps for benchmarks/head-to-head.mjs and benchmarks/compare (outside the pnpm workspace).
   - package-ecosystem: npm
-    directories: ["/benchmarks/apps/next-counter", "/benchmarks/apps/astro-counter"]
+    directories:
+      - "/benchmarks/apps/next-counter"
+      - "/benchmarks/apps/astro-counter"
+      - "/benchmarks/compare/apps/nowaki"
+      - "/benchmarks/compare/apps/astro"
+      - "/benchmarks/compare/apps/sveltekit"
+      - "/benchmarks/compare/apps/next"
+      - "/benchmarks/compare/apps/nuxt"
     schedule:
       interval: weekly
     groups:
