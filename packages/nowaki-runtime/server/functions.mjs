@@ -22,6 +22,11 @@ const JSON_CT = { "content-type": "application/json; charset=utf-8" };
 
 const als = new AsyncLocalStorage();
 
+/// Runs `fn` with `ctx` as `getContext()` (server functions and live handlers).
+export function runWithContext(ctx, fn) {
+  return ctx ? als.run(ctx, fn) : fn();
+}
+
 /// Called inside a server function, returns that call's LoaderContext (null otherwise).
 /// E.g. for auth or reading cookies.`import { getContext } from "@nowaki-dev/runtime/server/functions.mjs"`
 export function getContext() {

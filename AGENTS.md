@@ -118,6 +118,10 @@ code locations and CI coverage.
   `<style>` (CSS shims, router head/body swaps, boundaries) must set
   `window.__nowakiNonce` on it. Re-run the browser tests with
   `NOWAKI_CSP=enforce` when touching those paths.
+- **Live handlers see only allowlisted request headers.** `live::context_headers`
+  picks cookie / authorization / accept-language / user-agent and the public
+  host from the upgrade; `live.authorize` runs after the signature check and
+  before the handler. Keep both orders.
 - **Sidecar requests go through `forward::apply`** (`crates/nowaki/src/forward.rs`).
   Clients never set `x-forwarded-*` or internal `x-nowaki-*` headers on the
   sidecar hop unless `NOWAKI_TRUST_PROXY` is set; new client-facing `x-nowaki-*`
