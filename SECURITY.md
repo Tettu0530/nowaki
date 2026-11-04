@@ -134,8 +134,8 @@ Framework defaults do not replace app-level checks:
 These are implemented in the repo today. When you change one, keep this table
 accurate and follow the [Security invariants](./AGENTS.md#security-invariants)
 checklist (extend `scripts/security-e2e.mjs` when CI does not already cover the
-behavior). ROADMAP v0.14 aims to map **every row** to an automated CI check in
-both dev and prod; coverage is noted in the last column.
+behavior). v0.14 mapped most rows to automated checks (last column); add or update
+tests when you change a default defense.
 
 | Defense | What it limits | Primary location | CI regression |
 |---------|----------------|------------------|---------------|
@@ -157,9 +157,15 @@ both dev and prod; coverage is noted in the last column.
 | Generic production 500s | Stack traces (file paths, code) reaching clients | `server/app.mjs`, `server/web.mjs`, `server/prod-sidecar.mjs` (`renderError` and top-level catches) | `scripts/security-e2e.mjs` (prod) |
 | Dependency advisories | Known-vulnerable crates/packages | `.github/workflows/ci.yml` | `cargo audit`, `cargo-deny`, `pnpm audit` jobs |
 
-**Planned (not yet default):** inbound proxy header sanitization (`NOWAKI_TRUST_PROXY`),
-default security headers (CSP, `X-Frame-Options`, etc.), and broader
-`security-e2e` parity in prod — see [ROADMAP.md](./ROADMAP.md) v0.13–v0.14.
+**Opt-in or phased (not missing, but not every row above):**
+
+- **Full CSP enforcement** — default responses add `frame-ancestors` only unless the
+  app sets CSP. Set `NOWAKI_CSP=report-only` or `enforce` for nonce-based
+  `script-src` / `style-src-elem` (see [Application author responsibilities](#application-author-responsibilities)).
+- **API route CSRF by default** — page `action`s reject cross-site non-GET requests
+  today. API routes still allow them with a one-time log warning unless the route
+  exports `csrf = true`; a later release will reject by default. Cookie-authenticated
+  API handlers should set `csrf = true` now.
 
 ## Dependency auditing
 
@@ -176,5 +182,5 @@ pnpm audit --prod
 - [AGENTS.md § Security invariants](./AGENTS.md#security-invariants) — checklist for
   code changes (maps to the table above)
 - [DESIGN.md](./DESIGN.md) — architecture and data flow
-- [ROADMAP.md](./ROADMAP.md) — milestone exit criteria (v0.13–v0.14 security work)
+- [ROADMAP.md](./ROADMAP.md) — milestone exit criteria (v0.14 security defaults shipped; see v0.15+)
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — PR expectations before you submit
