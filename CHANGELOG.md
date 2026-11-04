@@ -19,6 +19,8 @@ milestone's worth of work; the codename is noted per entry.
   headers, `NOWAKI_TRUST_PROXY=1` uses its `x-forwarded-host` /
   `x-forwarded-proto` (also for the WebSocket Origin check) and keeps
   `x-forwarded-for`.
+- The cloudflare adapter renders live (Jetstream) islands with their initial
+  state. It ignored `liveIslands`, so a page with a live island returned 500.
 
 ### Changed
 - Docs: clearer SECURITY.md layout (audience map, defenses ↔ AGENTS invariants) and
