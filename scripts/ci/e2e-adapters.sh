@@ -14,6 +14,9 @@ NODE_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3310/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3310/ | grep -q "nowaki-island"   # SSR + island marker
 curl -sf http://127.0.0.1:3310/api/hello | grep -q '"hello":"nowaki"'
+# default security headers on the node adapter (pages and static assets)
+curl -s -D - -o /dev/null http://127.0.0.1:3310/ | grep -qi '^x-content-type-options: nosniff'
+curl -s -D - -o /dev/null http://127.0.0.1:3310/ | grep -qi "^content-security-policy: frame-ancestors 'self'"
 # streaming SSR route (export const streaming = true) renders a complete document
 curl -sf http://127.0.0.1:3310/stream | grep -q "Streaming SSR"
 curl -sf http://127.0.0.1:3310/stream | grep -q "nowaki-island"
@@ -44,6 +47,7 @@ grep -q 'Page not found' examples/hello/dist/static/404.html
 # the SPA router's boundaries fetch is answered by a static file (no 404 on static hosts)
 node -e 'const b=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!Array.isArray(b.loading)||!Array.isArray(b.error)||!b.loading.length) process.exit(1)' examples/hello/dist/static/__nowaki/boundaries
 grep -q '/__nowaki/boundaries' examples/hello/dist/static/_headers
+grep -qi 'x-content-type-options: nosniff' examples/hello/dist/static/_headers
 # cloudflare (edge) adapter: generates a bundled fetch-handler worker + wrangler config
 ./target/debug/nowaki build examples/hello --adapter cloudflare
 test -f examples/hello/dist/worker/index.js
@@ -56,6 +60,7 @@ grep -q '"binding": "ASSETS"' examples/hello/dist/worker/wrangler.jsonc
 ./target/debug/nowaki build examples/hello --adapter vercel
 test -f examples/hello/.vercel/output/config.json
 grep -q '"version": 3' examples/hello/.vercel/output/config.json
+grep -q '"x-content-type-options": "nosniff"' examples/hello/.vercel/output/config.json
 test -f examples/hello/.vercel/output/functions/index.func/.vc-config.json
 grep -q '"launcherType": "Nodejs"' examples/hello/.vercel/output/functions/index.func/.vc-config.json
 test -d examples/hello/.vercel/output/static/_nowaki

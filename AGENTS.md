@@ -101,6 +101,10 @@ code locations and CI coverage.
 - **Do not weaken default CSRF / CSWSH gates** without an explicit opt-in API and
   ROADMAP/SECURITY updates: JSON + `x-nowaki-rpc` + Origin/Host for RPC;
   Origin checks on `/__nowaki/live` and `/__nowaki/hmr` upgrades.
+- **Every server sets the default security headers** (`security_headers.rs` for
+  dev/start, `server/security-headers.mjs` for the adapters, `_headers` for
+  static output). Add new defaults to both lists, and never overwrite a header
+  the response already set.
 - **Sidecar requests go through `forward::apply`** (`crates/nowaki/src/forward.rs`).
   Clients never set `x-forwarded-*` or internal `x-nowaki-*` headers on the
   sidecar hop unless `NOWAKI_TRUST_PROXY` is set; new client-facing `x-nowaki-*`

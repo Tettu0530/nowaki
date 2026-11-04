@@ -11,6 +11,7 @@ import { loadEnv } from "./env.mjs";
 import { wrapIsland } from "./island-directive.mjs";
 import { scanRoutes } from "./router.mjs";
 import { handleRequest, sendResult } from "./handler.mjs";
+import { missingSecurityHeaders } from "./security-headers.mjs";
 import { prodDocument, prodShell } from "./document.mjs";
 import { liveInitialState } from "./live.mjs";
 import { liveProps } from "./live-sign.mjs";
@@ -145,6 +146,8 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
   };
 
   const handle = async (req, res) => {
+    // Set before the response's own headers, which override any of these by name.
+    for (const [k, v] of missingSecurityHeaders(() => false)) res.setHeader(k, v);
     try {
       const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
 

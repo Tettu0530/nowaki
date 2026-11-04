@@ -121,7 +121,10 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     copy_dir(&root.join("dist/client"), &assets)?;
     std::fs::write(
         out.join("_headers"),
-        "/_nowaki/*\n  Cache-Control: public, max-age=31536000, immutable\n/__nowaki/boundaries\n  Content-Type: application/json\n",
+        format!(
+            "/*\n{}/_nowaki/*\n  Cache-Control: public, max-age=31536000, immutable\n/__nowaki/boundaries\n  Content-Type: application/json\n",
+            static_security_headers()
+        ),
     )?;
 
     drop(child);
@@ -158,6 +161,19 @@ async fn static_paths(root: &Path) -> Result<Vec<(String, String)>> {
             ))
         })
         .collect())
+}
+
+/// The default security headers as a `_headers` block (Cloudflare Pages / Netlify syntax).
+fn static_security_headers() -> String {
+    let mut out = String::new();
+    for (name, value) in crate::security_headers::DEFAULTS {
+        out.push_str(&format!("  {name}: {value}\n"));
+    }
+    out.push_str(&format!(
+        "  content-security-policy: {}\n",
+        crate::security_headers::FRAME_CSP
+    ));
+    out
 }
 
 /// URL to output file path. `/` → index.html, `/about` → about/index.html (clean URLs).
