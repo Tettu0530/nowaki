@@ -40,14 +40,17 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
 
     let stdout = child.stdout.take().expect("piped stdout");
     let mut lines = BufReader::new(stdout).lines();
-    let mut port = None;
-    while let Some(line) = lines.next_line().await? {
-        if let Some(rest) = line.strip_prefix("NOWAKI_START_READY ") {
-            port = Some(rest.trim().parse::<u16>().context("failed to parse port")?);
-            break;
+    let ready = async {
+        while let Some(line) = lines.next_line().await? {
+            if let Some(rest) = line.strip_prefix("NOWAKI_START_READY ") {
+                return rest.trim().parse::<u16>().context("failed to parse port");
+            }
         }
-    }
-    let port = port.ok_or_else(|| anyhow!("prod server exited without reporting READY"))?;
+        Err(anyhow!("prod server exited without reporting READY"))
+    };
+    // Both are Node processes that only read dist/; starting them together hides one Node startup.
+    let (port, dynamic_pages) = tokio::join!(ready, static_paths(&root));
+    let port = port?;
 
     let mut pages: Vec<(String, PathBuf)> =
         nowaki_core::routes::enumerate_static_prerender_urls(&root.join("dist/server/routes"))?
@@ -57,7 +60,7 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
                 (url, file)
             })
             .collect();
-    for (url, file) in static_paths(&root).await? {
+    for (url, file) in dynamic_pages? {
         pages.push((url, out.join(file)));
     }
     if pages.is_empty() {
