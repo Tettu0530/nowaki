@@ -213,6 +213,11 @@ if (mode === "dev") {
 
   // forged live state
   check("forged live join is rejected (no patch)", await liveForgeryRejected(base));
+  // The sidecar's internal re-render endpoint trusts its body (state, request context); the public
+  // server must never proxy it.
+  check("internal /__nowaki/live-render is not reachable (404)",
+    (await fetch(`${base}/__nowaki/live-render`, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "LiveCounter", state: {}, sig: "", handler: "adminReset", request: { headers: { cookie: "role=admin" } } }) })).status === 404);
 }
 
 if (mode === "prod") {

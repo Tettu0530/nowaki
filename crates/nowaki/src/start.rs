@@ -215,6 +215,9 @@ fn prod_ws_origin_ok(headers: &axum::http::HeaderMap) -> bool {
 
 async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
     let path = req.uri().path().to_string();
+    if crate::forward::is_internal_path(&path) {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    }
     // Rust serves static assets directly (high-volume hot path).
     if req.method() == Method::GET && path.starts_with("/_nowaki/") {
         return serve_static(&state, &path).await;
