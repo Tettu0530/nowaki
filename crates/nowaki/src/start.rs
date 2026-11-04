@@ -160,7 +160,8 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
     let app = Router::new()
         .route("/__nowaki/live", get(live_ws))
         .fallback(any(handle))
-        .with_state(state);
+        .with_state(state)
+        .layer(axum::middleware::map_response(crate::security_headers::add));
     let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
     let actual = listener.local_addr()?.port();
     // Also report the actual port when PORT=0 (a marker grepped by prerender / adapters / bench; keep it).

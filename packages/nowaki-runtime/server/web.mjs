@@ -5,6 +5,7 @@ import { h, options } from "preact";
 import { handleRequest } from "./handler.mjs";
 import { wrapIsland } from "./island-directive.mjs";
 import { prodDocument, prodShell } from "./document.mjs";
+import { withSecurityHeaders } from "./security-headers.mjs";
 
 export function resultToResponse(result) {
   const headers = new Headers();
@@ -16,7 +17,7 @@ export function resultToResponse(result) {
     }
   }
   const body = result.stream ?? result.body ?? "";
-  return new Response(body, { status: result.status ?? 200, headers });
+  return withSecurityHeaders(new Response(body, { status: result.status ?? 200, headers }));
 }
 
 // Same rule as live.mjs liveInitialState, without its node:crypto import.

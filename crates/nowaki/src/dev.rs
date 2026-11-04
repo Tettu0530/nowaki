@@ -69,7 +69,8 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         .route("/__nowaki/ssr-module", get(ssr_module))
         .route("/@fs/{*path}", get(serve_fs))
         .fallback(serve_or_proxy)
-        .with_state(state);
+        .with_state(state)
+        .layer(axum::middleware::map_response(crate::security_headers::add));
 
     let bind_host = if expose { "0.0.0.0" } else { "127.0.0.1" };
     let listener = tokio::net::TcpListener::bind((bind_host, port)).await?;
