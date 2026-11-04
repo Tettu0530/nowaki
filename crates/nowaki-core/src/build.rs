@@ -31,7 +31,6 @@ pub struct ClientInfo {
 }
 
 pub struct BuildReport {
-    pub client: ClientInfo,
     pub modules: usize,
     pub islands: usize,
     pub server_modules: usize,
@@ -48,6 +47,15 @@ pub fn build_client(
     core: &NowakiCore,
     dist: &Path,
 ) -> Result<(BuildReport, HashMap<PathBuf, String>)> {
+    let (report, assets, _) = build_client_with_info(core, dist)?;
+    Ok((report, assets))
+}
+
+/// `build_client`, plus the manifest data in memory (for the route JS report).
+pub fn build_client_with_info(
+    core: &NowakiCore,
+    dist: &Path,
+) -> Result<(BuildReport, HashMap<PathBuf, String>, ClientInfo)> {
     let client_dir = dist.join("client");
     // Start empty so deleted islands/modules from a previous build don't ship.
     clear_dir(&client_dir)?;
@@ -171,7 +179,6 @@ pub fn build_client(
     };
     Ok((
         BuildReport {
-            client,
             modules: ctx.emitted.len(),
             islands: islands.len(),
             server_modules: 0,
@@ -180,6 +187,7 @@ pub fn build_client(
             asset_out: ctx.asset_out,
         },
         ctx.assets,
+        client,
     ))
 }
 

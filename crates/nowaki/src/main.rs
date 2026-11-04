@@ -127,7 +127,7 @@ fn main() -> anyhow::Result<()> {
                 core.set_plugins(host.bridge.clone());
             }
             let started = std::time::Instant::now();
-            let report = core.build(&dist)?;
+            let (report, client) = core.build_with_client(&dist)?;
             let client_js_kb = ui::dir_js_kb(&report.out_dir);
             ui::build_summary(
                 report.modules,
@@ -139,7 +139,7 @@ fn main() -> anyhow::Result<()> {
                 report.asset_in,
                 report.asset_out,
             );
-            check_route_budgets(&core, &report)?;
+            check_route_budgets(&core, &report, &client)?;
             let unvalidated = nowaki_core::server_fn::discover_unvalidated(
                 &core,
                 &["routes", "islands", "components", "lib", "actions"],
@@ -194,8 +194,9 @@ fn main() -> anyhow::Result<()> {
 fn check_route_budgets(
     core: &nowaki_core::NowakiCore,
     report: &nowaki_core::build::BuildReport,
+    client: &nowaki_core::build::ClientInfo,
 ) -> anyhow::Result<()> {
-    let routes = nowaki_core::budget::route_first_load(core, &report.client, &report.out_dir)?;
+    let routes = nowaki_core::budget::route_first_load(core, client, &report.out_dir)?;
     // Machine-readable copy for tooling and CI (outside dist/client, so it is never served).
     let json: Vec<_> = routes
         .iter()
