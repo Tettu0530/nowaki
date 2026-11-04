@@ -10,8 +10,10 @@ import { handleRequest } from "./handler.mjs";
 import { liveContext, liveRender, LiveForbiddenError } from "./live.mjs";
 import { runWithContext } from "./functions.mjs";
 import { pageMeta } from "./document.mjs";
+import { persistRooms } from "./live-rooms-file.mjs";
 
 const appRoot = process.cwd();
+persistRooms(appRoot);
 const { env, liveRegistry } = await createApp({
   clientDir: path.join(appRoot, "dist/client"),
   serverDir: path.join(appRoot, "dist/server"),
