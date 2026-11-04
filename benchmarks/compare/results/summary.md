@@ -104,3 +104,17 @@ Measured 2026-11-04 · Apple M2, 8 cores, 16 GB, darwin 25.6.0, node v24.14.0 ·
 | Nuxt | static build (every page to HTML) | 2287 | 1.53 | 32.8 |
 | Nuxt | server build (render per request) | 2995 | 0.4 | 49.1 |
 | Nuxt | JS on `/` per island (KB gzip) | | | 0.03 |
+
+### Production servers — 100 pages × 1 island, rendered per request unless noted, median of runs
+
+| server | start (ms) | idle RSS (MB) | peak RSS (MB) | TTFB p50 / p99 (ms, 1 conn) | post pages req/s (p99 ms, 50 conns) | `/` req/s (p99 ms, 50 conns) |
+|---|---|---|---|---|---|---|
+| Nowaki 0.14.0 | 143 | 301.6 | 367.3 | 0.42 / 1.01 | 4168 (24.04) | 6644 (14.75) |
+| Astro 7.4.5 | 122 | 322 | 322.4 | 0.23 / 0.94 | 6818 (14.63) | 8187 (13.06) |
+| SvelteKit 3.1.1 | 122 | 336.9 | 337.3 | 0.22 / 1.01 | 6783 (12.41) | 4513 (21.28) |
+| Next.js 16.4.5 | 352 | 430.6 | 441.7 | 0.98 / 2.48 | 1210 (60.85) | 1448 (46.06) |
+| Nuxt 4.6.4 | 147 | 441.5 | 445.4 | 0.62 / 4.59 | 1952 (66.99) | 2102 (45.12) |
+| Nowaki 0.14.0 (NOWAKI_CSP=enforce) | 143 | 302.5 | 382.7 | 0.42 / 0.99 | 4317 (22.53) | 6849 (13.86) |
+| Nowaki 0.14.0 (ISR on post pages, 60 s) | 125 | 110.5 | 110.7 | 0.08 / 0.22 | 152492 (0.92) | 6857 (13.82) |
+| Next.js 16.4.5 (ISR on post pages, 60 s) | 344 | 386.7 | 395.9 | 0.28 / 1.29 | 4859 (22.27) | 1289 (62.36) |
+| Nuxt 4.6.4 (ISR on post pages, 60 s) | 174 | 267.9 | 277.5 | 0.12 / 0.47 | 17227 (6.54) | 1937 (50.91) |

@@ -100,7 +100,41 @@ for (const fw of ORDER) {
   out[fw] = { label: FRAMEWORKS[fw].label, version: mine.at(-1).version, cells, fits };
 }
 
-const summary = { measured: measured.slice(0, 10), machine, commits: [...commits], metrics: Object.fromEntries(Object.entries(METRICS).map(([k, m]) => [k, m.label])), frameworks: out };
+// Production servers (prod.mjs): per label (a framework, or a framework with extra env), the
+// latest series, median of its runs for every number.
+const prodRows = lines("prod.jsonl");
+const prod = {};
+const med = (xs) => stats(xs)?.median ?? null;
+for (const lab of [...new Set(prodRows.map((r) => r.label))]) {
+  const rows = latest(prodRows.filter((r) => r.label === lab));
+  const pick = (f) => med(rows.map(f));
+  const r0 = rows[0];
+  prod[lab] = {
+    framework: r0.framework,
+    label: r0.fwLabel,
+    version: r0.version,
+    env: r0.env,
+    isr: Boolean(r0.isr),
+    pages: r0.pages,
+    islands: r0.islands,
+    runs: rows.length,
+    startMs: pick((r) => r.startMs),
+    idleMB: pick((r) => r.idleMB),
+    peakMB: pick((r) => r.peakMB),
+    ttfbP50: pick((r) => r.latency.ttfbP50),
+    ttfbP99: pick((r) => r.latency.ttfbP99),
+    totalP50: pick((r) => r.latency.totalP50),
+    postRps: pick((r) => r.post.rps),
+    postP99: pick((r) => r.post.p99),
+    homeRps: pick((r) => r.home.rps),
+    homeP99: pick((r) => r.home.p99),
+    postRpsRuns: rows.map((r) => r.post.rps),
+    homeRpsRuns: rows.map((r) => r.home.rps),
+    oha: r0.oha,
+  };
+}
+
+const summary = { measured: measured.slice(0, 10), machine, commits: [...commits], metrics: Object.fromEntries(Object.entries(METRICS).map(([k, m]) => [k, m.label])), frameworks: out, prod };
 writeFileSync(path.join(R, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
 
 // Markdown: one table per metric, a column per scale.
@@ -144,6 +178,21 @@ for (const f of Object.values(out)) {
     if (p || i) md.push(`| ${f.label} | ${METRICS[key].label} | ${p?.fixedMs ?? "—"} | ${p?.perPageMs ?? "—"} | ${i?.perIslandMs ?? "—"} |`);
   }
   if (f.fits.islands.homeJs) md.push(`| ${f.label} | JS on \`/\` per island (KB gzip) | | | ${f.fits.islands.homeJs.perIslandKB} |`);
+}
+if (Object.keys(prod).length) {
+  const p0 = Object.values(prod)[0];
+  md.push(
+    "",
+    `### Production servers — ${p0.pages} pages × ${p0.islands} island, rendered per request unless noted, median of runs`,
+    "",
+    "| server | start (ms) | idle RSS (MB) | peak RSS (MB) | TTFB p50 / p99 (ms, 1 conn) | post pages req/s (p99 ms, 50 conns) | `/` req/s (p99 ms, 50 conns) |",
+    "|---|---|---|---|---|---|---|",
+  );
+  for (const p of Object.values(prod)) {
+    const notes = [...Object.entries(p.env ?? {}).map(([k, v]) => `${k}=${v}`), ...(p.isr ? ["ISR on post pages, 60 s"] : [])];
+    const name = `${p.label} ${p.version}${notes.length ? ` (${notes.join(", ")})` : ""}`;
+    md.push(`| ${name} | ${p.startMs} | ${p.idleMB} | ${p.peakMB} | ${p.ttfbP50} / ${p.ttfbP99} | ${p.postRps} (${p.postP99}) | ${p.homeRps} (${p.homeP99}) |`);
+  }
 }
 writeFileSync(path.join(R, "summary.md"), `${md.join("\n")}\n`);
 console.log(md.join("\n"));

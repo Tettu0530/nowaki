@@ -9,7 +9,9 @@
 // Data is read on the server only (loader / frontmatter / server load / server component / server API).
 // The home page and post pages carry a marker the dev metrics wait for.
 //
-// opts: { pages, islands, mode }  mode: "static" (every page prerendered) | "server" (rendered per request)
+// opts: { pages, islands, mode, isr }  mode: "static" (every page prerendered) | "server" (rendered per request)
+//   isr (server mode, Nowaki / Next.js / Nuxt): post pages cached and revalidated every 60 s
+//       (Nowaki and Next.js `revalidate = 60`; Nuxt `swr: 60`, its cache for a self-hosted server)
 
 import { postsModule } from "./content.mjs";
 
@@ -37,7 +39,7 @@ export default function Island${pad(k)}({ start = 0 }: { start?: number }) {
 `;
 
 // ---------------------------------------------------------------- Nowaki
-function nowaki({ pages, islands }) {
+function nowaki({ pages, islands, isr }) {
   const f = {};
   f["lib/posts.ts"] = postsModule(pages, true);
   f["routes/_layout.tsx"] = `export default function RootLayout({ children }: { children: unknown }) {
@@ -123,7 +125,7 @@ type Ctx = { params: { slug: string } };
 export const title = "Post — Nowaki";
 
 export const staticPaths = () => posts.map((p) => ({ slug: p.slug }));
-
+${isr ? "\nexport const revalidate = 60;\n" : ""}
 export const loader = (ctx: Ctx) => {
   const post = posts.find((p) => p.slug === ctx.params.slug);
   if (!post) return { post: null, html: "" };
@@ -430,7 +432,7 @@ export function load({ params }) {
 }
 
 // ---------------------------------------------------------------- Next.js (App Router, React 19)
-function next({ pages, islands, mode }) {
+function next({ pages, islands, mode, isr }) {
   const f = {};
   const server = mode === "server";
   const dynamic = server ? `\nexport const dynamic = "force-dynamic";\n` : "";
@@ -549,7 +551,9 @@ import { posts } from "../../../lib/posts";
 export const metadata = { title: "Post — Next" };
 ${
   server
-    ? dynamic
+    ? isr
+      ? "\nexport const revalidate = 60;\n\n// No paths at build time: each post is rendered on its first request, then cached.\nexport function generateStaticParams() {\n  return [];\n}\n"
+      : dynamic
     : `
 export const dynamicParams = false;
 
@@ -594,12 +598,12 @@ export default function Island${pad(k)}({ start = 0 }: { start?: number }) {
 }
 
 // ---------------------------------------------------------------- Nuxt (Vue 3, data through server/api + useFetch)
-function nuxt({ pages, islands, mode }) {
+function nuxt({ pages, islands, mode, isr }) {
   const f = {};
   f["nuxt.config.ts"] = `export default defineNuxtConfig({
   compatibilityDate: "2026-11-01",
   devtools: { enabled: false },
-  telemetry: false,${mode === "static" ? `\n  nitro: { prerender: { crawlLinks: true, routes: ["/"] } },` : ""}
+  telemetry: false,${mode === "static" ? `\n  nitro: { prerender: { crawlLinks: true, routes: ["/"] } },` : ""}${isr ? `\n  routeRules: { "/posts/**": { swr: 60 } },` : ""}
 });
 `;
   f["tsconfig.json"] = `{ "files": [], "references": [{ "path": "./.nuxt/tsconfig.app.json" }, { "path": "./.nuxt/tsconfig.server.json" }, { "path": "./.nuxt/tsconfig.shared.json" }, { "path": "./.nuxt/tsconfig.node.json" }] }\n`;

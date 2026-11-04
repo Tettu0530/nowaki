@@ -72,7 +72,38 @@ islands.
 
 Not compared here: Jetstream (it has no counterpart in the other frameworks, and runs live only
 under `nowaki dev` / `nowaki start`), image optimization (each framework's image pipeline would
-dominate build time), HMR, production throughput and Web Vitals. Those are the next steps.
+dominate build time), HMR and Web Vitals.
+
+## Production servers
+
+`prod.mjs` builds the server mode at 100 pages and starts each framework's own Node server:
+`nowaki start`, `@astrojs/node` standalone, SvelteKit `adapter-node`, `next start`, Nuxt's
+`.output/server/index.mjs`, all with `NODE_ENV=production`, one process each (no clustering).
+Each of 5 runs starts the server fresh, warms it up for 3 s at the measured load, then records:
+
+| metric | definition |
+|---|---|
+| start | spawn → `GET /` returns 200 with the home marker |
+| TTFB / total | 300 sequential GETs over one keep-alive connection, cycling through 90 posts; headers received / body received, p50 and p99 |
+| req/s | `oha` with 50 connections for 10 s: post pages (90 URLs from a file, one picked per request) and `/` separately; successful responses per second. Any error other than requests cut off at the deadline fails the run |
+| idle / peak RSS | the server's whole process tree, after the warm-up / sampled every 100 ms during the post-page load |
+
+Pages are rendered per request: nothing is cached. `--isr` instead runs the post pages under the
+framework's own ISR, revalidated every 60 s: `export const revalidate = 60` in Nowaki and Next.js
+(Next.js also needs `generateStaticParams` returning `[]`, or the route stays dynamic), and
+`routeRules: { "/posts/**": { swr: 60 } }` in Nuxt (its `isr` rule targets hosting providers).
+The harness checked each one serves from cache (`x-nowaki-cache: HIT`, `x-nextjs-cache: HIT`, a
+stable `last-modified` in Nuxt). Astro and SvelteKit have no built-in ISR and run without it.
+
+Notes:
+- Nowaki's Rust binary is started directly. The npm `nowaki` command is a Node shim that
+  `spawnSync`s the binary and stays resident (about 45 MB); no other framework has such a
+  launcher, but an app started with `npx nowaki start` pays it.
+- `nowaki start` proxies each uncached request from its Rust front to the Node renderer over
+  loopback HTTP, and reads the whole response before sending it on, so uncached pages make two HTTP
+  hops where the other servers make one. ISR hits are served by the Rust front alone.
+- The load generator runs on the same machine. Above roughly 100k req/s (Nowaki's ISR hits) the
+  number is likely bounded by `oha` and the loopback, not the server.
 
 ## Rules
 
@@ -112,6 +143,11 @@ node benchmarks/compare/run.mjs nowaki --pages 100 --islands 1 --runs 10
 # the whole matrix (about 1.5 h on an M2), then the tables
 caffeinate -i node benchmarks/compare/sweep.mjs
 node benchmarks/compare/summarize.mjs   # writes results/summary.json and results/summary.md
+
+# production servers (needs oha: brew install oha), one framework at a time
+for fw in nowaki astro sveltekit next nuxt; do node benchmarks/compare/prod.mjs $fw --runs 5; done
+for fw in nowaki next nuxt; do node benchmarks/compare/prod.mjs $fw --runs 5 --isr; done
+node benchmarks/compare/prod.mjs nowaki --runs 5 --label nowaki+csp --env NOWAKI_CSP=enforce
 ```
 
 `gen.mjs` can also be run on its own to read the generated code:
