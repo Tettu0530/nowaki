@@ -2,6 +2,7 @@
 # CI: Deploy adapters — self-contained node entry + static + streaming SSR
 # Run from the repo root after `cargo build -p nowaki` and `pnpm install`.
 set -e
+trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 cd "$(dirname "$0")/../.."
 
 # node adapter: build emits a self-contained server entry runnable WITHOUT the nowaki binary
