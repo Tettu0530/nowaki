@@ -36,6 +36,63 @@ async function serverFnEntries(version) {
   return entries;
 }
 
+// Errors go to the dev server's MCP log (`recent_errors`) as a stdout line carrying the same
+// per-process token as publish(), so app log output can't add entries.
+function reportError(source, err, urlPath) {
+  const token = process.env.NOWAKI_PUBLISH_TOKEN;
+  if (!token) return;
+  const entry = {
+    source,
+    message: String(err?.message ?? err),
+    stack: err?.stack ? String(err.stack) : undefined,
+    path: urlPath,
+  };
+  process.stdout.write(`NOWAKI_DEV_ERROR ${token} ${JSON.stringify(entry)}\n`);
+}
+
+const rel = (file) => path.relative(appRoot, file).split(path.sep).join("/");
+
+function routePattern(segments) {
+  if (segments.length === 0) return "/";
+  return "/" + segments.map((s) => s.lit ?? (s.rest ? `[...${s.param}]` : `[${s.param}]`)).join("/");
+}
+
+// For the dev MCP `routes` / `module_graph` tools: the route table and island registry the
+// renderer uses, plus each route module's exports (imported the same way a request would).
+async function devInfo(version) {
+  const table = await scanRoutes(appRoot);
+  const routes = [];
+  for (const r of table.routes) {
+    const route = { pattern: routePattern(r.segments), file: rel(r.file), kind: r.isApi ? "api" : "page" };
+    try {
+      const mod = await env.importModule(r.file, version);
+      route.exports = Object.keys(mod).sort();
+      if (mod.revalidate !== undefined) route.revalidate = mod.revalidate;
+      if (mod.csrf !== undefined) route.csrf = mod.csrf;
+    } catch (err) {
+      route.loadError = String(err?.message ?? err);
+    }
+    routes.push(route);
+  }
+  const scoped = (kind, list) => list.map((e) => ({ kind, prefix: e.prefix || "/", file: rel(e.file) }));
+  const conventions = [
+    ...scoped("layout", table.layouts),
+    ...scoped("middleware", table.middleware),
+    ...scoped("loading", table.loadingBoundaries),
+    ...scoped("error-boundary", table.errorBoundaries),
+  ];
+  if (table.notFound) conventions.push({ kind: "not-found", file: rel(table.notFound) });
+  if (table.errorRoute) conventions.push({ kind: "error-page", file: rel(table.errorRoute) });
+  let islands;
+  try {
+    const reg = await loadIslandRegistry(appRoot, version);
+    islands = [...reg.values()].map((e) => ({ name: e.name, file: e.src.slice(1), live: Boolean(e.live) }));
+  } catch (err) {
+    islands = { loadError: String(err?.message ?? err) };
+  }
+  return { routes, conventions, islands };
+}
+
 const env = {
   dev: true,
   // dev rescans on every request (picks up file changes)
@@ -60,6 +117,7 @@ const env = {
   },
   renderDocument,
   renderShell,
+  onError: (err, ctx) => reportError("ssr", err, ctx?.url?.pathname),
   renderError: (err) => {
     console.error("[nowaki ssr]", err);
     return {
@@ -71,6 +129,18 @@ const env = {
 };
 
 const server = createServer(async (req, res) => {
+  if (req.method === "GET" && req.url.split("?")[0] === "/__nowaki/dev-info") {
+    try {
+      const version = new URL(req.url, "http://localhost").searchParams.get("v") ?? "0";
+      const info = await devInfo(version);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(info));
+    } catch (err) {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: String(err?.stack ?? err) }));
+    }
+    return;
+  }
   if (req.method === "POST" && req.url.split("?")[0] === "/__nowaki/live-render") {
     try {
       const chunks = [];
@@ -102,6 +172,7 @@ const server = createServer(async (req, res) => {
         return;
       }
       console.error("[nowaki live]", err);
+      reportError("live", err);
       res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: String(err?.stack ?? err) }));
     }
@@ -119,6 +190,7 @@ const server = createServer(async (req, res) => {
     await sendResult(res, result);
   } catch (err) {
     console.error("[nowaki ssr]", err);
+    reportError("ssr", err, req.url.split("?")[0]);
     res.writeHead(500, { "content-type": "text/html; charset=utf-8" });
     res.end(errorPage(String(err?.stack ?? err)));
   }

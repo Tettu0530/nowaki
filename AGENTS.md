@@ -124,8 +124,14 @@ code locations and CI coverage.
   host from the upgrade; `live.authorize` runs after the signature check and
   before the handler. Keep both orders.
 - **Internal sidecar endpoints stay internal.** Anything the sidecar trusts
-  without checks (today `/__nowaki/live-render`) must be listed in
-  `forward::is_internal_path`, so dev/start return 404 instead of proxying it.
+  without checks (today `/__nowaki/live-render` and the dev-only
+  `/__nowaki/dev-info`) must be listed in `forward::is_internal_path`, so
+  dev/start return 404 instead of proxying it.
+- **The dev MCP stays loopback-only and dev-only.** `/__nowaki/mcp`
+  (`crates/nowaki/src/mcp.rs`) answers only a loopback peer with a loopback
+  `Host` and `Origin`, also under `--host`; only `nowaki dev` mounts it. Keep
+  its tools read-only. Dev errors reach its log from the sidecar through a
+  stdout line carrying `NOWAKI_PUBLISH_TOKEN`, like `publish()`.
 - **`publish()` has no network endpoint.** The sidecar reaches the Rust hub only
   through its stdout with `NOWAKI_PUBLISH_TOKEN`; keep it that way, and keep the
   topic caps in `live.rs` and `live.mjs` in step.
@@ -155,6 +161,11 @@ code locations and CI coverage.
   cover the behavior, and update the defenses table in SECURITY.md.
 
 ## Feature map (where things live)
+
+- **Dev MCP (`/__nowaki/mcp`)** — `crates/nowaki/src/mcp.rs` (JSON-RPC over
+  Streamable HTTP, tools, error ring buffer); route table + island registry from
+  the dev sidecar's `/__nowaki/dev-info` (`server/sidecar.mjs`); imports /
+  importers from `crates/nowaki-core/src/graph.rs`. E2E: `scripts/mcp-e2e.mjs`.
 
 - **Server functions (`"use server"`)** — `crates/nowaki-core/src/server_fn.rs`
   (detect, id, client proxy, discover) + `packages/nowaki-runtime/server/functions.mjs`

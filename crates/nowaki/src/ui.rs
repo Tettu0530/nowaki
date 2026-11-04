@@ -142,7 +142,8 @@ pub fn build_summary(
     println!();
 }
 
-/// Prints the LAN URL only when `show_network` is set.
+/// Prints the LAN URL only when `show_network` is set. `mcp` is `nowaki dev`'s MCP endpoint, shown
+/// with the command that registers it with Claude Code.
 pub fn server_banner(
     label: &str,
     version: &str,
@@ -150,6 +151,7 @@ pub fn server_banner(
     ready_ms: u128,
     features: &[&str],
     show_network: bool,
+    mcp: Option<&str>,
 ) {
     println!();
     println!("  {} {}", bold(&cyan(label)), dim(&format!("v{version}")));
@@ -175,6 +177,13 @@ pub fn server_banner(
             dim("➜"),
             dim("Network:"),
             dim("use --host to expose"),
+        );
+    }
+    if let Some(url) = mcp {
+        println!("  {}  {}      {}", green("➜"), bold("MCP:"), cyan(url));
+        println!(
+            "               {}",
+            dim(&format!("claude mcp add --transport http nowaki {url}"))
         );
     }
     // "ready in" is also the marker the benchmarks (bench.mjs / head-to-head.mjs) wait for.

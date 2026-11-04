@@ -179,6 +179,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         started.elapsed().as_millis(),
         &["Rust front", "Node renderer"],
         expose || host == "0.0.0.0",
+        None,
     );
     // The sidecar lives outside the shared state (request tasks hold that), so it is killed here on shutdown.
     tokio::select! {

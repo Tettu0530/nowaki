@@ -29,7 +29,7 @@ pub fn parse_mode(v: &str) -> Mode {
     }
 }
 
-fn mode() -> Mode {
+pub(crate) fn mode() -> Mode {
     static MODE: OnceLock<Mode> = OnceLock::new();
     *MODE.get_or_init(|| {
         std::env::var("NOWAKI_CSP")

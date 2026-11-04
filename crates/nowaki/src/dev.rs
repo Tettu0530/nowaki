@@ -19,16 +19,20 @@ use tokio::sync::broadcast;
 use crate::sidecar;
 
 pub struct DevState {
-    core: NowakiCore,
+    pub(crate) core: NowakiCore,
     hmr_tx: broadcast::Sender<String>,
-    ssr_version: AtomicU64,
-    sidecar_port: u16,
-    http: reqwest::Client,
-    live_hub: Arc<crate::live::LiveHub>,
+    pub(crate) ssr_version: AtomicU64,
+    pub(crate) sidecar_port: u16,
+    pub(crate) http: reqwest::Client,
+    pub(crate) live_hub: Arc<crate::live::LiveHub>,
+    /// Recent build / SSR / live / HMR errors for the MCP `recent_errors` tool.
+    pub(crate) errors: Arc<crate::mcp::ErrorLog>,
+    pub(crate) port: u16,
+    pub(crate) plugins: bool,
     /// Roots /@fs/ may serve from (canonical paths). Anything else is rejected.
     fs_allow: Vec<PathBuf>,
     /// Whether --host exposes all interfaces. Used for WS Origin/Host checks.
-    expose: bool,
+    pub(crate) expose: bool,
 }
 
 pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<()> {
@@ -37,7 +41,8 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
     crate::typegen::write(&root).ok();
 
     let live_hub = crate::live::LiveHub::new();
-    let sidecar = sidecar::spawn(&root, port, live_hub.clone()).await?;
+    let errors = crate::mcp::ErrorLog::new(&root);
+    let sidecar = sidecar::spawn(&root, port, live_hub.clone(), errors.clone()).await?;
 
     let plugin_host = crate::plugins::start(&root)?;
     let mut core = NowakiCore::new(root.clone());
@@ -57,6 +62,9 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
             .build()
             .expect("failed to build reqwest client"),
         live_hub,
+        errors,
+        port,
+        plugins: plugin_host.is_some(),
         fs_allow: compute_fs_allow(&root),
         expose,
     });
@@ -69,6 +77,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         .route("/__nowaki/server-functions", get(server_functions))
         .route("/__nowaki/ssr-module", get(ssr_module))
         .route("/@fs/{*path}", get(serve_fs))
+        .route(crate::mcp::PATH, axum::routing::any(crate::mcp::handle))
         .fallback(serve_or_proxy)
         .with_state(state)
         .layer(axum::middleware::from_fn(crate::csp::layer))
@@ -88,6 +97,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         started.elapsed().as_millis(),
         &features,
         expose,
+        Some(&crate::mcp::url(port)),
     );
 
     if open {
@@ -96,7 +106,10 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
 
     // Don't wait for open HMR/live sockets on shutdown; just stop serving and drop the children.
     tokio::select! {
-        r = std::future::IntoFuture::into_future(axum::serve(listener, app)) => r?,
+        r = std::future::IntoFuture::into_future(axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )) => r?,
         _ = crate::shutdown::signal() => {}
     }
     drop(plugin_host);
@@ -109,7 +122,13 @@ fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::Recommende
     let root_owned = root.to_path_buf();
     let last_fire = Mutex::new(Instant::now() - Duration::from_secs(1));
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        let Ok(event) = res else { return };
+        let event = match res {
+            Ok(event) => event,
+            Err(e) => {
+                state.errors.record("hmr", &e.to_string(), None, None, None);
+                return;
+            }
+        };
         if !matches!(
             event.kind,
             EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
@@ -347,6 +366,7 @@ async fn serve_file(state: Arc<DevState>, abs: PathBuf) -> Response {
 async fn transform_response(state: Arc<DevState>, abs: PathBuf, mode: Mode) -> Response {
     // oxc transforms are CPU-bound, so run them on the blocking pool
     let core_state = state.clone();
+    let file = abs.clone();
     let result = tokio::task::spawn_blocking(move || core_state.core.load_module(&abs, mode)).await;
     match result {
         Ok(Ok(code)) => (
@@ -360,6 +380,7 @@ async fn transform_response(state: Arc<DevState>, abs: PathBuf, mode: Mode) -> R
         Ok(Err(err)) => {
             let msg = format!("{err:#}");
             eprintln!("[nowaki] transform error: {msg}");
+            state.errors.record("build", &msg, Some(&file), None, None);
             // Diagnostics may contain the full source, so keep them out of the HTTP body and send them only to the same-origin HMR overlay.
             let _ = state
                 .hmr_tx
@@ -459,7 +480,7 @@ fn workspace_root(root: &Path) -> Option<PathBuf> {
 }
 
 /// Sensitive paths refused even under allowed roots (inside `.git`, `.env*`, private keys).
-fn is_denied_fs_path(p: &Path) -> bool {
+pub(crate) fn is_denied_fs_path(p: &Path) -> bool {
     p.components().any(|c| {
         let s = c.as_os_str().to_string_lossy();
         s == ".git" || s == ".env" || s.starts_with(".env.")
@@ -470,7 +491,7 @@ fn fs_path_allowed(canon: &Path, allow: &[PathBuf]) -> bool {
     !is_denied_fs_path(canon) && allow.iter().any(|root| canon.starts_with(root))
 }
 
-fn is_loopback_host(host: &str) -> bool {
+pub(crate) fn is_loopback_host(host: &str) -> bool {
     let h = if let Some(rest) = host.strip_prefix('[') {
         rest.split(']').next().unwrap_or(rest)
     } else if host.matches(':').count() >= 2 {
