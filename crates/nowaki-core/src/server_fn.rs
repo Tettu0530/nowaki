@@ -13,7 +13,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use oxc::allocator::Allocator;
-use oxc::ast::ast::{Declaration, ModuleExportName, Statement};
+use oxc::ast::ast::{Declaration, Expression, ModuleExportName, Statement};
 use xxhash_rust::xxh3::xxh3_64;
 
 /// RPC endpoint the client calls in a single request.
@@ -132,6 +132,66 @@ pub fn collect_exports(abs: &Path, source: &str) -> Result<Vec<String>> {
     Ok(out)
 }
 
+/// Exports that take arguments without validating them: a function (declaration, arrow, or
+/// expression, default export included) with at least one parameter, or a `const` initialized
+/// with anything but `serverFn(schema, impl)`. `export { a }` lists are not inspected.
+pub fn unvalidated_exports(abs: &Path, source: &str) -> Result<Vec<String>> {
+    let allocator = Allocator::default();
+    let program = crate::transform::parse_program(
+        &allocator,
+        abs,
+        source,
+        crate::transform::source_type_for_path(abs),
+    )?;
+    let mut out = Vec::new();
+    for stmt in &program.body {
+        match stmt {
+            Statement::ExportNamedDeclaration(d) => match &d.declaration {
+                Some(Declaration::FunctionDeclaration(f)) if !f.params.is_empty() => {
+                    if let Some(id) = &f.id {
+                        out.push(id.name.to_string());
+                    }
+                }
+                Some(Declaration::VariableDeclaration(v)) => {
+                    for decl in &v.declarations {
+                        let takes_input = match &decl.init {
+                            Some(Expression::CallExpression(c)) => !matches!(
+                                &c.callee,
+                                Expression::Identifier(id) if id.name == "serverFn"
+                            ),
+                            Some(Expression::ArrowFunctionExpression(f)) => !f.params.is_empty(),
+                            Some(Expression::FunctionExpression(f)) => !f.params.is_empty(),
+                            _ => false,
+                        };
+                        if let (true, Some(b)) = (takes_input, decl.id.get_binding_identifier()) {
+                            out.push(b.name.to_string());
+                        }
+                    }
+                }
+                _ => {}
+            },
+            Statement::ExportDefaultDeclaration(d) => {
+                use oxc::ast::ast::ExportDefaultDeclarationKind as K;
+                let takes_input = match &d.declaration {
+                    K::FunctionDeclaration(f) => !f.params.is_empty(),
+                    K::ArrowFunctionExpression(f) => !f.params.is_empty(),
+                    K::FunctionExpression(f) => !f.params.is_empty(),
+                    K::CallExpression(c) => !matches!(
+                        &c.callee,
+                        Expression::Identifier(id) if id.name == "serverFn"
+                    ),
+                    _ => false,
+                };
+                if takes_input {
+                    out.push("default".to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
 /// Generates the client proxy source for a server module (a dependency-free leaf).
 /// Each export is an async function that does `fetch(SERVER_FN_PATH)`. The implementation never reaches the client.
 pub fn client_proxy(module_key: &str, exports: &[String]) -> String {
@@ -151,7 +211,7 @@ const fn = async (...args) => {{\n    \
 const res = await fetch({path:?}, {{ method: \"POST\", headers: {{ \"content-type\": \"application/json\", \"x-nowaki-rpc\": \"1\" }}, body: JSON.stringify({{ id, args: args.map(__nowakiArg) }}) }});\n    \
 let data = null;\n    \
 try {{ data = await res.json(); }} catch {{}}\n    \
-if (!res.ok) throw new Error((data && data.error) || (\"server function failed: \" + res.status));\n    \
+if (!res.ok) {{ const e = new Error((data && data.error) || (\"server function failed: \" + res.status)); e.status = res.status; if (data && data.data !== undefined) e.data = data.data; throw e; }}\n    \
 return data ? data.result : null;\n  \
 }};\n  \
 fn.toString = () => \"__nowaki_action:\" + id;\n  \
@@ -179,6 +239,8 @@ pub struct DiscoveredFn {
     /// moduleKey without extension
     pub module_key: String,
     pub export: String,
+    /// Takes arguments without `serverFn(schema, impl)` validation (see `unvalidated_exports`).
+    pub unvalidated: bool,
 }
 
 /// Scans the given directories (root-relative names) and collects every server function.
@@ -208,12 +270,15 @@ pub fn discover(core: &crate::NowakiCore, dirs: &[&str]) -> Vec<DiscoveredFn> {
             let Ok(exports) = collect_exports(&abs, &src) else {
                 continue;
             };
+            let unvalidated = unvalidated_exports(&abs, &src).unwrap_or_default();
             for ex in exports {
+                let is_unvalidated = unvalidated.contains(&ex);
                 out.push(DiscoveredFn {
                     id: server_fn_id(&key, &ex),
                     source_rel: rel.clone(),
                     module_key: key.clone(),
                     export: ex,
+                    unvalidated: is_unvalidated,
                 });
             }
         }
@@ -268,6 +333,21 @@ fn decl_bound_names(decl: &Declaration) -> Vec<String> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn unvalidated_exports_take_input_without_server_fn() {
+        let src = "\"use server\";\nimport { serverFn } from \"@nowaki-dev/runtime\";\n\
+            export const a = serverFn(s, async (x) => x);\n\
+            export const b = async (x) => x;\n\
+            export const c = async () => 1;\n\
+            export async function d(x) {}\n\
+            export async function e() {}\n\
+            export const f = wrap(async (x) => x);\n\
+            export default async function (x) {}\n";
+        let mut v = unvalidated_exports(&PathBuf::from("actions/x.ts"), src).unwrap();
+        v.sort();
+        assert_eq!(v, vec!["b", "d", "default", "f"]);
+    }
 
     #[test]
     fn detects_use_server_directive() {

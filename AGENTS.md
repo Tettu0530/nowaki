@@ -101,6 +101,10 @@ code locations and CI coverage.
 - **Do not weaken default CSRF / CSWSH gates** without an explicit opt-in API and
   ROADMAP/SECURITY updates: JSON + `x-nowaki-rpc` + Origin/Host for RPC;
   Origin checks on `/__nowaki/live` and `/__nowaki/hmr` upgrades.
+- **Server function errors stay generic in production.** Only a `ServerFnError`'s
+  status, message, and `data` reach the client; anything else is logged and sent
+  as "Internal Server Error" (dev keeps the message). Keep the body / argument
+  limits in `functions.mjs` ahead of parsing and dispatch.
 - **Sidecar requests go through `forward::apply`** (`crates/nowaki/src/forward.rs`).
   Clients never set `x-forwarded-*` or internal `x-nowaki-*` headers on the
   sidecar hop unless `NOWAKI_TRUST_PROXY` is set; new client-facing `x-nowaki-*`

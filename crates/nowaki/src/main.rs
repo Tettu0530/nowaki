@@ -135,6 +135,21 @@ fn main() -> anyhow::Result<()> {
                 report.asset_in,
                 report.asset_out,
             );
+            let unvalidated: Vec<String> = nowaki_core::server_fn::discover(
+                &core,
+                &["routes", "islands", "components", "lib", "actions"],
+            )
+            .into_iter()
+            .filter(|f| f.unvalidated)
+            .map(|f| format!("{}#{}", f.source_rel, f.export))
+            .collect();
+            if !unvalidated.is_empty() {
+                eprintln!(
+                    "[nowaki] warning: {} server function(s) take unvalidated input: {}. Wrap them with serverFn(schema, impl) (any Standard Schema library).",
+                    unvalidated.len(),
+                    unvalidated.join(", ")
+                );
+            }
             match adapter {
                 Adapter::Cloudflare => adapter::emit_cloudflare(&root, &dist)?,
                 Adapter::Vercel => adapter::emit_vercel(&root, &dist)?,
