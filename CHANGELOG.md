@@ -56,6 +56,12 @@ milestone's worth of work; the codename is noted per entry.
   `x-nowaki-live: 1`, cross-site requests rejected) and a 64 KiB body cap.
 
 ### Changed
+- **Smaller client JS:** the build mangled names but never printed them, so
+  client chunks kept their full local names. They are now mangled, annotation
+  comments (`/* @__PURE__ */`) are dropped (legal comments stay), and an island
+  chunk imports each shared chunk in one statement. On the counter benchmark,
+  first-load JS goes from 9.29 to 8.69 KB gzip and the idle-loaded router from
+  4.05 to 2.77 KB.
 - **Faster `nowaki prerender`:** the temporary prod server and the
   `staticPaths` evaluation (two Node processes) now start together instead of
   one after the other, and up to 8 pages are requested at once (results are
@@ -64,6 +70,10 @@ milestone's worth of work; the codename is noted per entry.
   the output is unchanged.
 
 ### Fixed
+- **Builds are reproducible:** an island that hoists several app modules (for
+  example two modules in an import cycle) got a different chunk, hash and
+  manifest from one build to the next, because the modules' order followed
+  hash-set iteration. They are now ordered by path.
 - **Security:** `nowaki dev` / `nowaki start` no longer proxy
   `/__nowaki/live-render` (404). That endpoint is the sidecar's internal
   re-render call from `live.rs`, and it trusts its body; reached through the
