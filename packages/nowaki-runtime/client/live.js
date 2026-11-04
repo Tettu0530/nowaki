@@ -68,10 +68,12 @@ function connect() {
         const el = document.querySelector(`nowaki-live[nid="${cssEscape(msg.nid)}"]`);
         if (el) apply(el, msg);
       } else if (msg.type === "presence") {
+        // data-nowaki-presence="" shows everyone connected; ="<room>" shows that room (live.room).
+        const want = typeof msg.room === "string" ? msg.room : "";
         for (const el of document.querySelectorAll("[data-nowaki-presence]")) {
-          el.textContent = String(msg.count);
+          if (el.getAttribute("data-nowaki-presence") === want) el.textContent = String(msg.count);
         }
-        window.dispatchEvent(new CustomEvent("nowaki:presence", { detail: { count: msg.count } }));
+        window.dispatchEvent(new CustomEvent("nowaki:presence", { detail: { count: msg.count, room: msg.room } }));
       } else if (msg.type === "error" && msg.reason === "at capacity") {
         // Limit reached: the server closed the connection. Degrade to the initial SSR (still tries to reconnect).
         console.warn("[nowaki live] server at capacity; staying on the initial SSR view");

@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { h, options } from "preact";
 
 import { wrapIsland } from "./island-directive.mjs";
-import { liveInitialState, liveTopics } from "./live.mjs";
+import { liveInitialState, liveTopics, liveView } from "./live.mjs";
 import { liveProps } from "./live-sign.mjs";
 import { pageMeta } from "./document.mjs";
 
@@ -63,7 +63,7 @@ options.vnode = (vnode) => {
         return h(
           "nowaki-live",
           liveProps(island.name, nid, state, liveTopics(island.mod, state)),
-          h(Original, { state, __nowakiLiveInner: true }),
+          h(Original, { state: liveView(island.mod, state), __nowakiLiveInner: true }),
         );
       };
     } else {

@@ -126,6 +126,26 @@ try {
   check("the focused input keeps what was typed",
     (await cdp.evalAsync("return document.querySelector('[data-testid=todo-filter]').value;")) === "br");
 
+  // Rooms (WebSocket only: POST has no push or presence): two tabs on /poll share the votes.
+  if (EXPECT === "ws") {
+    await cdp.send("Page.navigate", { url: BASE + "/poll" });
+    const second = await (await fetch(`http://127.0.0.1:${PORT}/json/new?${BASE}/poll`, { method: "PUT" })).json();
+    const tab2 = new CDP(second.webSocketDebuggerUrl);
+    await tab2.ready;
+    await tab2.send("Runtime.enable");
+    await sleep(1500);
+    const votes = (c) => c.evalAsync("return document.querySelector('[data-testid=votes]')?.textContent ?? null;");
+    const here = (c) => c.evalAsync("return document.querySelector('[data-nowaki-presence=\"poll:demo\"]')?.textContent ?? null;");
+    check(`room presence shows both tabs (${await here(cdp)}, ${await here(tab2)})`, (await here(cdp)) === "2" && (await here(tab2)) === "2");
+    const before = await votes(tab2);
+    await cdp.evalAsync("document.querySelector('nowaki-live [data-live=vote][value=a]').click(); return true;");
+    await sleep(800);
+    const after = await votes(tab2);
+    const a = (t) => Number(/a:\s*(\d+)/.exec(t ?? "")?.[1]);
+    check(`a vote in one tab shows up in the other (${before} → ${after})`, a(after) === a(before) + 1);
+    await tab2.send("Page.close").catch(() => {});
+  }
+
   console.log(`\n${failures === 0 ? "LIVE BROWSER TEST PASSED" : `LIVE BROWSER TEST FAILED (${failures})`}`);
 } catch (err) {
   console.error("harness error:", err);

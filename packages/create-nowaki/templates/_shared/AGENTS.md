@@ -109,7 +109,10 @@ nowaki.config.mjs   plugins (optional)
    `data-live-input` (debounced; `data-live-debounce="ms"`) or `data-live-change`;
    give list rows `data-key`. Read the request with `getContext()` and guard
    events with `live.authorize`; `live.subscribe` + `live.load` + `publish(topic)`
-   push server-side changes.
+   push server-side changes. `live.room(props)` + `live.shared()` share one state
+   between everyone in a room (`data-nowaki-presence="<room>"` shows who's there).
+   Rooms, `publish`, and presence live in one server process (`nowaki start`);
+   on the deploy adapters live islands work per event over POST, without push.
 9. **Loading / error UI** (client navigation) — `routes/loading.tsx` renders
    while a navigation is in flight; `routes/error.tsx` (props `{ error, reset }`,
    type `ErrorPageProps`) renders if it fails. Both nest by directory. In

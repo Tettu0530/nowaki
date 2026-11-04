@@ -154,6 +154,9 @@ pub struct LiveHub {
     presence: broadcast::Sender<usize>,
     /// `publish(topic)` from the sidecar, fanned out to every session in this process.
     topics: broadcast::Sender<String>,
+    /// Connections per room (sessions with an island subscribed to `room:<id>`), and its changes.
+    rooms: std::sync::Mutex<HashMap<String, usize>>,
+    room_presence: broadcast::Sender<(String, usize)>,
 }
 
 impl LiveHub {
@@ -165,11 +168,14 @@ impl LiveHub {
             .unwrap_or(10_000);
         let (presence, _) = broadcast::channel(64);
         let (topics, _) = broadcast::channel(256);
+        let (room_presence, _) = broadcast::channel(256);
         Arc::new(Self {
             active: AtomicUsize::new(0),
             max,
             presence,
             topics,
+            rooms: std::sync::Mutex::new(HashMap::new()),
+            room_presence,
         })
     }
 
@@ -193,6 +199,56 @@ impl LiveHub {
     fn count(&self) -> usize {
         self.active.load(Ordering::SeqCst)
     }
+
+    fn room_enter(&self, room: &str) {
+        let n = {
+            let mut m = self.rooms.lock().unwrap();
+            let c = m.entry(room.to_string()).or_insert(0);
+            *c += 1;
+            *c
+        };
+        let _ = self.room_presence.send((room.to_string(), n));
+    }
+
+    fn room_exit(&self, room: &str) {
+        let n = {
+            let mut m = self.rooms.lock().unwrap();
+            let Some(c) = m.get_mut(room) else { return };
+            *c = c.saturating_sub(1);
+            let n = *c;
+            if n == 0 {
+                m.remove(room);
+            }
+            n
+        };
+        let _ = self.room_presence.send((room.to_string(), n));
+    }
+
+    fn room_count(&self, room: &str) -> usize {
+        self.rooms.lock().unwrap().get(room).copied().unwrap_or(0)
+    }
+}
+
+/// Rooms this session is in: its islands' `room:<id>` topics.
+fn rooms_of(islands: &Islands) -> std::collections::HashSet<String> {
+    islands
+        .values()
+        .flat_map(|(_, _, _, topics)| topics.iter())
+        .filter_map(|t| t.strip_prefix("room:"))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Enter rooms the session joined and leave the ones it no longer has an island in.
+fn sync_rooms(hub: &LiveHub, mine: &mut std::collections::HashSet<String>, islands: &Islands) {
+    let now = rooms_of(islands);
+    for r in mine.difference(&now) {
+        hub.room_exit(r);
+    }
+    for r in now.difference(mine) {
+        hub.room_enter(r);
+    }
+    *mine = now;
 }
 
 /// Upgrade request headers live handlers may read through getContext(). Captured once per
@@ -240,6 +296,8 @@ pub async fn handle(
 
     let mut presence_rx = hub.presence.subscribe();
     let mut topic_rx = hub.topics.subscribe();
+    let mut room_rx = hub.room_presence.subscribe();
+    let mut my_rooms = std::collections::HashSet::new();
     let _ = socket
         .send(Message::Text(
             json!({ "type": "presence", "count": count })
@@ -273,6 +331,7 @@ pub async fn handle(
                             break;
                         }
                     }
+                    sync_rooms(&hub, &mut my_rooms, &islands);
                 }
                 // Ping/Pong/Binary/Close only update last_seen (Close makes recv return None).
             }
@@ -282,6 +341,7 @@ pub async fn handle(
                 if !apply_rendered(&mut socket, &mut islands, r).await {
                     break;
                 }
+                sync_rooms(&hub, &mut my_rooms, &islands);
             }
             t = topic_rx.recv() => {
                 let topic = match t {
@@ -298,6 +358,20 @@ pub async fn handle(
                             payload: Value::Null,
                             load: Some(topic.clone()),
                         });
+                    }
+                }
+            }
+            rp = room_rx.recv() => {
+                let (room, n) = match rp {
+                    Ok(v) => v,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
+                if my_rooms.contains(&room) {
+                    let n = if n == 0 { hub.room_count(&room) } else { n };
+                    let msg = json!({ "type": "presence", "room": room, "count": n });
+                    if socket.send(Message::Text(msg.to_string().into())).await.is_err() {
+                        break;
                     }
                 }
             }
@@ -332,6 +406,9 @@ pub async fn handle(
 
     if let Some(h) = inflight {
         h.abort();
+    }
+    for r in &my_rooms {
+        hub.room_exit(r);
     }
     hub.leave();
 }
@@ -594,5 +671,30 @@ mod tests {
         q.push(refresh).unwrap();
         assert!(q.has_load("L0"));
         assert!(!q.has_load("L1"));
+    }
+
+    #[test]
+    fn room_presence_counts_sessions_per_room() {
+        let hub = LiveHub::new();
+        let mut rx = hub.room_presence.subscribe();
+        let mut islands = Islands::new();
+        islands.insert(
+            "L0".into(),
+            (
+                "Poll".into(),
+                json!({ "room": "p" }),
+                "s".into(),
+                vec!["room:p".into(), "ticks".into()],
+            ),
+        );
+        let (mut a, mut b) = (Default::default(), Default::default());
+        sync_rooms(&hub, &mut a, &islands);
+        sync_rooms(&hub, &mut b, &islands);
+        assert_eq!(hub.room_count("p"), 2);
+        assert_eq!(rx.try_recv().unwrap(), ("p".to_string(), 1));
+        assert_eq!(rx.try_recv().unwrap(), ("p".to_string(), 2));
+        sync_rooms(&hub, &mut b, &Islands::new());
+        assert_eq!(hub.room_count("p"), 1);
+        assert!(!b.contains("p") && a.contains("p"));
     }
 }

@@ -17,6 +17,14 @@ milestone's worth of work; the codename is noted per entry.
   so Worker vars and secrets reach `process.env`.
 
 ### Added
+- **Jetstream rooms:** `live.room(props)` names a room and `live.shared()` is
+  its initial state; every island in the same room shares that state, handlers
+  receive and return it, and a change re-renders every member (on any
+  connection in the process). `data-nowaki-presence="<room>"` shows how many
+  connections are in the room. Rooms are held in the server process's memory
+  (single process, lost on restart); on the deploy adapters a room island
+  renders and handles events, but other members aren't pushed. See `/poll` in
+  `examples/hello` for the two-tab demo.
 - **Jetstream form events:** `data-live-submit="handler"` on a `<form>` sends
   its fields as an object (no navigation); `data-live-input="handler"` sends a
   field's value while typing, debounced by `data-live-debounce` (ms, default

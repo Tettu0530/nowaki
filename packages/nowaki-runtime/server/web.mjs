@@ -39,8 +39,8 @@ function installIslandHook(registry, liveRegistry, live) {
       const Original = vnode.type;
       vnode.type = (props) => {
         const { state: propState, ...rest } = props;
-        const state = propState ?? initialState(mod, rest);
-        const inner = h(Original, { state, __nowakiLiveInner: true });
+        const state = propState ?? (live?.initial ?? initialState)(mod, rest);
+        const inner = h(Original, { state: live?.view ? live.view(mod, state) : state, __nowakiLiveInner: true });
         // Without the signing helpers (an older worker entry) the island stays on its initial SSR.
         return live ? h("nowaki-live", live.props(name, `L${liveCounter++}`, state), inner) : inner;
       };

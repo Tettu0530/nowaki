@@ -69,7 +69,7 @@ for (const [i, name] of (manifest.liveIslands ?? []).entries()) {
 const hasLive = liveImports.length > 0;
 if (hasLive) {
   liveImports.unshift(
-    `import { liveRender } from "@nowaki-dev/runtime/server/live.mjs";`,
+    `import { liveInitialState, liveRender, liveView } from "@nowaki-dev/runtime/server/live.mjs";`,
     `import { liveProps } from "@nowaki-dev/runtime/server/live-sign.mjs";`,
   );
 }
@@ -112,7 +112,7 @@ const handler = createFetchHandler({
   islandComponents,
   liveIslands,
   routeTable,
-  serverFunctions,${hasLive ? "\n  live: { render: liveRender, props: liveProps }," : ""}
+  serverFunctions,${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}
 });
 
 export default {
