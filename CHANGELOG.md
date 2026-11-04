@@ -32,6 +32,9 @@ Packages: `nowaki` / `nowaki-core` 0.14.0 (crates.io, npm), `@nowaki-dev/runtime
   `window.opener` should send its own value (or `NOWAKI_SECURITY_HEADERS=off`).
 
 ### Added
+- **`npm create nowaki` templates:** `.env.example`, a Security section in scaffolded
+  `AGENTS.md`, and (basics template only) `routes/_404.tsx`, `routes/api/health.ts`,
+  and a validated `"use server"` example in `actions/echo.ts`.
 - **Content Security Policy (opt-in):** `NOWAKI_CSP=report-only` or `enforce`
   sends a policy limiting scripts and style elements to `'self'` plus a
   per-response nonce, which Nowaki adds to every `<script>` / `<style>` in HTML
