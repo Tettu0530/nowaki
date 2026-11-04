@@ -126,6 +126,9 @@ code locations and CI coverage.
 - **Internal sidecar endpoints stay internal.** Anything the sidecar trusts
   without checks (today `/__nowaki/live-render`) must be listed in
   `forward::is_internal_path`, so dev/start return 404 instead of proxying it.
+- **`publish()` has no network endpoint.** The sidecar reaches the Rust hub only
+  through its stdout with `NOWAKI_PUBLISH_TOKEN`; keep it that way, and keep the
+  topic caps in `live.rs` and `live.mjs` in step.
 - **Sidecar requests go through `forward::apply`** (`crates/nowaki/src/forward.rs`).
   Clients never set `x-forwarded-*` or internal `x-nowaki-*` headers on the
   sidecar hop unless `NOWAKI_TRUST_PROXY` is set; new client-facing `x-nowaki-*`

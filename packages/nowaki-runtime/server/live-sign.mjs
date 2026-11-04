@@ -69,12 +69,15 @@ export function verify(name, state, sig, { now = nowS() } = {}) {
 }
 
 // Shared by dev (render.mjs) and prod (app.mjs) so neither drifts by forgetting to sign.
-export function liveProps(name, nid, state) {
-  return {
+export function liveProps(name, nid, state, topics) {
+  const props = {
     name,
     nid,
     state: JSON.stringify(state),
     sig: sign(name, state),
     style: "display:contents",
   };
+  // `live.subscribe` topics; the client sends them on join so publish(topic) can find the island.
+  if (topics?.length) props.topics = JSON.stringify(topics);
+  return props;
 }
