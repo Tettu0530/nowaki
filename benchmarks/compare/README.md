@@ -25,7 +25,7 @@ did hydrate.
 
 | app | framework | UI | how data is read |
 |---|---|---|---|
-| `apps/nowaki` | Nowaki 0.15.0 (runtime 0.14.0, the latest on npm) | Preact islands | route `loader` |
+| `apps/nowaki` | Nowaki 0.16.0 (runtime 0.15.0, released together) | Preact islands | route `loader` |
 | `apps/astro` | Astro 7.4.5 | Preact islands (`client:load`) | frontmatter |
 | `apps/sveltekit` | SvelteKit 3.1.1 | Svelte 5 | `+page.server.js` `load` |
 | `apps/next` | Next.js 16.4.5 | React 19 client components | async server components |
