@@ -161,3 +161,38 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
 
     let _ = std::fs::remove_dir_all(root.join("dist"));
 }
+
+#[test]
+fn build_hints_at_islands_that_could_ship_no_js() {
+    let root = example_root();
+    if !deps_installed(&root) {
+        eprintln!("skip: examples/hello deps not installed");
+        return;
+    }
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    let out = Command::new(bin)
+        .arg("build")
+        .arg(&root)
+        .output()
+        .expect("run nowaki build");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("islands/Counter.tsx could be a live island (useState, onClick)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("islands/Badge.tsx has no state or event handlers"),
+        "{stdout}"
+    );
+    // Islands that need the browser get no hint (ClientOnly uses useEffect).
+    assert!(!stdout.contains("islands/ClientOnly.tsx"), "{stdout}");
+
+    let quiet = Command::new(bin)
+        .arg("build")
+        .arg(&root)
+        .env("NOWAKI_HINTS", "0")
+        .output()
+        .expect("run nowaki build");
+    assert!(!String::from_utf8_lossy(&quiet.stdout).contains("could be a live island"));
+}

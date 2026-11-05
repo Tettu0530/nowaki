@@ -6,6 +6,7 @@ pub mod compress;
 pub mod css;
 pub mod env;
 pub mod graph;
+pub mod live_hint;
 pub mod resolve;
 pub mod routes;
 pub mod server_fn;

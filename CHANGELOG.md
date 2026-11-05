@@ -11,6 +11,20 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **Build hints for islands that could ship no JS.** `nowaki build` reads
+  each client island's AST and points out two kinds:
+  - Islands that only keep state (`useState` / `useReducer`) and handle
+    click or form events (`onClick`, `onSubmit`, `onInput`, `onChange`).
+    Rewritten as live islands, they ship no JS, and pages where they are the
+    only client island lose the islands runtime too. The catch is a server
+    round trip per event.
+  - Islands with no state and no event handlers, which would render the same
+    as plain components.
+
+  No hint is given when an island uses other hooks, other events, `ref`,
+  browser globals, or imports anything but preact / React / CSS.
+  `NOWAKI_HINTS=0` hides the hints. In `examples/hello`: Counter,
+  ReactCounter, and TsrxCounter could be live, and Badge needs no island.
 - **`nowaki dev` MCP endpoint:** while `nowaki dev` runs, a coding agent can
   inspect the app over MCP (Streamable HTTP) at
   `http://127.0.0.1:<port>/__nowaki/mcp`. The startup banner prints the URL and
@@ -80,6 +94,14 @@ milestone's worth of work; the codename is noted per entry.
   Measured on `examples/hello`, 50 connections, Apple M2: `/about` on
   `nowaki start` went from 6,056 to 28,752 req/s, and `/api/hello` from
   8,895 to 32,101 req/s. Dev mode is unchanged: it re-imports on every edit.
+
+### Fixed
+- **Live islands are detected from the AST.** The build used to look for
+  the text `export const live`. A comment containing it turned a client
+  island into a live one, which then shipped no JS. `export { x as live }`
+  and `export { live } from "…"` were missed and shipped a client chunk.
+  Now any exported binding named `live` counts, and comments and strings
+  don't.
 
 ## [0.15.0] — 2026-11-04 · "Cyclone" (part 1)
 
