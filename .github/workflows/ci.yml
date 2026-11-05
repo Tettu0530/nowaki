@@ -142,10 +142,19 @@ jobs:
       - name: Typed routes (typegen)
         run: bash scripts/ci/e2e-typegen.sh
       - name: Dev server (SSR, islands, API, routing, security)
+        # Shorter than the job's 30 min: a hang fails this step with its log kept, instead of
+        # the whole job being cancelled without one.
+        timeout-minutes: 12
         run: bash scripts/ci/e2e-dev.sh
       - name: Production build + nowaki start (hoisting, ISR, Jetstream, security)
+        # Shorter than the job's 30 min: a hang fails this step with its log kept, instead of
+        # the whole job being cancelled without one.
+        timeout-minutes: 12
         run: bash scripts/ci/e2e-prod.sh
       - name: Deploy adapters (node, static, cloudflare, vercel)
+        # Shorter than the job's 30 min: a hang fails this step with its log kept, instead of
+        # the whole job being cancelled without one.
+        timeout-minutes: 12
         run: bash scripts/ci/e2e-adapters.sh
 
   browser:

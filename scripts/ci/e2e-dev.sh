@@ -4,6 +4,10 @@
 set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 cd "$(dirname "$0")/../.."
+# A request to a hung server must fail, not wait forever; and on Windows, where hangs have been
+# seen, trace every command so the log shows where one stopped.
+curl() { command curl --max-time 30 "$@"; }
+if [ "${RUNNER_OS:-}" = Windows ]; then set -x; fi
 
 # PORT overrides 3000 for local runs where that port is taken.
 PORT=${PORT:-3000}
