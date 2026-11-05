@@ -17,6 +17,9 @@ PORT=3310 node examples/hello/dist/server/index.mjs &
 NODE_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3310/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3310/ | grep -q "nowaki-island"   # SSR + island marker
+# route / layout CSS: linked in the head, served as text/css (0.16.1)
+curl -sf http://127.0.0.1:3310/styled | grep -qE '<link rel="stylesheet" href="/_nowaki/styled\.[0-9a-f]+\.css"'
+curl -sf http://127.0.0.1:3310/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'
 # streaming = "early": the shell goes out before the 300 ms loader; a loader error renders
 # error.tsx in the page (status stays 200) and a loader redirect becomes location.replace (#112)
 FB=$(curl -s -N -o /tmp/nowaki-early.html -w '%{time_starttransfer}' http://127.0.0.1:3310/stream-early)
@@ -73,6 +76,11 @@ grep -q 'Post: hello' examples/hello/dist/static/blog/hello/index.html
 grep -q 'Post: nowaki' examples/hello/dist/static/blog/nowaki/index.html
 grep -q 'docs / intro (2)' examples/hello/dist/static/files/docs/intro/index.html
 grep -q 'Page not found' examples/hello/dist/static/404.html
+# content collections: staticPaths from getCollection, one page per entry
+grep -q '<h2 id="why-content-collections"' examples/hello/dist/static/docs/intro/index.html
+test -f examples/hello/dist/static/docs/routing/index.html
+grep -qE '<link rel="stylesheet" href="/_nowaki/styled\.[0-9a-f]+\.css"' examples/hello/dist/static/styled/index.html
+ls examples/hello/dist/static/_nowaki/styled.*.css >/dev/null
 # live islands on a static host: their first HTML, but no live.js (no server for its events), and
 # the build says which pages they are on (#93)
 grep -q 'nowaki-live name="LiveCounter"' examples/hello/dist/static/live/index.html
@@ -102,9 +110,13 @@ grep -q '"launcherType": "Nodejs"' examples/hello/.vercel/output/functions/index
 test -d examples/hello/.vercel/output/static/_nowaki
 # the function must NOT carry a nested preact (would double-instance and break hooks)
 ! test -d examples/hello/.vercel/output/functions/index.func/node_modules/@nowaki-dev/runtime/node_modules
-( cd examples/hello/.vercel/output/functions/index.func \
-  && node -e 'import("./index.mjs").then(m=>require("http").createServer(m.default).listen(3320))' & )
+# Started with its PID kept, so it is stopped below (a subshell left it running after the script).
+(cd examples/hello/.vercel/output/functions/index.func \
+  && exec node -e 'import("./index.mjs").then(m=>require("http").createServer(m.default).listen(3320))') &
+VERCEL_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3320/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3320/ | grep -q "nowaki-island"
 curl -sf http://127.0.0.1:3320/api/hello | grep -q '"hello":"nowaki"'
+curl -sf http://127.0.0.1:3320/docs/intro | grep -q '<h2 id="why-content-collections"'   # content on vercel
 curl -sf http://127.0.0.1:3320/nav | grep -q 'href="/blog/hello"'
+kill $VERCEL_PID

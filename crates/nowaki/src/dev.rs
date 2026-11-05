@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -69,6 +69,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         expose,
     });
 
+    dev_content(&state);
     let _watcher = start_watcher(&root, state.clone())?;
 
     let app = Router::new()
@@ -76,6 +77,8 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         .route("/__nowaki/live", get(live_ws))
         .route("/__nowaki/server-functions", get(server_functions))
         .route("/__nowaki/ssr-module", get(ssr_module))
+        .route("/__nowaki/route-css", get(route_css))
+        .route("/__nowaki/css", get(dev_css))
         .route("/@fs/{*path}", get(serve_fs))
         .route(crate::mcp::PATH, axum::routing::any(crate::mcp::handle))
         .fallback(serve_or_proxy)
@@ -118,14 +121,36 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
 }
 
 /// File watch → bump ssr_version + broadcast reload (100ms debounce)
+/// Content collections in dev: re-read content/ into .nowaki/content/index.json, which the
+/// sidecar loads for the next SSR version. A bad file is reported (overlay, MCP) and the last
+/// good output is kept.
+fn dev_content(state: &DevState) {
+    let root = &state.core.root;
+    if !crate::content::enabled(root) {
+        return;
+    }
+    crate::typegen::write(root).ok();
+    if let Err(e) = crate::content::write(root, &root.join(".nowaki/content")) {
+        let msg = format!("{e:#}");
+        eprintln!("[nowaki] content: {msg}");
+        state.errors.record("build", &msg, None, None, None);
+    }
+}
+
 fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::RecommendedWatcher> {
     let root_owned = root.to_path_buf();
-    let last_fire = Mutex::new(Instant::now() - Duration::from_secs(1));
+    // notify's callback only filters and forwards; a worker thread batches the changes and
+    // reloads once they have been quiet for 100 ms. One save (several events) is one reload, a
+    // second quick save is never dropped, and nothing blocks notify's thread.
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<PathBuf>>();
+    let filter_state = state.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         let event = match res {
             Ok(event) => event,
             Err(e) => {
-                state.errors.record("hmr", &e.to_string(), None, None, None);
+                filter_state
+                    .errors
+                    .record("hmr", &e.to_string(), None, None, None);
                 return;
             }
         };
@@ -135,53 +160,71 @@ fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::Recommende
         ) {
             return;
         }
-        let relevant: Vec<_> = event
+        let relevant: Vec<PathBuf> = event
             .paths
-            .iter()
+            .into_iter()
             .filter(|p| {
-                let s = p.to_string_lossy();
-                !s.contains("/node_modules/")
-                    && !s.contains("/.git/")
-                    && !s.contains("/dist/")
-                    && !s.contains("/target/")
-                    && !s.contains("/.nowaki/")
+                !under(
+                    &filter_state.core.root,
+                    p,
+                    &["node_modules", ".git", "dist", "target", ".nowaki"],
+                )
             })
             .collect();
-        if relevant.is_empty() {
-            return;
+        if !relevant.is_empty() {
+            let _ = tx.send(relevant);
         }
-        {
-            let mut last = last_fire.lock().unwrap();
-            if last.elapsed() < Duration::from_millis(100) {
-                return;
-            }
-            *last = Instant::now();
-        }
-        if relevant
-            .iter()
-            .any(|p| p.to_string_lossy().contains("/routes/"))
-        {
-            crate::typegen::write(&state.core.root).ok();
-        }
-        state.ssr_version.fetch_add(1, Ordering::SeqCst);
-        let island_only = relevant
-            .iter()
-            .all(|p| p.to_string_lossy().contains("/islands/"));
-        let kind = if island_only { "update" } else { "reload" };
-        let files: Vec<String> = relevant
-            .iter()
-            .map(|p| {
-                p.strip_prefix(&state.core.root)
-                    .unwrap_or(p)
-                    .to_string_lossy()
-                    .into_owned()
-            })
-            .collect();
-        crate::ui::hmr_log(kind, &files);
-        let _ = state.hmr_tx.send(json!({ "type": kind }).to_string());
     })?;
+    std::thread::spawn(move || {
+        while let Ok(first) = rx.recv() {
+            let mut batch: std::collections::BTreeSet<PathBuf> = first.into_iter().collect();
+            while let Ok(more) = rx.recv_timeout(Duration::from_millis(100)) {
+                batch.extend(more);
+            }
+            apply_changes(&state, batch.into_iter().collect());
+        }
+    });
     watcher.watch(&root_owned, RecursiveMode::Recursive)?;
     Ok(watcher)
+}
+
+/// Whether `p` is inside a directory named one of `names` (by path component, so Windows `\`
+/// paths match too; "/x/" substring checks never did there).
+fn under(root: &Path, p: &Path, names: &[&str]) -> bool {
+    p.strip_prefix(root)
+        .unwrap_or(p)
+        .components()
+        .any(|c| names.iter().any(|n| c.as_os_str() == *n))
+}
+
+fn apply_changes(state: &DevState, relevant: Vec<PathBuf>) {
+    let root = &state.core.root;
+    if relevant.iter().any(|p| under(root, p, &["routes"])) {
+        crate::typegen::write(root).ok();
+    }
+    let under_content = relevant.iter().any(|p| {
+        p.strip_prefix(root)
+            .ok()
+            .and_then(|r| r.components().next())
+            .is_some_and(|c| c.as_os_str() == "content")
+    });
+    if under_content {
+        dev_content(state);
+    }
+    state.ssr_version.fetch_add(1, Ordering::SeqCst);
+    let island_only = relevant.iter().all(|p| under(root, p, &["islands"]));
+    let kind = if island_only { "update" } else { "reload" };
+    let files: Vec<String> = relevant
+        .iter()
+        .map(|p| {
+            p.strip_prefix(root)
+                .unwrap_or(p)
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    crate::ui::hmr_log(kind, &files);
+    let _ = state.hmr_tx.send(json!({ "type": kind }).to_string());
 }
 
 async fn hmr_ws(
@@ -281,6 +324,99 @@ async fn ssr_module(
         return (StatusCode::FORBIDDEN, "forbidden").into_response();
     }
     transform_response(state, canon, Mode::Ssr).await
+}
+
+#[derive(serde::Deserialize)]
+struct RouteCssQuery {
+    file: String,
+}
+
+/// The stylesheets a route (and its layouts) imports, as `/__nowaki/css` URLs, for the dev
+/// sidecar to link in the page head. Only route files under `routes/` are accepted.
+async fn route_css(State(state): State<Arc<DevState>>, Query(q): Query<RouteCssQuery>) -> Response {
+    let routes_dir = state.core.root.join("routes");
+    let Ok(canon) = dunce::canonicalize(&q.file) else {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    let Some(rel) = canon
+        .strip_prefix(&routes_dir)
+        .ok()
+        .map(|r| r.to_string_lossy().replace('\\', "/"))
+    else {
+        return (StatusCode::FORBIDDEN, "forbidden").into_response();
+    };
+    let core_state = state.clone();
+    let hrefs = tokio::task::spawn_blocking(move || {
+        let mut entries = nowaki_core::budget::layouts_for(&routes_dir, &rel);
+        entries.push(canon);
+        nowaki_core::route_css::css_of(&core_state.core, &entries)
+            .into_iter()
+            .map(|css| {
+                let shown = css
+                    .strip_prefix(&core_state.core.root)
+                    .map(|r| r.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_else(|_| css.to_string_lossy().into_owned());
+                format!("/__nowaki/css?f={}", query_encode(&shown))
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .unwrap_or_default();
+    (
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        serde_json::to_string(&hrefs).unwrap_or_else(|_| "[]".into()),
+    )
+        .into_response()
+}
+
+/// Percent-encodes a query value (unreserved characters and `/` stay as they are).
+fn query_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~' | b'/') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+#[derive(serde::Deserialize)]
+struct DevCssQuery {
+    f: String,
+}
+
+/// One stylesheet in dev (CSS Modules scoped like their JS). `f` is user input: it must resolve
+/// to a `.css` file under an allowed root.
+async fn dev_css(State(state): State<Arc<DevState>>, Query(q): Query<DevCssQuery>) -> Response {
+    let requested = state.core.root.join(&q.f);
+    let Ok(canon) = dunce::canonicalize(&requested) else {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    if !fs_path_allowed(&canon, &state.fs_allow) || !nowaki_core::css::is_css(&canon) {
+        return (StatusCode::FORBIDDEN, "forbidden").into_response();
+    }
+    let Ok(css) = std::fs::read_to_string(&canon) else {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    let sheet = if nowaki_core::css::is_css_module(&canon) {
+        let id = nowaki_core::css::css_scope_id(&state.core.root, &canon);
+        nowaki_core::css::scope_css(&id, &css).0
+    } else {
+        css
+    };
+    (
+        [
+            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        sheet,
+    )
+        .into_response()
 }
 
 /// /@fs/<absolute path>: serves files outside the app root (pnpm store etc.). `rest` is user input, so

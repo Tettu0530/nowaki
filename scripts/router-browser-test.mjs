@@ -89,6 +89,12 @@ try {
   await cdp.send("Page.navigate", { url: BASE + "/" });
   await sleep(800);
 
+  // The router loads on intent only: nothing has hovered, focused, or clicked a link yet, so its
+  // chunk must not have been fetched.
+  const routerLoaded = () =>
+    cdp.evalAsync(`return performance.getEntriesByType('resource').some((r) => /\\/_nowaki\\/router\\.[0-9a-f]+\\.js/.test(r.name));`);
+  check("the router isn't downloaded on page load", (await routerLoaded()) === false && (await cdp.evalAsync(`return !window.__nowakiRouter;`)));
+
   // SPA navigation: create a link and click it (the router intercepts)
   await cdp.evalAsync(`
     window.__nav = (href) => { const a=document.createElement('a'); a.href=href; a.textContent=href; document.body.appendChild(a); a.click(); };
@@ -157,12 +163,18 @@ try {
              color: getComputedStyle(document.getElementById('styled-probe') || document.body).color };`);
   check("client navigation applies the target page's <style>", styled.path === "/styled" && styled.color === "rgb(1, 2, 3)");
   check("client navigation applies the target page's <html lang>", styled.lang === "ja");
+  // Route CSS: the page's <link rel="stylesheet"> comes with the head swap and applies.
+  await sleep(200);
+  const linked = await cdp.evalAsync(`return getComputedStyle(document.getElementById('styled-linked') || document.body).color;`);
+  check("client navigation applies the target page's linked stylesheet", linked === "rgb(4, 5, 6)");
   await cdp.evalAsync(`window.__nav('/about'); return true;`);
   await sleep(600);
   const left = await cdp.evalAsync(`
     return { lang: document.documentElement.lang,
-             stale: [...document.head.querySelectorAll('style')].some((s) => s.textContent.includes('styled-probe')) };`);
+             stale: [...document.head.querySelectorAll('style')].some((s) => s.textContent.includes('styled-probe')),
+             staleLink: [...document.head.querySelectorAll('link[rel=stylesheet]')].some((l) => l.href.includes('/styled.')) };`);
   check("leaving drops the previous page's <style> and restores lang", !left.stale && left.lang === "en");
+  check("leaving drops the previous page's linked stylesheet", !left.staleLink);
 
   console.log(`\n${failures === 0 ? "BROWSER ROUTER TEST PASSED" : `BROWSER ROUTER TEST FAILED (${failures})`}`);
 } catch (err) {

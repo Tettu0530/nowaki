@@ -109,14 +109,43 @@ if (typeof window !== "undefined") window.__nowakiHydrateIslands = hydrateIsland
 
 hydrateIslands();
 
-// To keep first load small, lazily load the router chunk the server injected into data-router when idle
-// (clicks before it loads do full navigations).
+// The SPA router (data-router) loads on intent, not on every page: when a same-origin link is
+// hovered, focused, or touched, which is usually well before the click. A click that comes first
+// (keyboard, script) waits for the router and is replayed as a client navigation. Visitors who
+// never follow a link never download it.
 if (typeof document !== "undefined") {
   const runtimeEl = document.getElementById("nowaki-runtime");
   const routerSrc = runtimeEl && runtimeEl.getAttribute("data-router");
   if (routerSrc) {
-    const load = () => import(routerSrc).catch(() => {});
-    if ("requestIdleCallback" in window) requestIdleCallback(load, { timeout: 800 });
-    else setTimeout(load, 1);
+    let loading = null;
+    const load = () => (loading ??= import(routerSrc).catch(() => {}));
+    // Same rules as the router's own link check (router.js internalAnchor).
+    const link = (target) => {
+      const a = target?.closest?.("a");
+      const href = a?.getAttribute("href");
+      if (!href || href.startsWith("#") || (a.target && a.target !== "_self")) return null;
+      if (a.hasAttribute("download") || a.hasAttribute("data-no-router")) return null;
+      try {
+        return new URL(a.href, location.href).origin === location.origin ? a : null;
+      } catch {
+        return null;
+      }
+    };
+    const intent = (e) => {
+      if (link(e.target)) load();
+    };
+    for (const type of ["mouseover", "focusin", "touchstart"]) {
+      document.addEventListener(type, intent, { passive: true });
+    }
+    document.addEventListener("click", (e) => {
+      if (window.__nowakiRouter || e.defaultPrevented || e.button !== 0) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = link(e.target);
+      if (!a) return;
+      const url = new URL(a.href, location.href);
+      if (url.pathname === location.pathname && url.search === location.search) return;
+      e.preventDefault();
+      load().then(() => (window.__nowakiRouter ? a.click() : location.assign(url.href)));
+    });
   }
 }

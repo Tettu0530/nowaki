@@ -10,6 +10,125 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **Content collections** (v0.17). Each directory under `content/` is a
+  collection, declared in `content/config.ts` with
+  `defineCollection({ schema })`. Any Standard Schema library works.
+  - Entries are Markdown files with YAML frontmatter, or `.json` / `.yaml`
+    data files (`type: "data"`).
+  - Loaders and `staticPaths` read them with `getCollection(name, filter?)`
+    and `getEntry(name, slug)` from `@nowaki-dev/runtime/content`.
+  - **Markdown is rendered at build time, in Rust** (comrak): GFM tables,
+    task lists, strikethrough, footnotes, autolinks. Every heading gets an
+    anchor id, and `headings` lists them for a table of contents.
+  - Frontmatter is checked against the schema when the app is built and
+    when the server starts. An invalid entry fails the build, listing each
+    problem as `content/blog/x.md: title: …`. In `nowaki dev`, a change
+    under `content/` re-renders on the next request, and errors show in the
+    error overlay instead of stopping the server.
+  - Typegen adds the collections to `.nowaki/types.d.ts`, so entries are
+    typed by their schema's output.
+  - Works on `nowaki start`, the node / bun / deno / vercel adapters,
+    `nowaki prerender` (`staticPaths` can call `getCollection`), and
+    Cloudflare, where the content is inlined into the worker.
+  - `examples/hello` has a `docs` collection with `/docs` and
+    `/docs/[slug]`.
+
+  Images in Markdown, MDX, and TOML frontmatter come later in v0.17.
+- **Code highlighting in Markdown, at build time.** Fenced code blocks with
+  a language (` ```tsx `) are highlighted in Rust with syntect when the
+  content is built. The colors are inline styles, so no client JS or theme
+  CSS is needed, and an enforced CSP allows them.
+  - Syntaxes come from two-face (bat's set), which adds TypeScript / TSX,
+    Vue, Svelte, TOML, and more to syntect's defaults.
+  - The theme is `InspiredGitHub` (light). A theme setting is a follow-up.
+  - A block without a language, or with an unknown one, stays plain
+    escaped text.
+  - The regexes are pure Rust (no Oniguruma C library). The `nowaki`
+    binary grows by about 4.8 MB with the syntax and theme data.
+
+### Changed
+- **Less client JS on every page with an island.**
+  - **No `preact/jsx-runtime` chunk.** Client builds resolve it to a
+    227-byte wrapper around Preact's `createElement` (in
+    `@nowaki-dev/runtime/client/jsx-runtime.js`), which ships anyway. In
+    the browser it behaves the same: `key` leaves props, function
+    components keep `ref`, and children stay in `props.children`. This
+    saves about 0.7 KB gzip per page.
+  - **The SPA router loads on intent.** It used to load at idle on every
+    page. Now it starts loading when a same-origin link is hovered,
+    focused, or touched. A click that comes before it (keyboard, script) is
+    replayed as a client navigation once the router arrives. Visitors who
+    don't navigate never download its 2.4 KB.
+  - `examples/hello` `/`: 9.76 → 9.08 KB first load. `/tsrx`: 8.74 →
+    8.06 KB.
+  - The size gate's app: 8.63 → 8.22 KB eager, plus a 2.77 KB router that
+    no longer loads by default. Its baseline is updated.
+- **CI gates performance, not just client JS size.** A new "Performance
+  (regression gate)" job runs on pull requests that touch `crates/`, the
+  runtime, or `Cargo.lock`. It builds the PR and its base branch in the same
+  job, then measures `examples/hello` alternately, 3 rounds each: `nowaki
+  build` time, `nowaki dev` startup, and `nowaki start` throughput and TTFB
+  on `/about` (oha). The PR fails when the median gets worse than allowed:
+  25% for build and dev, 15% for req/s, 25% for TTFB, with a small
+  absolute allowance. An A/A run of the same build on one machine stayed
+  within 5%. `node benchmarks/ci-perf.mjs --base <dir> --head <dir>` runs it
+  locally.
+
+## [0.16.1] — 2026-11-05 · patch
+
+Packages: `nowaki` / `nowaki-core` 0.16.1 (crates.io, npm), `@nowaki-dev/runtime`
+0.15.1, `create-nowaki` / `create-nowaki-app` 0.17.1. New apps get
+`@nowaki-dev/runtime@^0.15.1` and `nowaki@^0.16.1`.
+
+CSS that routes, layouts, and their components import now reaches the page,
+as linked stylesheets. A plain `.css` import's default export is its text.
+`nowaki dev` no longer drops quick changes, and no longer reloads on its own
+cache writes on Windows.
+
+### Fixed
+- **CSS imported by routes and layouts now reaches the page.** Only islands
+  ship JS to the browser, so `import "../styles/site.css"` in a route,
+  layout, or component they use used to go nowhere: the server build
+  replaced it with an empty module.
+  - The build now follows each page route's imports (the route, every
+    `_layout` above it, and the components they use), and writes each CSS
+    file once to `dist/client` as `<name>.<hash>.css`. CSS Modules are
+    scoped the same way as their class names, and CSS from packages is
+    included too.
+  - The page's `<head>` gets a `<link rel="stylesheet">` for each file,
+    layouts first, before the route's own `head`. That covers
+    `nowaki start`, every adapter, `nowaki prerender`, and streaming
+    shells.
+  - The SPA router swaps the links on client navigation.
+  - `nowaki dev` links them from the dev server (`/__nowaki/css`, which
+    serves only `.css` files under the app) and reloads on change.
+  - The manifest gets a `routeCss` field.
+- **A plain `.css` import's default export is its text**, as
+  `nowaki-env.d.ts` declares. Before this change it was an empty module,
+  so `import css from "./a.css"` failed with "does not provide an export
+  named 'default'". This works on the server and on the client, so
+  `` export const head = `<style>${css}</style>` `` works.
+- **`nowaki dev` no longer drops quick changes, and stops reloading on its
+  own cache writes on Windows.**
+  - Changes are batched until 100 ms pass without one, then applied in one
+    reload. A change inside the old 100 ms window used to be ignored.
+  - Watched paths are compared by component. Before this change, the
+    `/node_modules/` checks never matched Windows `\` paths, so every
+    cache write reloaded the server modules and reset their state.
+- **`nowaki prerender` names the `staticPaths` error** (`staticPaths
+  failed: TypeError: …`). Before this change, it said only "see the error
+  above".
+- CSS strings embedded in JS (CSS shims, CSS Modules, CSS text) are now
+  escaped as JavaScript, so control characters can't produce invalid
+  modules.
+
+### Upgrade notes
+- Pages whose routes, layouts, or components import CSS now link it. If an
+  app worked around the old behavior by importing the same CSS in an
+  island, or by inlining it, it may now load the CSS twice. That is
+  harmless, but the workaround can be removed.
+
 ## [0.16.0] — 2026-11-05 · "Chinook"
 
 Packages: `nowaki` / `nowaki-core` 0.16.0 (crates.io, npm), `@nowaki-dev/runtime`
@@ -674,7 +793,8 @@ and the runtime at 0.9.0.
 - Published to crates.io (`nowaki-core`, `nowaki`) and npm (`@nowaki-dev/runtime`,
   `create-nowaki`, `create-nowaki-app`).
 
-[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.16.1...HEAD
+[0.16.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.16.1
 [0.16.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.16.0
 [0.15.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.15.0
 [0.14.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.14.1

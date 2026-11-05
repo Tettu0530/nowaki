@@ -1,6 +1,6 @@
 {
   "name": "@nowaki-dev/runtime",
-  "version": "0.15.0",
+  "version": "0.15.1",
   "description": "Runtime for Nowaki — islands hydration client, SSR sidecar, and Node loader hooks",
   "license": "MIT",
   "author": "Tettu0530",
@@ -26,7 +26,9 @@
     "index.js",
     "index.d.ts",
     "navigation.js",
-    "navigation.d.ts"
+    "navigation.d.ts",
+    "content.js",
+    "content.d.ts"
   ],
   "exports": {
     ".": {
@@ -36,6 +38,10 @@
     "./navigation": {
       "types": "./navigation.d.ts",
       "default": "./navigation.js"
+    },
+    "./content": {
+      "types": "./content.d.ts",
+      "default": "./content.js"
     },
     "./client/*": "./client/*",
     "./server/*": "./server/*"

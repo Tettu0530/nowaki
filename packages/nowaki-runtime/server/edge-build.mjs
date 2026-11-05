@@ -15,6 +15,8 @@ if (!serverDir || !clientDir || !workerDir) {
 const appName = appNameArg || "nowaki-app";
 
 const manifest = JSON.parse(await readFile(path.join(clientDir, "manifest.json"), "utf8"));
+// Content collections (written by `nowaki build`), inlined: an edge worker has no file system.
+const contentRaw = await readFile(path.join(serverDir, "content/index.json"), "utf8").catch(() => null);
 const table = await scanRoutes(serverDir);
 
 const keyOf = (abs) => path.relative(serverDir, abs).split(path.sep).join("/");
@@ -92,7 +94,7 @@ import { withSecurityHeaders } from "@nowaki-dev/runtime/server/security-headers
 ${moduleImports.join("\n")}
 ${islandImports.join("\n")}
 ${liveImports.join("\n")}
-
+${contentRaw ? `import * as contentConfig from ${JSON.stringify(specOf("content/config.js"))};\n` : ""}
 const manifest = ${JSON.stringify(manifest)};
 const modules = {
 ${moduleEntries.join("\n")}
@@ -105,14 +107,14 @@ ${liveEntries.join("\n")}
 };
 const routeTable = ${JSON.stringify(routeTable)};
 const serverFunctions = ${JSON.stringify(serverFnTable)};
-
+${contentRaw ? `const content = { raw: ${contentRaw}, config: contentConfig };\n` : ""}
 const handler = createFetchHandler({
   manifest,
   modules,
   islandComponents,
   liveIslands,
   routeTable,
-  serverFunctions,${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}
+  serverFunctions,${contentRaw ? "\n  content," : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}
 });
 
 export default {

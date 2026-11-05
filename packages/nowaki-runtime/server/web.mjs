@@ -7,6 +7,7 @@ import { wrapIsland } from "./island-directive.mjs";
 import { prodDocument, prodShell } from "./document.mjs";
 import { withSecurityHeaders } from "./security-headers.mjs";
 import { applyCsp } from "./csp.mjs";
+import { setContent, validateContent } from "./content-store.mjs";
 
 export function resultToResponse(result) {
   const headers = new Headers();
@@ -74,6 +75,7 @@ export function createFetchHandler({
   routeTable,
   serverFunctions: serverFnTable,
   live,
+  content,
 }) {
   const registry = new Map();
   for (const [name, comp] of Object.entries(islandComponents ?? {})) {
@@ -111,6 +113,7 @@ export function createFetchHandler({
         : null,
     renderDocument: (args) => prodDocument(manifest, args),
     renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta),
+    routeCss: (key) => (manifest.routeCss?.[key] ?? []).map((f) => `/_nowaki/${f}`),
     renderError: (err) => {
       console.error("[nowaki]", err);
       return {
@@ -121,7 +124,16 @@ export function createFetchHandler({
     },
   };
 
+  // Content collections, inlined by the edge build: validated once, before the first request.
+  const contentReady = content
+    ? validateContent(content.raw, content.config).then(({ collections, errors }) => {
+        if (errors.length) throw new Error(`[nowaki] content collections:\n  ${errors.join("\n  ")}`);
+        setContent({ collections, errors });
+      })
+    : null;
+
   return async (request) => {
+    if (contentReady) await contentReady;
     const url = new URL(request.url);
     const headers = {};
     for (const [k, v] of request.headers) headers[k.toLowerCase()] = v;

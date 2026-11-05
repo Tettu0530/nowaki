@@ -105,6 +105,24 @@ node scripts/livetest.mjs http://127.0.0.1:3300
 # leak) and collapse unused-query floods (#6/#7).
 ! grep -rl "$HOME" examples/hello/dist/client
 node scripts/security-e2e.mjs prod http://127.0.0.1:3300
+# content collections: Markdown rendered at build time, headings with anchors, a TOC from them,
+# and the docs list ordered by frontmatter
+curl -sf http://127.0.0.1:3300/docs | grep -q 'href="/docs/intro">Introduction</a></li><li><a href="/docs/routing"'
+curl -sf http://127.0.0.1:3300/docs/intro | grep -q '<h2 id="why-content-collections"'
+curl -sf http://127.0.0.1:3300/docs/intro | grep -q 'href="#next-steps"'
+curl -sf http://127.0.0.1:3300/docs/intro | grep -q '<title>Introduction — Nowaki docs</title>'
+# fenced code is highlighted at build time (inline styles, no client JS)
+curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<pre style="background-color:#ffffff;">'
+curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<span style="font-weight:bold;color:#a71d5d;">export'
+# route / layout CSS (0.16.1): the layout's and the page's stylesheets are linked in the head and
+# served as text/css; a plain .css import's default export is its text (inlined by /styled's head)
+curl -sf http://127.0.0.1:3300/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'
+STYLED=$(curl -sf http://127.0.0.1:3300/styled)
+echo "$STYLED" | grep -qE '<link rel="stylesheet" href="/_nowaki/styled\.[0-9a-f]+\.css"'
+echo "$STYLED" | grep -q '<style>#styled-probe{color:rgb(1, 2, 3)}</style>'
+SHEET=$(echo "$STYLED" | grep -oE '/_nowaki/styled\.[0-9a-f]+\.css' | head -1)
+curl -s -D - -o /dev/null "http://127.0.0.1:3300$SHEET" | grep -qi '^content-type: text/css'
+curl -sf "http://127.0.0.1:3300$SHEET" | grep -q 'rgb(4, 5, 6)'
 # Streamed responses pass through as written: with 600 ms between two chunks, the first byte
 # arrives long before the last (it used to wait for the whole body).
 FB=$(curl -s -N -o /dev/null -w '%{time_starttransfer}' "http://127.0.0.1:3300/api/stream?delay=600")

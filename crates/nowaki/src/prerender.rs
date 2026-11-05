@@ -22,6 +22,7 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         "[nowaki] build: client {} / server {} modules",
         report.modules, report.server_modules
     );
+    crate::content::build(&root, &root.join("dist"))?;
     crate::check_route_budgets(&core, &report, &client)?;
 
     let entry = root.join("node_modules/@nowaki-dev/runtime/server/start.mjs");
@@ -179,12 +180,26 @@ async fn static_paths(root: &Path) -> Result<Vec<(String, String)>> {
         .arg(&script)
         .arg(root.join("dist/server"))
         .current_dir(root)
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped())
         .output()
         .await
         .context("failed to run static-paths.mjs")?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
     if !output.status.success() {
-        return Err(anyhow!("staticPaths failed (see the error above)"));
+        eprint!("{stderr}");
+        // Name the error itself: Node prints it among the stack lines, easy to miss.
+        let cause = stderr
+            .lines()
+            .map(str::trim)
+            .find(|l| {
+                l.split_once(':')
+                    .is_some_and(|(name, _)| name.ends_with("Error") && !name.contains(' '))
+            })
+            .unwrap_or("see the output above");
+        return Err(anyhow!("staticPaths failed: {cause}"));
+    }
+    if !stderr.is_empty() {
+        eprint!("{stderr}");
     }
     let pages: Vec<serde_json::Value> =
         serde_json::from_slice(&output.stdout).context("static-paths.mjs printed invalid JSON")?;
