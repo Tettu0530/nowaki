@@ -31,6 +31,32 @@ nowaki prerender [dir]    # Static site generation (SSG)
 
 Scaffold a new app with `npm create nowaki@latest my-app`.
 
+### Content collections
+
+Each directory under `content/` is a collection of Markdown files (YAML frontmatter) or JSON /
+YAML data files. Declare it with a schema (any Standard Schema library):
+
+```ts
+// content/config.ts
+import { defineCollection } from "@nowaki-dev/runtime/content";
+import * as v from "valibot";
+
+export const docs = defineCollection({ schema: v.object({ title: v.string(), order: v.number() }) });
+```
+
+```tsx
+// routes/docs/[slug].tsx
+import { getCollection, getEntry } from "@nowaki-dev/runtime/content";
+
+export const staticPaths = async () => (await getCollection("docs")).map((d) => ({ slug: d.slug }));
+export const loader = ({ params }) => getEntry("docs", params.slug);
+```
+
+An entry has `slug`, `file`, `data` (the validated frontmatter), and, for Markdown, `html`
+(rendered at build time in Rust, with heading anchors) and `headings` (for a table of
+contents). An entry that fails its schema fails the build with the file and field. YAML dates
+arrive as strings; coerce them in the schema if you want `Date`s.
+
 ### First-load JS per route
 
 `nowaki build` (and `nowaki prerender`) prints the gzip size of the JS each page route loads
