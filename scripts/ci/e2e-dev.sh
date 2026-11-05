@@ -57,6 +57,18 @@ test "$(status "$B/boom?boom=1")" = "500"
 
 # API: legacy default, method dispatch, 405, streaming
 curl -sf $B/api/hello | grep -q '"hello":"nowaki"'
+# content collections in dev: a new Markdown file shows up without a restart, and a broken
+# frontmatter is reported instead of stopping the server
+curl -sf $B/docs/intro | grep -q '<h2 id="why-content-collections"'
+printf -- '---\ntitle: Added in dev\norder: 9\n---\n\n## Fresh heading\n' > examples/hello/content/docs/e2e-added.md
+for i in $(seq 1 20); do curl -s $B/docs/e2e-added | grep -q 'id="fresh-heading"' && break; sleep 0.5; done
+curl -s $B/docs/e2e-added | grep -q 'id="fresh-heading"'
+printf -- '---\norder: 9\n---\nno title\n' > examples/hello/content/docs/e2e-added.md
+for i in $(seq 1 20); do curl -s $B/docs | grep -q 'title: is required' && break; sleep 0.5; done
+curl -s $B/docs | grep -q 'content/docs/e2e-added.md: title: is required'
+rm examples/hello/content/docs/e2e-added.md
+for i in $(seq 1 20); do curl -sf $B/docs >/dev/null && break; sleep 0.5; done
+curl -sf $B/docs | grep -q 'href="/docs/intro"'
 curl -sf "$B/api/echo?q=hi" | grep -q '"q":"hi"'
 curl -sf -X POST -H 'content-type: application/json' -d '{"a":1}' $B/api/echo | grep -q '"received":{"a":1}'
 test "$(status -X DELETE $B/api/echo)" = "405"

@@ -1,4 +1,5 @@
 mod adapter;
+mod content;
 mod csp;
 mod dev;
 mod encoding;
@@ -139,6 +140,7 @@ fn main() -> anyhow::Result<()> {
                 report.asset_in,
                 report.asset_out,
             );
+            content::build(&root, &dist)?;
             check_route_budgets(&core, &report, &client)?;
             print_island_hints(&core, &report.out_dir);
             let unvalidated = nowaki_core::server_fn::discover_unvalidated(

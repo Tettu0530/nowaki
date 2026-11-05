@@ -3,6 +3,8 @@
 
 import { createServer } from "node:http";
 import { register } from "node:module";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { loadEnv } from "./env.mjs";
 
@@ -21,6 +23,32 @@ const { runWithContext, contextReads } = await import("./functions.mjs");
 const { pathToFileURL } = await import("node:url");
 
 const appRoot = process.cwd();
+
+// Content collections in dev: `nowaki dev` writes .nowaki/content/index.json at startup and on
+// every change under content/ (bumping the SSR version), and content/config.ts is imported fresh
+// for each version. Errors don't stop the dev server; getCollection reports them (error overlay).
+const { setContent, validateContent } = await import("./content-store.mjs");
+let contentVersion = null;
+async function ensureContent(version) {
+  if (contentVersion === version) return;
+  contentVersion = version;
+  let raw;
+  try {
+    raw = JSON.parse(await readFile(path.join(appRoot, ".nowaki/content/index.json"), "utf8"));
+  } catch {
+    setContent(null);
+    return;
+  }
+  const configFile = ["config.ts", "config.mts", "config.js", "config.mjs"]
+    .map((f) => path.join(appRoot, "content", f))
+    .find((f) => existsSync(f));
+  try {
+    const config = configFile ? await env.importModule(configFile, version) : {};
+    setContent(await validateContent(raw, config));
+  } catch (err) {
+    setContent({ collections: {}, errors: [`content/config: ${err?.message ?? err}`] });
+  }
+}
 const RUST = `http://127.0.0.1:${process.env.NOWAKI_RUST_PORT ?? "3000"}`;
 
 // dev doesn't build, so Rust discovers the server function allowlist. Cached per HMR generation.
@@ -182,6 +210,7 @@ const server = createServer(async (req, res) => {
   }
   try {
     const version = String(req.headers["x-nowaki-ssr-version"] ?? "0");
+    await ensureContent(version);
     const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
     const result = await handleRequest(env, {
       method: req.method,

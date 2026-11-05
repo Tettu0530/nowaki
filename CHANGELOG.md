@@ -10,6 +10,39 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **Content collections** (v0.17). Each directory under `content/` is a
+  collection, declared in `content/config.ts` with
+  `defineCollection({ schema })`. Any Standard Schema library works.
+  - Entries are Markdown files with YAML frontmatter, or `.json` / `.yaml`
+    data files (`type: "data"`).
+  - Loaders and `staticPaths` read them with `getCollection(name, filter?)`
+    and `getEntry(name, slug)` from `@nowaki-dev/runtime/content`.
+  - **Markdown is rendered at build time, in Rust** (comrak): GFM tables,
+    task lists, strikethrough, footnotes, autolinks. Every heading gets an
+    anchor id, and `headings` lists them for a table of contents.
+  - Frontmatter is checked against the schema when the app is built and
+    when the server starts. An invalid entry fails the build, listing each
+    problem as `content/blog/x.md: title: …`. In `nowaki dev`, a change
+    under `content/` re-renders on the next request, and errors show in the
+    error overlay instead of stopping the server.
+  - Typegen adds the collections to `.nowaki/types.d.ts`, so entries are
+    typed by their schema's output.
+  - Works on `nowaki start`, the node / bun / deno / vercel adapters,
+    `nowaki prerender` (`staticPaths` can call `getCollection`), and
+    Cloudflare, where the content is inlined into the worker.
+  - `examples/hello` has a `docs` collection with `/docs` and
+    `/docs/[slug]`.
+
+  Code highlighting, images in Markdown, MDX, and TOML frontmatter come
+  later in v0.17.
+
+### Fixed
+- **`nowaki dev` no longer drops a change made within 100 ms of the last
+  one.** The file watcher used to ignore events inside its 100 ms window, so
+  a second quick save, or a file written right after a reload, never
+  reached the page. It now waits out the window and then applies the change.
+
 ## [0.16.0] — 2026-11-05 · "Chinook"
 
 Packages: `nowaki` / `nowaki-core` 0.16.0 (crates.io, npm), `@nowaki-dev/runtime`

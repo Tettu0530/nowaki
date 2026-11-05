@@ -69,6 +69,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         expose,
     });
 
+    dev_content(&state);
     let _watcher = start_watcher(&root, state.clone())?;
 
     let app = Router::new()
@@ -118,6 +119,22 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
 }
 
 /// File watch → bump ssr_version + broadcast reload (100ms debounce)
+/// Content collections in dev: re-read content/ into .nowaki/content/index.json, which the
+/// sidecar loads for the next SSR version. A bad file is reported (overlay, MCP) and the last
+/// good output is kept.
+fn dev_content(state: &DevState) {
+    let root = &state.core.root;
+    if !crate::content::enabled(root) {
+        return;
+    }
+    crate::typegen::write(root).ok();
+    if let Err(e) = crate::content::write(root, &root.join(".nowaki/content")) {
+        let msg = format!("{e:#}");
+        eprintln!("[nowaki] content: {msg}");
+        state.errors.record("build", &msg, None, None, None);
+    }
+}
+
 fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::RecommendedWatcher> {
     let root_owned = root.to_path_buf();
     let last_fire = Mutex::new(Instant::now() - Duration::from_secs(1));
@@ -151,9 +168,13 @@ fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::Recommende
             return;
         }
         {
+            // At most one reload per 100 ms, but a change inside that window is delayed, not
+            // dropped: a second quick save (or a file written right after a reload) must still
+            // land. This runs on notify's thread, so waiting here just queues later events.
             let mut last = last_fire.lock().unwrap();
-            if last.elapsed() < Duration::from_millis(100) {
-                return;
+            let since = last.elapsed();
+            if since < Duration::from_millis(100) {
+                std::thread::sleep(Duration::from_millis(100) - since);
             }
             *last = Instant::now();
         }
@@ -162,6 +183,15 @@ fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::Recommende
             .any(|p| p.to_string_lossy().contains("/routes/"))
         {
             crate::typegen::write(&state.core.root).ok();
+        }
+        let under_content = relevant.iter().any(|p| {
+            p.strip_prefix(&state.core.root)
+                .ok()
+                .and_then(|r| r.components().next())
+                .is_some_and(|c| c.as_os_str() == "content")
+        });
+        if under_content {
+            dev_content(&state);
         }
         state.ssr_version.fetch_add(1, Ordering::SeqCst);
         let island_only = relevant

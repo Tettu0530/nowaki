@@ -8,11 +8,13 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadEnv } from "./env.mjs";
 import { scanRoutes } from "./router.mjs";
+import { loadContent } from "./content-load.mjs";
 
 loadEnv();
 
 const serverDir = path.resolve(process.argv[2] ?? "dist/server");
 const { routes } = await scanRoutes(serverDir);
+await loadContent(serverDir); // so staticPaths can call getCollection
 const pages = [];
 
 for (const route of routes) {
