@@ -57,6 +57,9 @@ curl -sf "$B/api/echo?q=hi" | grep -q '"q":"hi"'
 curl -sf -X POST -H 'content-type: application/json' -d '{"a":1}' $B/api/echo | grep -q '"received":{"a":1}'
 test "$(status -X DELETE $B/api/echo)" = "405"
 test "$(curl -s $B/api/stream | tr -d '\n')" = "chunk1chunk2"
+# the dev proxy streams too: the first chunk doesn't wait for the 600 ms gap
+FB=$(curl -s -N -o /dev/null -w '%{time_starttransfer}' "$B/api/stream?delay=600")
+awk -v t="$FB" 'BEGIN { exit !(t < 0.3) }'
 
 # action (form submission) via cookie PRG
 CJ=$(mktemp)
