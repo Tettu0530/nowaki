@@ -156,6 +156,9 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
     // files, so live islands get no live.js (it could never reach a server).
     renderDocument: (args) => prodDocument(manifest, args, { live: process.env.NOWAKI_PRERENDER !== "1" }),
     renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta),
+    // Route / layout CSS from the build (manifest.routeCss, keyed by server module).
+    routeCss: (file) =>
+      (manifest.routeCss?.[path.relative(serverDir, file).split(path.sep).join("/")] ?? []).map((f) => `/_nowaki/${f}`),
     renderError: (err) => {
       console.error("[nowaki]", err);
       return {

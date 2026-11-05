@@ -155,7 +155,7 @@ fn add_with_preloads(chunks: &mut BTreeSet<String>, chunk: &str, client: &Client
 }
 
 /// `_layout.*` files that wrap `rel`: one per directory from `routes/` down to the route's own.
-fn layouts_for(routes_dir: &Path, rel: &str) -> Vec<PathBuf> {
+pub fn layouts_for(routes_dir: &Path, rel: &str) -> Vec<PathBuf> {
     let mut dirs = vec![routes_dir.to_path_buf()];
     let mut dir = routes_dir.to_path_buf();
     let parts: Vec<&str> = rel.split('/').collect();

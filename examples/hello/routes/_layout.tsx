@@ -1,4 +1,7 @@
 // The top-level _layout.tsx wraps every page (nestable). Shared nav + footer.
+// CSS a layout or route imports is linked in the page head (as /_nowaki/site.<hash>.css).
+import "../styles/site.css";
+
 export default function RootLayout({
   children,
   url,

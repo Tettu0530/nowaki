@@ -173,7 +173,7 @@ async function renderRoute(env, table, match, mod, ctx, version) {
   // The trade-off: once it's sent, the status and headers are fixed, so `meta` only sees the static
   // exports, and a loader redirect or error is handled inside the stream (see earlyDocument).
   if (mod.streaming === "early" && typeof env.renderShell === "function") {
-    const meta = await resolveMeta(mod, { data: undefined, params: ctx.params, url: ctx.url });
+    const meta = await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data: undefined, params: ctx.params, url: ctx.url }));
     const { head, tail } = env.renderShell({ mod, meta });
     const revalidate = isrSeconds(mod);
     return {
@@ -190,7 +190,7 @@ async function renderRoute(env, table, match, mod, ctx, version) {
     };
   }
   const data = mod.loader ? await mod.loader(ctx) : undefined;
-  const meta = await resolveMeta(mod, { data, params: ctx.params, url: ctx.url });
+  const meta = await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data, params: ctx.params, url: ctx.url }));
   let node = h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url });
 
   // wrap outward in leaf→root order
@@ -373,7 +373,8 @@ async function render404(env, table, ctx, version) {
     if (typeof mod.default === "function") {
       await env.ensureIslands(version);
       const body = await renderToStringAsync(h(mod.default, { url: ctx.url }));
-      return { status: 404, headers: HTML, body: env.renderDocument({ mod, body }) };
+      const meta = await withRouteCss(env, table.notFound, mod, version);
+      return { status: 404, headers: HTML, body: env.renderDocument({ mod, body, meta }) };
     }
   }
   return { status: 404, headers: HTML, body: "<h1>404 Not Found</h1>" };
@@ -389,7 +390,8 @@ async function render500(env, table, ctx, version, err) {
         await env.ensureIslands(version);
         const message = env.dev ? String(err?.stack ?? err) : String(err?.message ?? err);
         const body = await renderToStringAsync(h(mod.default, { error: { message }, url: ctx.url }));
-        return { status: 500, headers: HTML, body: env.renderDocument({ mod, body }) };
+        const meta = await withRouteCss(env, table.errorRoute, mod, version);
+        return { status: 500, headers: HTML, body: env.renderDocument({ mod, body, meta }) };
       }
     } catch {
       // if the user's 500 page itself throws, fall back to the built-in one below
@@ -433,4 +435,15 @@ function responseToResult(res) {
   const headers = {};
   for (const [k, v] of res.headers) headers[k] = v;
   return { status: res.status, headers, stream: res.body, body: undefined, _response: res };
+}
+
+// Stylesheets for the CSS the route (and its layouts) imports: `env.routeCss(file, version)`
+// returns their URLs (the build's `routeCss`, or the dev server's). They go first in the page's
+// head, so `head` / `meta` styles still win, and the SPA router swaps them with the head.
+async function withRouteCss(env, file, mod, version, meta) {
+  const hrefs = typeof env.routeCss === "function" && file ? await env.routeCss(file, version) : null;
+  if (!Array.isArray(hrefs) || hrefs.length === 0) return meta;
+  const links = hrefs.map((h) => `<link rel="stylesheet" href="${String(h).replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`)}" />`).join("\n");
+  const own = typeof meta?.head === "string" ? meta.head : typeof mod?.head === "string" ? mod.head : "";
+  return { ...(meta ?? {}), head: own ? `${links}\n${own}` : links };
 }

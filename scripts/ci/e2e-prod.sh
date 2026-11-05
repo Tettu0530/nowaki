@@ -105,6 +105,15 @@ node scripts/livetest.mjs http://127.0.0.1:3300
 # leak) and collapse unused-query floods (#6/#7).
 ! grep -rl "$HOME" examples/hello/dist/client
 node scripts/security-e2e.mjs prod http://127.0.0.1:3300
+# route / layout CSS (0.16.1): the layout's and the page's stylesheets are linked in the head and
+# served as text/css; a plain .css import's default export is its text (inlined by /styled's head)
+curl -sf http://127.0.0.1:3300/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'
+STYLED=$(curl -sf http://127.0.0.1:3300/styled)
+echo "$STYLED" | grep -qE '<link rel="stylesheet" href="/_nowaki/styled\.[0-9a-f]+\.css"'
+echo "$STYLED" | grep -q '<style>#styled-probe{color:rgb(1, 2, 3)}</style>'
+SHEET=$(echo "$STYLED" | grep -oE '/_nowaki/styled\.[0-9a-f]+\.css' | head -1)
+curl -s -D - -o /dev/null "http://127.0.0.1:3300$SHEET" | grep -qi '^content-type: text/css'
+curl -sf "http://127.0.0.1:3300$SHEET" | grep -q 'rgb(4, 5, 6)'
 # Streamed responses pass through as written: with 600 ms between two chunks, the first byte
 # arrives long before the last (it used to wait for the whole body).
 FB=$(curl -s -N -o /dev/null -w '%{time_starttransfer}' "http://127.0.0.1:3300/api/stream?delay=600")
