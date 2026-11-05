@@ -156,10 +156,27 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     nowaki_core::build::clear_dir(&assets)?;
     std::fs::create_dir_all(&assets)?;
     copy_dir(&root.join("dist/client"), &assets)?;
+    // public/ files at their own path, last, so they win over a page at the same path (as on a
+    // server). A `_headers` of the app's own comes first in the generated one.
+    let mut own_headers = String::new();
+    for (url, src) in nowaki_core::public::list(&root.join("dist/public"))? {
+        if url == "/_headers" {
+            own_headers = std::fs::read_to_string(&src)?;
+            if !own_headers.ends_with('\n') {
+                own_headers.push('\n');
+            }
+            continue;
+        }
+        let to = out.join(url.trim_start_matches('/'));
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(&src, &to)?;
+    }
     std::fs::write(
         out.join("_headers"),
         format!(
-            "/*\n{}/_nowaki/*\n  Cache-Control: public, max-age=31536000, immutable\n/__nowaki/boundaries\n  Content-Type: application/json\n",
+            "{own_headers}/*\n{}/_nowaki/*\n  Cache-Control: public, max-age=31536000, immutable\n/__nowaki/boundaries\n  Content-Type: application/json\n",
             static_security_headers()
         ),
     )?;

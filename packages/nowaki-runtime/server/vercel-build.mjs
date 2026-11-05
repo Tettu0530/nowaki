@@ -6,6 +6,7 @@
 import { writeFile, mkdir, cp, rm } from "node:fs/promises";
 import path from "node:path";
 import { missingSecurityHeaders } from "./security-headers.mjs";
+import { indexPublic } from "./public-files.mjs";
 
 const [serverDir, clientDir, outputDir, appRoot] = process.argv.slice(2);
 if (!serverDir || !clientDir || !outputDir || !appRoot) {
@@ -22,6 +23,14 @@ await mkdir(staticDir, { recursive: true });
 
 // dist/client/* → static/_nowaki/* (served by Vercel)
 await cp(clientDir, path.join(staticDir, "_nowaki"), { recursive: true });
+// dist/public/* → static/* (public/ files at their own path; the filesystem handler serves them
+// ahead of the function, so they win over routes at the same path)
+const publicIndex = await indexPublic(path.join(clientDir, "..", "public"));
+for (const [url, { file }] of publicIndex) {
+  const to = path.join(staticDir, ...url.split("/").filter(Boolean));
+  await mkdir(path.dirname(to), { recursive: true });
+  await cp(file, to);
+}
 
 await cp(serverDir, path.join(funcDir, "server"), { recursive: true });
 await mkdir(path.join(funcDir, "client"), { recursive: true });
@@ -74,10 +83,28 @@ const config = {
       },
       continue: true,
     },
+    // public/ files skip the function too; same headers, but revalidated (names aren't hashed).
+    ...publicRoutes(),
     { handle: "filesystem" },
     { src: "/.*", dest: "/index" },
   ],
 };
 await writeFile(path.join(outputDir, "config.json"), JSON.stringify(config, null, 2) + "\n");
+
+/// Routes adding the security headers to public/ files, matched by exact path (100 per route to
+/// keep each pattern short).
+function publicRoutes() {
+  const esc = (u) => u.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const paths = [...publicIndex.keys()].map((u) => esc(encodeURI(u)));
+  const out = [];
+  for (let i = 0; i < paths.length; i += 100) {
+    out.push({
+      src: `^(?:${paths.slice(i, i + 100).join("|")})$`,
+      headers: { "cache-control": "public, max-age=0, must-revalidate", ...Object.fromEntries(missingSecurityHeaders(() => false)) },
+      continue: true,
+    });
+  }
+  return out;
+}
 
 console.log(`[nowaki] vercel adapter: .vercel/output ready (static + index.func) → ${outputDir}`);

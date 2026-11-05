@@ -3,9 +3,10 @@
 //
 // Usage: node edge-build.mjs <serverDir> <clientDir> <workerDir> [appName]
 
-import { readFile, writeFile, mkdir, readdir, rm } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir, rm, cp } from "node:fs/promises";
 import path from "node:path";
 import { scanRoutes } from "./router.mjs";
+import { indexPublic } from "./public-files.mjs";
 
 const [serverDir, clientDir, workerDir, appNameArg] = process.argv.slice(2);
 if (!serverDir || !clientDir || !workerDir) {
@@ -15,6 +16,9 @@ if (!serverDir || !clientDir || !workerDir) {
 const appName = appNameArg || "nowaki-app";
 
 const manifest = JSON.parse(await readFile(path.join(clientDir, "manifest.json"), "utf8"));
+// dist/public (nowaki build copies public/ there)
+const publicIndex = await indexPublic(path.join(clientDir, "..", "public"));
+const publicPaths = [...publicIndex.keys()];
 // Content collections (written by `nowaki build`), inlined: an edge worker has no file system.
 const contentRaw = await readFile(path.join(serverDir, "content/index.json"), "utf8").catch(() => null);
 const table = await scanRoutes(serverDir);
@@ -117,14 +121,24 @@ const handler = createFetchHandler({
   serverFunctions,${contentRaw ? "\n  content," : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}
 });
 
+// public/ files by decoded URL path; they win over routes at the same path.
+const publicFiles = new Set(${JSON.stringify(publicPaths)});
+const isPublic = (pathname) => {
+  if (publicFiles.size === 0) return false;
+  try {
+    return publicFiles.has(decodeURIComponent(pathname));
+  } catch {
+    return false;
+  }
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    // Static assets go to the Assets binding (dist/client), fetched with /_nowaki/<f> rewritten to /<f>.
-    if (url.pathname.startsWith("/_nowaki/") && env.ASSETS) {
-      const assetUrl = new URL(url);
-      assetUrl.pathname = url.pathname.slice("/_nowaki".length);
-      return withSecurityHeaders(await env.ASSETS.fetch(new Request(assetUrl, request)));
+    // Static files go to the Assets binding (dist/worker/assets: dist/client under _nowaki/, and
+    // public/ at the top).
+    if (env.ASSETS && (url.pathname.startsWith("/_nowaki/") || ((request.method === "GET" || request.method === "HEAD") && isPublic(url.pathname)))) {
+      return withSecurityHeaders(await env.ASSETS.fetch(request));
     }
     return handler(request);
   },
@@ -139,7 +153,7 @@ const wrangler = `{
   "compatibility_date": "2024-11-01",
   "compatibility_flags": ["nodejs_compat", "nodejs_compat_populate_process_env"],
   "assets": {
-    "directory": "../client",
+    "directory": "./assets",
     "binding": "ASSETS",
     "html_handling": "none",
     "not_found_handling": "none"
@@ -153,6 +167,14 @@ for (const name of await readdir(workerDir).catch(() => [])) {
 }
 await mkdir(workerDir, { recursive: true });
 await writeFile(path.join(workerDir, "index.js"), worker);
+// The Assets binding serves one directory: dist/client under _nowaki/, public/ files at the top.
+const assetsDir = path.join(workerDir, "assets");
+await cp(clientDir, path.join(assetsDir, "_nowaki"), { recursive: true });
+for (const [url, { file }] of publicIndex) {
+  const to = path.join(assetsDir, ...url.split("/").filter(Boolean));
+  await mkdir(path.dirname(to), { recursive: true });
+  await cp(file, to);
+}
 await writeFile(path.join(workerDir, "wrangler.jsonc"), wrangler);
 console.log(
   `[nowaki] cloudflare adapter: ${order.length} server modules + ${islIdx} islands → ${path.join(workerDir, "index.js")}`,

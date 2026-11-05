@@ -117,6 +117,20 @@ curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<span style="font-weight:
 # route / layout CSS (0.16.1): the layout's and the page's stylesheets are linked in the head and
 # served as text/css; a plain .css import's default export is its text (inlined by /styled's head)
 curl -sf http://127.0.0.1:3300/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'
+# public/ (copied to dist/public): as-is, ETag + 304, HEAD, dotfiles hidden except .well-known
+test -f examples/hello/dist/public/robots.txt
+! test -e examples/hello/dist/public/.hidden
+curl -s -D - http://127.0.0.1:3300/robots.txt | grep -qi '^content-type: text/plain'
+curl -s -D - -o /dev/null http://127.0.0.1:3300/robots.txt | grep -qi '^cache-control: public, no-cache'
+curl -s -D - -o /dev/null http://127.0.0.1:3300/robots.txt | grep -qi '^x-content-type-options: nosniff'
+curl -sf http://127.0.0.1:3300/raw.css | grep -q '^\.raw { color: red; }'
+curl -sf "http://127.0.0.1:3300/media/hello%20world.txt" | grep -q 'hello from public'
+curl -sf http://127.0.0.1:3300/.well-known/security.txt | grep -q 'Contact:'
+! curl -sf http://127.0.0.1:3300/.hidden | grep -q 'never served'
+PUB_ETAG=$(curl -s -D - -o /dev/null http://127.0.0.1:3300/robots.txt | tr -d '\r' | awk 'tolower($1)=="etag:" {print $2}')
+test -n "$PUB_ETAG"
+test "$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $PUB_ETAG" http://127.0.0.1:3300/robots.txt)" = 304
+test "$(curl -s -o /dev/null -w '%{http_code}' -I http://127.0.0.1:3300/robots.txt)" = 200
 STYLED=$(curl -sf http://127.0.0.1:3300/styled)
 echo "$STYLED" | grep -qE '<link rel="stylesheet" href="/_nowaki/styled\.[0-9a-f]+\.css"'
 echo "$STYLED" | grep -q '<style>#styled-probe{color:rgb(1, 2, 3)}</style>'

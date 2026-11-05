@@ -8,6 +8,7 @@ pub mod css;
 pub mod env;
 pub mod graph;
 pub mod live_hint;
+pub mod public;
 pub mod resolve;
 pub mod route_css;
 pub mod routes;
@@ -271,6 +272,7 @@ impl NowakiCore {
     ) -> Result<(build::BuildReport, build::ClientInfo)> {
         let (mut report, assets, client) = build::build_client_with_info(self, dist)?;
         report.server_modules = build::build_server(self, dist, &assets)?;
+        public::copy_to(&self.root, &dist.join("public"))?;
         Ok((report, client))
     }
 
