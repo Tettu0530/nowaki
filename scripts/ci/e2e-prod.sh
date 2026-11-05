@@ -117,6 +117,10 @@ curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<span style="font-weight:
 # route / layout CSS (0.16.1): the layout's and the page's stylesheets are linked in the head and
 # served as text/css; a plain .css import's default export is its text (inlined by /styled's head)
 curl -sf http://127.0.0.1:3300/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'
+# htmlAttrs / bodyAttrs in the Rust-assembled document
+curl -sf http://127.0.0.1:3300/styled | grep -q '<html lang="ja" data-sheet-rev="3" data-theme="paper" data-nowaki-attrs="data-sheet-rev data-theme">'
+curl -sf http://127.0.0.1:3300/styled | grep -q '<body class="site styled-page" data-site="hello" data-quote="&quot;&lt;x&gt;&quot;" data-nowaki-attrs="class data-site data-quote">'
+! curl -sf http://127.0.0.1:3300/styled | grep -q 'onload'
 # public/ (copied to dist/public): as-is, ETag + 304, HEAD, dotfiles hidden except .well-known
 test -f examples/hello/dist/public/robots.txt
 ! test -e examples/hello/dist/public/.hidden

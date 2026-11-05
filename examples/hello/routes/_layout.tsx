@@ -2,6 +2,9 @@
 // CSS a layout or route imports is linked in the page head (as /_nowaki/site.<hash>.css).
 import "../styles/site.css";
 
+// Attributes on <body> for every page; a route's own bodyAttrs merge over these (class is joined).
+export const bodyAttrs = { class: "site", "data-site": "hello" };
+
 export default function RootLayout({
   children,
   url,

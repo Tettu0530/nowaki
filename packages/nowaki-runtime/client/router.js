@@ -224,10 +224,20 @@ function syncHead(doc) {
     for (const el of [...document.head.children]) if (synced(el)) el.remove();
     for (const el of [...doc.head.children]) if (synced(el)) document.head.appendChild(el.cloneNode(true));
   }
-  for (const attr of ["lang", "dir"]) {
-    const v = doc.documentElement.getAttribute(attr);
-    if (v === null) document.documentElement.removeAttribute(attr);
-    else document.documentElement.setAttribute(attr, v);
+  syncAttrs(document.documentElement, doc.documentElement, ["lang", "dir"]);
+  syncAttrs(document.body, doc.body, []);
+}
+
+// Copies the attributes the server set from `htmlAttrs` / `bodyAttrs` (named in
+// data-nowaki-attrs) from the next page's element: the ones it sets, and the ones the current
+// page had that it doesn't. Attributes client code added (a theme toggle's data-theme) stay.
+function syncAttrs(cur, next, always) {
+  if (!cur || !next) return;
+  const names = (el) => (el.getAttribute("data-nowaki-attrs") ?? "").split(" ").filter(Boolean);
+  for (const attr of new Set([...always, ...names(cur), ...names(next), "data-nowaki-attrs"])) {
+    const v = next.getAttribute(attr);
+    if (v === null) cur.removeAttribute(attr);
+    else cur.setAttribute(attr, v);
   }
 }
 

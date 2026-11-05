@@ -45,6 +45,8 @@ const ck = await req("/isr-cookie", { headers: { cookie: "user=alice" } });
 check("ISR page reading a cookie is private on the edge", /private/.test(ck.headers.get("cache-control") || "") && !/s-maxage/.test(ck.headers.get("cache-control") || ""));
 const vy = await req("/vary", { headers: { "accept-language": "de" } });
 check("ISR page reading accept-language sends Vary on the edge", /accept-language/i.test(vy.headers.get("vary") || ""));
+const styledAttrs = await (await req("/styled")).text();
+check("htmlAttrs / bodyAttrs on the edge", styledAttrs.includes('<html lang="ja" data-sheet-rev="3"') && styledAttrs.includes('<body class="site styled-page" data-site="hello"') && !styledAttrs.includes("onload"));
 const pub = await req("/robots.txt");
 check("public/ files come from the ASSETS binding", (await pub.text()) === "asset" && secure(pub));
 const pubEnc = await req("/media/hello%20world.txt");

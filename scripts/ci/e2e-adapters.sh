@@ -37,6 +37,9 @@ grep -q "Couldn't display this page" /tmp/nowaki-early-fail.html
 ! grep -q 'the data source is down' /tmp/nowaki-early-fail.html   # no message in production
 curl -s 'http://127.0.0.1:3310/stream-early?go=1' | grep -q 'location.replace("/about")'
 curl -sf http://127.0.0.1:3310/api/hello | grep -q '"hello":"nowaki"'
+# htmlAttrs / bodyAttrs on the node adapter (document.mjs)
+curl -sf http://127.0.0.1:3310/styled | grep -q '<html lang="ja" data-sheet-rev="3" data-theme="paper" data-nowaki-attrs="data-sheet-rev data-theme">'
+curl -sf http://127.0.0.1:3310/styled | grep -q '<body class="site styled-page" data-site="hello"'
 # public/ on the node adapter (dist/server reads ../public)
 curl -s -D - http://127.0.0.1:3310/robots.txt | grep -qi '^content-type: text/plain'
 curl -sf http://127.0.0.1:3310/raw.css | grep -q '^\.raw { color: red; }'
@@ -102,6 +105,8 @@ grep -q 'nowaki-live name="LiveCounter"' examples/hello/dist/static/live/index.h
 node -e 'const b=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!Array.isArray(b.loading)||!Array.isArray(b.error)||!b.loading.length) process.exit(1)' examples/hello/dist/static/__nowaki/boundaries
 grep -q '/__nowaki/boundaries' examples/hello/dist/static/_headers
 grep -qi 'x-content-type-options: nosniff' examples/hello/dist/static/_headers
+grep -q '<html lang="ja" data-sheet-rev="3"' examples/hello/dist/static/styled/index.html
+grep -q '<body class="site styled-page"' examples/hello/dist/static/styled/index.html
 # public/ files at their own path in the static output, dotfiles left out
 grep -q 'User-agent' examples/hello/dist/static/robots.txt
 grep -q 'hello from public' "examples/hello/dist/static/media/hello world.txt"

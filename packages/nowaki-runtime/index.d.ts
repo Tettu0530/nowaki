@@ -116,11 +116,21 @@ export type ApiHandler = (
 /** Middleware. Returning a Response/redirect short-circuits the request. */
 export type Middleware = (ctx: LoaderContext) => unknown | Promise<unknown>;
 
-/** Page metadata (`<title>` / `<head>` / `<html lang>`). */
+/**
+ * Attributes for `<html>` / `<body>` (`export const htmlAttrs` / `bodyAttrs` in a route or
+ * layout, or from `meta()`). Layouts apply first, then the route, then `meta()`; a later value
+ * wins, `false` / `null` removes one set earlier, and `class` values are joined. `true` renders
+ * a bare attribute. Event-handler attributes (`on*`) are ignored.
+ */
+export type DocumentAttrs = Record<string, string | number | boolean | null | undefined>;
+
+/** Page metadata (`<title>` / `<head>` / `<html lang>` / `<html>` and `<body>` attributes). */
 export interface Meta {
   title?: string;
   head?: string;
   lang?: string;
+  htmlAttrs?: DocumentAttrs;
+  bodyAttrs?: DocumentAttrs;
 }
 
 /** Dynamic, possibly async metadata. Can be derived from loader data or params. */

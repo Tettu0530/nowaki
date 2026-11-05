@@ -163,12 +163,23 @@ try {
              color: getComputedStyle(document.getElementById('styled-probe') || document.body).color };`);
   check("client navigation applies the target page's <style>", styled.path === "/styled" && styled.color === "rgb(1, 2, 3)");
   check("client navigation applies the target page's <html lang>", styled.lang === "ja");
+  // htmlAttrs / bodyAttrs follow too; an attribute client code set (not in data-nowaki-attrs) stays.
+  const attrs = await cdp.evalAsync(`
+    return { rev: document.documentElement.getAttribute('data-sheet-rev'), body: document.body.className,
+             site: document.body.dataset.site };`);
+  check(`client navigation applies htmlAttrs / bodyAttrs (${JSON.stringify(attrs)})`,
+    attrs.rev === "3" && attrs.body === "site styled-page" && attrs.site === "hello");
   // Route CSS: the page's <link rel="stylesheet"> comes with the head swap and applies.
   await sleep(200);
   const linked = await cdp.evalAsync(`return getComputedStyle(document.getElementById('styled-linked') || document.body).color;`);
   check("client navigation applies the target page's linked stylesheet", linked === "rgb(4, 5, 6)");
-  await cdp.evalAsync(`window.__nav('/about'); return true;`);
+  await cdp.evalAsync(`document.documentElement.setAttribute('data-client', '1'); window.__nav('/about'); return true;`);
   await sleep(600);
+  const leftAttrs = await cdp.evalAsync(`
+    return { rev: document.documentElement.getAttribute('data-sheet-rev'), body: document.body.className,
+             client: document.documentElement.getAttribute('data-client') };`);
+  check(`leaving drops the page's htmlAttrs, keeps the layout's and client-set ones (${JSON.stringify(leftAttrs)})`,
+    leftAttrs.rev === null && leftAttrs.body === "site" && leftAttrs.client === "1");
   const left = await cdp.evalAsync(`
     return { lang: document.documentElement.lang,
              stale: [...document.head.querySelectorAll('style')].some((s) => s.textContent.includes('styled-probe')),
