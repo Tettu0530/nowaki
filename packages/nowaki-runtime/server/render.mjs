@@ -74,7 +74,9 @@ options.vnode = (vnode) => {
 };
 
 // Returns head (…<body>) and tail (</body>…). When streaming, the handler pipes the body in between.
-export function renderShell({ mod, meta }) {
+// `scripts.islands` / `scripts.live`: whether the page needs the islands runtime (and with it the
+// SPA router) and live.js. A streaming shell can't know yet, so it gets both, as in production.
+export function renderShell({ mod, meta }, scripts = { islands: true, live: true }) {
   const m = pageMeta(meta, mod);
   const head = `<!DOCTYPE html>
 <html lang="${escapeHtml(m.lang)}"${m.htmlAttrs}>
@@ -89,23 +91,30 @@ ${m.head}
 <body${m.bodyAttrs}>
 `;
   const tail = `
-${devScripts()}
+${devScripts(scripts)}
 </body>
 </html>`;
   return { head, tail };
 }
 
+// Like production (document.mjs), a page without islands gets no islands runtime and so no SPA
+// router: links do full loads in dev too.
 export function renderDocument({ mod, body, meta }) {
-  const { head, tail } = renderShell({ mod, meta });
+  const { head, tail } = renderShell(
+    { mod, meta },
+    { islands: body.includes("<nowaki-island"), live: body.includes("<nowaki-live") },
+  );
   return `${head}${body}${tail}`;
 }
 
-function devScripts() {
+function devScripts({ islands, live: hasLive }) {
   // As in prod, islands.js lazily imports the SPA router from data-router after hydration.
-  const router =
-    '<script id="nowaki-runtime" type="module" src="/node_modules/@nowaki-dev/runtime/client/islands.js" data-router="/node_modules/@nowaki-dev/runtime/client/router.js"></script>\n';
-  const live =
-    '<script type="module" src="/node_modules/@nowaki-dev/runtime/client/live.js"></script>\n';
+  const router = islands
+    ? '<script id="nowaki-runtime" type="module" src="/node_modules/@nowaki-dev/runtime/client/islands.js" data-router="/node_modules/@nowaki-dev/runtime/client/router.js"></script>\n'
+    : "";
+  const live = hasLive
+    ? '<script type="module" src="/node_modules/@nowaki-dev/runtime/client/live.js"></script>\n'
+    : "";
   const hmr =
     '<script type="module" src="/node_modules/@nowaki-dev/runtime/client/hmr.js"></script>';
   return `${router}${live}${hmr}`;

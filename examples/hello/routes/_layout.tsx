@@ -2,6 +2,9 @@
 // CSS a layout or route imports is linked in the page head (as /_nowaki/site.<hash>.css).
 import "../styles/site.css";
 
+// A layout's own head tags go into every page under it (before the page's `head`).
+export const head = '<meta name="x-layout-head" content="root" />';
+
 // Site-wide metadata defaults: each page's own meta merges over these.
 export const meta = { openGraph: { siteName: "Nowaki demo" }, twitter: { site: "@nowaki_dev" } };
 

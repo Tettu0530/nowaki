@@ -88,6 +88,7 @@ export function seoTags(meta, { title, pathname, origin, site }) {
       const i = typeof img === "string" ? { url: img } : img;
       if (!i?.url) continue;
       prop("og:image", absolute(i.url, base));
+      prop("og:image:type", i.type ?? imageType(i.url));
       prop("og:image:width", i.width);
       prop("og:image:height", i.height);
       prop("og:image:alt", i.alt);
@@ -102,7 +103,10 @@ export function seoTags(meta, { title, pathname, origin, site }) {
     name("twitter:description", tw.description ?? og?.description ?? meta.description);
     const img = tw.image ?? (og ? [].concat(og.image ?? [])[0] : undefined);
     const url = typeof img === "string" ? img : img?.url;
-    if (url) name("twitter:image", absolute(url, base));
+    if (url) {
+      name("twitter:image", absolute(url, base));
+      name("twitter:image:alt", tw.imageAlt ?? (typeof img === "object" ? img?.alt : undefined));
+    }
   }
   for (const ld of [].concat(meta.jsonLd ?? [])) {
     if (!isObj(ld)) continue;
@@ -111,6 +115,12 @@ export function seoTags(meta, { title, pathname, origin, site }) {
     tags.push(`<script type="application/ld+json">${json}</script>`);
   }
   return tags.join("\n");
+}
+
+/// The MIME type an image URL's extension implies, for `og:image:type` (undefined if unknown).
+function imageType(url) {
+  const ext = String(url).split(/[?#]/)[0].split(".").pop()?.toLowerCase();
+  return { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", avif: "image/avif", svg: "image/svg+xml" }[ext];
 }
 
 /// sitemap.xml for `urls` (paths), against the site.

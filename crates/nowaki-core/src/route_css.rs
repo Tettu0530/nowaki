@@ -50,7 +50,7 @@ pub fn css_of(core: &NowakiCore, entries: &[PathBuf]) -> Vec<PathBuf> {
 
 /// The stylesheet a CSS file becomes: CSS Modules are scoped with the same id as their JS.
 fn stylesheet(core: &NowakiCore, abs: &Path) -> Option<String> {
-    let css = fs::read_to_string(abs).ok()?;
+    let css = core.read_css(abs).ok()?;
     if crate::css::is_css_module(abs) {
         let id = crate::css::css_scope_id(&core.root, abs);
         Some(crate::css::scope_css(&id, &css).0)

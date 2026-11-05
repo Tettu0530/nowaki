@@ -493,7 +493,7 @@ async fn dev_css(State(state): State<Arc<DevState>>, Query(q): Query<DevCssQuery
     if !fs_path_allowed(&canon, &state.fs_allow) || !nowaki_core::css::is_css(&canon) {
         return (StatusCode::FORBIDDEN, "forbidden").into_response();
     }
-    let Ok(css) = std::fs::read_to_string(&canon) else {
+    let Ok(css) = state.core.read_css(&canon) else {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     };
     let sheet = if nowaki_core::css::is_css_module(&canon) {
@@ -600,7 +600,7 @@ async fn serve_file(state: Arc<DevState>, abs: PathBuf) -> Response {
     // Serve .css as a JS shim that injects a <style> (applied as an import side effect).
     // *.module.css scopes class names and default-exports the name map.
     if nowaki_core::css::is_css(&abs) {
-        return match tokio::fs::read_to_string(&abs).await {
+        return match state.core.read_css(&abs) {
             Ok(css) => {
                 let id = nowaki_core::css::css_scope_id(&state.core.root, &abs);
                 let shim = if nowaki_core::css::is_css_module(&abs) {

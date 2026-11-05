@@ -98,6 +98,14 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
                     .get(format!("http://127.0.0.1:{port}{url_path}"))
                     .send()
                     .await?;
+                // A server error is a broken page, not one to leave out: the static deploy would
+                // silently miss it. Redirects and 404s are skipped (a guarded or gone page).
+                if resp.status().is_server_error() {
+                    return Err(anyhow!(
+                        "{url_path}: the page failed to render ({})",
+                        resp.status()
+                    ));
+                }
                 if !resp.status().is_success() {
                     eprintln!("[nowaki] {url_path}: skipped ({})", resp.status());
                     return Ok::<_, anyhow::Error>(None);

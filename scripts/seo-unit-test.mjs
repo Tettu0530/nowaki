@@ -24,7 +24,7 @@ const tags = seoTags(
       description: 'Say "hi" <b>',
       canonical: true,
       robots: { index: false },
-      openGraph: { title: "Page", image: "/og.png" },
+      openGraph: { title: "Page", image: { url: "/og.png", alt: "A card" } },
       jsonLd: { "@type": "Thing", name: "</script><script>alert(1)</script>" },
     },
   ),
@@ -35,7 +35,9 @@ check("canonical: true is this page on the site", tags.includes('<link rel="cano
 check("robots object", tags.includes('<meta name="robots" content="noindex, follow" />'));
 check("openGraph merges over the layout's", tags.includes('og:title" content="Page"') && tags.includes('og:site_name" content="Site"'));
 check("og:image is absolute against the site", tags.includes('og:image" content="https://example.com/og.png"'));
+check("og:image:type from the extension", tags.includes('og:image:type" content="image/png"'));
 check("twitter falls back to openGraph", tags.includes('twitter:title" content="Page"') && tags.includes('twitter:image" content="https://example.com/og.png"'));
+check("twitter:image:alt from the Open Graph image", tags.includes('twitter:image:alt" content="A card"'));
 check("JSON-LD can't close its script element", !tags.includes("</script><script>") && tags.includes("\\u003c/script>"));
 check("no site: the request origin", seoTags({ canonical: "/x" }, { pathname: "/", origin: "http://h:1" }).includes('href="http://h:1/x"'));
 check("no meta, no tags", seoTags(undefined, { pathname: "/" }) === "");

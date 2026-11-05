@@ -11,6 +11,10 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **A migration guide from Astro**
+  ([docs/migrate-from-astro.md](docs/migrate-from-astro.md)). It was written
+  from porting a real portfolio site, whose static output matched the Astro
+  build. The port turned up the fixes listed under Fixed.
 - **Self-hosted fonts** (v0.17). `fonts` in nowaki.config, for example
   `{ family: "Inter", provider: "google", weights: [400, 700], subsets: ["latin"] }`
   or `{ family: "Brand", src: "./fonts/brand.ttf" }`, is built at build time.
@@ -45,6 +49,33 @@ milestone's worth of work; the codename is noted per entry.
     where a Markdown entry uses `html`.
   - YAML frontmatter in an `.mdx` page is ignored; pages use `export const`
     (`title`, `meta`, …).
+
+### Fixed
+- These came up while porting an Astro site.
+  - The server build compiles every app module that routes, islands, and
+    actions import, wherever it lives (`data/`, `sections/`, …). Before, only
+    the conventional folders were compiled. A page importing `../data/x.ts`
+    built, then failed at prerender with `ERR_MODULE_NOT_FOUND`.
+  - CSS `@import` is inlined (relative paths and packages, with
+    `@media` / `@layer` / `@supports` conditions). Before, it was emitted as
+    written and resolved against the served stylesheet's URL. Remote and
+    root-relative imports stay as imports.
+  - A layout's `export const head` goes into every page under it. Before, only
+    the route's was used.
+  - Fonts:
+    - A weight range (`weight: "100 900"`, for variable fonts) gave a file name
+      with a space and an unquoted `url()` the browser dropped. Font URLs are
+      now quoted.
+    - A family whose metrics can't be read (woff / woff2) no longer names a
+      fallback face that doesn't exist.
+  - `nowaki dev` adds the islands runtime, and with it the SPA router, only to
+    pages with islands, as production does. Before, links on island-free pages
+    were client-side navigations in dev and full loads in production.
+  - Prerendering fails the build when a page returns a server error. Before,
+    it printed "skipped" and left the page out of the static output.
+- Typed meta: `openGraph.image.type` (`og:image:type`, defaulting from the
+  image's extension) and `twitter:image:alt` (defaulting to the Open Graph
+  image's `alt`).
 
 ### Changed
 - **Highlighted code is cached on disk** (`node_modules/.cache/nowaki/highlight`)
