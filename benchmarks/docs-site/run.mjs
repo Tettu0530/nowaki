@@ -13,7 +13,7 @@
 //   browser the output served by ../compare/lib/serve.mjs and opened in Chromium
 //          (../compare/lib/browser.mjs): a Markdown entry, an MDX entry, and /docs/
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { measure } from "../compare/lib/browser.mjs";
@@ -67,6 +67,18 @@ const bin = fw.bin(dir);
 if (!existsSync(bin)) {
   console.error(`${fw.label}: ${bin} not found`);
   process.exit(2);
+}
+// pnpm copies the file: runtime and does not refresh the copy, so a stale one would measure
+// old runtime code under the new binary.
+if (fwName === "nowaki") {
+  const src = path.join(ROOT, "packages/nowaki-runtime");
+  const installed = realpathSync(path.join(dir, "node_modules/@nowaki-dev/runtime"));
+  const list = (root) => walk(root).filter((x) => !x.path.startsWith("node_modules")).map((x) => x.path).sort();
+  const stale = list(src).filter((p) => !existsSync(path.join(installed, p)) || !readFileSync(path.join(src, p)).equals(readFileSync(path.join(installed, p))));
+  if (stale.length) {
+    console.error(`the installed @nowaki-dev/runtime differs from packages/nowaki-runtime (${stale.slice(0, 3).join(", ")}…): rm -rf ${path.relative(ROOT, dir)}/node_modules && pnpm -C ${path.relative(ROOT, dir)} install`);
+    process.exit(2);
+  }
 }
 const version = fw.version(dir, bin);
 const env = { ...process.env, ...fw.env, FORCE_COLOR: "0", NO_COLOR: "1", CI: "1" };

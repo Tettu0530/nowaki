@@ -31,8 +31,9 @@ format, Astro writes WebP. That difference is part of the build time and the out
 Nowaki is measured from this checkout, before a release: build it with
 `cargo build --release -p nowaki` (or point `NOWAKI_BIN` at a binary). The app installs
 `@nowaki-dev/runtime` from `packages/nowaki-runtime` as a `file:` dependency, which pnpm
-copies (so `preact` resolves from the app); after changing the runtime, reinstall with
-`pnpm -C benchmarks/docs-site/apps/nowaki install --force`.
+copies (so `preact` resolves from the app). The copy is not refreshed by `pnpm install`, not
+even with `--force`: after the runtime changes, delete `apps/nowaki/node_modules` and install
+again. `run.mjs` refuses to measure when the installed copy differs from `packages/nowaki-runtime`.
 
 ## Metrics
 
