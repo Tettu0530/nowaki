@@ -115,7 +115,7 @@ Make Nowaki a first-class choice for blogs, docs, and marketing sites: content, 
 - [ ] Image component: `srcset` / `sizes`, `width` / `height` from the file (no layout shift), lazy loading by default, AVIF and lossy WebP, remote images with an allow-list
 - [ ] SEO and metadata: a typed `meta` (Open Graph, Twitter cards, canonical, robots, JSON-LD), `sitemap.xml` and `robots.txt` generated from the routes
 - [x] `public/`: files served as-is at their own path (favicon, `robots.txt`, fonts referenced from CSS), by `nowaki dev`, `nowaki start`, every adapter, and static output
-- [ ] File routes, prerendered: dynamic routes with an extension (`og/[card].png.ts`, `feed.xml.ts`) and API routes written to files by `nowaki prerender` / the static adapter, for OG images, feeds, and sitemaps
+- [x] File routes, prerendered: dynamic routes with an extension (`og/[card].png.ts`, `feed.xml.ts`) and API routes written to files by `nowaki prerender` / the static adapter, for OG images, feeds, and sitemaps
 - [x] Attributes on `<html>` and `<body>` from a route or layout (`export const htmlAttrs` / `bodyAttrs`)
 - [ ] Page scripts: a route or layout can ship a bundled TS module (npm imports included) without an island, like Astro's `<script>`; counted in the route's first-load JS and `budget`
 - [ ] Migration guide from Astro (`.astro` components to TSX, `<style>` to CSS Modules, `<script>` to page scripts, endpoints to file routes), written from moving a real site

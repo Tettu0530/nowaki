@@ -37,6 +37,13 @@ grep -q "Couldn't display this page" /tmp/nowaki-early-fail.html
 ! grep -q 'the data source is down' /tmp/nowaki-early-fail.html   # no message in production
 curl -s 'http://127.0.0.1:3310/stream-early?go=1' | grep -q 'location.replace("/about")'
 curl -sf http://127.0.0.1:3310/api/hello | grep -q '"hello":"nowaki"'
+# file routes: feed.xml.ts (static) and og/[card].png.ts (a param with a fixed extension, bytes)
+curl -s -D - -o /dev/null http://127.0.0.1:3310/feed.xml | grep -qi '^content-type: application/xml'
+curl -sf http://127.0.0.1:3310/feed.xml | grep -q '<rss version="2.0">'
+curl -s -D - -o /dev/null http://127.0.0.1:3310/og/intro.png | grep -qi '^content-type: image/png'
+curl -sf http://127.0.0.1:3310/og/intro.png | head -c 4 | od -An -c | grep -q 'P   N   G'
+test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3310/og/nope.png)" = 404
+test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3310/og/intro.jpg)" = 404
 # htmlAttrs / bodyAttrs on the node adapter (document.mjs)
 curl -sf http://127.0.0.1:3310/styled | grep -q '<html lang="ja" data-sheet-rev="3" data-theme="paper" data-nowaki-attrs="data-sheet-rev data-theme">'
 curl -sf http://127.0.0.1:3310/styled | grep -q '<body class="site styled-page" data-site="hello"'
@@ -105,6 +112,11 @@ grep -q 'nowaki-live name="LiveCounter"' examples/hello/dist/static/live/index.h
 node -e 'const b=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!Array.isArray(b.loading)||!Array.isArray(b.error)||!b.loading.length) process.exit(1)' examples/hello/dist/static/__nowaki/boundaries
 grep -q '/__nowaki/boundaries' examples/hello/dist/static/_headers
 grep -qi 'x-content-type-options: nosniff' examples/hello/dist/static/_headers
+# file routes are written to their own path (not feed.xml/index.html), bytes intact
+grep -q '<rss version="2.0">' examples/hello/dist/static/feed.xml
+head -c 4 examples/hello/dist/static/og/intro.png | od -An -c | grep -q 'P   N   G'
+test -f examples/hello/dist/static/og/routing.png
+! test -e examples/hello/dist/static/feed.xml/index.html
 grep -q '<html lang="ja" data-sheet-rev="3"' examples/hello/dist/static/styled/index.html
 grep -q '<body class="site styled-page"' examples/hello/dist/static/styled/index.html
 # public/ files at their own path in the static output, dotfiles left out

@@ -50,6 +50,20 @@ pub fn is_api_route_rel(rel: &str) -> bool {
     rel == "api" || rel.starts_with("api/")
 }
 
+/// Whether a route stem's last segment names a file (`feed.xml`, `[card].png`): a file route,
+/// which returns a body like an API route instead of rendering a page. Matches router.mjs.
+pub fn is_file_route_stem(stem: &str) -> bool {
+    let base = file_base_name(stem);
+    let tail = base.rsplit_once(']').map_or(base, |(_, t)| t);
+    tail.rsplit_once('.')
+        .is_some_and(|(_, ext)| !ext.is_empty() && ext.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+/// API routes and file routes: neither renders a page (no typegen entry, no page budget).
+pub fn is_endpoint_rel(rel: &str) -> bool {
+    is_api_route_rel(rel) || stem_from_rel(rel).is_some_and(|s| is_file_route_stem(&s))
+}
+
 /// Stem path without extension (e.g. `blog/[slug]`).
 pub fn stem_from_rel(rel: &str) -> Option<String> {
     let rel = rel.replace('\\', "/");
@@ -73,7 +87,7 @@ pub fn url_pattern_from_stem(stem: &str) -> String {
 pub fn typegen_entry(rel: &str) -> Option<(String, String)> {
     let stem = stem_from_rel(rel)?;
     let base = file_base_name(&stem);
-    if is_convention_source(base) || is_api_route_rel(rel) {
+    if is_convention_source(base) || is_endpoint_rel(rel) {
         return None;
     }
 
@@ -113,8 +127,12 @@ pub fn scan_typegen(routes_dir: &Path) -> Result<Vec<(String, String)>> {
 }
 
 /// Whether a built server route stem (`dist/server/routes/...` without `.js`) is a static HTML prerender target.
+/// File routes are listed by static-paths.mjs instead (written to their own path, not index.html).
 pub fn is_static_prerender_stem(stem: &str) -> bool {
-    !stem.starts_with("api/") && !stem.contains('[') && !is_convention_source(file_base_name(stem))
+    !stem.starts_with("api/")
+        && !stem.contains('[')
+        && !is_file_route_stem(stem)
+        && !is_convention_source(file_base_name(stem))
 }
 
 /// Static prerender URLs from compiled `dist/server/routes/**/*.js`.
@@ -152,7 +170,7 @@ pub fn page_url_patterns(routes_dir: &Path) -> Result<Vec<String>> {
             continue;
         };
         let base = file_base_name(&stem);
-        if is_convention_source(base) || is_api_route_rel(&rel) {
+        if is_convention_source(base) || is_endpoint_rel(&rel) {
             continue;
         }
         out.push(url_pattern_from_stem(&stem));
@@ -215,6 +233,22 @@ mod tests {
         assert!(is_static_prerender_stem("error/index"));
         assert!(!is_static_prerender_stem("blog/[slug]"));
         assert!(!is_static_prerender_stem("api/hello"));
+        assert!(!is_static_prerender_stem("feed.xml"));
+    }
+
+    #[test]
+    fn file_routes_are_endpoints() {
+        assert!(is_file_route_stem("feed.xml"));
+        assert!(is_file_route_stem("og/[card].png"));
+        assert!(is_file_route_stem("sitemap.xml"));
+        assert!(!is_file_route_stem("blog/[slug]"));
+        assert!(!is_file_route_stem("about"));
+        assert!(!is_file_route_stem("[...rest]"));
+        assert!(!is_file_route_stem("v1.2/index"));
+        assert!(is_endpoint_rel("og/[card].png.ts"));
+        assert!(is_endpoint_rel("api/hello.ts"));
+        assert!(!is_endpoint_rel("blog/[slug].tsx"));
+        assert_eq!(typegen_entry("feed.xml.ts"), None);
         assert!(!is_static_prerender_stem("_404"));
         assert!(!is_static_prerender_stem("loading"));
         assert!(!is_static_prerender_stem("blog/loading"));

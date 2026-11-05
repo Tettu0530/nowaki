@@ -11,6 +11,22 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **File routes** (v0.17). A route whose last segment has an extension returns
+  a file instead of a page: `routes/feed.xml.ts` → `/feed.xml`, and
+  `routes/og/[card].png.ts` → `/og/intro.png` (a param followed by a fixed
+  extension).
+  - Like an API route, it exports `GET` (or a default handler). A returned
+    string or `Uint8Array` is the body, with the Content-Type of the extension.
+    A `Response` is sent as it is, and objects are JSON.
+  - `nowaki build --adapter static` writes file routes to their own path,
+    binary included. Static ones are always written. Dynamic ones are written
+    from `export const staticPaths`. `export const prerender = false` skips
+    one.
+  - File routes get no typegen entry, page budget, or route CSS. The SPA
+    router leaves links that end in a file name (`/feed.xml`, `/robots.txt`)
+    to the browser.
+  - A page file's name can't end in a dot followed by letters or digits
+    (`v1.2.tsx`); name such a page `v1.2/index.tsx` instead.
 - **Attributes on `<html>` and `<body>`** (v0.17). A route or layout can
   `export const htmlAttrs` / `bodyAttrs`, and `meta()` can return them too:
   `export const htmlAttrs = { "data-theme": "paper" }`.

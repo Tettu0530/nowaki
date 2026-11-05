@@ -20,7 +20,7 @@ use oxc::ast::ast::{
 };
 
 use crate::build::ClientInfo;
-use crate::routes::{is_api_route_rel, is_convention_source, stem_from_rel, url_pattern_from_stem};
+use crate::routes::{is_convention_source, is_endpoint_rel, stem_from_rel, url_pattern_from_stem};
 use crate::NowakiCore;
 
 #[derive(Debug, Clone)]
@@ -81,7 +81,7 @@ pub fn route_first_load(
             continue;
         };
         let base = stem.rsplit('/').next().unwrap_or(&stem);
-        if is_convention_source(base) || is_api_route_rel(&rel) {
+        if is_convention_source(base) || is_endpoint_rel(&rel) {
             continue;
         }
 

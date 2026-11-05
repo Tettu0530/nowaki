@@ -70,6 +70,13 @@ rm examples/hello/content/docs/e2e-added.md
 for i in $(seq 1 20); do curl -sf $B/docs >/dev/null && break; sleep 0.5; done
 curl -sf $B/docs | grep -q 'href="/docs/intro"'
 # route / layout CSS in dev: linked from the dev server, which serves only .css under the app
+# file routes: feed.xml.ts (static) and og/[card].png.ts (a param with a fixed extension, bytes)
+curl -s -D - -o /dev/null $B/feed.xml | grep -qi '^content-type: application/xml'
+curl -sf $B/feed.xml | grep -q '<rss version="2.0">'
+curl -s -D - -o /dev/null $B/og/intro.png | grep -qi '^content-type: image/png'
+curl -sf $B/og/intro.png | head -c 4 | od -An -c | grep -q 'P   N   G'
+test "$(curl -s -o /dev/null -w '%{http_code}' $B/og/nope.png)" = 404
+test "$(curl -s -o /dev/null -w '%{http_code}' $B/og/intro.jpg)" = 404
 # htmlAttrs / bodyAttrs: route over layout, class joined, on* dropped, values escaped
 curl -sf $B/styled | grep -q '<html lang="ja" data-sheet-rev="3" data-theme="paper" data-nowaki-attrs="data-sheet-rev data-theme">'
 curl -sf $B/styled | grep -q '<body class="site styled-page" data-site="hello" data-quote="&quot;&lt;x&gt;&quot;" data-nowaki-attrs="class data-site data-quote">'

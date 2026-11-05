@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use xxhash_rust::xxh3::xxh3_64;
 
-use crate::routes::{is_api_route_rel, is_convention_source, stem_from_rel};
+use crate::routes::{is_convention_source, is_endpoint_rel, stem_from_rel};
 use crate::NowakiCore;
 
 /// The CSS files (absolute paths, in import order) a module and the app modules it reaches
@@ -81,8 +81,7 @@ pub fn build_route_css(
             continue;
         };
         let base = stem.rsplit('/').next().unwrap_or(&stem);
-        if is_api_route_rel(&rel)
-            || (is_convention_source(base) && base != "_404" && base != "_500")
+        if is_endpoint_rel(&rel) || (is_convention_source(base) && base != "_404" && base != "_500")
         {
             continue;
         }

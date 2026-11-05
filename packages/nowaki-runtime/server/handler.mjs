@@ -72,7 +72,7 @@ export async function handleRequest(env, info) {
         if (mod.csrf === true) return finalize(ctx, FORBIDDEN);
         warnCrossSiteApi(match.file, url.pathname);
       }
-      return finalize(ctx, await handleApi(mod, ctx));
+      return finalize(ctx, await handleApi(mod, ctx, match.fileExt));
     }
 
     if (crossSite && typeof mod.action === "function") return finalize(ctx, FORBIDDEN);
@@ -138,7 +138,7 @@ async function runMiddleware(env, table, ctx, version) {
   return null;
 }
 
-async function handleApi(mod, ctx) {
+async function handleApi(mod, ctx, fileExt) {
   const fn = pickMethodHandler(mod, ctx.method);
   if (!fn) {
     return { status: 405, headers: JSON_CT, body: JSON.stringify({ error: "Method Not Allowed" }) };
@@ -146,6 +146,15 @@ async function handleApi(mod, ctx) {
   const out = await fn(ctx);
   const res = toResult(out);
   if (res) return res;
+  // File routes (feed.xml.ts, og/[card].png.ts): a string or bytes is the file itself, typed by
+  // the route's extension. Objects are still JSON.
+  if (fileExt && (typeof out === "string" || out instanceof Uint8Array || out instanceof ArrayBuffer)) {
+    return {
+      status: 200,
+      headers: { "content-type": contentTypeForExt(fileExt) },
+      body: out instanceof ArrayBuffer ? new Uint8Array(out) : out,
+    };
+  }
   // also supports legacy { status, headers, body }
   if (out && typeof out === "object" && ("body" in out || "status" in out)) {
     return {
@@ -155,6 +164,20 @@ async function handleApi(mod, ctx) {
     };
   }
   return { status: 200, headers: JSON_CT, body: JSON.stringify(out ?? null) };
+}
+
+// Kept in step with nowaki-core `public::content_type` (the same types a file in public/ gets).
+const EXT_TYPES = {
+  html: "text/html; charset=utf-8", htm: "text/html; charset=utf-8", css: "text/css; charset=utf-8",
+  js: "text/javascript; charset=utf-8", mjs: "text/javascript; charset=utf-8", json: "application/json",
+  map: "application/json", webmanifest: "application/manifest+json", txt: "text/plain; charset=utf-8",
+  xml: "application/xml", rss: "application/rss+xml", atom: "application/atom+xml", csv: "text/csv; charset=utf-8",
+  md: "text/markdown; charset=utf-8", svg: "image/svg+xml", png: "image/png", jpg: "image/jpeg",
+  jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif", ico: "image/x-icon",
+  pdf: "application/pdf", wasm: "application/wasm", ics: "text/calendar; charset=utf-8",
+};
+function contentTypeForExt(ext) {
+  return EXT_TYPES[ext.slice(1).toLowerCase()] ?? "application/octet-stream";
 }
 
 function pickMethodHandler(mod, method) {
@@ -443,7 +466,7 @@ function layoutChain(table, file) {
 function routeUrlOf(table, file) {
   const r = (table.routes ?? []).find((x) => x.file === file);
   if (!r) return "/";
-  return "/" + r.segments.map((s) => (s.lit ?? `:${s.param}`)).join("/");
+  return "/" + r.segments.map((s) => (s.lit ?? `:${s.param}${s.suffix ?? ""}`)).join("/");
 }
 
 // prefix="" matches everything.
