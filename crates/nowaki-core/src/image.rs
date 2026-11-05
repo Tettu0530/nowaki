@@ -460,7 +460,9 @@ fn encode_avif(img: &DynamicImage, quality: u8) -> Result<Vec<u8>> {
     let (w, h) = (rgba.width() as usize, rgba.height() as usize);
     let pixels: Vec<ravif::RGBA8> = rgba
         .as_raw()
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|c| ravif::RGBA8::new(c[0], c[1], c[2], c[3]))
         .collect();
     let out = ravif::Encoder::new()
