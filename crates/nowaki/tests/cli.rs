@@ -259,27 +259,43 @@ fn build_hints_at_islands_that_could_ship_no_js() {
         return;
     }
     let bin = env!("CARGO_BIN_EXE_nowaki");
+    // Its own app: tests run in parallel, and another one rebuilds examples/hello.
+    let app = budget_app("{ js: 100 }");
+    std::fs::write(
+        app.path().join("islands/Tag.tsx"),
+        "export default function Tag() { return <span>v1</span>; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.path().join("islands/Width.tsx"),
+        "import { useEffect, useState } from \"preact/hooks\";\nexport default function Width() { const [w, set] = useState(0); useEffect(() => set(innerWidth), []); return <b onClick={() => set(0)}>{w}</b>; }\n",
+    )
+    .unwrap();
     let out = Command::new(bin)
         .arg("build")
-        .arg(&root)
+        .arg(app.path())
         .output()
         .expect("run nowaki build");
-    assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("islands/Counter.tsx could be a live island (useState, onClick)"),
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("islands/Clock.tsx could be a live island (useState, onClick)"),
         "{stdout}"
     );
     assert!(
-        stdout.contains("islands/Badge.tsx has no state or event handlers"),
+        stdout.contains("islands/Tag.tsx has no state or event handlers"),
         "{stdout}"
     );
-    // Islands that need the browser get no hint (ClientOnly uses useEffect).
-    assert!(!stdout.contains("islands/ClientOnly.tsx"), "{stdout}");
+    // An island that needs the browser (useEffect) gets no hint.
+    assert!(!stdout.contains("islands/Width.tsx"), "{stdout}");
 
     let quiet = Command::new(bin)
         .arg("build")
-        .arg(&root)
+        .arg(app.path())
         .env("NOWAKI_HINTS", "0")
         .output()
         .expect("run nowaki build");
