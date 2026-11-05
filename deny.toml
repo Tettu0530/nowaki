@@ -16,6 +16,8 @@ allow = [
   "Unlicense",
   "Zlib",
   "0BSD",
+  # Unicode's data-file license (OSI approved), via comrak's finl_unicode.
+  "Unicode-DFS-2016",
 ]
 confidence-threshold = 0.9
 

@@ -42,6 +42,13 @@ milestone's worth of work; the codename is noted per entry.
   one.** The file watcher used to ignore events inside its 100 ms window, so
   a second quick save, or a file written right after a reload, never
   reached the page. It now waits out the window and then applies the change.
+- **`nowaki dev` on Windows reloaded on its own cache writes.** The watcher
+  skipped `node_modules`, `dist`, `.nowaki`, and similar directories by
+  looking for `/node_modules/` in the path, which never matched Windows
+  `\` paths. Every write to `node_modules/.cache` reloaded the server
+  modules and reset their state. Paths are now compared by component, and
+  the `routes/` and `islands/` checks behind typegen and island-only
+  updates are fixed the same way.
 
 ## [0.16.0] — 2026-11-05 · "Chinook"
 

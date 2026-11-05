@@ -152,17 +152,18 @@ fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::Recommende
         ) {
             return;
         }
+        // Compared by path component, not by "/x/" substrings: Windows paths use `\`, and those
+        // checks let every write into node_modules/.cache trigger a reload there.
+        let under = |p: &Path, names: &[&str]| {
+            p.strip_prefix(&state.core.root)
+                .unwrap_or(p)
+                .components()
+                .any(|c| names.iter().any(|n| c.as_os_str() == *n))
+        };
         let relevant: Vec<_> = event
             .paths
             .iter()
-            .filter(|p| {
-                let s = p.to_string_lossy();
-                !s.contains("/node_modules/")
-                    && !s.contains("/.git/")
-                    && !s.contains("/dist/")
-                    && !s.contains("/target/")
-                    && !s.contains("/.nowaki/")
-            })
+            .filter(|p| !under(p, &["node_modules", ".git", "dist", "target", ".nowaki"]))
             .collect();
         if relevant.is_empty() {
             return;
@@ -178,10 +179,7 @@ fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::Recommende
             }
             *last = Instant::now();
         }
-        if relevant
-            .iter()
-            .any(|p| p.to_string_lossy().contains("/routes/"))
-        {
+        if relevant.iter().any(|p| under(p, &["routes"])) {
             crate::typegen::write(&state.core.root).ok();
         }
         let under_content = relevant.iter().any(|p| {
@@ -194,9 +192,7 @@ fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::Recommende
             dev_content(&state);
         }
         state.ssr_version.fetch_add(1, Ordering::SeqCst);
-        let island_only = relevant
-            .iter()
-            .all(|p| p.to_string_lossy().contains("/islands/"));
+        let island_only = relevant.iter().all(|p| under(p, &["islands"]));
         let kind = if island_only { "update" } else { "reload" };
         let files: Vec<String> = relevant
             .iter()
