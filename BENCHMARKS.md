@@ -96,29 +96,37 @@ none of it (see the nowaki.dev site above).
 
 From [`benchmarks/compare`](./benchmarks/compare/README.md#production-servers) (`prod.mjs`): the
 100-page blog's server build on each framework's own Node server, one process each, 5 runs
-(fresh server, 3 s warm-up at the measured load). TTFB is 300 sequential GETs of post pages over
-one keep-alive connection; req/s is `oha` with 50 connections for 10 s. Pages are rendered per
+(fresh server, 3 s warm-up at the measured load). The blog has a nav, global CSS and a
+theme-toggle island on every page, a search island, a sortable-table island, a validated form
+and a JSON API route (see the compare README). TTFB is 300 sequential GETs of post pages over one
+keep-alive connection; req/s is `oha` with 50 connections for 10 s. Pages are rendered per
 request unless the row says ISR.
 
-| server | TTFB p50 | TTFB p99 | post pages req/s | `/` req/s | idle RSS |
-|---|---|---|---|---|---|
-| **Nowaki 0.16.0** | **0.20 ms** | **0.70 ms** | **10,424** | **18,493** | 275 MB |
-| Nowaki 0.16.0, `NOWAKI_CSP=enforce` | 0.20 ms | 1.00 ms | 11,103 | 18,968 | 275 MB |
-| Astro 7.4.5 | 0.24 ms | 1.03 ms | 6,672 | 7,723 | 436 MB |
-| SvelteKit 3.1.1 | 0.26 ms | 1.28 ms | 6,215 | 4,293 | 336 MB |
-| Nuxt 4.6.4 | 0.67 ms | 4.49 ms | 1,950 | 2,135 | 410 MB |
-| Next.js 16.4.5 | 0.99 ms | 2.81 ms | 1,105 | 1,323 | 429 MB |
-| Nowaki 0.16.0, ISR on post pages | 0.08 ms | 0.23 ms | 122,454 | 17,067 ¹ | 114 MB |
-| Nuxt 4.6.4, ISR (`swr`) | 0.11 ms | 0.35 ms | 18,777 | 2,209 ¹ | 280 MB |
-| Next.js 16.4.5, ISR | 0.29 ms | 1.14 ms | 5,129 | 1,340 ¹ | 385 MB |
+| server | TTFB p50 | TTFB p99 | post pages req/s | `/` req/s | `/api/search` req/s | idle RSS |
+|---|---|---|---|---|---|---|
+| **Nowaki 0.16.1** | **0.20 ms** | **0.61 ms** | **9,830** | **16,746** | **32,910** | 299 MB |
+| Nowaki 0.16.1, `NOWAKI_CSP=enforce` | 0.21 ms | 0.56 ms | 9,442 | 16,245 | 30,676 | 300 MB |
+| SvelteKit 3.1.1 | 0.23 ms | 0.81 ms | 6,763 | 4,682 | 22,739 | 340 MB |
+| Astro 7.4.5 | 0.30 ms | 1.02 ms | 5,395 | 7,065 | 14,091 | 341 MB |
+| Nuxt 4.6.4 | 0.63 ms | 5.15 ms | 1,947 | 2,079 | 31,106 | 367 MB |
+| Next.js 16.4.5 | 1.02 ms | 2.43 ms | 1,197 | 1,385 | 6,925 | 438 MB |
+| Nowaki 0.16.1, ISR on post pages | 0.08 ms | 0.27 ms | 91,284 | 11,634 ¹ | 22,076 ¹ | 128 MB |
+| Nuxt 4.6.4, ISR (`swr`) | 0.11 ms | 0.33 ms | 18,179 | 2,044 ¹ | 33,358 ¹ | 280 MB |
+| Next.js 16.4.5, ISR | 0.29 ms | 1.22 ms | 4,824 | 1,245 ¹ | 6,665 ¹ | 375 MB |
 
-¹ `/` is rendered per request in the ISR runs too; only post pages are cached.
+¹ `/` and `/api/search` are rendered per request in the ISR runs too; only post pages are cached.
 
 Measured 2026-11-05, Apple M2, Node 24.14.0, `oha` 1.16.0 on the same machine (above roughly
-100k req/s the figure is likely bounded by `oha` and loopback). On the same benchmark, Nowaki
-0.15.0 served 4,183 post pages/s at a TTFB p50 of 0.41 ms; 0.16.0 includes #101, which stopped
-calling `import()` on every request (a CPU profile had put 52% of the time in the ESM loader
-hooks). Full tables, ISR details and raw runs: `benchmarks/compare/results/`.
+100k req/s the figure is likely bounded by `oha` and loopback). Nowaki is 0.16.1 / runtime 0.15.1
+from npm. In the Nowaki ISR run, the uncached `/` and `/api/search` served about a third less
+than in the uncached run (11,634 vs 16,746 and 22,076 vs 32,910 req/s), and cached post pages
+fewer than 0.16.0 did on the previous, smaller blog (122,454); Nuxt's ISR run shows no such drop.
+The cause has not been measured yet.
+
+On the earlier, counters-only blog, Nowaki 0.15.0 served 4,183 post pages/s at a TTFB p50 of
+0.41 ms and 0.16.0 served 10,424 at 0.20 ms; 0.16.0 includes #101, which stopped calling
+`import()` on every request (a CPU profile had put 52% of the time in the ESM loader hooks).
+Full tables, ISR details and raw runs: `benchmarks/compare/results/`.
 
 ## Jetstream fan-out — 1000 connections
 
@@ -139,13 +147,14 @@ the latency of the last patch. The table is the median of 3 sets (server restart
 
 | scenario | receivers | delivery p50 | **delivery p95** | delivery p99 | everyone p50 | everyone p95 | missed |
 |---|---|---|---|---|---|---|---|
-| live query (`publish`) | 1000 | 18.0 ms | **27.0 ms** | 30.0 ms | 25.3 ms | 30.8 ms | 0 |
-| rooms (`vote`) | 999 | 18.8 ms | **29.5 ms** | 34.0 ms | 26.1 ms | 34.9 ms | 0 |
+| live query (`publish`) | 1000 | 18.7 ms | **29.9 ms** | 32.8 ms | 27.8 ms | 33.4 ms | 0 |
+| rooms (`vote`) | 999 | 18.7 ms | **30.1 ms** | 33.9 ms | 26.7 ms | 34.1 ms | 0 |
 
 Measured 2026-11-05 on an Apple M2 (8 cores, 16 GB), macOS 26 (darwin 25.6.0), Node 24.14.0,
-Nowaki 0.16.0 built from the `v0.16.0` tag (`dffe887`, `cargo build --release`); 150 rounds
-and 149,850+ deliveries per scenario, none missed. Raw sets (each row tagged with its Nowaki
-version and commit): `benchmarks/results/live-fanout.jsonl`.
+Nowaki 0.16.1 built from the `v0.16.1` tag (`5f71061`, `cargo build --release`); 150 rounds
+and 149,850+ deliveries per scenario, none missed. 0.16.0 (`dffe887`) gave a delivery p95 of
+27.0 / 29.5 ms on the same benchmark, within the spread of the sets. Raw sets (each row tagged
+with its Nowaki version and commit): `benchmarks/results/live-fanout.jsonl`.
 
 The same benchmark on 0.15.0 (`0fba471`, 2026-11-04) gave a delivery p95 of 63.2 ms (live query)
 and 67.5 ms (rooms), everyone p50 59.5 / 65.7 ms. In 0.15.0 each session sent its own render

@@ -120,7 +120,8 @@ Notes:
 - Nowaki's Rust binary is started directly. The npm `nowaki` command is a Node shim that
   `spawnSync`s the binary and stays resident (about 45 MB); no other framework has such a
   launcher, but an app started with `npx nowaki start` pays it.
-- Nowaki 0.15.0 served 4,183 uncached post pages/s here; 0.16.0 serves 10,424. An earlier
+- On the earlier, counters-only blog, Nowaki 0.15.0 served 4,183 uncached post pages/s and 0.16.0
+  10,424 (the current blog: 0.16.1, 9,830). An earlier
   version of this note put the 0.15.0 gap down to the Rust → Node proxy hop; that was not
   measured, and it was wrong. Measured in #90: `examples/hello` `/about` was about as fast
   through `nowaki start` (6,056 req/s), on the Node sidecar directly (6,492) and on the node
