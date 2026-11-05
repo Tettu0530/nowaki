@@ -78,6 +78,13 @@ milestone's worth of work; the codename is noted per entry.
   image's `alt`).
 
 ### Changed
+- AVIF for `<Image>` / `?image` encodes at rav1e speed 9 (was 7). On photos this
+  is about 30% faster for the same or a slightly smaller file, which matters
+  for a cold build (variants are cached after it).
+- Static output: canonical URLs, the default `og:url`, and `sitemap.xml` give
+  page URLs a trailing slash (`/docs/a/`), matching the files the static
+  output writes (`docs/a/index.html`). A static host would otherwise redirect
+  each one. Servers (`nowaki start`, the adapters) keep the route's own path.
 - **Highlighted code is cached on disk** (`node_modules/.cache/nowaki/highlight`)
   for Markdown entries and MDX alike. Syntect's grammars (TypeScript alone takes
   about 150 ms to compile) load only on a cache miss, so a rebuild or a dev

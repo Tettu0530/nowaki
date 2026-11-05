@@ -26,8 +26,9 @@ use xxhash_rust::xxh3::xxh3_64;
 const DEFAULT_WIDTHS: [u32; 4] = [640, 960, 1280, 1920];
 const MAX_WIDTH: u32 = 2560;
 const DEFAULT_AVIF_QUALITY: u8 = 60;
-/// rav1e speed (1 slowest … 10 fastest). 7 keeps most of the size win at a fraction of the time.
-const AVIF_SPEED: u8 = 7;
+/// rav1e speed (1 slowest … 10 fastest). 9 was ~30% faster than 7 on photos at the same or a
+/// smaller size; 10 grew the files by ~60%.
+const AVIF_SPEED: u8 = 9;
 
 /// `?image` and its options.
 #[derive(Debug, Clone, Default, PartialEq)]

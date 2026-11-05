@@ -58,8 +58,20 @@ function absolute(value, base) {
 
 /// The head tags for a resolved meta. `title` is the page's <title> (Open Graph / Twitter
 /// default to it). `pathname` and `origin` are the request's; `site` wins over `origin`.
-export function seoTags(meta, { title, pathname, origin, site }) {
+/// A page's path as the static output serves it: `/docs/a` is written to `docs/a/index.html`, so
+/// its URL there is `/docs/a/` (a static host redirects the bare form). Paths that end in a file
+/// name (`/feed.xml`) or a slash stay as they are.
+export function staticPagePath(p) {
+  const s = String(p);
+  if (s.endsWith("/") || /\.[A-Za-z0-9]+$/.test(s.split("/").pop())) return s;
+  return `${s}/`;
+}
+
+/// `staticOutput`: the page is being prerendered (`nowaki build --adapter static`), so this page's
+/// own URL (canonical: true, the default og:url) gets the trailing slash its file implies.
+export function seoTags(meta, { title, pathname, origin, site, staticOutput = false }) {
   if (!isObj(meta)) return "";
+  if (staticOutput) pathname = staticPagePath(pathname);
   const base = (site ?? origin ?? "http://localhost") + "/";
   const tags = [];
   const name = (n, c) => c !== undefined && c !== null && c !== "" && tags.push(`<meta name="${n}" content="${esc(c)}" />`);
@@ -124,8 +136,8 @@ function imageType(url) {
 }
 
 /// sitemap.xml for `urls` (paths), against the site.
-export function sitemapXml(site, urls) {
-  const items = [...new Set(urls)]
+export function sitemapXml(site, urls, { staticOutput = false } = {}) {
+  const items = [...new Set(staticOutput ? urls.map(staticPagePath) : urls)]
     .sort()
     .map((u) => `  <url><loc>${esc(absolute(u, site + "/"))}</loc></url>`)
     .join("\n");
