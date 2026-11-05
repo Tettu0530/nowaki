@@ -525,7 +525,9 @@ async function render404(env, table, ctx, version) {
 }
 
 async function render500(env, table, ctx, version, err) {
-  env.onError?.(err, ctx);
+  // Always on record: with a custom _500 page, the built-in renderError (which logs) never runs.
+  if (typeof env.onError === "function") env.onError(err, ctx);
+  else console.error(`[nowaki] ${ctx.method ?? "GET"} ${ctx.url?.pathname ?? ""}:`, err);
   if (table.errorRoute && !ctx._inErrorPage) {
     try {
       ctx._inErrorPage = true;
