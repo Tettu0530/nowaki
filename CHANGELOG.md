@@ -11,6 +11,18 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **Attributes on `<html>` and `<body>`** (v0.17). A route or layout can
+  `export const htmlAttrs` / `bodyAttrs`, and `meta()` can return them too:
+  `export const htmlAttrs = { "data-theme": "paper" }`.
+  - Layouts apply first (root to leaf), then the route, then `meta()`. A later
+    value wins, `false` / `null` removes one set earlier, and `class` values
+    are joined. `true` renders a bare attribute.
+  - Values are escaped. Event-handler attributes (`on*`) are ignored.
+  - `export const lang` still sets `lang`, and `htmlAttrs.lang` is used when
+    there is none.
+  - The SPA router swaps these attributes on client navigation. It changes
+    only the ones the server set (listed in `data-nowaki-attrs`), so
+    attributes that client code added stay.
 - **`public/`** (v0.17). Files in `public/` are served as-is at their own
   path: `public/robots.txt` → `/robots.txt`, `public/fonts/a.woff2` →
   `/fonts/a.woff2`. There is no transform: a `.css` or `.ts` there is sent as

@@ -77,7 +77,7 @@ options.vnode = (vnode) => {
 export function renderShell({ mod, meta }) {
   const m = pageMeta(meta, mod);
   const head = `<!DOCTYPE html>
-<html lang="${escapeHtml(m.lang)}">
+<html lang="${escapeHtml(m.lang)}"${m.htmlAttrs}>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -86,7 +86,7 @@ export function renderShell({ mod, meta }) {
 ${m.head}
 <meta name="nowaki-head" content="end" />
 </head>
-<body>
+<body${m.bodyAttrs}>
 `;
   const tail = `
 ${devScripts()}

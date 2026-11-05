@@ -70,6 +70,11 @@ rm examples/hello/content/docs/e2e-added.md
 for i in $(seq 1 20); do curl -sf $B/docs >/dev/null && break; sleep 0.5; done
 curl -sf $B/docs | grep -q 'href="/docs/intro"'
 # route / layout CSS in dev: linked from the dev server, which serves only .css under the app
+# htmlAttrs / bodyAttrs: route over layout, class joined, on* dropped, values escaped
+curl -sf $B/styled | grep -q '<html lang="ja" data-sheet-rev="3" data-theme="paper" data-nowaki-attrs="data-sheet-rev data-theme">'
+curl -sf $B/styled | grep -q '<body class="site styled-page" data-site="hello" data-quote="&quot;&lt;x&gt;&quot;" data-nowaki-attrs="class data-site data-quote">'
+! curl -sf $B/styled | grep -q 'onload'
+curl -sf $B/about | grep -q '<body class="site" data-site="hello" data-nowaki-attrs="class data-site">'
 # public/: files at their own path, as-is (a .css stays CSS), dotfiles hidden except .well-known
 curl -s -D - $B/robots.txt | grep -qi '^content-type: text/plain'
 curl -sf $B/robots.txt | grep -q 'User-agent: \*'

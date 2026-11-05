@@ -39,6 +39,12 @@ struct PageMeta {
     title: String,
     head: String,
     lang: String,
+    /// ` name="value"…` for `<html>` / `<body>`, escaped by the runtime (document.mjs
+    /// `pageMeta`); empty from runtimes older than 0.15.3.
+    #[serde(default, rename = "htmlAttrs")]
+    html_attrs: String,
+    #[serde(default, rename = "bodyAttrs")]
+    body_attrs: String,
 }
 
 struct ProdState {
@@ -906,8 +912,10 @@ fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
     };
 
     format!(
-        "<!DOCTYPE html>\n<html lang=\"{lang}\">\n<head>\n<meta charset=\"utf-8\" />\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n<title>{title}</title>\n<meta name=\"nowaki-head\" content=\"start\" />\n{preload}\n{head}\n<meta name=\"nowaki-head\" content=\"end\" />\n</head>\n<body>\n{body}\n{runtime_script}\n{live_script}\n</body>\n</html>",
+        "<!DOCTYPE html>\n<html lang=\"{lang}\"{html_attrs}>\n<head>\n<meta charset=\"utf-8\" />\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n<title>{title}</title>\n<meta name=\"nowaki-head\" content=\"start\" />\n{preload}\n{head}\n<meta name=\"nowaki-head\" content=\"end\" />\n</head>\n<body{body_attrs}>\n{body}\n{runtime_script}\n{live_script}\n</body>\n</html>",
         lang = escape_html(&meta.lang),
+        html_attrs = meta.html_attrs,
+        body_attrs = meta.body_attrs,
         title = escape_html(&meta.title),
         head = meta.head,
         body = meta.body,

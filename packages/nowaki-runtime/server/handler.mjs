@@ -6,6 +6,7 @@ import { renderToStringAsync } from "preact-render-to-string";
 import { renderToReadableStream } from "preact-render-to-string/stream";
 
 import { matchRoute } from "./router.mjs";
+import { mergeAttrs } from "./document.mjs";
 import { makeContext } from "./context.mjs";
 import { dispatchServerFn, runWithContext, SERVER_FN_PATH } from "./functions.mjs";
 import { isCrossSite } from "./origin.mjs";
@@ -173,7 +174,7 @@ async function renderRoute(env, table, match, mod, ctx, version) {
   // The trade-off: once it's sent, the status and headers are fixed, so `meta` only sees the static
   // exports, and a loader redirect or error is handled inside the stream (see earlyDocument).
   if (mod.streaming === "early" && typeof env.renderShell === "function") {
-    const meta = await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data: undefined, params: ctx.params, url: ctx.url }));
+    const meta = await withDocAttrs(env, table, match.file, mod, version, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data: undefined, params: ctx.params, url: ctx.url })));
     const { head, tail } = env.renderShell({ mod, meta });
     const revalidate = isrSeconds(mod);
     return {
@@ -192,7 +193,7 @@ async function renderRoute(env, table, match, mod, ctx, version) {
     };
   }
   const data = mod.loader ? await mod.loader(ctx) : undefined;
-  const meta = await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data, params: ctx.params, url: ctx.url }));
+  const meta = await withDocAttrs(env, table, match.file, mod, version, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data, params: ctx.params, url: ctx.url })));
   let node = h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url });
 
   // wrap outward in leaf→root order
@@ -304,7 +305,18 @@ async function resolveMeta(mod, info) {
     title: str(dyn?.title) ?? str(mod.title),
     head: str(dyn?.head) ?? str(mod.head),
     lang: str(dyn?.lang) ?? str(mod.lang),
+    htmlAttrs: dyn?.htmlAttrs,
+    bodyAttrs: dyn?.bodyAttrs,
   };
+}
+
+// `export const htmlAttrs` / `bodyAttrs` from the layouts (root first), then the route, then what
+// the route's meta() returned, merged into one object each (document.mjs `mergeAttrs`).
+async function withDocAttrs(env, table, file, mod, version, meta) {
+  const layouts = [];
+  for (const f of layoutChain(table, file)) layouts.push(await env.importModule(f, version));
+  const merged = (key) => mergeAttrs(...layouts.map((l) => l?.[key]), mod?.[key], meta?.[key]);
+  return { ...(meta ?? {}), htmlAttrs: merged("htmlAttrs"), bodyAttrs: merged("bodyAttrs") };
 }
 
 // The page wrapped in its layouts, with every loader run (route first, then layouts leaf → root).

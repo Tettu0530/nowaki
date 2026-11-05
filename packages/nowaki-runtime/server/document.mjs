@@ -1,13 +1,60 @@
 // Production document assembly. Pure string processing with no node deps, so it works on Edge too.
 
 // Prefers meta resolved after the loader, falling back to the route's static export.
+// `htmlAttrs` / `bodyAttrs` come back as attribute strings (with a leading space, escaped) for the
+// <html> / <body> tags; meta carries them already merged across layouts (handler.mjs
+// `withDocAttrs`), and a page rendered without that (404 / 500) uses its own exports.
 export function pageMeta(meta, mod) {
   const str = (v) => (typeof v === "string" ? v : undefined);
+  const html = isAttrs(meta?.htmlAttrs) ? meta.htmlAttrs : isAttrs(mod?.htmlAttrs) ? mod.htmlAttrs : {};
+  const body = isAttrs(meta?.bodyAttrs) ? meta.bodyAttrs : isAttrs(mod?.bodyAttrs) ? mod.bodyAttrs : {};
   return {
     title: str(meta?.title) ?? str(mod?.title) ?? "Nowaki App",
     head: str(meta?.head) ?? str(mod?.head) ?? "",
-    lang: str(meta?.lang) ?? str(mod?.lang) ?? "en",
+    // `export const lang` / meta().lang win; htmlAttrs.lang (say, from a layout) is the fallback.
+    lang: str(meta?.lang) ?? str(mod?.lang) ?? attrValue(html.lang) ?? "en",
+    htmlAttrs: attrString(html, ["lang"]),
+    bodyAttrs: attrString(body, []),
   };
+}
+
+const isAttrs = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const attrValue = (v) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : undefined);
+// Plain attribute names only, and no inline event handlers (`onload` and the like): they would
+// run outside the CSP nonce and aren't something a page should set from data.
+const ATTR_NAME = /^[A-Za-z_:][-A-Za-z0-9_:.]*$/;
+const allowedName = (n) => ATTR_NAME.test(n) && !/^on/i.test(n) && n.toLowerCase() !== "data-nowaki-attrs";
+
+/// Merges attribute objects left to right (later wins; `false` / `null` remove one set earlier).
+/// `class` values are joined instead, so a layout's class and a page's class both apply.
+export function mergeAttrs(...objs) {
+  const out = {};
+  for (const o of objs) {
+    if (!isAttrs(o)) continue;
+    for (const [k, v] of Object.entries(o)) {
+      if (k === "class" && attrValue(v) !== undefined && attrValue(out.class) !== undefined) {
+        out.class = `${out.class} ${attrValue(v)}`;
+      } else {
+        out[k] = v;
+      }
+    }
+  }
+  return out;
+}
+
+/// ` name="value"` pairs, plus `data-nowaki-attrs` naming them so the SPA router can swap exactly
+/// these on navigation (and leave attributes that client code set alone).
+function attrString(obj, skip) {
+  const names = [];
+  let s = "";
+  for (const [k, v] of Object.entries(obj)) {
+    if (skip.includes(k) || !allowedName(k)) continue;
+    if (v === true) s += ` ${k}`;
+    else if (attrValue(v) !== undefined) s += ` ${k}="${escapeHtml(attrValue(v))}"`;
+    else continue;
+    names.push(k);
+  }
+  return names.length ? `${s} data-nowaki-attrs="${escapeHtml(names.join(" "))}"` : "";
 }
 
 // Non-streaming: scan the whole body and put preloads for used islands in <head> (avoids waterfalls).
@@ -51,7 +98,7 @@ export function prodDocument(manifest, { mod, body, meta }, opts = {}) {
       : "";
 
   return `<!DOCTYPE html>
-<html lang="${escapeHtml(m.lang)}">
+<html lang="${escapeHtml(m.lang)}"${m.htmlAttrs}>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -61,7 +108,7 @@ ${preload}
 ${m.head}
 <meta name="nowaki-head" content="end" />
 </head>
-<body>
+<body${m.bodyAttrs}>
 ${body}
 ${runtime}
 ${live}
@@ -81,7 +128,7 @@ export function prodShell(manifest, mod, meta) {
     ? `<script id="nowaki-runtime" type="module" src="/_nowaki/${runtimeChunk}"${dataRouter(manifest)}></script>`
     : "";
   const head = `<!DOCTYPE html>
-<html lang="${escapeHtml(m.lang)}">
+<html lang="${escapeHtml(m.lang)}"${m.htmlAttrs}>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -90,7 +137,7 @@ export function prodShell(manifest, mod, meta) {
 ${runtimePreload}${m.head}
 <meta name="nowaki-head" content="end" />
 </head>
-<body>
+<body${m.bodyAttrs}>
 `;
   const tail = `
 ${runtimeScript}
