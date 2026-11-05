@@ -176,6 +176,8 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
     .catch(() => null);
   const env = {
     dev: false,
+    // Prerendering for static output: pages are files (`x/index.html`), so their URLs end in `/`.
+    staticOutput: process.env.NOWAKI_PRERENDER === "1",
     site: resolveSite(builtSite),
     fonts,
     routeTable: () => routeTable,

@@ -1,5 +1,5 @@
 // Unit checks for server/seo.mjs (meta tags, sitemap, robots, site URL). No server needed.
-import { mergeMeta, normalizeSite, robotsTxt, seoTags, sitemapXml } from "../packages/nowaki-runtime/server/seo.mjs";
+import { mergeMeta, normalizeSite, robotsTxt, seoTags, sitemapXml, staticPagePath } from "../packages/nowaki-runtime/server/seo.mjs";
 
 let failures = 0;
 const check = (name, ok) => {
@@ -45,6 +45,9 @@ check("no meta, no tags", seoTags(undefined, { pathname: "/" }) === "");
 const map = sitemapXml("https://example.com", ["/b", "/a", "/a", "/x%20y"]);
 check("sitemap lists each URL once, sorted, absolute", map.indexOf("https://example.com/a<") < map.indexOf("https://example.com/b<") && map.split("/a<").length === 2);
 check("sitemap keeps encoded paths", map.includes("https://example.com/x%20y"));
+check("static output: page URLs get the slash their index.html implies", staticPagePath("/docs/a") === "/docs/a/" && staticPagePath("/") === "/" && staticPagePath("/feed.xml") === "/feed.xml");
+check("static output: canonical with a slash", seoTags({ canonical: true }, { pathname: "/docs/a", site: "https://e.x", staticOutput: true }).includes('href="https://e.x/docs/a/"'));
+check("static output: sitemap with slashes", sitemapXml("https://e.x", ["/", "/docs/a"], { staticOutput: true }).includes("<loc>https://e.x/docs/a/</loc>"));
 check("robots.txt points at the sitemap", robotsTxt("https://example.com") === "User-agent: *\nAllow: /\n\nSitemap: https://example.com/sitemap.xml\n");
 
 console.log(failures === 0 ? "\nSEO UNIT TEST PASSED" : `\nSEO UNIT TEST FAILED (${failures})`);
