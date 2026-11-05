@@ -43,9 +43,6 @@ pub fn alias_specifier(spec: &str) -> Option<&'static str> {
     }
 }
 
-/// Maps a resolved absolute path to a dev server URL.
-/// - Under the app root → root-relative URL (/islands/Counter.tsx)
-/// - Outside the root (realpaths into the pnpm store etc.) → /@fs/<absolute path>
 /// Client builds only: `preact/jsx-runtime` resolves to the runtime's tiny `createElement`
 /// wrapper (`client/jsx-runtime.js`) instead of Preact's own module, which saves about 0.9 KB gzip
 /// on every page with an island. None when the app's runtime predates it.
@@ -58,6 +55,9 @@ pub fn client_runtime_alias(root: &Path, spec: &str) -> Option<PathBuf> {
         .then(|| dunce::canonicalize(&shim).unwrap_or(shim))
 }
 
+/// Maps a resolved absolute path to a dev server URL.
+/// - Under the app root → root-relative URL (/islands/Counter.tsx)
+/// - Outside the root (realpaths into the pnpm store etc.) → /@fs/<absolute path>
 pub fn fs_path_to_url(root: &Path, abs: &Path) -> String {
     match abs.strip_prefix(root) {
         Ok(rel) => format!("/{}", url_slashes(rel)),
