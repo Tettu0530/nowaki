@@ -286,6 +286,19 @@ if (mode === "prod") {
   check("ISR variant is cached on repeat (HIT/STALE)",
     /HIT|STALE/.test(de2.headers.get("x-nowaki-cache") || ""));
 
+  // ISR cache headers for CDNs (0.16.2): x-nowaki-vary only reaches the nowaki start cache, so a
+  // header-dependent page must say Vary, and a per-user (cookie) page must not be shareable.
+  check(`ISR page reading accept-language sends Vary (${en.headers.get("vary")})`,
+    /accept-language/i.test(en.headers.get("vary") || "") && /public/.test(en.headers.get("cache-control") || ""));
+  const ck = await fetch(`${base}/isr-cookie`, { headers: { cookie: "user=alice" } });
+  check(`ISR page reading a cookie is private (${ck.headers.get("cache-control")})`,
+    /private/.test(ck.headers.get("cache-control") || "") && !/public|s-maxage/.test(ck.headers.get("cache-control") || ""));
+  const bob = await (await fetch(`${base}/isr-cookie`, { headers: { cookie: "user=bob" } })).text();
+  check("the nowaki start cache still keeps cookie variants apart", bob.includes("USER=bob") && !bob.includes("USER=alice"));
+  const plain = await fetch(`${base}/isr`);
+  check(`ISR page that reads nothing stays public without Vary (${plain.headers.get("cache-control")})`,
+    /public, s-maxage=/.test(plain.headers.get("cache-control") || "") && !/accept-language|cookie/i.test(plain.headers.get("vary") || ""));
+
   // ISR query-flood collapsing (/isr doesn't read the query -> ?cb collapses into one entry)
   await fetch(`${base}/isr`); // populate
   const f1 = (await fetch(`${base}/isr?cb=1`)).headers.get("x-nowaki-cache");

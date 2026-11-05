@@ -74,6 +74,38 @@ milestone's worth of work; the codename is noted per entry.
   absolute allowance. An A/A run of the same build on one machine stayed
   within 5%. `node benchmarks/ci-perf.mjs --base <dir> --head <dir>` runs it
   locally.
+## [0.16.2] — 2026-11-05 · security patch
+
+Packages: `nowaki` / `nowaki-core` 0.16.2 (crates.io, npm), `@nowaki-dev/runtime`
+0.15.2, `create-nowaki` / `create-nowaki-app` 0.17.2. The fix is in the runtime:
+update `@nowaki-dev/runtime` to 0.15.2.
+
+### Security
+- **ISR pages that depend on the request could be shared by a CDN.**
+  - An ISR page (`export const revalidate`) was always sent with
+    `cache-control: public, s-maxage=…, stale-while-revalidate`. What its
+    render read from the request (cookies, `accept-language`, …) went only
+    into the internal `x-nowaki-vary` header. The `nowaki start` cache uses
+    that header, but `start` strips it, and the adapters never turn it into
+    HTTP `Vary`.
+  - So a CDN in front of `nowaki start`, or the edge cache of an adapter's
+    host (for example Vercel's), could store one visitor's page (a page that
+    read `ctx.cookies`) and serve it to others. This also happened when the
+    render read every header or the request body, which `nowaki start`
+    already refused to cache.
+  - Now:
+    - A render that read `cookie`, `authorization`, the whole header set, or
+      the body gets `cache-control: private, no-cache`. That means never
+      shared. `Vary: Cookie` alone isn't enough, because some CDNs ignore
+      it.
+    - A render that read other headers stays `public, s-maxage=…` and sends
+      `Vary` naming them.
+    - The query string needs nothing, because every cache keys by the URL.
+    - `streaming = true` pages get the same treatment: their loaders run
+      before the headers are sent.
+    - `streaming = "early"` pages send their headers before any loader runs,
+      so they are never marked shareable.
+  - `nowaki start` still caches cookie variants apart internally, as before.
 
 ## [0.16.1] — 2026-11-05 · patch
 
@@ -793,7 +825,8 @@ and the runtime at 0.9.0.
 - Published to crates.io (`nowaki-core`, `nowaki`) and npm (`@nowaki-dev/runtime`,
   `create-nowaki`, `create-nowaki-app`).
 
-[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.16.1...HEAD
+[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.16.2...HEAD
+[0.16.2]: https://github.com/Tettu0530/nowaki/releases/tag/v0.16.2
 [0.16.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.16.1
 [0.16.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.16.0
 [0.15.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.15.0
