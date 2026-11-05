@@ -11,7 +11,9 @@ export function pageMeta(meta, mod) {
 }
 
 // Non-streaming: scan the whole body and put preloads for used islands in <head> (avoids waterfalls).
-export function prodDocument(manifest, { mod, body, meta }) {
+// `opts.live === false` (static output from `nowaki prerender`): live islands keep their first
+// HTML but ship no live.js. A static host has no server to answer its events.
+export function prodDocument(manifest, { mod, body, meta }, opts = {}) {
   const m = pageMeta(meta, mod);
   const islandNames = [...body.matchAll(/<nowaki-island name="([^"]+)"/g)].map((m) => m[1]);
   const hasIslands = islandNames.length > 0 && manifest.runtime;
@@ -44,7 +46,7 @@ export function prodDocument(manifest, { mod, body, meta }) {
   // Only `nowaki dev` / `nowaki start` terminate the /__nowaki/live WebSocket, and they assemble
   // their own documents, so this one tells live.js to go straight to POST /__nowaki/live-event.
   const live =
-    manifest.liveRuntime && body.includes("<nowaki-live")
+    opts.live !== false && manifest.liveRuntime && body.includes("<nowaki-live")
       ? `<script type="module" src="/_nowaki/${manifest.liveRuntime}" data-live-transport="post"></script>`
       : "";
 

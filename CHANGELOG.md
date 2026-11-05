@@ -76,6 +76,12 @@ milestone's worth of work; the codename is noted per entry.
   process only: `nowaki dev` and the adapters don't save rooms.
 
 ### Changed
+- **The npm `nowaki` command no longer keeps a Node process running** (#91).
+  On Linux and macOS, the shim now replaces itself with the Rust binary
+  (`process.execve`, Node 22.15+ / 23.11+), so it no longer runs the binary
+  as a child process. `npx nowaki start` used to leave a ~45 MB Node
+  process running next to the server. It also forwarded signals indirectly.
+  Windows and older Node versions keep the child-process fallback.
 - **ISR pages are cached from the first request.** Right after startup,
   `nowaki start` renders every ISR page once in the background, so the first
   visitor gets a page from the Rust front instead of waiting for a render.
@@ -121,6 +127,17 @@ milestone's worth of work; the codename is noted per entry.
   and `export { live } from "…"` were missed and shipped a client chunk.
   Now any exported binding named `live` counts, and comments and strings
   don't.
+- **Scope hoisting through a symlinked or verbatim app root** (#92).
+  `NowakiCore::new` now canonicalizes the root with `dunce`. Before this
+  change, a root opened through a symlink (macOS `/var` → `/private/var`)
+  or given as a Windows `\\?\` path matched no resolved module. Every app
+  module then became its own chunk, and the route JS report missed islands.
+- **Static output no longer ships a live.js that can't work** (#93). Pages
+  from `nowaki prerender` and the static adapter used to include live.js in
+  POST mode. A static host has no server for its events, so every click
+  logged "not applied". Live islands now keep their first HTML and ship no
+  script. The build also lists the pages they are on, as a note. The node,
+  bun, deno, vercel, and cloudflare adapters still ship live.js.
 
 ## [0.15.0] — 2026-11-04 · "Cyclone" (part 1)
 
