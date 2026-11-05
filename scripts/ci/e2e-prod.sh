@@ -4,6 +4,10 @@
 set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 cd "$(dirname "$0")/../.."
+# A request to a hung server must fail, not wait forever; and on Windows, where hangs have been
+# seen, trace every command so the log shows where one stopped.
+curl() { command curl --max-time 30 "$@"; }
+if [ "${RUNNER_OS:-}" = Windows ]; then set -x; fi
 
 # stdout stays in the log; stderr is captured for the unvalidated-server-function warning.
 { BUILD_ERR=$(./target/debug/nowaki build examples/hello 2>&1 1>&3 3>&-); } 3>&1
