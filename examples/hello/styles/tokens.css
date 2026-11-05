@@ -1,0 +1,3 @@
+/* Inlined into site.css by the build (and the dev server): an @import left as written would
+   resolve against /_nowaki/ and miss. */
+:root { --site-token: rgb(9, 8, 7); }

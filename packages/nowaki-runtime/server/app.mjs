@@ -198,8 +198,8 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
     // Route / layout CSS from the build (manifest.routeCss, keyed by server module).
     routeCss: (file) =>
       (manifest.routeCss?.[path.relative(serverDir, file).split(path.sep).join("/")] ?? []).map((f) => `/_nowaki/${f}`),
-    renderError: (err) => {
-      console.error("[nowaki]", err);
+    // render500 has already logged it.
+    renderError: () => {
       return {
         status: 500,
         headers: { "content-type": "text/plain; charset=utf-8" },

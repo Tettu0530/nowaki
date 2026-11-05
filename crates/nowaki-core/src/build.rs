@@ -331,6 +331,19 @@ pub fn build_server(
             }
         }
     }
+    // Plus every app module those import from anywhere else in the app (`data/`, `sections/`,
+    // `utils/`, …): the conventional folders are entry points, not the whole server graph.
+    {
+        let mut seen: HashSet<PathBuf> = files.iter().cloned().collect();
+        let entries = files.clone();
+        for entry in &entries {
+            for m in crate::chunk::collect_app_modules(core, entry) {
+                if seen.insert(m.clone()) {
+                    files.push(m);
+                }
+            }
+        }
+    }
 
     let server_assets = ServerAssets {
         client_dir: dist.join("client"),
@@ -684,8 +697,7 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
     }
     // .css becomes a <style>-injecting JS shim; *.module.css is scoped + exports a class name map (no deps).
     if crate::css::is_css(abs) {
-        let css = fs::read_to_string(abs)
-            .with_context(|| format!("failed to read: {}", abs.display()))?;
+        let css = core.read_css(abs)?;
         let id = crate::css::css_scope_id(&core.root, abs);
         let code = if crate::css::is_css_module(abs) {
             let (scoped, map) = crate::css::scope_css(&id, &css);

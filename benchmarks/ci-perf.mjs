@@ -52,13 +52,16 @@ function get(url) {
   });
 }
 
-async function waitFor(url, ms = 30000) {
+// `log()` returns what the server printed, shown when it never answers 200.
+async function waitFor(url, ms = 30000, log = () => "") {
   const end = Date.now() + ms;
+  let last = 0;
   while (Date.now() < end) {
-    if ((await get(url)) === 200) return;
+    last = await get(url);
+    if (last === 200) return;
     await sleep(100);
   }
-  throw new Error(`timed out waiting for ${url}`);
+  throw new Error(`timed out waiting for ${url} (last status ${last})\n${log()}`);
 }
 
 function stop(child) {
@@ -70,10 +73,14 @@ function stop(child) {
   });
 }
 
+const lastBuild = {};
+const lastTree = {};
 function measureBuild(side) {
   const t0 = performance.now();
-  const r = spawnSync(bin(side), ["build", app(side)], { stdio: "ignore" });
-  if (r.status !== 0) throw new Error(`${side}: nowaki build failed`);
+  const r = spawnSync(bin(side), ["build", app(side)], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`${side}: nowaki build failed\n${r.stdout}\n${r.stderr}`);
+  lastBuild[side] = `${r.stdout}\n${r.stderr}`;
+  lastTree[side] = spawnSync("find", [path.join(app(side), "dist/server"), "-maxdepth", "2"], { encoding: "utf8" }).stdout;
   return performance.now() - t0;
 }
 
@@ -105,12 +112,20 @@ function oha(args) {
 async function measureServer(side) {
   const p = port++;
   const child = spawn(bin(side), ["start", app(side), "--port", String(p)], {
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, NOWAKI_ISR_WARM: "0" },
   });
+  let out = "";
+  child.stdout.on("data", (d) => (out = (out + d).slice(-8000)));
+  child.stderr.on("data", (d) => (out = (out + d).slice(-8000)));
   const url = `http://127.0.0.1:${p}/about`;
+  // On a timeout, also show what the build left in dist/server, and the source tree, side by side.
+  const tree = () => {
+    const ls = (d) => spawnSync("find", [d, "-maxdepth", "2"], { encoding: "utf8" }).stdout;
+    return `--- ${app(side)}/dist/server now ---\n${ls(path.join(app(side), "dist/server"))}\n--- right after the last build ---\n${lastTree[side] ?? ""}\n--- server output (tail) ---\n${out.slice(-2500)}`;
+  };
   try {
-    await waitFor(url);
+    await waitFor(url, 30000, tree);
     oha(["-z", "2s", "-c", "50", url]); // warm-up
     const load = oha(["-z", "5s", "-c", "50", url]);
     const seq = oha(["-n", "300", "-c", "1", url]);

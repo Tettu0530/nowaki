@@ -160,12 +160,15 @@ export interface Meta {
     title?: string;
     description?: string;
     image?: string;
+    /** Defaults to the Open Graph image's `alt`. */
+    imageAlt?: string;
   };
   /** Structured data, one `<script type="application/ld+json">` per object. */
   jsonLd?: Record<string, unknown> | Record<string, unknown>[];
 }
 
-export type OpenGraphImage = string | { url: string; width?: number; height?: number; alt?: string };
+/** `type` (`og:image:type`) defaults to the URL's extension (`.png` → image/png). */
+export type OpenGraphImage = string | { url: string; type?: string; width?: number; height?: number; alt?: string };
 
 /**
  * Route metadata: `export const meta: Meta = {...}`, or a function of the loader data (`MetaFn`).

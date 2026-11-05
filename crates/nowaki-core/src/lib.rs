@@ -220,6 +220,18 @@ impl NowakiCore {
         Ok(source)
     }
 
+    /// A stylesheet's text with its `@import`s inlined (css.rs `inline_imports`), resolving
+    /// packages like JS imports do (`lenis/dist/lenis.css`).
+    pub fn read_css(&self, abs: &Path) -> Result<String> {
+        let css = std::fs::read_to_string(abs)
+            .with_context(|| format!("failed to read: {}", abs.display()))?;
+        if !css.contains("@import") {
+            return Ok(css);
+        }
+        let resolve = |dir: &Path, spec: &str| self.resolve_spec(dir, spec);
+        Ok(css::inline_imports(abs, &css, &resolve))
+    }
+
     /// Reads the file, checks the cache by content hash, and transforms if needed.
     /// Checks memory → disk (survives restarts) → transform, in that order.
     pub fn load_module(&self, abs: &Path, mode: Mode) -> Result<String> {

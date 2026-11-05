@@ -2,6 +2,131 @@ use std::path::Path;
 
 use xxhash_rust::xxh3::xxh3_64;
 
+/// Inlines `@import`s at the top of a stylesheet, recursively: `@import "./tokens.css";`,
+/// `@import url(x) screen;`, `@import "pkg/dist/x.css" layer(base);`. A served stylesheet lives at
+/// a hashed URL (or `/__nowaki/css` in dev), so an import left as written would resolve against
+/// that URL and miss. Conditions wrap the imported rules (`@media` / `@layer` / `@supports`);
+/// remote URLs stay as `@import`s, first. `resolve(dir, spec)` finds a file (relative paths and
+/// packages); one it can't find stays as written. Each file is inlined once (cycles stop).
+pub fn inline_imports(
+    abs: &Path,
+    css: &str,
+    resolve: &dyn Fn(&Path, &str) -> Option<std::path::PathBuf>,
+) -> String {
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(abs.to_path_buf());
+    let mut remote = Vec::new();
+    let body = inline_rec(abs, css, resolve, &mut seen, &mut remote);
+    if remote.is_empty() {
+        body
+    } else {
+        format!("{}\n{body}", remote.join("\n"))
+    }
+}
+
+fn inline_rec(
+    abs: &Path,
+    css: &str,
+    resolve: &dyn Fn(&Path, &str) -> Option<std::path::PathBuf>,
+    seen: &mut std::collections::HashSet<std::path::PathBuf>,
+    remote: &mut Vec<String>,
+) -> String {
+    let dir = abs.parent().unwrap_or(Path::new("."));
+    let mut out = String::new();
+    let mut rest = css;
+    loop {
+        // Leading whitespace, comments, and @charset may precede imports.
+        let trimmed = rest.trim_start();
+        let skipped = &rest[..rest.len() - trimmed.len()];
+        if trimmed.starts_with("/*") {
+            let end = trimmed.find("*/").map(|i| i + 2).unwrap_or(trimmed.len());
+            out.push_str(skipped);
+            out.push_str(&trimmed[..end]);
+            rest = &trimmed[end..];
+            continue;
+        }
+        if trimmed.starts_with("@charset") {
+            let end = trimmed.find(';').map(|i| i + 1).unwrap_or(trimmed.len());
+            rest = &trimmed[end..]; // one @charset per output at most; UTF-8 is the default
+            continue;
+        }
+        if !trimmed.starts_with("@import") {
+            break;
+        }
+        let Some(end) = trimmed.find(';') else { break };
+        let rule = &trimmed["@import".len()..end];
+        rest = &trimmed[end + 1..];
+        let (spec, cond) = parse_import(rule.trim());
+        // Remote and root-relative URLs (a public/ file) are real URLs: they stay imports, first.
+        if spec.starts_with("http://") || spec.starts_with("https://") || spec.starts_with('/') {
+            remote.push(format!("@import{rule};"));
+            continue;
+        }
+        let target = if spec.starts_with('.') {
+            Some(dir.join(spec))
+        } else {
+            resolve(dir, spec).or_else(|| Some(dir.join(spec)))
+        };
+        let Some(target) = target.filter(|p| p.is_file()) else {
+            out.push_str(&format!("@import{rule};"));
+            continue;
+        };
+        let target = dunce::canonicalize(&target).unwrap_or(target);
+        if !seen.insert(target.clone()) {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&target) else {
+            out.push_str(&format!("@import{rule};"));
+            continue;
+        };
+        let inner = inline_rec(&target, &text, resolve, seen, remote);
+        let cond = cond.trim();
+        if cond.is_empty() {
+            out.push_str(&inner);
+        } else if let Some(layer) = cond.strip_prefix("layer") {
+            let name = layer
+                .trim()
+                .trim_start_matches('(')
+                .split(')')
+                .next()
+                .unwrap_or("")
+                .trim();
+            let media = layer.split_once(')').map(|(_, m)| m.trim()).unwrap_or("");
+            let wrapped = format!("@layer {name} {{\n{inner}\n}}");
+            out.push_str(&if media.is_empty() {
+                wrapped
+            } else {
+                format!("@media {media} {{\n{wrapped}\n}}")
+            });
+        } else if let Some(sup) = cond.strip_prefix("supports") {
+            out.push_str(&format!("@supports {} {{\n{inner}\n}}", sup.trim()));
+        } else {
+            out.push_str(&format!("@media {cond} {{\n{inner}\n}}"));
+        }
+        out.push('\n');
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `"x" screen` / `url(x) layer(a)` → ("x", "screen").
+fn parse_import(rule: &str) -> (&str, &str) {
+    let r = rule.trim();
+    if let Some(inner) = r.strip_prefix("url(") {
+        let close = inner.find(')').unwrap_or(inner.len());
+        let spec = inner[..close].trim().trim_matches(['"', '\'']);
+        return (spec, inner.get(close + 1..).unwrap_or(""));
+    }
+    let q = r.chars().next().unwrap_or('"');
+    if q == '"' || q == '\'' {
+        let body = &r[1..];
+        let close = body.find(q).unwrap_or(body.len());
+        return (&body[..close], body.get(close + 1..).unwrap_or(""));
+    }
+    let (spec, cond) = r.split_once(char::is_whitespace).unwrap_or((r, ""));
+    (spec, cond)
+}
+
 /// Empty module that neutralizes .css imports on the server (CSS is client-only).
 pub const CSS_NOOP_SPECIFIER: &str = "data:text/javascript,";
 
@@ -227,5 +352,40 @@ mod tests {
         assert!(shim.contains("data-nowaki-css"));
         assert!(shim.contains("color:red"));
         assert!(shim.contains("/app/x.css"));
+    }
+
+    #[test]
+    fn inlines_imports_with_conditions_and_keeps_remote_ones_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        std::fs::write(d.join("tokens.css"), ":root { --a: 1; }\n").unwrap();
+        std::fs::write(
+            d.join("print.css"),
+            "@import './tokens.css';\nbody { color: black; }\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(d.join("node_modules/pkg")).unwrap();
+        std::fs::write(d.join("node_modules/pkg/x.css"), ".x { top: 0; }\n").unwrap();
+        let main = d.join("base.css");
+        let src = "/* hi */\n@import \"./tokens.css\";\n@import url(./print.css) print;\n@import \"pkg/x.css\" layer(vendor);\n@import url(\"https://fonts.example/a.css\");\n@import \"/public.css\";\n@import \"./missing.css\";\nbody { margin: 0; }\n";
+        let resolve =
+            |_: &Path, spec: &str| (spec == "pkg/x.css").then(|| d.join("node_modules/pkg/x.css"));
+        let out = inline_imports(&main, src, &resolve);
+        assert!(
+            out.starts_with(
+                "@import url(\"https://fonts.example/a.css\");\n@import \"/public.css\";\n"
+            ),
+            "{out}"
+        );
+        assert!(out.contains(":root { --a: 1; }"), "{out}");
+        assert_eq!(
+            out.matches("--a: 1").count(),
+            1,
+            "tokens.css is inlined once: {out}"
+        );
+        assert!(out.contains("@media print {\n"), "{out}");
+        assert!(out.contains("@layer vendor {\n.x { top: 0; }"), "{out}");
+        assert!(out.contains("@import \"./missing.css\";"), "{out}");
+        assert!(out.trim_end().ends_with("body { margin: 0; }"), "{out}");
     }
 }

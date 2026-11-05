@@ -356,17 +356,22 @@ async function resolveMeta(mod, info) {
 // The typed meta's head tags (seo.mjs): layouts' `export const meta` objects first (site-wide
 // defaults like openGraph.siteName), then the route's meta. They go after the route CSS and before
 // the page's own `head`.
+// Layouts' own `export const head` strings (root first) go here too, before the page's `head`.
 async function withSeo(env, table, file, mod, version, ctx, meta) {
   const layouts = [];
+  const layoutHeads = [];
   for (const f of file ? layoutChain(table, file) : []) {
     const l = await env.importModule(f, version);
     if (l?.meta && typeof l.meta === "object") layouts.push(l.meta);
+    if (typeof l?.head === "string" && l.head) layoutHeads.push(l.head);
   }
   const own = meta?.seo ?? (mod?.meta && typeof mod.meta === "object" ? mod.meta : undefined);
-  if (layouts.length === 0 && !own) return meta;
+  if (layouts.length === 0 && !own && layoutHeads.length === 0) return meta;
   const merged = mergeMeta(...layouts, own);
   const title = (typeof meta?.title === "string" ? meta.title : undefined) ?? merged.title ?? mod?.title;
-  const tags = seoTags(merged, { title, pathname: ctx.url.pathname, origin: ctx.url.origin, site: env.site });
+  const tags = [seoTags(merged, { title, pathname: ctx.url.pathname, origin: ctx.url.origin, site: env.site }), ...layoutHeads]
+    .filter(Boolean)
+    .join("\n");
   const next = { ...(meta ?? {}) };
   if (next.title === undefined && typeof merged.title === "string") next.title = merged.title;
   if (!tags) return next;
@@ -520,7 +525,9 @@ async function render404(env, table, ctx, version) {
 }
 
 async function render500(env, table, ctx, version, err) {
-  env.onError?.(err, ctx);
+  // Always on record: with a custom _500 page, the built-in renderError (which logs) never runs.
+  if (typeof env.onError === "function") env.onError(err, ctx);
+  else console.error(`[nowaki] ${ctx.method ?? "GET"} ${ctx.url?.pathname ?? ""}:`, err);
   if (table.errorRoute && !ctx._inErrorPage) {
     try {
       ctx._inErrorPage = true;

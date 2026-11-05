@@ -134,6 +134,14 @@ curl -sf "http://127.0.0.1:3300$FCSS" | grep -q 'size-adjust: '
 curl -sf "http://127.0.0.1:3300$FCSS" | grep -q -- '--font-body: "Atkinson Hyperlegible", "Atkinson Hyperlegible Fallback", sans-serif;'
 FT=$(echo "$FH" | grep -oE '/_nowaki/atkinson-hyperlegible-400-normal\.[0-9a-f]+\.ttf' | head -1)
 curl -s -D - -o /dev/null "http://127.0.0.1:3300$FT" | grep -qi '^content-type: font/ttf'
+# from porting an Astro site: a layout's head, CSS @import inlined, modules outside the
+# conventional folders, and no SPA router on a page without islands (dev and prod alike)
+curl -sf http://127.0.0.1:3300/about | grep -q '<meta name="x-layout-head" content="root" />'
+curl -sf http://127.0.0.1:3300/about | grep -q '<p id="greeting">Hello from data/</p>'
+! curl -sf http://127.0.0.1:3300/about | grep -q 'id="nowaki-runtime"'
+SC=$(curl -sf http://127.0.0.1:3300/about | grep -oE '/_nowaki/site\.[0-9a-f]+\.css' | head -1)
+curl -sf "http://127.0.0.1:3300$SC" | grep -q -- '--site-token: rgb(9, 8, 7)'
+! curl -sf "http://127.0.0.1:3300$SC" | grep -q '@import'
 # MDX: a .mdx page (ESM exports, expressions, GFM, an island) and an .mdx content entry
 curl -sf http://127.0.0.1:3300/guide | grep -q '<title>Guide (MDX) — Nowaki</title>'
 curl -sf http://127.0.0.1:3300/guide | grep -q '<h1 id="an-mdx-page">An MDX page</h1>'

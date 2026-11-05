@@ -125,8 +125,8 @@ export function createFetchHandler({
         src: `/_nowaki/${f}`,
         preload: (manifest.scriptPreload?.[f] ?? []).map((d) => `/_nowaki/${d}`),
       })),
-    renderError: (err) => {
-      console.error("[nowaki]", err);
+    // render500 has already logged it.
+    renderError: () => {
       return {
         status: 500,
         headers: { "content-type": "text/plain; charset=utf-8" },

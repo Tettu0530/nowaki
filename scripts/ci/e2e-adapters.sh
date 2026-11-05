@@ -126,6 +126,7 @@ ls examples/hello/dist/static/_nowaki/hero-640.*.avif >/dev/null
 # fonts in the static output: the stylesheet and face under _nowaki/
 grep -qE '<link rel="preload" href="/_nowaki/atkinson-hyperlegible-400-normal\.[0-9a-f]+\.ttf"' examples/hello/dist/static/about/index.html
 ls examples/hello/dist/static/_nowaki/fonts.*.css >/dev/null
+grep -q '<p id="greeting">Hello from data/</p>' examples/hello/dist/static/about/index.html
 # MDX in the static output: the page and the entry (an island inside it)
 grep -q '<h1 id="an-mdx-page">An MDX page</h1>' examples/hello/dist/static/guide/index.html
 grep -q '<nowaki-island name="Counter"' examples/hello/dist/static/docs/components/index.html

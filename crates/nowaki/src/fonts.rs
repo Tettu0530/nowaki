@@ -96,7 +96,7 @@ fn build(root: &Path, config: &Value, out_dir: &Path, prefix: &str) -> Result<Op
     let mut preload = Vec::new();
     let mut variables = serde_json::Map::new();
     for fam in &families {
-        let slug = slug(&fam.family);
+        let fam_slug = slug(&fam.family);
         for face in &fam.faces {
             let bytes = std::fs::read(&face.file).with_context(|| {
                 format!("{}: failed to read {}", fam.family, face.file.display())
@@ -112,10 +112,11 @@ fn build(root: &Path, config: &Value, out_dir: &Path, prefix: &str) -> Result<Op
                 .as_deref()
                 .map(|s| format!("-{s}"))
                 .unwrap_or_default();
+            // A variable font's range (`"100 900"`) is a valid CSS weight but not a file name.
             let name = format!(
-                "{slug}-{}-{}{subset}.{:08x}.{ext}",
-                face.weight,
-                face.style,
+                "{fam_slug}-{}-{}{subset}.{:08x}.{ext}",
+                slug(&face.weight),
+                slug(&face.style),
                 xxh3_64(&bytes) as u32
             );
             let path = out_dir.join(&name);
@@ -130,7 +131,7 @@ fn build(root: &Path, config: &Value, out_dir: &Path, prefix: &str) -> Result<Op
                 _ => "truetype",
             };
             css.push_str(&format!(
-                "@font-face {{\n  font-family: {};\n  font-style: {};\n  font-weight: {};\n  font-display: {};\n  src: url({url}) format(\"{format}\");\n",
+                "@font-face {{\n  font-family: {};\n  font-style: {};\n  font-weight: {};\n  font-display: {};\n  src: url(\"{url}\") format(\"{format}\");\n",
                 css_string(&fam.family),
                 face.style,
                 face.weight,
@@ -151,7 +152,11 @@ fn build(root: &Path, config: &Value, out_dir: &Path, prefix: &str) -> Result<Op
             .copied()
             .unwrap_or(FALLBACKS[0]);
         let fallback_name = format!("{} Fallback", fam.family);
+        // A fallback face needs the font's metrics; woff / woff2 aren't read (metrics come from
+        // a .ttf / .otf, or Google's TrueType), so such a family's stack goes straight to generic.
+        let mut has_fallback = false;
         if let Some(m) = fam.metrics.as_deref().and_then(|p| metrics(p).ok()) {
+            has_fallback = true;
             let size_adjust = (m.avg / m.upm) / (fb_avg / fb_upm);
             let pct = |v: f64| format!("{:.2}%", v * 100.0);
             css.push_str(&format!(
@@ -164,11 +169,15 @@ fn build(root: &Path, config: &Value, out_dir: &Path, prefix: &str) -> Result<Op
                 pct(m.line_gap / (m.upm * size_adjust)),
             ));
         }
-        let stack = format!(
-            "{}, {}, {generic}",
-            css_string(&fam.family),
-            css_string(&fallback_name)
-        );
+        let stack = if has_fallback {
+            format!(
+                "{}, {}, {generic}",
+                css_string(&fam.family),
+                css_string(&fallback_name)
+            )
+        } else {
+            format!("{}, {generic}", css_string(&fam.family))
+        };
         variables.insert(fam.variable.clone(), Value::String(stack));
     }
     css.push_str(":root {\n");
@@ -426,6 +435,34 @@ mod tests {
                     .trim_start_matches("/_nowaki/")
             )
             .is_file());
+    }
+
+    #[test]
+    fn a_weight_range_gets_a_safe_file_name_and_no_fallback_without_metrics() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("fonts")).unwrap();
+        // Any bytes do: woff2 isn't parsed (that's the point: no metrics, so no fallback face).
+        std::fs::write(dir.path().join("fonts/v.woff2"), b"wOF2 not really").unwrap();
+        let config = json!({ "fonts": [{ "family": "Geist Variable", "src": "./fonts/v.woff2", "weight": "100 900" }] });
+        let out_dir = dir.path().join("out");
+        let out = build(dir.path(), &config, &out_dir, "/_nowaki/")
+            .unwrap()
+            .unwrap();
+        let css = std::fs::read_to_string(
+            out_dir.join(out["css"].as_str().unwrap().trim_start_matches("/_nowaki/")),
+        )
+        .unwrap();
+        assert!(css.contains("font-weight: 100 900;"), "{css}");
+        assert!(
+            css.contains("src: url(\"/_nowaki/geist-variable-100-900-normal."),
+            "{css}"
+        );
+        assert!(!css.contains("Fallback"), "{css}");
+        assert!(
+            css.contains("--font-geist-variable: \"Geist Variable\", sans-serif;"),
+            "{css}"
+        );
+        assert!(!out["preload"][0]["href"].as_str().unwrap().contains(' '));
     }
 
     #[test]
