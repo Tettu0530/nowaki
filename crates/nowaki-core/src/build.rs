@@ -791,8 +791,8 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
         if spec.starts_with('/') || spec.contains("://") || spec.starts_with("data:") {
             continue;
         }
-        let abs_path = core
-            .resolve_spec(dir, spec)
+        let abs_path = crate::resolve::client_runtime_alias(&core.root, spec)
+            .or_else(|| core.resolve_spec(dir, spec))
             .ok_or_else(|| anyhow!("failed to resolve {spec} (from {})", dir.display()))?;
         let placeholder = format!("__NOWAKI_DEP_{}__", deps.len());
         lit.value = allocator.alloc_str(&placeholder).into();

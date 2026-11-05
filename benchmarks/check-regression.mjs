@@ -29,7 +29,7 @@ function measure() {
   }
   const clientDir = path.join(APP, "dist/client");
   const manifest = JSON.parse(readFileSync(path.join(clientDir, "manifest.json"), "utf8"));
-  // The SPA router (routerRuntime + manifest.preload's transitive deps) is lazily imported on idle
+  // The SPA router (routerRuntime + manifest.preload transitive deps) loads on link intent
   // and isn't part of first load, so it's excluded from the gated value (gzipBytes).
   const lazySet = new Set();
   if (manifest.routerRuntime) {
@@ -66,7 +66,7 @@ const kb = (b) => (b / 1024).toFixed(2);
 let failed = false;
 console.log(`first-load JS (gzip): ${kb(cur.gzipBytes)} KB  (baseline ${kb(base.gzipBytes)} KB, limit ${kb(limit)} KB)`);
 if (cur.lazyBytes) {
-  console.log(`  + lazy SPA router (loaded on idle, not first-load): ${kb(cur.lazyBytes)} KB`);
+  console.log(`  + SPA router (loaded on link intent, not first-load): ${kb(cur.lazyBytes)} KB`);
 }
 if (cur.gzipBytes > limit) {
   console.error(`REGRESSION: shipped JS grew >${TOLERANCE * 100}% over baseline`);

@@ -89,6 +89,12 @@ try {
   await cdp.send("Page.navigate", { url: BASE + "/" });
   await sleep(800);
 
+  // The router loads on intent only: nothing has hovered, focused, or clicked a link yet, so its
+  // chunk must not have been fetched.
+  const routerLoaded = () =>
+    cdp.evalAsync(`return performance.getEntriesByType('resource').some((r) => /\\/_nowaki\\/router\\.[0-9a-f]+\\.js/.test(r.name));`);
+  check("the router isn't downloaded on page load", (await routerLoaded()) === false && (await cdp.evalAsync(`return !window.__nowakiRouter;`)));
+
   // SPA navigation: create a link and click it (the router intercepts)
   await cdp.evalAsync(`
     window.__nav = (href) => { const a=document.createElement('a'); a.href=href; a.textContent=href; document.body.appendChild(a); a.click(); };

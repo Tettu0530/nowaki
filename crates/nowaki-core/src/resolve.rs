@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use oxc_resolver::{ResolveOptions, Resolver};
 
@@ -41,6 +41,18 @@ pub fn alias_specifier(spec: &str) -> Option<&'static str> {
         "scheduler" => Some("preact/compat/scheduler"),
         _ => None,
     }
+}
+
+/// Client builds only: `preact/jsx-runtime` resolves to the runtime's tiny `createElement`
+/// wrapper (`client/jsx-runtime.js`) instead of Preact's own module, which saves about 0.9 KB gzip
+/// on every page with an island. None when the app's runtime predates it.
+pub fn client_runtime_alias(root: &Path, spec: &str) -> Option<PathBuf> {
+    if spec != "preact/jsx-runtime" && spec != "preact/jsx-dev-runtime" {
+        return None;
+    }
+    let shim = root.join("node_modules/@nowaki-dev/runtime/client/jsx-runtime.js");
+    shim.exists()
+        .then(|| dunce::canonicalize(&shim).unwrap_or(shim))
 }
 
 /// Maps a resolved absolute path to a dev server URL.

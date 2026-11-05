@@ -48,6 +48,22 @@ milestone's worth of work; the codename is noted per entry.
     binary grows by about 4.8 MB with the syntax and theme data.
 
 ### Changed
+- **Less client JS on every page with an island.**
+  - **No `preact/jsx-runtime` chunk.** Client builds resolve it to a
+    227-byte wrapper around Preact's `createElement` (in
+    `@nowaki-dev/runtime/client/jsx-runtime.js`), which ships anyway. In
+    the browser it behaves the same: `key` leaves props, function
+    components keep `ref`, and children stay in `props.children`. This
+    saves about 0.7 KB gzip per page.
+  - **The SPA router loads on intent.** It used to load at idle on every
+    page. Now it starts loading when a same-origin link is hovered,
+    focused, or touched. A click that comes before it (keyboard, script) is
+    replayed as a client navigation once the router arrives. Visitors who
+    don't navigate never download its 2.4 KB.
+  - `examples/hello` `/`: 9.76 → 9.08 KB first load. `/tsrx`: 8.74 →
+    8.06 KB.
+  - The size gate's app: 8.63 → 8.22 KB eager, plus a 2.77 KB router that
+    no longer loads by default. Its baseline is updated.
 - **CI gates performance, not just client JS size.** A new "Performance
   (regression gate)" job runs on pull requests that touch `crates/`, the
   runtime, or `Cargo.lock`. It builds the PR and its base branch in the same
