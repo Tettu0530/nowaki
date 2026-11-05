@@ -39,6 +39,8 @@ check("live-event forged signature rejected (403)", (await liveEv({ ...ev, sig: 
 const doc = await req("/docs/intro");
 const docHtml = await doc.text();
 check("content collection page renders on the edge (inlined content)", doc.status === 200 && docHtml.includes('id="why-content-collections"'));
+const styled = await (await req("/styled")).text();
+check("route CSS is linked on the edge", /<link rel="stylesheet" href="\/_nowaki\/styled\.[0-9a-f]+\.css"/.test(styled));
 const api = await req("/api/hello");
 check("API route returns JSON", api.status === 200 && (await api.json()).hello === "nowaki");
 check("unknown path is 404", (await req("/nope")).status === 404);

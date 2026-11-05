@@ -53,6 +53,21 @@ const RUST = `http://127.0.0.1:${process.env.NOWAKI_RUST_PORT ?? "3000"}`;
 
 // dev doesn't build, so Rust discovers the server function allowlist. Cached per HMR generation.
 const fnCache = new Map();
+const routeCssCache = new Map();
+async function routeCssDev(file, version) {
+  const key = `${version}\u0000${file}`;
+  if (!routeCssCache.has(key)) {
+    if (routeCssCache.size > 500) routeCssCache.clear();
+    routeCssCache.set(
+      key,
+      fetch(`${RUST}/__nowaki/route-css?file=${encodeURIComponent(file)}&v=${encodeURIComponent(version)}`)
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []),
+    );
+  }
+  return routeCssCache.get(key);
+}
+
 async function serverFnEntries(version) {
   if (fnCache.has(version)) return fnCache.get(version);
   let entries = {};
@@ -127,6 +142,9 @@ const env = {
   routeTable: () => scanRoutes(appRoot),
   importModule: (file, version) => import(`${pathToFileURL(file).href}?v=${version}`),
   ensureIslands: (version) => loadIslandRegistry(appRoot, version),
+  // Route / layout CSS in dev: the Rust dev server follows the route's imports and serves each
+  // stylesheet (cached per SSR version, so an edit shows up on the next reload).
+  routeCss: (file, version) => routeCssDev(file, version),
   serverFunctions: {
     async lookup(id, version) {
       const entries = await serverFnEntries(String(version ?? "0"));

@@ -37,20 +37,59 @@ milestone's worth of work; the codename is noted per entry.
   Code highlighting, images in Markdown, MDX, and TOML frontmatter come
   later in v0.17.
 
+## [0.16.1] — 2026-11-05 · patch
+
+Packages: `nowaki` / `nowaki-core` 0.16.1 (crates.io, npm), `@nowaki-dev/runtime`
+0.15.1, `create-nowaki` / `create-nowaki-app` 0.17.1. New apps get
+`@nowaki-dev/runtime@^0.15.1` and `nowaki@^0.16.1`.
+
+CSS that routes, layouts, and their components import now reaches the page,
+as linked stylesheets. A plain `.css` import's default export is its text.
+`nowaki dev` no longer drops quick changes, and no longer reloads on its own
+cache writes on Windows.
+
 ### Fixed
-- **`nowaki dev` no longer drops a change made within 100 ms of the last
-  one.** The file watcher used to ignore events inside its 100 ms window, so
-  a second quick save, or a file written right after a reload, never
-  reached the page. Changes are now batched until they have been quiet for
-  100 ms, then applied in one reload. A save that fires several events is
-  still one reload.
-- **`nowaki dev` on Windows reloaded on its own cache writes.** The watcher
-  skipped `node_modules`, `dist`, `.nowaki`, and similar directories by
-  looking for `/node_modules/` in the path, which never matched Windows
-  `\` paths. Every write to `node_modules/.cache` reloaded the server
-  modules and reset their state. Paths are now compared by component, and
-  the `routes/` and `islands/` checks behind typegen and island-only
-  updates are fixed the same way.
+- **CSS imported by routes and layouts now reaches the page.** Only islands
+  ship JS to the browser, so `import "../styles/site.css"` in a route,
+  layout, or component they use used to go nowhere: the server build
+  replaced it with an empty module.
+  - The build now follows each page route's imports (the route, every
+    `_layout` above it, and the components they use), and writes each CSS
+    file once to `dist/client` as `<name>.<hash>.css`. CSS Modules are
+    scoped the same way as their class names, and CSS from packages is
+    included too.
+  - The page's `<head>` gets a `<link rel="stylesheet">` for each file,
+    layouts first, before the route's own `head`. That covers
+    `nowaki start`, every adapter, `nowaki prerender`, and streaming
+    shells.
+  - The SPA router swaps the links on client navigation.
+  - `nowaki dev` links them from the dev server (`/__nowaki/css`, which
+    serves only `.css` files under the app) and reloads on change.
+  - The manifest gets a `routeCss` field.
+- **A plain `.css` import's default export is its text**, as
+  `nowaki-env.d.ts` declares. Before this change it was an empty module,
+  so `import css from "./a.css"` failed with "does not provide an export
+  named 'default'". This works on the server and on the client, so
+  `` export const head = `<style>${css}</style>` `` works.
+- **`nowaki dev` no longer drops quick changes, and stops reloading on its
+  own cache writes on Windows.**
+  - Changes are batched until 100 ms pass without one, then applied in one
+    reload. A change inside the old 100 ms window used to be ignored.
+  - Watched paths are compared by component. Before this change, the
+    `/node_modules/` checks never matched Windows `\` paths, so every
+    cache write reloaded the server modules and reset their state.
+- **`nowaki prerender` names the `staticPaths` error** (`staticPaths
+  failed: TypeError: …`). Before this change, it said only "see the error
+  above".
+- CSS strings embedded in JS (CSS shims, CSS Modules, CSS text) are now
+  escaped as JavaScript, so control characters can't produce invalid
+  modules.
+
+### Upgrade notes
+- Pages whose routes, layouts, or components import CSS now link it. If an
+  app worked around the old behavior by importing the same CSS in an
+  island, or by inlining it, it may now load the CSS twice. That is
+  harmless, but the workaround can be removed.
 
 ## [0.16.0] — 2026-11-05 · "Chinook"
 
@@ -716,7 +755,8 @@ and the runtime at 0.9.0.
 - Published to crates.io (`nowaki-core`, `nowaki`) and npm (`@nowaki-dev/runtime`,
   `create-nowaki`, `create-nowaki-app`).
 
-[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.16.1...HEAD
+[0.16.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.16.1
 [0.16.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.16.0
 [0.15.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.15.0
 [0.14.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.14.1

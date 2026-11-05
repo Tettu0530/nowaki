@@ -77,6 +77,8 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         .route("/__nowaki/live", get(live_ws))
         .route("/__nowaki/server-functions", get(server_functions))
         .route("/__nowaki/ssr-module", get(ssr_module))
+        .route("/__nowaki/route-css", get(route_css))
+        .route("/__nowaki/css", get(dev_css))
         .route("/@fs/{*path}", get(serve_fs))
         .route(crate::mcp::PATH, axum::routing::any(crate::mcp::handle))
         .fallback(serve_or_proxy)
@@ -322,6 +324,99 @@ async fn ssr_module(
         return (StatusCode::FORBIDDEN, "forbidden").into_response();
     }
     transform_response(state, canon, Mode::Ssr).await
+}
+
+#[derive(serde::Deserialize)]
+struct RouteCssQuery {
+    file: String,
+}
+
+/// The stylesheets a route (and its layouts) imports, as `/__nowaki/css` URLs, for the dev
+/// sidecar to link in the page head. Only route files under `routes/` are accepted.
+async fn route_css(State(state): State<Arc<DevState>>, Query(q): Query<RouteCssQuery>) -> Response {
+    let routes_dir = state.core.root.join("routes");
+    let Ok(canon) = dunce::canonicalize(&q.file) else {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    let Some(rel) = canon
+        .strip_prefix(&routes_dir)
+        .ok()
+        .map(|r| r.to_string_lossy().replace('\\', "/"))
+    else {
+        return (StatusCode::FORBIDDEN, "forbidden").into_response();
+    };
+    let core_state = state.clone();
+    let hrefs = tokio::task::spawn_blocking(move || {
+        let mut entries = nowaki_core::budget::layouts_for(&routes_dir, &rel);
+        entries.push(canon);
+        nowaki_core::route_css::css_of(&core_state.core, &entries)
+            .into_iter()
+            .map(|css| {
+                let shown = css
+                    .strip_prefix(&core_state.core.root)
+                    .map(|r| r.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_else(|_| css.to_string_lossy().into_owned());
+                format!("/__nowaki/css?f={}", query_encode(&shown))
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .unwrap_or_default();
+    (
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        serde_json::to_string(&hrefs).unwrap_or_else(|_| "[]".into()),
+    )
+        .into_response()
+}
+
+/// Percent-encodes a query value (unreserved characters and `/` stay as they are).
+fn query_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~' | b'/') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+#[derive(serde::Deserialize)]
+struct DevCssQuery {
+    f: String,
+}
+
+/// One stylesheet in dev (CSS Modules scoped like their JS). `f` is user input: it must resolve
+/// to a `.css` file under an allowed root.
+async fn dev_css(State(state): State<Arc<DevState>>, Query(q): Query<DevCssQuery>) -> Response {
+    let requested = state.core.root.join(&q.f);
+    let Ok(canon) = dunce::canonicalize(&requested) else {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    if !fs_path_allowed(&canon, &state.fs_allow) || !nowaki_core::css::is_css(&canon) {
+        return (StatusCode::FORBIDDEN, "forbidden").into_response();
+    }
+    let Ok(css) = std::fs::read_to_string(&canon) else {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    let sheet = if nowaki_core::css::is_css_module(&canon) {
+        let id = nowaki_core::css::css_scope_id(&state.core.root, &canon);
+        nowaki_core::css::scope_css(&id, &css).0
+    } else {
+        css
+    };
+    (
+        [
+            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        sheet,
+    )
+        .into_response()
 }
 
 /// /@fs/<absolute path>: serves files outside the app root (pnpm store etc.). `rest` is user input, so
