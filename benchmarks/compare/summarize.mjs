@@ -66,10 +66,13 @@ for (const fw of ORDER) {
     // Post-page rows are matched to `/` through their series: rows written before the browser
     // result's island count was renamed to islandsOnPage carry islands = 0 there.
     const home = latest(browser.filter((r) => r.framework === fw && scaleKey(r) === scale && r.page === "/")).at(-1);
-    const post = home && browser.filter((r) => r.framework === fw && r.series === home.series && r.page === "post").at(-1);
+    const same = (page) => home && browser.filter((r) => r.framework === fw && r.series === home.series && r.page === page).at(-1);
     for (const [key, b] of [
       ["home", home],
-      ["post", post],
+      ["post", same("post")],
+      ["list", same("/posts")],
+      ["stats", same("/stats")],
+      ["contact", same("/contact")],
     ]) {
       if (!b) continue;
       const { jsKB, jsFileKB, inlineKB, idleKB, totalKB, byTypeKB, requests, jsFiles, hydrated } = b;
@@ -128,6 +131,9 @@ for (const lab of [...new Set(prodRows.map((r) => r.label))]) {
     postP99: pick((r) => r.post.p99),
     homeRps: pick((r) => r.home.rps),
     homeP99: pick((r) => r.home.p99),
+    // Runs recorded before the API step have no `api`.
+    apiRps: rows.every((r) => r.api) ? pick((r) => r.api.rps) : null,
+    apiP99: rows.every((r) => r.api) ? pick((r) => r.api.p99) : null,
     postRpsRuns: rows.map((r) => r.post.rps),
     homeRpsRuns: rows.map((r) => r.home.rps),
     oha: r0.oha,
@@ -159,6 +165,9 @@ for (const [key, m] of Object.entries(METRICS)) {
 for (const [page, title] of [
   ["home", "`/` in the browser — JS / total transfer, KB gzip"],
   ["post", "a post page in the browser — JS / total transfer, KB gzip"],
+  ["list", "`/posts` (search island) in the browser — JS / total transfer, KB gzip"],
+  ["stats", "`/stats` (50-row table island) in the browser — JS / total transfer, KB gzip"],
+  ["contact", "`/contact` (form) in the browser — JS / total transfer, KB gzip"],
 ]) {
   md.push(...head(title));
   for (const f of Object.values(out)) {
@@ -185,13 +194,14 @@ if (Object.keys(prod).length) {
     "",
     `### Production servers — ${p0.pages} pages × ${p0.islands} island, rendered per request unless noted, median of runs`,
     "",
-    "| server | start (ms) | idle RSS (MB) | peak RSS (MB) | TTFB p50 / p99 (ms, 1 conn) | post pages req/s (p99 ms, 50 conns) | `/` req/s (p99 ms, 50 conns) |",
-    "|---|---|---|---|---|---|---|",
+    "| server | start (ms) | idle RSS (MB) | peak RSS (MB) | TTFB p50 / p99 (ms, 1 conn) | post pages req/s (p99 ms, 50 conns) | `/` req/s (p99 ms, 50 conns) | `/api/search` req/s (p99 ms, 50 conns) |",
+    "|---|---|---|---|---|---|---|---|",
   );
   for (const p of Object.values(prod)) {
     const notes = [...Object.entries(p.env ?? {}).map(([k, v]) => `${k}=${v}`), ...(p.isr ? ["ISR on post pages, 60 s"] : [])];
     const name = `${p.label} ${p.version}${notes.length ? ` (${notes.join(", ")})` : ""}`;
-    md.push(`| ${name} | ${p.startMs} | ${p.idleMB} | ${p.peakMB} | ${p.ttfbP50} / ${p.ttfbP99} | ${p.postRps} (${p.postP99}) | ${p.homeRps} (${p.homeP99}) |`);
+    const api = p.apiRps == null ? "—" : `${p.apiRps} (${p.apiP99})`;
+    md.push(`| ${name} | ${p.startMs} | ${p.idleMB} | ${p.peakMB} | ${p.ttfbP50} / ${p.ttfbP99} | ${p.postRps} (${p.postP99}) | ${p.homeRps} (${p.homeP99}) | ${api} |`);
   }
 }
 writeFileSync(path.join(R, "summary.md"), `${md.join("\n")}\n`);
