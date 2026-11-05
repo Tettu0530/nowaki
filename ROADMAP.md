@@ -95,7 +95,7 @@ Prove the differentiation with numbers and tooling.
 **Exit criteria**: `nowaki build` reports first-load JS per route and fails when a budget is exceeded. TTFB and Jetstream benchmark results are in the docs. Claude Code can connect to the `nowaki dev` MCP.
 
 - [x] Per-route client JS budgets (`export const budget = { js: <KB> }`; every build prints first-load JS per route and fails over budget)
-- [ ] Build-time "this island could be live" suggestions (including moving live detection to the AST)
+- [x] Build-time "this island could be live" suggestions (including moving live detection to the AST)
 - [x] Serve ISR pages from Rust alone right after startup (a warm-up render at startup instead of prerender ingestion, ETag / 304, pre-compressed br / gzip)
 - [ ] TTFB measurement in BENCHMARKS.md (with the 0.16.0 re-run of `benchmarks/compare`)
 - [x] An MCP endpoint for `nowaki dev` (routes, module graph, recent errors)

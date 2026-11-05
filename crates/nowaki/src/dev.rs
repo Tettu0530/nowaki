@@ -434,10 +434,12 @@ async fn proxy_to_sidecar(state: Arc<DevState>, req: Request) -> Response {
                     response = response.header(name, value);
                 }
             }
-            let bytes = resp.bytes().await.unwrap_or_default();
-            response.body(Body::from(bytes)).unwrap_or_else(|e| {
-                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-            })
+            // Streamed through as the sidecar writes it (streaming SSR, SSE, large API bodies).
+            response
+                .body(Body::from_stream(resp.bytes_stream()))
+                .unwrap_or_else(|e| {
+                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+                })
         }
         Err(err) => {
             crate::ui::request_log(&method_str, &log_path, 502, started.elapsed().as_millis());

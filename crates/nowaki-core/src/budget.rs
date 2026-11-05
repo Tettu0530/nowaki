@@ -105,7 +105,15 @@ pub fn route_first_load(
             }
         }
 
+        let source = core.read_source(&path)?;
         let mut chunks: BTreeSet<String> = BTreeSet::new();
+        // A streaming page sends its shell before it knows which islands render, so the shell
+        // always loads the islands runtime (document.mjs prodShell), islands or not.
+        if client_islands.is_empty() && is_streaming(&path, &source) {
+            if let Some(rt) = &client.runtime {
+                add_with_preloads(&mut chunks, rt, client);
+            }
+        }
         if !client_islands.is_empty() {
             if let Some(rt) = &client.runtime {
                 add_with_preloads(&mut chunks, rt, client);
@@ -123,7 +131,6 @@ pub fn route_first_load(
         }
         let gzip_bytes = chunks.iter().map(|c| gzip_of(c)).sum();
 
-        let source = core.read_source(&path)?;
         let budget_kb =
             parse_budget(&path, &source).map_err(|e| anyhow::anyhow!("routes/{rel}: {e}"))?;
         out.push(RouteJs {
@@ -174,6 +181,36 @@ fn layouts_for(routes_dir: &Path, rel: &str) -> Vec<PathBuf> {
         }
     }
     out
+}
+
+/// `export const streaming = true` or `"early"` (anything else renders the whole page first).
+fn is_streaming(path: &Path, source: &str) -> bool {
+    if !source.contains("streaming") {
+        return false;
+    }
+    let allocator = Allocator::default();
+    let source_type = crate::transform::source_type_for_path(path);
+    let Ok(program) = crate::transform::parse_program(&allocator, path, source, source_type) else {
+        return false;
+    };
+    program.body.iter().any(|stmt| {
+        let Statement::ExportNamedDeclaration(d) = stmt else {
+            return false;
+        };
+        let Some(Declaration::VariableDeclaration(var)) = &d.declaration else {
+            return false;
+        };
+        var.declarations.iter().any(|decl| {
+            let named =
+                matches!(&decl.id, BindingPattern::BindingIdentifier(id) if id.name == "streaming");
+            named
+                && match decl.init.as_ref().map(unwrap_ts) {
+                    Some(Expression::BooleanLiteral(b)) => b.value,
+                    Some(Expression::StringLiteral(s)) => s.value == "early",
+                    _ => false,
+                }
+        })
+    })
 }
 
 /// Reads `export const budget = { js: <KiB> }` from the route's AST. None when there is no such
@@ -291,6 +328,22 @@ mod tests {
         );
         assert!(budget("const n = 20; export const budget = { js: n };").is_err());
         assert!(budget("export const budget = { css: 4 };").is_err());
+    }
+
+    #[test]
+    fn detects_streaming_routes() {
+        let p = Path::new("routes/x.tsx");
+        assert!(is_streaming(p, "export const streaming = true;"));
+        assert!(is_streaming(p, "export const streaming = \"early\";"));
+        assert!(!is_streaming(p, "export const streaming = false;"));
+        assert!(!is_streaming(
+            p,
+            "// export const streaming = true\nexport default () => null;"
+        ));
+        assert!(!is_streaming(
+            p,
+            "const streaming = true; export default () => streaming;"
+        ));
     }
 
     #[test]

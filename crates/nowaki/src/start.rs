@@ -693,9 +693,26 @@ async fn proxy(state: Arc<ProdState>, req: Request, cacheable: bool) -> Response
     let status = resp.status();
     let is_page = resp.headers().get("x-nowaki-page").is_some();
     let resp_headers = resp.headers().clone();
+
+    if !is_page {
+        // Pass through as the sidecar writes it (API, redirect, file stream, streaming SSR,
+        // built-in 404/500): the first bytes go out before the last are rendered.
+        let mut builder = Response::builder().status(status.as_u16());
+        for (name, value) in resp_headers.iter() {
+            if name != header::TRANSFER_ENCODING && name != header::CONTENT_LENGTH {
+                builder = builder.header(name, value);
+            }
+        }
+        return builder
+            .body(Body::from_stream(resp.bytes_stream()))
+            .unwrap_or_else(|e| {
+                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+            });
+    }
+    // Pages come back as JSON (body + meta) for Rust to assemble, so they are read whole.
     let bytes = resp.bytes().await.unwrap_or_default();
 
-    if is_page {
+    {
         let html = match serde_json::from_slice::<PageMeta>(&bytes) {
             Ok(meta) => assemble(&state.manifest, &meta),
             Err(_) => String::from_utf8_lossy(&bytes).to_string(),
@@ -739,17 +756,6 @@ async fn proxy(state: Arc<ProdState>, req: Request, cacheable: bool) -> Response
         }
         builder
             .body(Body::from(html))
-            .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
-    } else {
-        // Pass through (API / redirect / stream / streaming SSR / built-in 404/500).
-        let mut builder = Response::builder().status(status.as_u16());
-        for (name, value) in resp_headers.iter() {
-            if name != header::TRANSFER_ENCODING && name != header::CONTENT_LENGTH {
-                builder = builder.header(name, value);
-            }
-        }
-        builder
-            .body(Body::from(bytes))
             .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
     }
 }
