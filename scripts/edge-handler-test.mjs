@@ -51,6 +51,8 @@ const scripted = await (await req("/scripted")).text();
 check("page scripts on the edge", /<script type="module" src="\/_nowaki\/stamp\.[0-9a-f]+\.js" data-nowaki-script><\/script>/.test(scripted));
 const gallery = await (await req("/gallery")).text();
 check("<Image> renders AVIF + JPEG sources on the edge", /<source type="image\/avif" srcset="\/_nowaki\/hero-640\.[0-9a-f]+\.avif/.test(gallery) && gallery.includes('width="1200" height="750"'));
+const fontPage = await (await req("/about")).text();
+check("fonts: preload + stylesheet on the edge", /<link rel="preload" href="\/_nowaki\/atkinson-hyperlegible-400-normal\.[0-9a-f]+\.ttf" as="font"/.test(fontPage) && /<link rel="stylesheet" href="\/_nowaki\/fonts\.[0-9a-f]+\.css" \/>/.test(fontPage));
 const mdxPage = await (await req("/guide")).text();
 check("an .mdx page on the edge", mdxPage.includes('<h1 id="an-mdx-page">An MDX page</h1>') && mdxPage.includes('<nowaki-island name="Counter"'));
 const mdxEntry = await (await req("/docs/components")).text();

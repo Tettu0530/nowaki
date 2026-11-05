@@ -184,6 +184,10 @@ code locations and CI coverage.
   `ServerAssets::image_module` (server); dev modules from `transform.rs` `dev_asset_module`,
   variants from `dev.rs` `dev_image` (`/__nowaki/image`). Component: `packages/nowaki-runtime/image.js`.
   Markdown images: `content.rs` `local_image`.
+- **Fonts** — `crates/nowaki/src/fonts.rs` (faces, size-adjusted fallbacks from ttf-parser
+  metrics, `dist/server/fonts.json`; dev: `.nowaki/fonts`), Google downloads in
+  `server/fonts-fetch.mjs`, config via `site.rs` + `server/site-config.mjs`; the links go into
+  every page from `handler.mjs` `withFonts` (`env.fonts`).
 - **MDX** — `crates/nowaki-core/src/mdx.rs` (markdown-rs mdast → TSX: hoisted ESM, JSX
   pass-through, `headings`, images via `?image`, code via `highlight.rs`); applied in
   `NowakiCore::read_source`, so `.mdx` is an ordinary transformable module (routes, graph, dev,

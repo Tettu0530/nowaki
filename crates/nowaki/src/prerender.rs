@@ -23,7 +23,9 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         report.modules, report.server_modules
     );
     crate::content::build(&root, &root.join("dist"))?;
-    crate::site::write(&root, &root.join("dist"))?;
+    let config = crate::site::config(&root)?;
+    crate::site::write(&root.join("dist"), &config)?;
+    crate::fonts::build_dist(&root, &root.join("dist"), &config)?;
     crate::check_route_budgets(&core, &report, &client)?;
 
     let entry = root.join("node_modules/@nowaki-dev/runtime/server/start.mjs");

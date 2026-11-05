@@ -77,6 +77,16 @@ curl -s -D - -o /dev/null "$B/__nowaki/image?f=/hero.jpg&w=640&fmt=avif" | grep 
 curl -s -D - -o /dev/null "$B/__nowaki/image?f=/hero.jpg&w=640&fmt=orig" | grep -qi '^content-type: image/jpeg'
 test "$(curl -s -o /dev/null -w '%{http_code}' "$B/__nowaki/image?f=/package.json&w=10&fmt=orig")" = 403
 curl -sf $B/docs/intro | grep -q '<picture><source type="image/avif" srcset="/__nowaki/image?f=/hero.jpg'
+# fonts in dev: built in the background at startup into .nowaki/fonts, served at /__nowaki/fonts/
+for i in $(seq 1 20); do curl -sf $B/about | grep -q '/__nowaki/fonts/fonts\.' && break; sleep 0.5; done
+FH=$(curl -sf $B/about)
+echo "$FH" | grep -qE '<link rel="preload" href="/__nowaki/fonts/atkinson-hyperlegible-400-normal\.[0-9a-f]+\.ttf" as="font" type="font/ttf" crossorigin />'
+FCSS=$(echo "$FH" | grep -oE '/__nowaki/fonts/fonts\.[0-9a-f]+\.css' | head -1)
+curl -sf "$B$FCSS" | grep -q 'font-family: "Atkinson Hyperlegible Fallback";'
+curl -sf "$B$FCSS" | grep -q 'size-adjust: '
+curl -sf "$B$FCSS" | grep -q -- '--font-body: "Atkinson Hyperlegible", "Atkinson Hyperlegible Fallback", sans-serif;'
+FT=$(echo "$FH" | grep -oE '/__nowaki/fonts/atkinson-hyperlegible-400-normal\.[0-9a-f]+\.ttf' | head -1)
+curl -s -D - -o /dev/null "$B$FT" | grep -qi '^content-type: font/ttf'
 # MDX: a .mdx page (ESM exports, expressions, GFM, an island) and an .mdx content entry
 curl -sf $B/guide | grep -q '<title>Guide (MDX) — Nowaki</title>'
 curl -sf $B/guide | grep -q '<h1 id="an-mdx-page">An MDX page</h1>'

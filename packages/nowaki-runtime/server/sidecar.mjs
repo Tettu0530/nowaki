@@ -3,7 +3,7 @@
 
 import { createServer } from "node:http";
 import { createRequire, register } from "node:module";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveSite } from "./seo.mjs";
@@ -170,9 +170,33 @@ const devSite = await (async () => {
   return undefined;
 })();
 
+// Self-hosted fonts in dev: `nowaki dev` builds them into .nowaki/fonts in the background at
+// startup, so the file is read again whenever it changes.
+const fontsFile = path.join(appRoot, ".nowaki/fonts.json");
+let fontsCache = { mtime: -1, value: null };
+function devFonts() {
+  let mtime = 0;
+  try {
+    mtime = statSync(fontsFile).mtimeMs;
+  } catch {
+    return null;
+  }
+  if (mtime !== fontsCache.mtime) {
+    try {
+      fontsCache = { mtime, value: JSON.parse(readFileSync(fontsFile, "utf8")) };
+    } catch {
+      fontsCache = { mtime, value: null };
+    }
+  }
+  return fontsCache.value;
+}
+
 const env = {
   dev: true,
   site: resolveSite(devSite),
+  get fonts() {
+    return devFonts();
+  },
   // dev rescans on every request (picks up file changes)
   routeTable: () => scanRoutes(appRoot),
   importModule: (file, version) => import(`${pathToFileURL(file).href}?v=${version}`),

@@ -125,6 +125,15 @@ echo "$G" | grep -q 'width="320" height="200" alt loading="lazy"'
 AV=$(echo "$G" | grep -oE '/_nowaki/hero-640\.[0-9a-f]+\.avif' | head -1)
 curl -s -D - -o /dev/null "http://127.0.0.1:3300$AV" | grep -qi '^content-type: image/avif'
 curl -sf http://127.0.0.1:3300/docs/intro | grep -qE '<picture><source type="image/avif" srcset="/_nowaki/hero-640\.[0-9a-f]+\.avif'
+# fonts: preload + stylesheet first in every page's head; the face and its sized fallback
+FH=$(curl -sf http://127.0.0.1:3300/about)
+echo "$FH" | grep -qE '<link rel="preload" href="/_nowaki/atkinson-hyperlegible-400-normal\.[0-9a-f]+\.ttf" as="font" type="font/ttf" crossorigin />'
+FCSS=$(echo "$FH" | grep -oE '/_nowaki/fonts\.[0-9a-f]+\.css' | head -1)
+curl -sf "http://127.0.0.1:3300$FCSS" | grep -q 'font-family: "Atkinson Hyperlegible Fallback";'
+curl -sf "http://127.0.0.1:3300$FCSS" | grep -q 'size-adjust: '
+curl -sf "http://127.0.0.1:3300$FCSS" | grep -q -- '--font-body: "Atkinson Hyperlegible", "Atkinson Hyperlegible Fallback", sans-serif;'
+FT=$(echo "$FH" | grep -oE '/_nowaki/atkinson-hyperlegible-400-normal\.[0-9a-f]+\.ttf' | head -1)
+curl -s -D - -o /dev/null "http://127.0.0.1:3300$FT" | grep -qi '^content-type: font/ttf'
 # MDX: a .mdx page (ESM exports, expressions, GFM, an island) and an .mdx content entry
 curl -sf http://127.0.0.1:3300/guide | grep -q '<title>Guide (MDX) — Nowaki</title>'
 curl -sf http://127.0.0.1:3300/guide | grep -q '<h1 id="an-mdx-page">An MDX page</h1>'

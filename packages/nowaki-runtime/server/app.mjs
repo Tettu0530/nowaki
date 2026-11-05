@@ -170,9 +170,14 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
   const builtSite = await readFile(path.join(serverDir, "site.json"), "utf8")
     .then((t) => JSON.parse(t).site)
     .catch(() => undefined);
+  // Self-hosted fonts, from the build (dist/server/fonts.json).
+  const fonts = await readFile(path.join(serverDir, "fonts.json"), "utf8")
+    .then((t) => JSON.parse(t))
+    .catch(() => null);
   const env = {
     dev: false,
     site: resolveSite(builtSite),
+    fonts,
     routeTable: () => routeTable,
     importModule: (file) => importOnce(pathToFileURL(file).href),
     ensureIslands: () => {},

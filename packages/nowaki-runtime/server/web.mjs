@@ -78,6 +78,7 @@ export function createFetchHandler({
   live,
   content,
   site,
+  fonts,
 }) {
   const registry = new Map();
   for (const [name, comp] of Object.entries(islandComponents ?? {})) {
@@ -107,6 +108,7 @@ export function createFetchHandler({
     dev: false,
     // NOWAKI_SITE (a Worker var) or nowaki.config `site`, embedded by edge-build.mjs.
     site: resolveSite(site),
+    fonts: fonts ?? null,
     routeTable: () => routeTable,
     importModule: (key) => modules[key],
     ensureIslands: () => {},

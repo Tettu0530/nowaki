@@ -1,7 +1,8 @@
 [files]
 # Raw benchmark runs are generated data: they list every built file, and bundlers name files
 # with base64-like hashes (e.g. Nuxt's BcNtoJ_O.js) that change on every run.
-extend-exclude = ["*.lock", "pnpm-lock.yaml", "*.svg", "benchmarks/**/results/*.jsonl"]
+# Font files and their third-party license text (examples/hello/fonts/OFL.txt) aren't ours to edit.
+extend-exclude = ["*.lock", "pnpm-lock.yaml", "*.svg", "benchmarks/**/results/*.jsonl", "*.ttf", "*.woff2", "OFL.txt"]
 
 [default]
 # Hex ids in server-function fixtures, content hashes in built file names (benchmark results

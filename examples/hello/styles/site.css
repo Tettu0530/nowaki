@@ -1,2 +1,5 @@
 /* Imported by routes/_layout.tsx: linked on every page as a stylesheet (route CSS). */
 .site-footer-note { color: rgb(120, 120, 120); }
+
+/* The self-hosted font from nowaki.config `fonts` (with its size-adjusted fallback). */
+body { font-family: var(--font-body, sans-serif); }

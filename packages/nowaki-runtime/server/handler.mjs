@@ -214,7 +214,7 @@ async function renderRoute(env, table, match, mod, ctx, version) {
   // The trade-off: once it's sent, the status and headers are fixed, so `meta` only sees the static
   // exports, and a loader redirect or error is handled inside the stream (see earlyDocument).
   if (mod.streaming === "early" && typeof env.renderShell === "function") {
-    const meta = await withDocAttrs(env, table, match.file, mod, version, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data: undefined, params: ctx.params, url: ctx.url })))));
+    const meta = await withDocAttrs(env, table, match.file, mod, version, withFonts(env, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data: undefined, params: ctx.params, url: ctx.url }))))));
     const { head, tail } = env.renderShell({ mod, meta });
     const revalidate = isrSeconds(mod);
     return {
@@ -233,7 +233,7 @@ async function renderRoute(env, table, match, mod, ctx, version) {
     };
   }
   const data = mod.loader ? await mod.loader(ctx) : undefined;
-  const meta = await withDocAttrs(env, table, match.file, mod, version, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data, params: ctx.params, url: ctx.url })))));
+  const meta = await withDocAttrs(env, table, match.file, mod, version, withFonts(env, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data, params: ctx.params, url: ctx.url }))))));
   let node = h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url });
 
   // wrap outward in leaf→root order
@@ -404,6 +404,20 @@ async function withScripts(env, table, file, mod, version, meta) {
   return { ...(meta ?? {}), head: own ? `${own}\n${tags.join("\n")}` : tags.join("\n") };
 }
 
+// Self-hosted fonts (`fonts` in nowaki.config, built by fonts.rs): preloads for the faces marked
+// for it and the stylesheet, first in every page's head. `env.fonts` is `{ css, preload }`.
+function withFonts(env, meta) {
+  const f = env.fonts;
+  if (!f?.css) return meta;
+  const esc = (h) => String(h).replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`);
+  const links = [
+    ...(f.preload ?? []).map((p) => `<link rel="preload" href="${esc(p.href)}" as="font" type="${esc(p.type)}" crossorigin />`),
+    `<link rel="stylesheet" href="${esc(f.css)}" />`,
+  ].join("\n");
+  const head = typeof meta?.head === "string" ? meta.head : "";
+  return { ...(meta ?? {}), head: head ? `${links}\n${head}` : links };
+}
+
 // `export const htmlAttrs` / `bodyAttrs` from the layouts (root first), then the route, then what
 // the route's meta() returned, merged into one object each (document.mjs `mergeAttrs`).
 async function withDocAttrs(env, table, file, mod, version, meta) {
@@ -498,7 +512,7 @@ async function render404(env, table, ctx, version) {
     if (typeof mod.default === "function") {
       await env.ensureIslands(version);
       const body = await renderToStringAsync(h(mod.default, { url: ctx.url }));
-      const meta = await withScripts(env, table, table.notFound, mod, version, await withSeo(env, table, table.notFound, mod, version, ctx, await withRouteCss(env, table.notFound, mod, version)));
+      const meta = withFonts(env, await withScripts(env, table, table.notFound, mod, version, await withSeo(env, table, table.notFound, mod, version, ctx, await withRouteCss(env, table.notFound, mod, version))));
       return { status: 404, headers: HTML, body: env.renderDocument({ mod, body, meta }) };
     }
   }
@@ -515,7 +529,7 @@ async function render500(env, table, ctx, version, err) {
         await env.ensureIslands(version);
         const message = env.dev ? String(err?.stack ?? err) : String(err?.message ?? err);
         const body = await renderToStringAsync(h(mod.default, { error: { message }, url: ctx.url }));
-        const meta = await withScripts(env, table, table.errorRoute, mod, version, await withSeo(env, table, table.errorRoute, mod, version, ctx, await withRouteCss(env, table.errorRoute, mod, version)));
+        const meta = withFonts(env, await withScripts(env, table, table.errorRoute, mod, version, await withSeo(env, table, table.errorRoute, mod, version, ctx, await withRouteCss(env, table.errorRoute, mod, version))));
         return { status: 500, headers: HTML, body: env.renderDocument({ mod, body, meta }) };
       }
     } catch {
