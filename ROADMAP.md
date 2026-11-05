@@ -109,7 +109,7 @@ Make Nowaki a first-class choice for blogs, docs, and marketing sites: content, 
 **Exit criteria**: a docs site is built from a typed content collection of Markdown and MDX, with responsive images and a generated sitemap, without third-party Markdown or image code in the app. Its build time and first-load JS are in BENCHMARKS.md, next to Astro's.
 
 - [x] Content collections: `content/<name>/*` (declared in `content/config.ts`) with YAML frontmatter validated by a Standard Schema (the same as `serverFn`), `getCollection` / `getEntry`, generated types; TOML frontmatter (`+++`) as a follow-up
-- [ ] Built-in Markdown, rendered in Rust at build time: heading anchors and table of contents, code highlighting, images through the asset pipeline
+- [ ] Built-in Markdown, rendered in Rust at build time: heading anchors and table of contents and code highlighting (done), images through the asset pipeline
 - [ ] MDX: components and islands inside `.mdx` (parsed in Rust; how JSX is emitted is decided in an RFC)
 - [ ] Markdoc as an official plugin (it runs on the Node side through the plugin host)
 - [ ] Image component: `srcset` / `sizes`, `width` / `height` from the file (no layout shift), lazy loading by default, AVIF and lossy WebP, remote images with an allow-list
