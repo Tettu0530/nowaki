@@ -87,8 +87,14 @@ pub fn collect(root: &Path, images: &Images) -> Result<BTreeMap<String, Vec<Entr
         let mut files = Vec::new();
         walk(&coll, &mut files);
         let mut entries = Vec::new();
-        for path in files {
-            if let Some(e) = read_entry(root, &coll, &path, images)? {
+        // Entries are independent: parsed and rendered in parallel (order is restored by the sort).
+        use rayon::prelude::*;
+        let read: Vec<Result<Option<Entry>>> = files
+            .par_iter()
+            .map(|path| read_entry(root, &coll, path, images))
+            .collect();
+        for e in read {
+            if let Some(e) = e? {
                 entries.push(e);
             }
         }
@@ -341,19 +347,62 @@ fn local_image(
     // `../../hero.jpg` → the real path, so dev URLs and file names don't carry `..`.
     let abs = dunce::canonicalize(&abs).unwrap_or(abs);
     let q = nowaki_core::image::ImageQuery::default();
-    let set = match images {
-        Images::Dev => nowaki_core::image::dev_set(root, &abs, &q)?,
-        Images::Build(client_dir) => {
-            nowaki_core::image::build_set(root, &abs, &q, |stem, w, ext, bytes| {
-                nowaki_core::image::write_variant(client_dir, stem, w, ext, bytes)
-            })?
-        }
-    };
+    let set = image_set(root, &abs, &q, images)?;
     Ok(Some(nowaki_core::image::picture_html(
         &set,
         alt,
         Some(title),
     )))
+}
+
+/// One image set per file (and mode) for the whole build: a photo referenced from 500 entries is
+/// processed once. Keyed by the file's size and modification time too, so a dev rebuild after an
+/// edit sees the new file.
+fn image_set(
+    root: &Path,
+    abs: &Path,
+    q: &nowaki_core::image::ImageQuery,
+    images: &Images,
+) -> Result<nowaki_core::image::ImageSet> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+    type Key = (PathBuf, u64, u128, Option<PathBuf>);
+    type Slot = Arc<OnceLock<std::result::Result<nowaki_core::image::ImageSet, String>>>;
+    static SETS: OnceLock<Mutex<HashMap<Key, Slot>>> = OnceLock::new();
+    let meta = std::fs::metadata(abs)?;
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mode = match images {
+        Images::Dev => None,
+        Images::Build(dir) => Some(dir.clone()),
+    };
+    let key = (abs.to_path_buf(), meta.len(), mtime, mode);
+    // One slot per file: entries are read in parallel, and the first to reach a photo builds it
+    // while the others wait for that result (instead of encoding the same variants at once).
+    let slot: Slot = SETS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .entry(key)
+        .or_default()
+        .clone();
+    slot.get_or_init(|| {
+        match images {
+            Images::Dev => nowaki_core::image::dev_set(root, abs, q),
+            Images::Build(client_dir) => {
+                nowaki_core::image::build_set(root, abs, q, |stem, w, ext, bytes| {
+                    nowaki_core::image::write_variant(client_dir, stem, w, ext, bytes)
+                })
+            }
+        }
+        .map_err(|e| format!("{e:#}"))
+    })
+    .clone()
+    .map_err(|e| anyhow!(e))
 }
 
 /// `%20` → ` ` (Markdown URLs are often percent-encoded); a malformed escape stays as written.
