@@ -101,6 +101,11 @@ node scripts/livetest.mjs http://127.0.0.1:3300
 # leak) and collapse unused-query floods (#6/#7).
 ! grep -rl "$HOME" examples/hello/dist/client
 node scripts/security-e2e.mjs prod http://127.0.0.1:3300
+# Streamed responses pass through as written: with 600 ms between two chunks, the first byte
+# arrives long before the last (it used to wait for the whole body).
+FB=$(curl -s -N -o /dev/null -w '%{time_starttransfer}' "http://127.0.0.1:3300/api/stream?delay=600")
+awk -v t="$FB" 'BEGIN { exit !(t < 0.3) }'
+test "$(curl -s 'http://127.0.0.1:3300/api/stream?delay=50' | tr -d '\n')" = "chunk1chunk2"
 # The build's first-load JS report matches the chunks each page actually references.
 test -f examples/hello/dist/route-js.json
 node scripts/route-js-e2e.mjs http://127.0.0.1:3300 examples/hello

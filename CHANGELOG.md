@@ -62,6 +62,18 @@ milestone's worth of work; the codename is noted per entry.
   process only: `nowaki dev` and the adapters don't save rooms.
 
 ### Changed
+- **Streamed responses reach the client as they are written** (#90). Before
+  this change, `nowaki start` and `nowaki dev` read each response from the
+  Node renderer in full before sending it on. With a
+  `ReadableStream` API response, an SSE endpoint, or a streaming-SSR page,
+  the client got nothing until the last byte. Non-page responses now pass
+  straight through, and dev streams every response.
+  - With 600 ms between two chunks, the first byte arrives in about 4 ms.
+    It used to take about 400 ms.
+  - Regular pages are still read whole, because Rust assembles their HTML
+    from the renderer's JSON.
+  - A `streaming = true` page still waits for its loader before the shell
+    is sent. The example and its comments now say so.
 - **ISR pages are cached from the first request.** Right after startup,
   `nowaki start` renders every ISR page once in the background, so the first
   visitor gets a page from the Rust front instead of waiting for a render.
