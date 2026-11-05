@@ -463,6 +463,9 @@ fn resolve(core: &NowakiCore, dir: &Path, spec: &str) -> Option<PathBuf> {
         return None;
     }
     let spec = crate::resolve::alias_specifier(spec).unwrap_or(spec);
+    if let Some(shim) = crate::resolve::client_runtime_alias(&core.root, spec) {
+        return Some(shim);
+    }
     // resolve_spec tries normal resolution, then (on failure) plugin resolveId (virtual modules).
     core.resolve_spec(dir, spec)
 }
