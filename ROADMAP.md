@@ -94,14 +94,58 @@ Prove the differentiation with numbers and tooling.
 
 **Exit criteria**: `nowaki build` reports first-load JS per route and fails when a budget is exceeded. TTFB and Jetstream benchmark results are in the docs. Claude Code can connect to the `nowaki dev` MCP.
 
-**Status**: 0.16.0 ships the checked items below, plus streamed responses through the Rust front, `streaming = "early"`, and one render per publish for live queries and rooms. The Jetstream fan-out benchmark is in BENCHMARKS.md. Still open: TTFB numbers from the 0.16.0 re-run of `benchmarks/compare`, and the Jetstream docs and demo polish on nowaki.dev.
+**Status**: 0.16.0 ships the checked items below, plus streamed responses through the Rust front, `streaming = "early"`, and one render per publish for live queries and rooms. The Jetstream fan-out benchmark and the TTFB / throughput numbers from the 0.16.0 re-run of `benchmarks/compare` are in BENCHMARKS.md. Still open: the Jetstream docs and demo polish on nowaki.dev.
 
 - [x] Per-route client JS budgets (`export const budget = { js: <KB> }`; every build prints first-load JS per route and fails over budget)
 - [x] Build-time "this island could be live" suggestions (including moving live detection to the AST)
 - [x] Serve ISR pages from Rust alone right after startup (a warm-up render at startup instead of prerender ingestion, ETag / 304, pre-compressed br / gzip)
-- [ ] TTFB measurement in BENCHMARKS.md (with the 0.16.0 re-run of `benchmarks/compare`)
+- [x] TTFB measurement in BENCHMARKS.md (with the 0.16.0 re-run of `benchmarks/compare`)
 - [x] An MCP endpoint for `nowaki dev` (routes, module graph, recent errors)
 - [ ] Polish Jetstream docs, demos, and benchmarks
+
+### v0.17 "Mistral": Content sites
+Make Nowaki a first-class choice for blogs, docs, and marketing sites: content, images, and SEO out of the box.
+
+**Exit criteria**: a docs site is built from a typed content collection of Markdown and MDX, with responsive images and a generated sitemap, without third-party Markdown or image code in the app. Its build time and first-load JS are in BENCHMARKS.md, next to Astro's.
+
+- [ ] Content collections: `content/<name>/*` (declared in `content/config.ts`) with YAML frontmatter validated by a Standard Schema (the same as `serverFn`), `getCollection` / `getEntry`, generated types; TOML frontmatter (`+++`) as a follow-up
+- [ ] Built-in Markdown, rendered in Rust at build time: heading anchors and table of contents, code highlighting, images through the asset pipeline
+- [ ] MDX: components and islands inside `.mdx` (parsed in Rust; how JSX is emitted is decided in an RFC)
+- [ ] Markdoc as an official plugin (it runs on the Node side through the plugin host)
+- [ ] Image component: `srcset` / `sizes`, `width` / `height` from the file (no layout shift), lazy loading by default, AVIF and lossy WebP, remote images with an allow-list
+- [ ] SEO and metadata: a typed `meta` (Open Graph, Twitter cards, canonical, robots, JSON-LD), `sitemap.xml` and `robots.txt` generated from the routes
+- [ ] Font optimization: self-hosted Google and local fonts at build time (no third-party request), subsetting, `preload` for the fonts a page uses, `font-display`, and size-adjusted fallbacks so text doesn't shift when the font arrives
+
+### v0.18 "Sirocco": Routing for real apps
+Routing features that larger apps and existing Next.js / Remix users expect.
+
+**Exit criteria**: a photo gallery opens a photo in a modal on client navigation and as a full page on reload (intercepting + parallel routes). The same app is served under a `basePath` in two locales, with a signed-in session, and fails to start when a required env var is missing.
+
+- [ ] Route groups: `(group)` directories that share layouts without adding a URL segment
+- [ ] Parallel routes (`@slot` directories rendered side by side in a layout) and intercepting routes (`(.)photo`, for modals)
+- [ ] Config-level `redirects`, `rewrites`, and `headers` in `nowaki.config.mjs`, applied by the Rust front and every adapter (`_redirects` / `_headers` / Vercel config where the host supports them)
+- [ ] `basePath`, and a `trailingSlash` policy (`"never"` / `"always"` / `"ignore"`, with redirects)
+- [ ] i18n routing: locale prefixes, a default locale, optional `Accept-Language` negotiation, `getLocale()`, `hreflang`, and per-locale content collections
+- [ ] Typed env schema: declare server and `PUBLIC_` variables with a Standard Schema; validated at build and at startup (a missing or malformed value fails fast), with generated types for `import.meta.env` and a server-only `env` that the client build refuses to import
+- [ ] Sessions: `ctx.session` (and `getContext().session`) backed by a signed and encrypted cookie by default, or a pluggable store; rotation on sign-in, expiry, and the same CSRF rules as actions
+
+### v0.19 "Bora": Production and dev experience
+Control over what is cached, smooth navigation, visibility into a running app, and edits that keep their state.
+
+**Exit criteria**: an action updates a post and the next request for it is fresh on `nowaki start` and on a CDN adapter. A list-to-detail navigation animates with View Transitions and falls back cleanly where they are unsupported. A request shows up as one OpenTelemetry trace (route, middleware, loader, render). Editing an island in `nowaki dev` keeps its state, and the dev toolbar shows the page's islands and JS budget.
+
+- [ ] Cache invalidation: `revalidatePath()` / `revalidateTag()` from actions and API routes (route-level `tags`), purging the `nowaki start` ISR cache and calling the adapter's CDN purge where there is one
+- [ ] View Transitions in the client router (`document.startViewTransition`, opt-in per link or route, `view-transition-name` helpers), with a reduced-motion fallback
+- [ ] Observability: `Server-Timing` (middleware, loader, render, ISR status), structured JSON logs (`NOWAKI_LOG=json`), OpenTelemetry traces over OTLP (Rust front and renderer joined by `traceparent`, live events included), and a health endpoint
+- [ ] HMR: island edits keep component state (Preact Fast Refresh), CSS and CSS modules update without a reload, and route / layout edits re-render the page in place
+- [ ] Dev toolbar in `nowaki dev`, from the same data as the dev MCP endpoint:
+  - the current route, its layouts, and their loaders' timing
+  - each island on the page: client or live, hydration state, size, and the "could be live" hint
+  - the route's first-load JS against its `budget`
+  - ISR status and live connections and rooms
+  - recent errors with links to the source
+
+  It is injected only in dev and can be turned off.
 
 ### v1.0 "Nowaki": Stable release
 **Exit criteria**: Stability guarantees for the public API, complete documentation, established governance.

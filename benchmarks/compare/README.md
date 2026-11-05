@@ -25,7 +25,7 @@ did hydrate.
 
 | app | framework | UI | how data is read |
 |---|---|---|---|
-| `apps/nowaki` | Nowaki 0.15.0 (runtime 0.14.0, the latest on npm) | Preact islands | route `loader` |
+| `apps/nowaki` | Nowaki 0.16.0 (runtime 0.15.0, released together) | Preact islands | route `loader` |
 | `apps/astro` | Astro 7.4.5 | Preact islands (`client:load`) | frontmatter |
 | `apps/sveltekit` | SvelteKit 3.1.1 | Svelte 5 | `+page.server.js` `load` |
 | `apps/next` | Next.js 16.4.5 | React 19 client components | async server components |
@@ -99,12 +99,16 @@ Notes:
 - Nowaki's Rust binary is started directly. The npm `nowaki` command is a Node shim that
   `spawnSync`s the binary and stays resident (about 45 MB); no other framework has such a
   launcher, but an app started with `npx nowaki start` pays it.
-- The current Nowaki numbers predate #101. An earlier version of this note put Nowaki's lower
-  uncached throughput down to the Rust → Node proxy hop; that was not measured, and it was wrong.
-  Measured since (#90): `examples/hello` `/about` was about as fast through `nowaki start`
-  (6,056 req/s), on the Node sidecar directly (6,492) and on the node adapter (6,180), and a CPU
-  profile spent 52% of its time in the ESM loader hooks. #101 changed that path; these tables
-  will be re-measured with the next npm release. ISR hits are served by the Rust front alone.
+- Nowaki 0.15.0 served 4,183 uncached post pages/s here; 0.16.0 serves 10,424. An earlier
+  version of this note put the 0.15.0 gap down to the Rust → Node proxy hop; that was not
+  measured, and it was wrong. Measured in #90: `examples/hello` `/about` was about as fast
+  through `nowaki start` (6,056 req/s), on the Node sidecar directly (6,492) and on the node
+  adapter (6,180), and a CPU profile spent 52% of its time in the ESM loader hooks, from an
+  `import()` on every request. 0.16.0 includes #101, which removed that. ISR hits are served by
+  the Rust front alone.
+- 0.16.0 renders ISR pages right after `nowaki start`, so ISR runs hit the cache from the first
+  request, and compresses responses; `oha` sends no `Accept-Encoding`, so req/s is measured on
+  uncompressed bodies for every framework.
 - The load generator runs on the same machine. Above roughly 100k req/s (Nowaki's ISR hits) the
   number is likely bounded by `oha` and the loopback, not the server.
 

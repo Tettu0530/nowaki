@@ -72,7 +72,7 @@ build if a change inflates the bundle by more than 12 %.
 | dev server ready (warm cache) | ~90 ms |
 | production build | ~15 ms |
 | shipped client JS (gzip, per file) | ~14 KB |
-| TTFB (`nowaki start`, `/`) | ~50 ms |
+| first response after start (`nowaki start`, `/`, one cold request) | ~50 ms |
 
 This is the number behind the landing page's "dev ready in about 90 ms": a real
 content app boots in well under 100 ms.
@@ -85,12 +85,40 @@ content app boots in well under 100 ms.
 | dev server ready (warm cache) | ~160 ms |
 | production build | ~130 ms |
 | shipped client JS (gzip, per file) | ~18 KB |
-| TTFB (`nowaki start`, `/`) | ~45 ms |
+| first response after start (`nowaki start`, `/`, one cold request) | ~45 ms |
 
 The kitchen-sink app is slower to boot because it also starts the Node **plugin
 host** (it has a config plugin and `.tsrx` islands compiled by `@tsrx/preact`).
 That overhead only applies to apps that use plugins or TSRX — a plain app pays
 none of it (see the nowaki.dev site above).
+
+## Production servers — TTFB and throughput
+
+From [`benchmarks/compare`](./benchmarks/compare/README.md#production-servers) (`prod.mjs`): the
+100-page blog's server build on each framework's own Node server, one process each, 5 runs
+(fresh server, 3 s warm-up at the measured load). TTFB is 300 sequential GETs of post pages over
+one keep-alive connection; req/s is `oha` with 50 connections for 10 s. Pages are rendered per
+request unless the row says ISR.
+
+| server | TTFB p50 | TTFB p99 | post pages req/s | `/` req/s | idle RSS |
+|---|---|---|---|---|---|
+| **Nowaki 0.16.0** | **0.20 ms** | **0.70 ms** | **10,424** | **18,493** | 275 MB |
+| Nowaki 0.16.0, `NOWAKI_CSP=enforce` | 0.20 ms | 1.00 ms | 11,103 | 18,968 | 275 MB |
+| Astro 7.4.5 | 0.24 ms | 1.03 ms | 6,672 | 7,723 | 436 MB |
+| SvelteKit 3.1.1 | 0.26 ms | 1.28 ms | 6,215 | 4,293 | 336 MB |
+| Nuxt 4.6.4 | 0.67 ms | 4.49 ms | 1,950 | 2,135 | 410 MB |
+| Next.js 16.4.5 | 0.99 ms | 2.81 ms | 1,105 | 1,323 | 429 MB |
+| Nowaki 0.16.0, ISR on post pages | 0.08 ms | 0.23 ms | 122,454 | 17,067 ¹ | 114 MB |
+| Nuxt 4.6.4, ISR (`swr`) | 0.11 ms | 0.35 ms | 18,777 | 2,209 ¹ | 280 MB |
+| Next.js 16.4.5, ISR | 0.29 ms | 1.14 ms | 5,129 | 1,340 ¹ | 385 MB |
+
+¹ `/` is rendered per request in the ISR runs too; only post pages are cached.
+
+Measured 2026-11-05, Apple M2, Node 24.14.0, `oha` 1.16.0 on the same machine (above roughly
+100k req/s the figure is likely bounded by `oha` and loopback). On the same benchmark, Nowaki
+0.15.0 served 4,183 post pages/s at a TTFB p50 of 0.41 ms; 0.16.0 includes #101, which stopped
+calling `import()` on every request (a CPU profile had put 52% of the time in the ESM loader
+hooks). Full tables, ISR details and raw runs: `benchmarks/compare/results/`.
 
 ## Jetstream fan-out — 1000 connections
 
@@ -111,18 +139,21 @@ the latency of the last patch. The table is the median of 3 sets (server restart
 
 | scenario | receivers | delivery p50 | **delivery p95** | delivery p99 | everyone p50 | everyone p95 | missed |
 |---|---|---|---|---|---|---|---|
-| live query (`publish`) | 1000 | 34.3 ms | **63.2 ms** | 72.7 ms | 59.5 ms | 76.3 ms | 0 |
-| rooms (`vote`) | 999 | 37.6 ms | **67.5 ms** | 73.6 ms | 65.7 ms | 77.4 ms | 0 |
+| live query (`publish`) | 1000 | 18.0 ms | **27.0 ms** | 30.0 ms | 25.3 ms | 30.8 ms | 0 |
+| rooms (`vote`) | 999 | 18.8 ms | **29.5 ms** | 34.0 ms | 26.1 ms | 34.9 ms | 0 |
 
-Measured 2026-11-04 on an Apple M2 (8 cores, 16 GB), macOS 26 (darwin 25.6.0), Node 24.14.0,
-Nowaki 0.15.0 built from `main` at `0fba471` (`cargo build --release`); 150 rounds and
-149,850+ deliveries per scenario, none missed. Raw sets: `benchmarks/results/live-fanout.jsonl`.
+Measured 2026-11-05 on an Apple M2 (8 cores, 16 GB), macOS 26 (darwin 25.6.0), Node 24.14.0,
+Nowaki 0.16.0 built from the `v0.16.0` tag (`dffe887`, `cargo build --release`); 150 rounds
+and 149,850+ deliveries per scenario, none missed. Raw sets (each row tagged with its Nowaki
+version and commit): `benchmarks/results/live-fanout.jsonl`.
+
+The same benchmark on 0.15.0 (`0fba471`, 2026-11-04) gave a delivery p95 of 63.2 ms (live query)
+and 67.5 ms (rooms), everyone p50 59.5 / 65.7 ms. In 0.15.0 each session sent its own render
+to the Node renderer on every publish, so 1000 renders ran one after another (#97); 0.16.0
+renders once per publish (#114).
 
 The client is one Node process on the same machine, so the time it takes to handle 1000
-messages is part of each number. Deliveries spread evenly from ~0 to ~65 ms, which looks like
-the patches are rendered or sent one connection after another; rooms (one shared state) take
-as long as the live query, so a render per shared state rather than per connection may be
-the next thing to look at.
+messages is part of each number.
 
 Reproduce (raise the file-descriptor limit in both shells; macOS defaults to 256):
 
