@@ -11,6 +11,20 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **Build hints for islands that could ship no JS.** `nowaki build` reads
+  each client island's AST and points out two kinds:
+  - Islands that only keep state (`useState` / `useReducer`) and handle
+    click or form events (`onClick`, `onSubmit`, `onInput`, `onChange`).
+    Rewritten as live islands, they ship no JS, and pages where they are the
+    only client island lose the islands runtime too. The catch is a server
+    round trip per event.
+  - Islands with no state and no event handlers, which would render the same
+    as plain components.
+
+  No hint is given when an island uses other hooks, other events, `ref`,
+  browser globals, or imports anything but preact / React / CSS.
+  `NOWAKI_HINTS=0` hides the hints. In `examples/hello`: Counter,
+  ReactCounter, and TsrxCounter could be live, and Badge needs no island.
 - **First-load JS per route, and budgets that fail the build.** Every
   `nowaki build` and `nowaki prerender` now prints the gzip size of the JS
   each page route loads first, and writes the same data to
@@ -74,6 +88,12 @@ milestone's worth of work; the codename is noted per entry.
     from the renderer's JSON.
   - A `streaming = true` page still waits for its loader before the shell
     is sent. The example and its comments now say so.
+- **The npm `nowaki` command no longer keeps a Node process running** (#91).
+  On Linux and macOS, the shim now replaces itself with the Rust binary
+  (`process.execve`, Node 22.15+ / 23.11+), so it no longer runs the binary
+  as a child process. `npx nowaki start` used to leave a ~45 MB Node
+  process running next to the server. It also forwarded signals indirectly.
+  Windows and older Node versions keep the child-process fallback.
 - **ISR pages are cached from the first request.** Right after startup,
   `nowaki start` renders every ISR page once in the background, so the first
   visitor gets a page from the Rust front instead of waiting for a render.
@@ -111,6 +131,25 @@ milestone's worth of work; the codename is noted per entry.
   Measured on `examples/hello`, 50 connections, Apple M2: `/about` on
   `nowaki start` went from 6,056 to 28,752 req/s, and `/api/hello` from
   8,895 to 32,101 req/s. Dev mode is unchanged: it re-imports on every edit.
+
+### Fixed
+- **Live islands are detected from the AST.** The build used to look for
+  the text `export const live`. A comment containing it turned a client
+  island into a live one, which then shipped no JS. `export { x as live }`
+  and `export { live } from "…"` were missed and shipped a client chunk.
+  Now any exported binding named `live` counts, and comments and strings
+  don't.
+- **Scope hoisting through a symlinked or verbatim app root** (#92).
+  `NowakiCore::new` now canonicalizes the root with `dunce`. Before this
+  change, a root opened through a symlink (macOS `/var` → `/private/var`)
+  or given as a Windows `\\?\` path matched no resolved module. Every app
+  module then became its own chunk, and the route JS report missed islands.
+- **Static output no longer ships a live.js that can't work** (#93). Pages
+  from `nowaki prerender` and the static adapter used to include live.js in
+  POST mode. A static host has no server for its events, so every click
+  logged "not applied". Live islands now keep their first HTML and ship no
+  script. The build also lists the pages they are on, as a note. The node,
+  bun, deno, vercel, and cloudflare adapters still ship live.js.
 
 ## [0.15.0] — 2026-11-04 · "Cyclone" (part 1)
 

@@ -152,7 +152,9 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
     live: liveByName.size
       ? { lookup: (name) => liveByName.get(name) ?? null, render: liveRender }
       : null,
-    renderDocument: (args) => prodDocument(manifest, args),
+    // `nowaki prerender` sets NOWAKI_PRERENDER=1 on its temporary server: the pages become static
+    // files, so live islands get no live.js (it could never reach a server).
+    renderDocument: (args) => prodDocument(manifest, args, { live: process.env.NOWAKI_PRERENDER !== "1" }),
     renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta),
     renderError: (err) => {
       console.error("[nowaki]", err);
