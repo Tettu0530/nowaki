@@ -20,6 +20,9 @@ allow = [
   "Unicode-DFS-2016",
 ]
 confidence-threshold = 0.9
+# rav1e (the AVIF encoder behind `?image`) depends on libfuzzer-sys only under `cfg(fuzzing)`, so
+# it is never built into nowaki; cargo-deny checks every target, hence the exception.
+exceptions = [{ name = "libfuzzer-sys", allow = ["NCSA"] }]
 
 [bans]
 multiple-versions = "warn"

@@ -117,6 +117,14 @@ curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<span style="font-weight:
 # route / layout CSS (0.16.1): the layout's and the page's stylesheets are linked in the head and
 # served as text/css; a plain .css import's default export is its text (inlined by /styled's head)
 curl -sf http://127.0.0.1:3300/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'
+# ?image + <Image> in the build: hashed AVIF / JPEG variants under /_nowaki/, served as images
+G=$(curl -sf http://127.0.0.1:3300/gallery)
+echo "$G" | grep -qE '<source type="image/avif" srcset="/_nowaki/hero-640\.[0-9a-f]+\.avif 640w, /_nowaki/hero-960\.[0-9a-f]+\.avif 960w, /_nowaki/hero-1200\.[0-9a-f]+\.avif 1200w"'
+# alt="" renders as a bare `alt` (still an empty alt for screen readers)
+echo "$G" | grep -q 'width="320" height="200" alt loading="lazy"'
+AV=$(echo "$G" | grep -oE '/_nowaki/hero-640\.[0-9a-f]+\.avif' | head -1)
+curl -s -D - -o /dev/null "http://127.0.0.1:3300$AV" | grep -qi '^content-type: image/avif'
+curl -sf http://127.0.0.1:3300/docs/intro | grep -qE '<picture><source type="image/avif" srcset="/_nowaki/hero-640\.[0-9a-f]+\.avif'
 # page scripts: bundled to /_nowaki/stamp.<hash>.js with preloads for its chunks, counted in the
 # route's first-load JS
 curl -sf http://127.0.0.1:3300/scripted | grep -qE '<script type="module" src="/_nowaki/stamp\.[0-9a-f]+\.js" data-nowaki-script></script>'

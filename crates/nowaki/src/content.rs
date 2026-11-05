@@ -50,7 +50,15 @@ pub fn enabled(root: &Path) -> bool {
 
 /// Reads every collection under `content/`. Each sub-directory is a collection; files directly in
 /// `content/` (the config) are not entries.
-pub fn collect(root: &Path) -> Result<BTreeMap<String, Vec<Entry>>> {
+/// Where a Markdown entry's local images (`![alt](./hero.jpg)`) go: `nowaki dev` points them at
+/// `/__nowaki/image` (encoded on request); a build writes the variants into `dist/client`.
+#[derive(Clone)]
+pub enum Images {
+    Dev,
+    Build(PathBuf),
+}
+
+pub fn collect(root: &Path, images: &Images) -> Result<BTreeMap<String, Vec<Entry>>> {
     let dir = root.join("content");
     let mut out = BTreeMap::new();
     let Ok(read) = std::fs::read_dir(&dir) else {
@@ -77,7 +85,7 @@ pub fn collect(root: &Path) -> Result<BTreeMap<String, Vec<Entry>>> {
         walk(&coll, &mut files);
         let mut entries = Vec::new();
         for path in files {
-            if let Some(e) = read_entry(root, &coll, &path)? {
+            if let Some(e) = read_entry(root, &coll, &path, images)? {
                 entries.push(e);
             }
         }
@@ -98,8 +106,8 @@ pub fn collect(root: &Path) -> Result<BTreeMap<String, Vec<Entry>>> {
 }
 
 /// Writes `<out_dir>/index.json`. Returns the number of entries.
-pub fn write(root: &Path, out_dir: &Path) -> Result<usize> {
-    let all = collect(root)?;
+pub fn write(root: &Path, out_dir: &Path, images: &Images) -> Result<usize> {
+    let all = collect(root, images)?;
     let n = all.values().map(Vec::len).sum();
     std::fs::create_dir_all(out_dir)?;
     std::fs::write(out_dir.join("index.json"), serde_json::to_string(&all)?)?;
@@ -113,7 +121,11 @@ pub fn build(root: &Path, dist: &Path) -> Result<()> {
     if !enabled(root) {
         return Ok(());
     }
-    let n = write(root, &dist.join("server/content"))?;
+    let n = write(
+        root,
+        &dist.join("server/content"),
+        &Images::Build(dist.join("client")),
+    )?;
     let script = root.join("node_modules/@nowaki-dev/runtime/server/content-check.mjs");
     if !script.exists() {
         return Err(anyhow!("content collections need @nowaki-dev/runtime 0.16 or newer (server/content-check.mjs not found)"));
@@ -163,7 +175,7 @@ fn rel(root: &Path, p: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
+fn read_entry(root: &Path, coll: &Path, path: &Path, images: &Images) -> Result<Option<Entry>> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     let file = rel(root, path);
     let slug = {
@@ -179,7 +191,11 @@ fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
                 Some(y) => yaml_to_json(y).map_err(|e| anyhow!("{file}: frontmatter: {e}"))?,
                 None => Value::Object(Default::default()),
             };
-            let (html, headings) = render_markdown(body);
+            let dir = path.parent().unwrap_or(coll);
+            let mut image =
+                |url: &str, alt: &str, title: &str| local_image(root, dir, url, alt, title, images);
+            let (html, headings) =
+                render_markdown_with(body, &mut image).map_err(|e| anyhow!("{file}: {e:#}"))?;
             Entry {
                 slug,
                 file,
@@ -272,11 +288,118 @@ fn highlighter() -> &'static SyntectAdapter {
     })
 }
 
+/// The `<picture>` for a Markdown image with a relative URL (`./hero.jpg`, `../img/a.png`), run
+/// through the same pipeline as `?image`. None leaves the image as Markdown wrote it: remote and
+/// root-relative URLs (`/logo.svg`, from public/), and files that aren't images.
+fn local_image(
+    root: &Path,
+    dir: &Path,
+    url: &str,
+    alt: &str,
+    title: &str,
+    images: &Images,
+) -> Result<Option<String>> {
+    if url.is_empty()
+        || url.starts_with('/')
+        || url.starts_with('#')
+        || url.contains("://")
+        || url.starts_with("data:")
+    {
+        return Ok(None);
+    }
+    let path_part = url.split(['?', '#']).next().unwrap_or(url);
+    let decoded = percent_decode(path_part);
+    let abs = dir.join(&decoded);
+    if !abs.is_file() || !nowaki_core::is_asset(&abs) {
+        return Err(anyhow!(
+            "image {url} not found (paths are relative to the entry)"
+        ));
+    }
+    // `../../hero.jpg` → the real path, so dev URLs and file names don't carry `..`.
+    let abs = dunce::canonicalize(&abs).unwrap_or(abs);
+    let q = nowaki_core::image::ImageQuery::default();
+    let set = match images {
+        Images::Dev => nowaki_core::image::dev_set(root, &abs, &q)?,
+        Images::Build(client_dir) => {
+            nowaki_core::image::build_set(root, &abs, &q, |stem, w, ext, bytes| {
+                nowaki_core::image::write_variant(client_dir, stem, w, ext, bytes)
+            })?
+        }
+    };
+    Ok(Some(nowaki_core::image::picture_html(
+        &set,
+        alt,
+        Some(title),
+    )))
+}
+
+/// `%20` → ` ` (Markdown URLs are often percent-encoded); a malformed escape stays as written.
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = (b[i] == b'%')
+            .then(|| b.get(i + 1..i + 3))
+            .flatten()
+            .and_then(|h| std::str::from_utf8(h).ok())
+            .and_then(|h| u8::from_str_radix(h, 16).ok());
+        match hex {
+            Some(v) => {
+                out.push(v);
+                i += 3;
+            }
+            None => {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
+}
+
 /// Renders Markdown to HTML and lists its headings (with the same ids as the anchors comrak adds).
-pub fn render_markdown(md: &str) -> (String, Vec<Heading>) {
+/// Images stay `<img>`; entries go through `render_markdown_with`, which turns local ones into
+/// responsive `<picture>`s.
+#[cfg(test)]
+fn render_markdown(md: &str) -> (String, Vec<Heading>) {
+    render_markdown_with(md, &mut |_, _, _| Ok(None)).expect("no image callback errors")
+}
+
+/// `image(url, alt, title)`: the HTML for a Markdown image, or None to keep it as written.
+pub type ImageHtml<'a> = dyn FnMut(&str, &str, &str) -> Result<Option<String>> + 'a;
+
+/// `render_markdown`, with `image` giving the HTML for each image.
+pub fn render_markdown_with(md: &str, image: &mut ImageHtml) -> Result<(String, Vec<Heading>)> {
     let arena = Arena::new();
     let options = markdown_options();
     let doc = parse_document(&arena, md, &options);
+    // Images first: the node becomes raw HTML (render.unsafe is on), its alt-text children go.
+    let image_nodes: Vec<_> = doc
+        .descendants()
+        .filter(|n| matches!(n.data.borrow().value, NodeValue::Image(_)))
+        .collect();
+    for node in image_nodes {
+        let (url, title) = match &node.data.borrow().value {
+            NodeValue::Image(link) => (link.url.clone(), link.title.clone()),
+            _ => continue,
+        };
+        let mut alt = String::new();
+        for d in node.descendants() {
+            match &d.data.borrow().value {
+                NodeValue::Text(t) => alt.push_str(t),
+                NodeValue::Code(c) => alt.push_str(&c.literal),
+                _ => {}
+            }
+        }
+        if let Some(html) = image(&url, &alt, &title)? {
+            let children: Vec<_> = node.children().collect();
+            for c in children {
+                c.detach();
+            }
+            node.data.borrow_mut().value = NodeValue::HtmlInline(html);
+        }
+    }
     let mut headings = Vec::new();
     let mut anchorizer = comrak::Anchorizer::new();
     for node in doc.descendants() {
@@ -302,7 +425,7 @@ pub fn render_markdown(md: &str) -> (String, Vec<Heading>) {
     }
     let mut html = String::new();
     format_html_with_plugins(doc, &options, &mut html, &plugins).expect("writing to a String");
-    (html, headings)
+    Ok((html, headings))
 }
 
 #[cfg(test)]
@@ -376,6 +499,44 @@ mod tests {
     }
 
     #[test]
+    fn local_markdown_images_become_pictures() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("content/docs")).unwrap();
+        // examples/hello/hero.jpg is 1200×750.
+        let hero = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello/hero.jpg");
+        std::fs::copy(hero, dir.path().join("content/docs/a b.jpg")).unwrap();
+        let client = dir.path().join("dist/client");
+        let images = Images::Build(client.clone());
+        let docs = dir.path().join("content/docs");
+        let mut cb = |url: &str, alt: &str, title: &str| {
+            local_image(dir.path(), &docs, url, alt, title, &images)
+        };
+        let (html, _) = render_markdown_with(
+            "![A *wide* image](./a%20b.jpg \"Caption\")\n\n![logo](/logo.svg) ![remote](https://x.test/a.png)\n",
+            &mut cb,
+        )
+        .unwrap();
+        assert!(
+            html.contains("<picture><source type=\"image/avif\" srcset=\"/_nowaki/a b-640."),
+            "{html}"
+        );
+        assert!(
+            html.contains("width=\"1200\" height=\"750\" alt=\"A wide image\" title=\"Caption\""),
+            "{html}"
+        );
+        assert!(
+            html.contains("<img src=\"/logo.svg\" alt=\"logo\""),
+            "{html}"
+        );
+        assert!(html.contains("<img src=\"https://x.test/a.png\""), "{html}");
+        assert!(std::fs::read_dir(&client).unwrap().count() >= 4);
+        let mut missing = |url: &str, alt: &str, title: &str| {
+            local_image(dir.path(), &docs, url, alt, title, &images)
+        };
+        assert!(render_markdown_with("![x](./nope.png)\n", &mut missing).is_err());
+    }
+
+    #[test]
     fn highlights_fenced_code_with_a_language_at_build_time() {
         let (html, _) =
             render_markdown("```rust\nfn main() { let x = 1; }\n```\n\n```\nplain text\n```\n");
@@ -415,7 +576,7 @@ mod tests {
         std::fs::write(r.join("content/blog/notes.txt"), "ignored").unwrap();
         std::fs::write(r.join("content/authors/tettu.json"), "{\"name\":\"Tettu\"}").unwrap();
         assert!(enabled(r));
-        let all = collect(r).unwrap();
+        let all = collect(r, &Images::Dev).unwrap();
         let blog: Vec<_> = all["blog"].iter().map(|e| e.slug.as_str()).collect();
         assert_eq!(blog, ["2026/a", "b"]);
         assert_eq!(all["blog"][0].file, "content/blog/2026/a.md");
@@ -424,7 +585,7 @@ mod tests {
         assert!(all["authors"][0].html.is_none());
 
         std::fs::write(r.join("content/blog/b.json"), "{}").unwrap();
-        let err = collect(r).unwrap_err().to_string();
+        let err = collect(r, &Images::Dev).unwrap_err().to_string();
         assert!(err.contains("two entries have the slug \"b\""), "{err}");
     }
 
@@ -434,7 +595,7 @@ mod tests {
         let r = dir.path();
         std::fs::create_dir_all(r.join("content/blog")).unwrap();
         std::fs::write(r.join("content/blog/x.md"), "---\ntitle: [oops\n---\n").unwrap();
-        let err = collect(r).unwrap_err().to_string();
+        let err = collect(r, &Images::Dev).unwrap_err().to_string();
         assert!(err.contains("content/blog/x.md: frontmatter"), "{err}");
     }
 }

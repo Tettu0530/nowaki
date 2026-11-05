@@ -119,6 +119,19 @@ fn try_optimize(bytes: &[u8], ext: &str, t: &Transform) -> Result<Option<(Vec<u8
     Ok(Some((out, out_fmt.ext().to_string())))
 }
 
+/// Encodes a decoded image in the format of `ext` (png / jpg / jpeg / webp), for `image.rs`'s
+/// fallback variants. None for formats this module doesn't write.
+pub(crate) fn encode_as(
+    img: &DynamicImage,
+    ext: &str,
+    quality: Option<u8>,
+) -> Result<Option<(Vec<u8>, &'static str)>> {
+    let Some(fmt) = Fmt::from_ext(ext) else {
+        return Ok(None);
+    };
+    Ok(Some((encode(img, fmt, quality)?, fmt.ext())))
+}
+
 // One dimension: fit within, keeping aspect ratio. Both: exact resize.
 fn resize(img: &DynamicImage, w: Option<u32>, h: Option<u32>) -> DynamicImage {
     match (w, h) {

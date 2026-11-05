@@ -28,7 +28,9 @@
     "navigation.js",
     "navigation.d.ts",
     "content.js",
-    "content.d.ts"
+    "content.d.ts",
+    "image.js",
+    "image.d.ts"
   ],
   "exports": {
     ".": {
@@ -42,6 +44,10 @@
     "./content": {
       "types": "./content.d.ts",
       "default": "./content.js"
+    },
+    "./image": {
+      "types": "./image.d.ts",
+      "default": "./image.js"
     },
     "./client/*": "./client/*",
     "./server/*": "./server/*"

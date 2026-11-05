@@ -11,6 +11,19 @@ repository = "https://github.com/Tettu0530/nowaki"
 homepage = "https://nowaki.dev"
 rust-version = "1.95"
 
+# The AVIF encoder (for `?image`) is unusably slow unoptimized; debug builds (`cargo build`, CI's
+# e2e) optimize just it and the image codecs.
+[profile.dev.package.rav1e]
+opt-level = 3
+[profile.dev.package.ravif]
+opt-level = 3
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.image-webp]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
