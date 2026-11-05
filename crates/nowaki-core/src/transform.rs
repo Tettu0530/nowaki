@@ -308,8 +308,20 @@ fn rewrite_ssr_imports<'a>(
             }
             continue;
         }
+        // Plain CSS: SSR gets its text as the default export (`import css from "./a.css"` is a
+        // string, as nowaki-env.d.ts says); the page links it as a stylesheet (route CSS).
         if spec.ends_with(".css") {
-            lit.value = allocator.alloc_str(crate::css::CSS_NOOP_SPECIFIER).into();
+            let text = resolver
+                .resolve(dir, spec)
+                .ok()
+                .and_then(|r| std::fs::read_to_string(r.full_path()).ok());
+            let module = match text {
+                Some(css) => {
+                    data_module(&format!("export default {}", crate::css::js_string(&css)))
+                }
+                None => crate::css::CSS_NOOP_SPECIFIER.to_string(),
+            };
+            lit.value = allocator.alloc_str(&module).into();
             lit.raw = None;
             continue;
         }

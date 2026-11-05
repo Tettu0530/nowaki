@@ -17,6 +17,9 @@ PORT=3310 node examples/hello/dist/server/index.mjs &
 NODE_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3310/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3310/ | grep -q "nowaki-island"   # SSR + island marker
+# route / layout CSS: linked in the head, served as text/css (0.16.1)
+curl -sf http://127.0.0.1:3310/styled | grep -qE '<link rel="stylesheet" href="/_nowaki/styled\.[0-9a-f]+\.css"'
+curl -sf http://127.0.0.1:3310/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'
 # streaming = "early": the shell goes out before the 300 ms loader; a loader error renders
 # error.tsx in the page (status stays 200) and a loader redirect becomes location.replace (#112)
 FB=$(curl -s -N -o /tmp/nowaki-early.html -w '%{time_starttransfer}' http://127.0.0.1:3310/stream-early)
@@ -76,6 +79,8 @@ grep -q 'Page not found' examples/hello/dist/static/404.html
 # content collections: staticPaths from getCollection, one page per entry
 grep -q '<h2 id="why-content-collections"' examples/hello/dist/static/docs/intro/index.html
 test -f examples/hello/dist/static/docs/routing/index.html
+grep -qE '<link rel="stylesheet" href="/_nowaki/styled\.[0-9a-f]+\.css"' examples/hello/dist/static/styled/index.html
+ls examples/hello/dist/static/_nowaki/styled.*.css >/dev/null
 # live islands on a static host: their first HTML, but no live.js (no server for its events), and
 # the build says which pages they are on (#93)
 grep -q 'nowaki-live name="LiveCounter"' examples/hello/dist/static/live/index.html

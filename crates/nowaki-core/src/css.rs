@@ -5,6 +5,28 @@ use xxhash_rust::xxh3::xxh3_64;
 /// Empty module that neutralizes .css imports on the server (CSS is client-only).
 pub const CSS_NOOP_SPECIFIER: &str = "data:text/javascript,";
 
+/// A JS string literal for `s`. (Rust's `{:?}` writes control characters as `\u{1f}`, which
+/// isn't JS.)
+pub fn js_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 pub fn is_css(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()) == Some("css")
 }
@@ -77,7 +99,7 @@ pub fn mapping_object(map: &[(String, String)]) -> String {
 pub fn css_module_client_js(style_id: &str, scoped_css: &str, map: &[(String, String)]) -> String {
     format!(
         "{}export default {};\n",
-        css_shim(style_id, scoped_css),
+        css_shim_body(style_id, scoped_css),
         mapping_object(map)
     )
 }
@@ -92,8 +114,13 @@ pub fn css_module_mapping_js(map: &[(String, String)]) -> String {
 /// Copies the page's CSP nonce (set by islands.js, or from a nonced script) so an enforced
 /// `style-src-elem` allows it.
 pub fn css_shim(id: &str, css: &str) -> String {
-    let css_lit = format!("{css:?}");
-    let id_lit = format!("{id:?}");
+    css_shim_body(id, css) + "export default __css;\n"
+}
+
+/// The injecting part of [`css_shim`], without an export (CSS Modules export their class map).
+fn css_shim_body(id: &str, css: &str) -> String {
+    let css_lit = js_string(css);
+    let id_lit = js_string(id);
     format!(
         "const __css = {css_lit};\n\
 const __id = {id_lit};\n\
@@ -106,6 +133,13 @@ __el.textContent = __css;\n"
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn js_string_escapes_for_javascript() {
+        assert_eq!(js_string("a\"b\\c"), r#""a\"b\\c""#);
+        assert_eq!(js_string("x\ny\u{1f}z"), r#""x\ny\u001fz""#);
+        assert_eq!(js_string("\u{e9} \u{2028}"), "\"\u{e9} \\u2028\"");
+    }
 
     #[test]
     fn detects_css_and_modules() {
