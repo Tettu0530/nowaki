@@ -115,6 +115,10 @@ grep -q 'nowaki-live name="LiveCounter"' examples/hello/dist/static/live/index.h
 node -e 'const b=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!Array.isArray(b.loading)||!Array.isArray(b.error)||!b.loading.length) process.exit(1)' examples/hello/dist/static/__nowaki/boundaries
 grep -q '/__nowaki/boundaries' examples/hello/dist/static/_headers
 grep -qi 'x-content-type-options: nosniff' examples/hello/dist/static/_headers
+# images in the static output: the gallery's variants and the Markdown entry's picture
+grep -qE '<source type="image/avif" srcset="/_nowaki/hero-640\.[0-9a-f]+\.avif' examples/hello/dist/static/gallery/index.html
+grep -qE '<picture><source type="image/avif"' examples/hello/dist/static/docs/intro/index.html
+ls examples/hello/dist/static/_nowaki/hero-640.*.avif >/dev/null
 # SEO in the static output: sitemap.xml generated against the site, public/robots.txt kept
 grep -q '<loc>https://hello.nowaki.dev/docs/intro</loc>' examples/hello/dist/static/sitemap.xml
 ! grep -qE '/boom<|/secret<' examples/hello/dist/static/sitemap.xml

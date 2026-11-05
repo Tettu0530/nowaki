@@ -109,10 +109,11 @@ Make Nowaki a first-class choice for blogs, docs, and marketing sites: content, 
 **Exit criteria**: a docs site is built from a typed content collection of Markdown and MDX, with responsive images and a generated sitemap, without third-party Markdown or image code in the app. Its build time and first-load JS are in BENCHMARKS.md, next to Astro's. A static Astro site of the size of a personal portfolio (page scripts, `public/` assets, generated OG images, attributes on `<html>`) moves to Nowaki without workarounds, following the migration guide.
 
 - [x] Content collections: `content/<name>/*` (declared in `content/config.ts`) with YAML frontmatter validated by a Standard Schema (the same as `serverFn`), `getCollection` / `getEntry`, generated types; TOML frontmatter (`+++`) as a follow-up
-- [ ] Built-in Markdown, rendered in Rust at build time: heading anchors and table of contents and code highlighting (done), images through the asset pipeline
+- [x] Built-in Markdown, rendered in Rust at build time: heading anchors and table of contents, code highlighting, and local images through the image pipeline
 - [ ] MDX: components and islands inside `.mdx` (parsed in Rust; how JSX is emitted is decided in an RFC)
 - [ ] Markdoc as an official plugin (it runs on the Node side through the plugin host)
-- [ ] Image component: `srcset` / `sizes`, `width` / `height` from the file (no layout shift), lazy loading by default, AVIF and lossy WebP, remote images with an allow-list
+- [x] Image component: `srcset` / `sizes`, `width` / `height` from the file (no layout shift), lazy loading by default, AVIF (pure Rust) with the original format as the fallback
+- [ ] Remote images in `<Image>` with an allow-list (fetched and optimized at build time)
 - [x] SEO and metadata: a typed `meta` (Open Graph, Twitter cards, canonical, robots, JSON-LD), `sitemap.xml` and `robots.txt` generated from the routes
 - [x] `public/`: files served as-is at their own path (favicon, `robots.txt`, fonts referenced from CSS), by `nowaki dev`, `nowaki start`, every adapter, and static output
 - [x] File routes, prerendered: dynamic routes with an extension (`og/[card].png.ts`, `feed.xml.ts`) and API routes written to files by `nowaki prerender` / the static adapter, for OG images, feeds, and sitemaps

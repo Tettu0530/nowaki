@@ -70,6 +70,13 @@ rm examples/hello/content/docs/e2e-added.md
 for i in $(seq 1 20); do curl -sf $B/docs >/dev/null && break; sleep 0.5; done
 curl -sf $B/docs | grep -q 'href="/docs/intro"'
 # route / layout CSS in dev: linked from the dev server, which serves only .css under the app
+# ?image + <Image>: AVIF then JPEG, sizes from the file, lazy by default; Markdown images too
+curl -sf $B/gallery | grep -q '<picture><source type="image/avif" srcset="/__nowaki/image?f=/hero.jpg&amp;w=640&amp;fmt=avif'
+curl -sf $B/gallery | grep -q 'width="1200" height="750" alt="A gradient" loading="eager"'
+curl -s -D - -o /dev/null "$B/__nowaki/image?f=/hero.jpg&w=640&fmt=avif" | grep -qi '^content-type: image/avif'
+curl -s -D - -o /dev/null "$B/__nowaki/image?f=/hero.jpg&w=640&fmt=orig" | grep -qi '^content-type: image/jpeg'
+test "$(curl -s -o /dev/null -w '%{http_code}' "$B/__nowaki/image?f=/package.json&w=10&fmt=orig")" = 403
+curl -sf $B/docs/intro | grep -q '<picture><source type="image/avif" srcset="/__nowaki/image?f=/hero.jpg'
 # SEO: typed meta → head tags (absolute against nowaki.config `site`), generated sitemap.xml
 curl -sf $B/docs/intro | grep -q '<link rel="canonical" href="https://hello.nowaki.dev/docs/intro" />'
 curl -sf $B/docs/intro | grep -q '<meta property="og:image" content="https://hello.nowaki.dev/og/intro.png" />'

@@ -49,6 +49,8 @@ const styledAttrs = await (await req("/styled")).text();
 check("htmlAttrs / bodyAttrs on the edge", styledAttrs.includes('<html lang="ja" data-sheet-rev="3"') && styledAttrs.includes('<body class="site styled-page" data-site="hello"') && !styledAttrs.includes("onload"));
 const scripted = await (await req("/scripted")).text();
 check("page scripts on the edge", /<script type="module" src="\/_nowaki\/stamp\.[0-9a-f]+\.js" data-nowaki-script><\/script>/.test(scripted));
+const gallery = await (await req("/gallery")).text();
+check("<Image> renders AVIF + JPEG sources on the edge", /<source type="image\/avif" srcset="\/_nowaki\/hero-640\.[0-9a-f]+\.avif/.test(gallery) && gallery.includes('width="1200" height="750"'));
 const sitemap = await (await req("/sitemap.xml")).text();
 check("sitemap.xml on the edge uses the embedded site", sitemap.includes("<loc>https://hello.nowaki.dev/docs/intro</loc>"));
 const docHead = await (await req("/docs/intro")).text();

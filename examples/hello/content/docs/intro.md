@@ -17,3 +17,9 @@ Nowaki renders this page from `content/docs/intro.md` at build time, in Rust.
 | Page | What it covers |
 |---|---|
 | [Routing](/docs/routing) | Files under `routes/` |
+
+## Images
+
+A relative image becomes a responsive `<picture>` at build time:
+
+![A gradient](../../hero.jpg "hero.jpg, 1200x750")

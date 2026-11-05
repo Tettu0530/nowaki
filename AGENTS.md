@@ -179,6 +179,11 @@ code locations and CI coverage.
   `resolve_id`, `load`); `NowakiCore::resolve_spec` + the `VirtualResolve` trait.
 - **Scope hoisting / chunking** — `crates/nowaki-core/src/chunk.rs`.
 - **Deploy adapters** — `crates/nowaki/src/adapter.rs` (+ `server/edge-build.mjs`).
+- **Images (`?image`, `<Image>`)** — `crates/nowaki-core/src/image.rs` (widths, AVIF via ravif
+  + fallback, disk cache, `picture_html` for Markdown), emitted by `build.rs` `emit` (client) and
+  `ServerAssets::image_module` (server); dev modules from `transform.rs` `dev_asset_module`,
+  variants from `dev.rs` `dev_image` (`/__nowaki/image`). Component: `packages/nowaki-runtime/image.js`.
+  Markdown images: `content.rs` `local_image`.
 - **SEO** — `packages/nowaki-runtime/server/seo.mjs` (site URL, meta tags, sitemap, robots);
   `handler.mjs` `withSeo` (layout + route meta) and the generated `/sitemap.xml` / `/robots.txt`;
   page URLs from `server/isr-urls.mjs` `pageUrls`. The site comes from `crates/nowaki/src/site.rs`

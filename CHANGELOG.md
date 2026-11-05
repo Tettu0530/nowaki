@@ -11,6 +11,31 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **`<Image>` and `?image` imports** (v0.17).
+  `import hero from "./hero.jpg?image"` gives the image's size and generated
+  variants. `<Image src={hero} alt="…" />` from `@nowaki-dev/runtime/image`
+  renders a `<picture>` with them.
+  - Variants: AVIF, then the original format (JPEG / PNG / WebP) as the
+    fallback. Widths are 640, 960, 1280, and 1920 below the original, plus the
+    original (at most 2560); nothing is upscaled.
+    `?w=400,800&image` picks the widths, and `q=` the AVIF quality (default
+    60).
+  - `width` / `height` come from the file, so there is no layout shift.
+    `loading="lazy"` and `decoding="async"` are the defaults, and `sizes`
+    defaults to the rendered width.
+  - AVIF is encoded in pure Rust (ravif / rav1e without asm), so the release
+    builds stay free of C codecs. Lossy WebP isn't offered, since it would
+    need libwebp.
+  - Every variant is cached in `node_modules/.cache/nowaki/images`, so a
+    rebuild or a dev reload doesn't encode again. In dev, variants are encoded
+    on first request at `/__nowaki/image`.
+  - The image codecs are optimized in debug builds too
+    (`[profile.dev.package]`), since unoptimized AVIF takes tens of seconds
+    per image.
+- **Local images in Markdown** (v0.17). `![alt](./hero.jpg "title")` in a
+  content entry becomes the same `<picture>`, resolved relative to the entry.
+  A missing file fails the build. Root-relative (`/logo.svg`, from `public/`)
+  and remote URLs stay as written.
 - **SEO and metadata** (v0.17).
   - `site` in nowaki.config (or `NOWAKI_SITE`, which wins) is the site's URL.
     The build writes it to `dist/server/site.json`, so the adapters and the

@@ -403,6 +403,31 @@ struct ServerAssets {
 }
 
 impl ServerAssets {
+    /// The `?image` module for `abs` (path with its query): the client build's when it emitted
+    /// one (kept in the same map, as module code), else built now into dist/client.
+    fn image_module(&self, abs: &Path, q: &crate::image::ImageQuery) -> Result<String> {
+        if let Some(code) = self.urls.lock().unwrap().get(abs) {
+            if code.starts_with("export default") {
+                return Ok(code.clone());
+            }
+        }
+        let (file, _) = crate::image::split_query(abs);
+        let root = self
+            .client_dir
+            .parent()
+            .and_then(Path::parent)
+            .unwrap_or(Path::new("."));
+        let set = crate::image::build_set(root, &file, q, |stem, w, ext, bytes| {
+            crate::image::write_variant(&self.client_dir, stem, w, ext, bytes)
+        })?;
+        let code = set.module();
+        self.urls
+            .lock()
+            .unwrap()
+            .insert(abs.to_path_buf(), code.clone());
+        Ok(code)
+    }
+
     fn url_for(&self, abs: &Path) -> Result<String> {
         let mut urls = self.urls.lock().unwrap();
         if let Some(url) = urls.get(abs) {
@@ -499,6 +524,20 @@ fn transform_for_server(
         if !spec.starts_with('/') && !spec.contains("://") && !spec.starts_with("data:") {
             if let Ok(resolution) = core.resolver.resolve(dir, spec) {
                 let full = resolution.full_path();
+                // `./hero.jpg?image`: the image set module (see image.rs).
+                let (file, query) = crate::image::split_query(&full);
+                if let Some(q) = query.as_deref().and_then(crate::image::image_query) {
+                    let code = assets.image_module(&full, &q)?;
+                    let data = crate::transform::data_module(&code);
+                    lit.value = allocator.alloc_str(&data).into();
+                    lit.raw = None;
+                    continue;
+                }
+                let full = if query.is_some() && crate::is_asset(&file) {
+                    file
+                } else {
+                    full
+                };
                 if crate::is_asset(&full) {
                     let url = assets.url_for(&full)?;
                     let data = crate::transform::asset_module_data_url(&url);
@@ -603,6 +642,27 @@ fn client_source_name(root: &Path, path: &Path) -> PathBuf {
 fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Result<String> {
     if let Some(name) = ctx.emitted.get(abs) {
         return Ok(name.clone());
+    }
+    // `./hero.jpg?image`: AVIF + fallback variants and a module exporting the set (image.rs).
+    let (file, query) = crate::image::split_query(abs);
+    if let Some(q) = query.as_deref().and_then(crate::image::image_query) {
+        let set = crate::image::build_set(&core.root, &file, &q, |stem, w, ext, bytes| {
+            ctx.asset_out += bytes.len() as u64;
+            crate::image::write_variant(out_dir, stem, w, ext, bytes)
+        })?;
+        ctx.asset_in += fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
+        let code = set.module();
+        let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
+        let mod_name = format!("{stem}.image.{:08x}.js", xxh3_64(code.as_bytes()) as u32);
+        fs::write(out_dir.join(&mod_name), &code)?;
+        ctx.assets.insert(abs.to_path_buf(), code);
+        ctx.deps.insert(mod_name.clone(), Vec::new());
+        ctx.emitted.insert(abs.to_path_buf(), mod_name.clone());
+        return Ok(mod_name);
+    }
+    // Any other query on an asset (`?url`, a cache-buster): the file itself.
+    if query.is_some() && crate::is_asset(&file) {
+        return emit(core, &file, out_dir, ctx);
     }
     // Assets (images, fonts, etc.): copy raw with a content hash and
     // emit a tiny JS module that default-exports the served URL (no deps).

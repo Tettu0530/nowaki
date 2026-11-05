@@ -10,6 +10,16 @@ declare module "*.css" {
   export default css;
 }
 
+// `?image` gives a responsive image set for <Image> (@nowaki-dev/runtime/image).
+declare module "*?image" {
+  const image: import("@nowaki-dev/runtime/image").ImageSource;
+  export default image;
+}
+declare module "*&image" {
+  const image: import("@nowaki-dev/runtime/image").ImageSource;
+  export default image;
+}
+
 // An asset import becomes its served URL (a string).
 declare module "*.svg" { const url: string; export default url; }
 declare module "*.png" { const url: string; export default url; }
