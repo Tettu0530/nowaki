@@ -15,7 +15,7 @@ A "structural answer to the slowness of Next.js", built on three pillars:
 
 ## Where we are
 
-**alpha (CLI / crates 0.16.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands: WebSocket on `nowaki dev` / `nowaki start`, per-event HTTP POST on every deploy adapter), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Production use is not yet recommended (the API is still stabilizing).
+**alpha (CLI / crates 0.17.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands: WebSocket on `nowaki dev` / `nowaki start`, per-event HTTP POST on every deploy adapter), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Production use is not yet recommended (the API is still stabilizing).
 
 ## Milestones
 
@@ -107,6 +107,8 @@ Prove the differentiation with numbers and tooling.
 Make Nowaki a first-class choice for blogs, docs, and marketing sites: content, images, and SEO out of the box.
 
 **Exit criteria**: a docs site is built from a typed content collection of Markdown and MDX, with responsive images and a generated sitemap, without third-party Markdown or image code in the app. Its build time and first-load JS are in BENCHMARKS.md, next to Astro's. A static Astro site of the size of a personal portfolio (page scripts, `public/` assets, generated OG images, attributes on `<html>`) moves to Nowaki without workarounds, following the migration guide.
+
+**Status**: 0.17.0 ships every item below. The portfolio exit criterion was met by porting a real Astro site (static output matched, OG images byte-identical) after fixing what the port turned up. The docs-site build time and first-load JS against Astro are in BENCHMARKS.md. Markdoc and remote images moved to v0.18. Lossy WebP is not offered: there was no MIT-licensed pure-Rust encoder mature enough to ship; candidates are compared after 0.17.0.
 
 - [x] Content collections: `content/<name>/*` (declared in `content/config.ts`) with YAML frontmatter validated by a Standard Schema (the same as `serverFn`), `getCollection` / `getEntry`, generated types; TOML frontmatter (`+++`) as a follow-up
 - [x] Built-in Markdown, rendered in Rust at build time: heading anchors and table of contents, code highlighting, and local images through the image pipeline

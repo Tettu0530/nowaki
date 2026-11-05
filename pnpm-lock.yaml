@@ -40,7 +40,7 @@ importers:
   packages/create-nowaki-app:
     dependencies:
       create-nowaki:
-        specifier: ^0.17.2
+        specifier: ^0.18.0
         version: link:../create-nowaki
 
   packages/nowaki-runtime:
