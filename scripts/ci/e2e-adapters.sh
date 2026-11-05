@@ -44,6 +44,9 @@ curl -s -D - -o /dev/null http://127.0.0.1:3310/og/intro.png | grep -qi '^conten
 curl -sf http://127.0.0.1:3310/og/intro.png | head -c 4 | od -An -c | grep -q 'P   N   G'
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3310/og/nope.png)" = 404
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3310/og/intro.jpg)" = 404
+# the node adapter reads the site from dist/server/site.json
+curl -sf http://127.0.0.1:3310/sitemap.xml | grep -q '<loc>https://hello.nowaki.dev/</loc>'
+curl -sf http://127.0.0.1:3310/docs/intro | grep -q 'og:url" content="https://hello.nowaki.dev/docs/intro"'
 # htmlAttrs / bodyAttrs on the node adapter (document.mjs)
 curl -sf http://127.0.0.1:3310/styled | grep -q '<html lang="ja" data-sheet-rev="3" data-theme="paper" data-nowaki-attrs="data-sheet-rev data-theme">'
 curl -sf http://127.0.0.1:3310/styled | grep -q '<body class="site styled-page" data-site="hello"'
@@ -116,6 +119,11 @@ grep -qi 'x-content-type-options: nosniff' examples/hello/dist/static/_headers
 grep -qE '<source type="image/avif" srcset="/_nowaki/hero-640\.[0-9a-f]+\.avif' examples/hello/dist/static/gallery/index.html
 grep -qE '<picture><source type="image/avif"' examples/hello/dist/static/docs/intro/index.html
 ls examples/hello/dist/static/_nowaki/hero-640.*.avif >/dev/null
+# SEO in the static output: sitemap.xml generated against the site, public/robots.txt kept
+grep -q '<loc>https://hello.nowaki.dev/docs/intro</loc>' examples/hello/dist/static/sitemap.xml
+! grep -qE '/boom<|/secret<' examples/hello/dist/static/sitemap.xml
+grep -q 'User-agent: \*' examples/hello/dist/static/robots.txt
+grep -q '<link rel="canonical" href="https://hello.nowaki.dev/docs/intro" />' examples/hello/dist/static/docs/intro/index.html
 # file routes are written to their own path (not feed.xml/index.html), bytes intact
 grep -q '<rss version="2.0">' examples/hello/dist/static/feed.xml
 head -c 4 examples/hello/dist/static/og/intro.png | od -An -c | grep -q 'P   N   G'

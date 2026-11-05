@@ -3,6 +3,8 @@
 type Ctx = { url: URL };
 
 export const title = "Boom — Nowaki";
+// A noindex page: the robots meta tag, and no sitemap.xml entry.
+export const meta = { robots: { index: false } };
 
 export const loader = (ctx: Ctx) => {
   const boom = ctx.url.searchParams.get("boom");

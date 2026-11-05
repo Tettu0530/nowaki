@@ -11,6 +11,7 @@ mod prerender;
 mod security_headers;
 mod shutdown;
 mod sidecar;
+mod site;
 mod start;
 mod typegen;
 mod ui;
@@ -141,6 +142,7 @@ fn main() -> anyhow::Result<()> {
                 report.asset_out,
             );
             content::build(&root, &dist)?;
+            site::write(&root, &dist)?;
             check_route_budgets(&core, &report, &client)?;
             print_island_hints(&core, &report.out_dir);
             let unvalidated = nowaki_core::server_fn::discover_unvalidated(

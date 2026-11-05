@@ -4,6 +4,9 @@
 //   load(id)                    — returns the source for that id (a virtual module not on disk)
 // Return null/undefined for no change (fast path).
 export default {
+  // The site's URL: absolute canonical / Open Graph links, the generated sitemap.xml and
+  // robots.txt, and `ctx.site` (NOWAKI_SITE overrides it at runtime).
+  site: "https://hello.nowaki.dev",
   plugins: [
     {
       name: "mark-replace",

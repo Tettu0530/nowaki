@@ -18,6 +18,7 @@ import { liveInitialState, liveRender, liveTopics, liveView } from "./live.mjs";
 import { loadContent } from "./content-load.mjs";
 import { liveProps, warnIfEphemeralLiveKey } from "./live-sign.mjs";
 import { indexPublic, lookupPublic } from "./public-files.mjs";
+import { resolveSite } from "./seo.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
 // Bun and Deno don't implement Node's module.register; their SSR keeps the old behavior.
@@ -165,8 +166,13 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
       }
     : null;
 
+  // NOWAKI_SITE, else nowaki.config `site` (the build writes it to dist/server/site.json).
+  const builtSite = await readFile(path.join(serverDir, "site.json"), "utf8")
+    .then((t) => JSON.parse(t).site)
+    .catch(() => undefined);
   const env = {
     dev: false,
+    site: resolveSite(builtSite),
     routeTable: () => routeTable,
     importModule: (file) => importOnce(pathToFileURL(file).href),
     ensureIslands: () => {},

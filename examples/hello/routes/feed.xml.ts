@@ -5,10 +5,12 @@ import { getCollection } from "@nowaki-dev/runtime/content";
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 
-export async function GET({ url }: { url: URL }) {
+export async function GET({ url, site }: { url: URL; site?: URL }) {
+  // The site URL (nowaki.config `site`) for absolute links, else this request's origin.
+  const origin = site?.origin ?? url.origin;
   const docs = await getCollection("docs");
   const items = docs
-    .map((d) => `  <item><title>${esc(String(d.data.title))}</title><link>${url.origin}/docs/${d.slug}</link></item>`)
+    .map((d) => `  <item><title>${esc(String(d.data.title))}</title><link>${origin}/docs/${d.slug}</link></item>`)
     .join("\n");
   return `<?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0"><channel>

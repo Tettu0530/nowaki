@@ -36,6 +36,24 @@ milestone's worth of work; the codename is noted per entry.
   content entry becomes the same `<picture>`, resolved relative to the entry.
   A missing file fails the build. Root-relative (`/logo.svg`, from `public/`)
   and remote URLs stay as written.
+- **SEO and metadata** (v0.17).
+  - `site` in nowaki.config (or `NOWAKI_SITE`, which wins) is the site's URL.
+    The build writes it to `dist/server/site.json`, so the adapters and the
+    edge have it too. Loaders, `meta()`, and file routes read it as
+    `ctx.site`.
+  - A typed `meta` writes the head tags: `description`, `canonical` (`true`
+    for this page), `robots`, `openGraph`, `twitter`, and `jsonLd`. Use
+    `export const meta = {...}`, or a `meta()` function of the loader data.
+    - Relative URLs resolve against the site, and Open Graph / Twitter fall
+      back to the page's title and description.
+    - JSON-LD can't close its `<script>`.
+    - A layout's `meta` object sets defaults for the pages under it;
+      `openGraph` and `twitter` merge one level deep.
+  - With a site, `sitemap.xml` (every page, including dynamic ones from
+    `staticPaths`) and `robots.txt` are generated, unless a route or a
+    `public/` file provides them. The static output writes both.
+    - `export const sitemap = false` leaves a page out, and so does a static
+      `meta.robots` of noindex.
 - **Page scripts** (v0.17). A route or layout can ship plain browser modules
   with no island, like Astro's `<script>`:
   `export const scripts = ["../scripts/hero.ts"]`.

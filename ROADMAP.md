@@ -114,7 +114,7 @@ Make Nowaki a first-class choice for blogs, docs, and marketing sites: content, 
 - [ ] Markdoc as an official plugin (it runs on the Node side through the plugin host)
 - [x] Image component: `srcset` / `sizes`, `width` / `height` from the file (no layout shift), lazy loading by default, AVIF (pure Rust) with the original format as the fallback
 - [ ] Remote images in `<Image>` with an allow-list (fetched and optimized at build time)
-- [ ] SEO and metadata: a typed `meta` (Open Graph, Twitter cards, canonical, robots, JSON-LD), `sitemap.xml` and `robots.txt` generated from the routes
+- [x] SEO and metadata: a typed `meta` (Open Graph, Twitter cards, canonical, robots, JSON-LD), `sitemap.xml` and `robots.txt` generated from the routes
 - [x] `public/`: files served as-is at their own path (favicon, `robots.txt`, fonts referenced from CSS), by `nowaki dev`, `nowaki start`, every adapter, and static output
 - [x] File routes, prerendered: dynamic routes with an extension (`og/[card].png.ts`, `feed.xml.ts`) and API routes written to files by `nowaki prerender` / the static adapter, for OG images, feeds, and sitemaps
 - [x] Attributes on `<html>` and `<body>` from a route or layout (`export const htmlAttrs` / `bodyAttrs`)

@@ -77,6 +77,18 @@ curl -s -D - -o /dev/null "$B/__nowaki/image?f=/hero.jpg&w=640&fmt=avif" | grep 
 curl -s -D - -o /dev/null "$B/__nowaki/image?f=/hero.jpg&w=640&fmt=orig" | grep -qi '^content-type: image/jpeg'
 test "$(curl -s -o /dev/null -w '%{http_code}' "$B/__nowaki/image?f=/package.json&w=10&fmt=orig")" = 403
 curl -sf $B/docs/intro | grep -q '<picture><source type="image/avif" srcset="/__nowaki/image?f=/hero.jpg'
+# SEO: typed meta → head tags (absolute against nowaki.config `site`), generated sitemap.xml
+curl -sf $B/docs/intro | grep -q '<link rel="canonical" href="https://hello.nowaki.dev/docs/intro" />'
+curl -sf $B/docs/intro | grep -q '<meta property="og:image" content="https://hello.nowaki.dev/og/intro.png" />'
+curl -sf $B/docs/intro | grep -q '<meta property="og:site_name" content="Nowaki demo" />'
+curl -sf $B/docs/intro | grep -q '<script type="application/ld+json">{"@context":"https://schema.org"'
+curl -sf $B/boom | grep -q '<meta name="robots" content="noindex, follow" />'
+curl -s -D - -o /dev/null $B/sitemap.xml | grep -qi '^content-type: application/xml'
+curl -sf $B/sitemap.xml | grep -q '<loc>https://hello.nowaki.dev/docs/intro</loc>'
+! curl -sf $B/sitemap.xml | grep -qE '/boom<|/secret<|/api/|feed.xml'
+curl -sf $B/robots.txt | grep -q 'User-agent'   # public/robots.txt wins over the generated one
+curl -sf $B/feed.xml | grep -q '<link>https://hello.nowaki.dev/docs/intro</link>'
+node scripts/seo-unit-test.mjs
 # page scripts: a module <script> per listed module, served as JS (dev: its own URL)
 curl -sf $B/scripted | grep -q '<script type="module" src="/scripts/stamp.ts" data-nowaki-script></script>'
 curl -s -D - -o /dev/null $B/scripts/stamp.ts | grep -qi '^content-type: text/javascript'
