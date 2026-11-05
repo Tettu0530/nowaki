@@ -7,6 +7,11 @@ export default {
   // The site's URL: absolute canonical / Open Graph links, the generated sitemap.xml and
   // robots.txt, and `ctx.site` (NOWAKI_SITE overrides it at runtime).
   site: "https://hello.nowaki.dev",
+  // Self-hosted fonts: a local file here (OFL, see fonts/OFL.txt); `provider: "google"` downloads
+  // Google Fonts at build time instead. Each gets a size-adjusted fallback and a CSS variable.
+  fonts: [
+    { family: "Atkinson Hyperlegible", src: "./fonts/atkinson-hyperlegible-400.ttf", weight: 400, variable: "--font-body" },
+  ],
   plugins: [
     {
       name: "mark-replace",

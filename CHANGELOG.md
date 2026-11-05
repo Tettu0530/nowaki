@@ -11,6 +11,25 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **Self-hosted fonts** (v0.17). `fonts` in nowaki.config, for example
+  `{ family: "Inter", provider: "google", weights: [400, 700], subsets: ["latin"] }`
+  or `{ family: "Brand", src: "./fonts/brand.ttf" }`, is built at build time.
+  - Google fonts are downloaded once and served from the site, so pages never
+    request a third-party host. There is one woff2 per subset with its
+    `unicode-range`, so a page loads only the subsets it uses. Downloads are
+    cached, so later builds work offline. Local fonts are copied as they are.
+  - Each face gets a hashed file and an `@font-face` (`font-display: swap` by
+    default).
+  - Each family gets a fallback face (local Arial / Times New Roman / Courier
+    New, chosen by `fallback`). Its `size-adjust` and ascent / descent /
+    line-gap overrides are computed from the font's own metrics, so text
+    doesn't shift when the font arrives.
+  - `--font-<family>` (or `variable`) holds the stack, as in
+    `font-family: var(--font-inter)`.
+  - Every page gets the stylesheet and `<link rel="preload">` for the latin,
+    upright faces. `preload: false` turns the preloads off for a family.
+  - In dev, fonts build in the background at startup and are served at
+    `/__nowaki/fonts/`.
 - **MDX** (v0.17). `.mdx` files are pages (`routes/guide.mdx`) and content
   entries (`content/docs/x.mdx`): Markdown with JSX, `{expressions}`, and
   `import` / `export`.

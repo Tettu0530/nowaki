@@ -3,6 +3,7 @@ mod content;
 mod csp;
 mod dev;
 mod encoding;
+mod fonts;
 mod forward;
 mod live;
 mod mcp;
@@ -142,7 +143,9 @@ fn main() -> anyhow::Result<()> {
                 report.asset_out,
             );
             content::build(&root, &dist)?;
-            site::write(&root, &dist)?;
+            let config = site::config(&root)?;
+            site::write(&dist, &config)?;
+            fonts::build_dist(&root, &dist, &config)?;
             check_route_budgets(&core, &report, &client)?;
             print_island_hints(&core, &report.out_dir);
             let unvalidated = nowaki_core::server_fn::discover_unvalidated(

@@ -118,7 +118,7 @@ Make Nowaki a first-class choice for blogs, docs, and marketing sites: content, 
 - [x] Attributes on `<html>` and `<body>` from a route or layout (`export const htmlAttrs` / `bodyAttrs`)
 - [x] Page scripts: a route or layout can ship a bundled TS module (npm imports included) without an island, like Astro's `<script>`; counted in the route's first-load JS and `budget`
 - [ ] Migration guide from Astro (`.astro` components to TSX, `<style>` to CSS Modules, `<script>` to page scripts, endpoints to file routes), written from moving a real site
-- [ ] Font optimization: self-hosted Google and local fonts at build time (no third-party request), subsetting, `preload` for the fonts a page uses, `font-display`, and size-adjusted fallbacks so text doesn't shift when the font arrives
+- [x] Font optimization: self-hosted Google and local fonts at build time (no third-party request), Google subsets by `unicode-range`, `preload`, `font-display`, and size-adjusted fallbacks so text doesn't shift when the font arrives
 
 ### v0.18 "Sirocco": Routing for real apps
 Routing features that larger apps and existing Next.js / Remix users expect.

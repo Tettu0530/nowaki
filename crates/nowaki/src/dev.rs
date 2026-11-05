@@ -39,6 +39,16 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
     let started = Instant::now();
 
     crate::typegen::write(&root).ok();
+    // Fonts (nowaki.config `fonts`) build in the background: startup doesn't wait on Node or a
+    // download, and the renderer picks up .nowaki/fonts.json once it exists.
+    {
+        let root = root.clone();
+        std::thread::spawn(move || {
+            if let Ok(config) = crate::site::config(&root) {
+                crate::fonts::build_dev(&root, &config);
+            }
+        });
+    }
 
     let live_hub = crate::live::LiveHub::new();
     let errors = crate::mcp::ErrorLog::new(&root);
@@ -80,6 +90,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         .route("/__nowaki/route-css", get(route_css))
         .route("/__nowaki/css", get(dev_css))
         .route("/__nowaki/image", get(dev_image))
+        .route("/__nowaki/fonts/{file}", get(dev_font))
         .route("/@fs/{*path}", get(serve_fs))
         .route(crate::mcp::PATH, axum::routing::any(crate::mcp::handle))
         .fallback(serve_or_proxy)
@@ -338,6 +349,35 @@ struct RouteCssQuery {
 
 /// The stylesheets a route (and its layouts) imports, as `/__nowaki/css` URLs, for the dev
 /// sidecar to link in the page head. Only route files under `routes/` are accepted.
+/// A self-hosted font file built by `fonts::build_dev` (`.nowaki/fonts/<name>`; names only).
+async fn dev_font(
+    State(state): State<Arc<DevState>>,
+    axum::extract::Path(file): axum::extract::Path<String>,
+) -> Response {
+    let ok = !file.is_empty()
+        && !file.starts_with('.')
+        && file
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'));
+    if !ok {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    }
+    match tokio::fs::read(state.core.root.join(".nowaki/fonts").join(&file)).await {
+        Ok(bytes) => (
+            [
+                (
+                    header::CONTENT_TYPE,
+                    nowaki_core::public::content_type(&file),
+                ),
+                (header::CACHE_CONTROL, "no-cache"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(_) => (StatusCode::NOT_FOUND, "not found").into_response(),
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct ImageVariantQuery {
     /// The image's dev URL (`/photo.png`, or `/@fs/...` outside the root).
