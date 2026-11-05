@@ -24,6 +24,7 @@ import { measure } from "./lib/browser.mjs";
 import { posts } from "./lib/content.mjs";
 import { FRAMEWORKS, ORDER } from "./lib/frameworks.mjs";
 import { serve } from "./lib/serve.mjs";
+import { MARK_CONTACT, MARK_STATS } from "./lib/features.mjs";
 import { MARK_HOME, MARK_POST } from "./lib/templates.mjs";
 
 const HERE = import.meta.dirname;
@@ -180,16 +181,22 @@ if (only.has("static")) {
   const out = path.join(dir, fw.staticOut);
   const html = countHtml(out);
   console.log(`  static median: ${median(times)} ms · ${html} HTML files`);
-  if (html < pages + 2) throw new Error(`${fw.label}: expected at least ${pages + 2} HTML files, got ${html}`);
+  if (html < pages + 4) throw new Error(`${fw.label}: expected at least ${pages + 4} HTML files, got ${html}`);
   const server = await serve(out, STATIC_PORT);
   try {
-    for (const [page, url, marker] of [
-      ["/", "/", MARK_HOME],
-      ["post", `/posts/${oldestSlug}`, MARK_POST],
+    // [page, url, marker, islands expected on it]; the theme toggle is on every page.
+    for (const [page, url, marker, expected] of [
+      ["/", "/", MARK_HOME, islands + 1],
+      ["post", `/posts/${oldestSlug}`, MARK_POST, 1],
+      ["/posts", "/posts", null, 2],
+      ["/stats", "/stats", MARK_STATS, 2],
+      ["/contact", "/contact", MARK_CONTACT, 1],
     ]) {
       const b = await measure(`http://127.0.0.1:${STATIC_PORT}${url}`, { idleJs: fw.idleJs });
       if (b.marker !== marker) throw new Error(`${fw.label}: ${url} rendered without its marker`);
-      if (page === "/" && b.hydrated !== islands) throw new Error(`${fw.label}: ${b.hydrated}/${islands} islands hydrated`);
+      if (b.islandsOnPage !== expected || b.hydrated !== expected) {
+        throw new Error(`${fw.label}: ${url} has ${b.hydrated}/${b.islandsOnPage} islands hydrated, expected ${expected}`);
+      }
       record("browser.jsonl", { page, ...b });
       console.log(`  browser ${url}: JS ${b.jsKB} KB gzip (${b.jsFiles} files + ${b.inlineScripts} inline, ${b.idleKB} KB idle) · total ${b.totalKB} KB · ${b.requests} requests · hydrated ${b.hydrated}/${b.islandsOnPage}`);
     }

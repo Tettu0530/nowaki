@@ -14,18 +14,39 @@ favor Nowaki are reported the same way as those that do.
 
 | route | what it exercises |
 |---|---|
-| `/` | root layout, server-side data (latest 10 posts), `islands` interactive counters |
-| `/posts` | list of every post |
+| every page | root layout with the nav, global CSS (about 2 KB, light and dark themes) and a **theme toggle** island (`localStorage`, `data-theme`) |
+| `/` | server-side data (latest 10 posts), `islands` interactive counters |
+| `/posts` | list of every post, and a **search** island: debounced `fetch` of `/api/search?q=` |
 | `/posts/[slug]` | dynamic route, nested layout, Markdown rendered on the server with `marked` |
+| `/stats` | a **sortable table** island: 50 rows computed on the server and passed as props, component-scoped CSS |
+| `/contact` | a form validated on the server with `zod`, Post/Redirect/Get to `?sent=1` or `?error=1` |
+| `/api/search` | a JSON API route: the 10 titles matching `q` |
 
 The posts come from `lib/content.mjs`: deterministic text (about 1.5 KB of Markdown each), the same
-bytes in every app. Each island is a separate module (a counter with its own step), so a bundler
-cannot merge them; it sets `data-hydrated` once mounted, and the harness checks that every island
-did hydrate.
+bytes in every app. The parts beyond the posts are in `lib/features.mjs` (the CSS, the shared
+server code and the Preact islands) and `lib/features-fw.mjs` (each framework's files): every
+island does the same thing in every framework. Each counter island is a separate module with its
+own step, so a bundler cannot merge them. Every island sets `data-hydrated` once mounted, and the
+harness checks that every island on each measured page did hydrate.
+
+Each framework does these the way its docs show:
+
+| | global CSS | component CSS | form handler | API route |
+|---|---|---|---|---|
+| Nowaki | `import "../styles/global.css"` in the root layout (linked as a stylesheet since 0.16.1) | CSS module imported by the island | route `action` | `routes/api/search.ts` `GET` |
+| Astro | `import "../styles/global.css"` in the layout | CSS module | `Astro.request` in the page frontmatter | `src/pages/api/search.ts` `GET` |
+| SvelteKit | `import "../app.css"` in the root layout | `<style>` in the component | form `actions` | `+server.js` `GET` |
+| Next.js | `import "./globals.css"` in the root layout | CSS module | Server Action | Route Handler `GET` |
+| Nuxt | `css` in `nuxt.config` | `<style scoped>` | `server/api/contact.post.ts` | `server/api/search.get.ts` |
+
+Limits of the static mode: Next.js's `output: "export"` has no Server Actions and SvelteKit cannot
+prerender a page with form actions, so in static builds `/contact` renders the form without a
+handler in every framework. `/api/search` is prerendered once (ignoring `q`) where the framework
+can, and absent where it cannot; search is exercised against the server builds.
 
 | app | framework | UI | how data is read |
 |---|---|---|---|
-| `apps/nowaki` | Nowaki 0.16.0 (runtime 0.15.0, released together) | Preact islands | route `loader` |
+| `apps/nowaki` | Nowaki 0.16.1 (runtime 0.15.1, released together) | Preact islands | route `loader` |
 | `apps/astro` | Astro 7.4.5 | Preact islands (`client:load`) | frontmatter |
 | `apps/sveltekit` | SvelteKit 3.1.1 | Svelte 5 | `+page.server.js` `load` |
 | `apps/next` | Next.js 16.4.5 | React 19 client components | async server components |
@@ -61,7 +82,7 @@ and `perIsland = (ms at 10 islands − ms at 1) / 9` at 10 pages.
 | dev second route | right after that, `GET` of a post page until it returns 200 with its marker (one more route compiled on demand). |
 | static build | wall time of the static build, output and framework caches deleted first. |
 | server build | wall time of the server build, output and framework caches deleted first. |
-| first-load JS | the static output served by `lib/serve.mjs` (one plain server for all five), opened in headless Chromium with the cache disabled until the network has been quiet for 2 s. Every JavaScript response plus every inline script the page executes (JSON and import maps excluded), each gzipped at zlib's default level. Measured on `/` and on a post page. |
+| first-load JS | the static output served by `lib/serve.mjs` (one plain server for all five), opened in headless Chromium with the cache disabled until the network has been quiet for 2 s. Every JavaScript response plus every inline script the page executes (JSON and import maps excluded), each gzipped at zlib's default level. Measured on `/`, a post page, `/posts`, `/stats` and `/contact`. |
 | total transfer | the same page load, every response body gzipped: document, scripts, styles, data (`fetch`), prefetches. |
 | idle JS | the part of first-load JS that the framework loads only once the page is idle (Nowaki's client router). Included in first-load JS. |
 
@@ -85,7 +106,7 @@ Each of 5 runs starts the server fresh, warms it up for 3 s at the measured load
 |---|---|
 | start | spawn → `GET /` returns 200 with the home marker |
 | TTFB / total | 300 sequential GETs over one keep-alive connection, cycling through 90 posts; headers received / body received, p50 and p99 |
-| req/s | `oha` with 50 connections for 10 s: post pages (90 URLs from a file, one picked per request) and `/` separately; successful responses per second. Any error other than requests cut off at the deadline fails the run |
+| req/s | `oha` with 50 connections for 10 s: post pages (90 URLs from a file, one picked per request), `/` and `/api/search?q=post%201` separately; successful responses per second. Any error other than requests cut off at the deadline fails the run |
 | idle / peak RSS | the server's whole process tree, after the warm-up / sampled every 100 ms during the post-page load |
 
 Pages are rendered per request: nothing is cached. `--isr` instead runs the post pages under the
@@ -99,7 +120,8 @@ Notes:
 - Nowaki's Rust binary is started directly. The npm `nowaki` command is a Node shim that
   `spawnSync`s the binary and stays resident (about 45 MB); no other framework has such a
   launcher, but an app started with `npx nowaki start` pays it.
-- Nowaki 0.15.0 served 4,183 uncached post pages/s here; 0.16.0 serves 10,424. An earlier
+- On the earlier, counters-only blog, Nowaki 0.15.0 served 4,183 uncached post pages/s and 0.16.0
+  10,424 (the current blog: 0.16.1, 9,830). An earlier
   version of this note put the 0.15.0 gap down to the Rust → Node proxy hop; that was not
   measured, and it was wrong. Measured in #90: `examples/hello` `/about` was about as fast
   through `nowaki start` (6,056 req/s), on the Node sidecar directly (6,492) and on the node

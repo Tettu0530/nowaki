@@ -1,5 +1,7 @@
 [files]
-extend-exclude = ["*.lock", "pnpm-lock.yaml", "*.svg"]
+# Raw benchmark runs are generated data: they list every built file, and bundlers name files
+# with base64-like hashes (e.g. Nuxt's BcNtoJ_O.js) that change on every run.
+extend-exclude = ["*.lock", "pnpm-lock.yaml", "*.svg", "benchmarks/**/results/*.jsonl"]
 
 [default]
 # Hex ids in server-function fixtures, content hashes in built file names (benchmark results
