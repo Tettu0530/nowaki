@@ -11,6 +11,25 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **First-load JS per route, and budgets that fail the build.** Every
+  `nowaki build` and `nowaki prerender` now prints the gzip size of the JS
+  each page route loads first, and writes the same data to
+  `dist/route-js.json`.
+  - Counted: the islands runtime and its preloads, every client island the
+    page can render (found through the import graph from the route and each
+    `_layout` above it, components included), and the live runtime for live
+    islands. The lazy SPA router chunk is not counted.
+  - A route sets `export const budget = { js: <KB> }`, and the build fails
+    when the route goes over it. `{ js: 0 }` means the page ships no client
+    JS.
+  - The value is read from the AST. It must be a number literal, and an
+    unreadable `budget` fails the build instead of being ignored.
+  - `examples/hello` sets `{ js: 12 }` on `/` (9.76 KB today) and
+    `{ js: 0 }` on `/about`.
+  - `scripts/route-js-e2e.mjs` checks the report against the pages
+    `nowaki start` serves. Each served chunk must be one the report counted;
+    18 of 19 static routes match exactly. The other one is `/stream`, whose
+    islands load later.
 - **`nowaki dev` MCP endpoint:** while `nowaki dev` runs, a coding agent can
   inspect the app over MCP (Streamable HTTP) at
   `http://127.0.0.1:<port>/__nowaki/mcp`. The startup banner prints the URL and
@@ -86,6 +105,14 @@ milestone's worth of work; the codename is noted per entry.
   Measured on `examples/hello`, 50 connections, Apple M2: `/about` on
   `nowaki start` went from 6,056 to 28,752 req/s, and `/api/hello` from
   8,895 to 32,101 req/s. Dev mode is unchanged: it re-imports on every edit.
+
+### Fixed
+- **Static output no longer ships a live.js that can't work** (#93). Pages
+  from `nowaki prerender` and the static adapter used to include live.js in
+  POST mode. A static host has no server for its events, so every click
+  logged "not applied". Live islands now keep their first HTML and ship no
+  script. The build also lists the pages they are on, as a note. The node,
+  bun, deno, vercel, and cloudflare adapters still ship live.js.
 
 ## [0.15.0] — 2026-11-04 · "Cyclone" (part 1)
 

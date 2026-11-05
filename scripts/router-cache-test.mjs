@@ -72,4 +72,13 @@ cache.set("/x", 1);
 cache.delete("/x");
 ok("delete removes an entry", cache.get("/x") === undefined && cache.has("/x") === false);
 
+const instant = createPageCache({ ttlMs: 0, max: 8, now: () => 0 });
+instant.set("/z", 1);
+ok("ttlMs 0 treats entries as immediately stale", instant.get("/z") === undefined && !instant.has("/z"));
+
+const cap1 = createPageCache({ ttlMs: 100_000, max: 1, now: () => 0 });
+cap1.set("/first", 1);
+cap1.set("/second", 2);
+ok("max 1 evicts the previous entry", cap1.get("/first") === undefined && cap1.get("/second") === 2 && cap1.size() === 1);
+
 console.log(`\nROUTER CACHE TEST PASSED (${passed} assertions)`);

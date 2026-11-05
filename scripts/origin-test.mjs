@@ -82,5 +82,20 @@ check(
 );
 delete process.env.NOWAKI_TRUST_PROXY;
 
+check("Origin: null is treated as cross-site", isCrossSite(hdr({ origin: "null", host: "app.example" })));
+
+check(
+  "Sec-Fetch-Site: cross-site without Origin is cross-site",
+  isCrossSite(hdr({ host: "app.example", "sec-fetch-site": "cross-site" })),
+);
+check(
+  "Sec-Fetch-Site: same-origin without Origin is allowed",
+  !isCrossSite(hdr({ host: "app.example", "sec-fetch-site": "same-origin" })),
+);
+check(
+  "no Origin or Sec-Fetch-Site is not treated as cross-site (curl/server)",
+  !isCrossSite(hdr({ host: "app.example" })),
+);
+
 console.log(failures ? `\nORIGIN TEST FAILED (${failures})` : "\nORIGIN TEST PASSED");
 process.exit(failures ? 1 : 0);

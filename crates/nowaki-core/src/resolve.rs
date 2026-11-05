@@ -107,6 +107,14 @@ mod tests {
             alias_specifier("react/jsx-dev-runtime"),
             Some("preact/jsx-dev-runtime")
         );
+        assert_eq!(
+            alias_specifier("react-dom/test-utils"),
+            Some("preact/test-utils")
+        );
+        assert_eq!(
+            alias_specifier("react/compiler-runtime"),
+            Some("preact/compat/compiler-runtime")
+        );
     }
 
     #[test]

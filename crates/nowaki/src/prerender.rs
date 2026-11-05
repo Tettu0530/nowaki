@@ -17,11 +17,12 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     if let Some(host) = &_plugin_host {
         core.set_plugins(host.bridge.clone());
     }
-    let report = core.build(&root.join("dist"))?;
+    let (report, client) = core.build_with_client(&root.join("dist"))?;
     println!(
         "[nowaki] build: client {} / server {} modules",
         report.modules, report.server_modules
     );
+    crate::check_route_budgets(&core, &report, &client)?;
 
     let entry = root.join("node_modules/@nowaki-dev/runtime/server/start.mjs");
     if !entry.exists() {
@@ -36,6 +37,8 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         .arg(&entry)
         .current_dir(&root)
         .env("PORT", "0")
+        // Static pages: live islands render their first HTML without live.js (see app.mjs).
+        .env("NOWAKI_PRERENDER", "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .kill_on_drop(true)
@@ -93,24 +96,36 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
                     .await?;
                 if !resp.status().is_success() {
                     eprintln!("[nowaki] {url_path}: skipped ({})", resp.status());
-                    return Ok::<_, anyhow::Error>(false);
+                    return Ok::<_, anyhow::Error>(None);
                 }
                 let html = resp.text().await?;
+                let live = html.contains("<nowaki-live");
                 if let Some(parent) = file.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
                 tokio::fs::write(file, html).await?;
-                Ok(true)
+                Ok(Some((url_path.as_str(), live)))
             }
         })
         .buffered(PRERENDER_JOBS);
     let mut count = 0;
+    let mut live_pages = Vec::new();
     while let Some(written) = rendered.next().await {
-        if written? {
+        if let Some((url, live)) = written? {
             count += 1;
+            if live {
+                live_pages.push(url.to_string());
+            }
         }
     }
     drop(rendered);
+    if !live_pages.is_empty() {
+        eprintln!(
+            "[nowaki] note: {} page(s) have live islands, which stay as their first HTML on a static host (no server for their events): {}",
+            live_pages.len(),
+            live_pages.join(", ")
+        );
+    }
 
     // Static hosts (Cloudflare Pages, Netlify, GitHub Pages) serve 404.html for unknown paths.
     // Rendered for /404, since a static page can't know the path that was actually requested.

@@ -81,6 +81,19 @@ eq(snap(table, "/api/echo"), { file: "echo.ts", params: {}, isApi: true }, "/api
 eq(snap(table, "/about/"), snap(table, "/about"), "trailing slash matches same route");
 eq(snap(table, "/vary"), { file: "vary.tsx", params: {}, isApi: false }, "/vary → ISR demo route");
 eq(snap(table, "/live"), { file: "live.tsx", params: {}, isApi: false }, "/live → Jetstream demo route");
+eq(snap(table, "/poll"), { file: "poll.tsx", params: {}, isApi: false }, "/poll → multiplayer demo");
+eq(snap(table, "/todos"), { file: "todos.tsx", params: {}, isApi: false }, "/todos → action demo");
+eq(snap(table, "/live-post"), { file: "live-post.tsx", params: {}, isApi: false }, "/live-post → POST transport demo");
+eq(snap(table, "/live-form"), { file: "live-form.tsx", params: {}, isApi: false }, "/live-form → live form demo");
+eq(snap(table, "/isr"), { file: "isr.tsx", params: {}, isApi: false }, "/isr → ISR demo");
+eq(snap(table, "/lazy"), { file: "lazy.tsx", params: {}, isApi: false }, "/lazy → lazy hydration demo");
+eq(snap(table, "/stream"), { file: "stream.tsx", params: {}, isApi: false }, "/stream → streaming SSR demo");
+eq(snap(table, "/nav"), { file: "nav.tsx", params: {}, isApi: false }, "/nav → SPA nav demo");
+eq(snap(table, "/plugin"), { file: "plugin.tsx", params: {}, isApi: false }, "/plugin → virtual module demo");
+eq(snap(table, "/styled"), { file: "styled.tsx", params: {}, isApi: false }, "/styled → scoped CSS demo");
+eq(snap(table, "/tsrx"), { file: "tsrx.tsx", params: {}, isApi: false }, "/tsrx → TSRX demo");
+eq(snap(table, "/api/tick"), { file: "tick.ts", params: {}, isApi: true }, "/api/tick → api");
+eq(snap(table, "/api/stream"), { file: "stream.ts", params: {}, isApi: true }, "/api/stream → api");
 
 const syn = [
   { segments: [{ lit: "users" }, { param: "id" }], file: "dyn", isApi: false, specificity: 1 },
