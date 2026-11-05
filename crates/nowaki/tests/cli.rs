@@ -323,13 +323,31 @@ export const posts = defineCollection({ schema: post });
     )
     .unwrap();
     std::fs::write(c.join("posts/good.md"), "---\ntitle: Good\n---\n# Good\n").unwrap();
-    let ok = Command::new(bin).arg("build").arg(app.path()).output().unwrap();
-    assert!(ok.status.success(), "{}", String::from_utf8_lossy(&ok.stderr));
+    let ok = Command::new(bin)
+        .arg("build")
+        .arg(app.path())
+        .output()
+        .unwrap();
+    assert!(
+        ok.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
     assert!(String::from_utf8_lossy(&ok.stdout).contains("content: 1 entries checked"));
 
     std::fs::write(c.join("posts/bad.md"), "---\nauthor: x\n---\nno title\n").unwrap();
-    let bad = Command::new(bin).arg("build").arg(app.path()).output().unwrap();
+    let bad = Command::new(bin)
+        .arg("build")
+        .arg(app.path())
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&bad.stderr);
-    assert!(!bad.status.success(), "an invalid entry must fail the build");
-    assert!(stderr.contains("content/posts/bad.md: title: is required"), "{stderr}");
+    assert!(
+        !bad.status.success(),
+        "an invalid entry must fail the build"
+    );
+    assert!(
+        stderr.contains("content/posts/bad.md: title: is required"),
+        "{stderr}"
+    );
 }
