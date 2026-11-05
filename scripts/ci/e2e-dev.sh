@@ -57,6 +57,13 @@ test "$(status "$B/boom?boom=1")" = "500"
 
 # API: legacy default, method dispatch, 405, streaming
 curl -sf $B/api/hello | grep -q '"hello":"nowaki"'
+# route / layout CSS in dev: linked from the dev server, which serves only .css under the app
+curl -sf $B/styled | grep -q '<link rel="stylesheet" href="/__nowaki/css?f=routes/styled.css"'
+curl -sf $B/styled | grep -q '<style>#styled-probe{color:rgb(1, 2, 3)}</style>'
+curl -s -D - "$B/__nowaki/css?f=routes/styled.css" | grep -qi '^content-type: text/css'
+test "$(curl -s -o /dev/null -w '%{http_code}' "$B/__nowaki/css?f=routes/styled.tsx")" = 403
+# outside routes/: 403, or 404 where the path doesn't exist (Windows has no /etc/hosts)
+test "$(curl -s -o /dev/null -w '%{http_code}' "$B/__nowaki/route-css?file=/etc/hosts")" != 200
 curl -sf "$B/api/echo?q=hi" | grep -q '"q":"hi"'
 curl -sf -X POST -H 'content-type: application/json' -d '{"a":1}' $B/api/echo | grep -q '"received":{"a":1}'
 test "$(status -X DELETE $B/api/echo)" = "405"

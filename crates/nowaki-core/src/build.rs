@@ -150,17 +150,32 @@ pub fn build_client_with_info(
         None
     };
 
-    fs::write(
-        client_dir.join("manifest.json"),
-        render_manifest(
-            runtime_out.as_deref(),
-            router_runtime_out.as_deref(),
-            &islands,
-            &live_islands,
-            live_runtime_out.as_deref(),
-            &ctx.deps,
-        ),
-    )?;
+    // Stylesheets for the CSS that routes and layouts import (route_css.rs).
+    let route_css = crate::route_css::build_route_css(core, &client_dir)?;
+    let mut manifest = render_manifest(
+        runtime_out.as_deref(),
+        router_runtime_out.as_deref(),
+        &islands,
+        &live_islands,
+        live_runtime_out.as_deref(),
+        &ctx.deps,
+    );
+    // `"routeCss": { "routes/x.js": ["site.1a2b3c4d.css"] }`, added before the closing brace.
+    let fields: Vec<String> = route_css
+        .iter()
+        .map(|(k, v)| {
+            let files: Vec<String> = v.iter().map(|f| format!("\"{f}\"")).collect();
+            format!("    {}: [{}]", crate::css::js_string(k), files.join(", "))
+        })
+        .collect();
+    let close = manifest.rfind('}').expect("manifest is an object");
+    manifest.truncate(close);
+    let trimmed = manifest.trim_end().to_string();
+    manifest = format!(
+        "{trimmed},\n  \"routeCss\": {{\n{}\n  }}\n}}\n",
+        fields.join(",\n")
+    );
+    fs::write(client_dir.join("manifest.json"), manifest)?;
     // `.gz` / `.br` siblings: `nowaki start` serves them by Accept-Encoding, and most static hosts
     // pick them up too.
     crate::compress::precompress_dir(&client_dir)?;
@@ -377,6 +392,25 @@ fn transform_for_server(
                     lit.raw = None;
                 }
             }
+            continue;
+        }
+        // Plain CSS: its text is the default export (the page links it as a stylesheet, from
+        // routeCss). Package CSS (`pkg/style.css`) included.
+        if spec.ends_with(".css") {
+            let text = core
+                .resolver
+                .resolve(dir, spec)
+                .ok()
+                .and_then(|r| fs::read_to_string(r.full_path()).ok());
+            let module = match text {
+                Some(css) => crate::transform::data_module(&format!(
+                    "export default {}",
+                    crate::css::js_string(&css)
+                )),
+                None => crate::css::CSS_NOOP_SPECIFIER.to_string(),
+            };
+            lit.value = allocator.alloc_str(&module).into();
+            lit.raw = None;
             continue;
         }
         // Assets: the hashed URL the client build emitted, or emit it now (server-only imports).
