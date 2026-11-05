@@ -23,6 +23,7 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         report.modules, report.server_modules
     );
     crate::content::build(&root, &root.join("dist"))?;
+    crate::site::write(&root, &root.join("dist"))?;
     crate::check_route_budgets(&core, &report, &client)?;
 
     let entry = root.join("node_modules/@nowaki-dev/runtime/server/start.mjs");
@@ -127,6 +128,25 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
             live_pages.len(),
             live_pages.join(", ")
         );
+    }
+
+    // Generated sitemap.xml / robots.txt (with a site URL), unless a route or public/ wrote one.
+    for (url, name) in [
+        ("/sitemap.xml", "sitemap.xml"),
+        ("/robots.txt", "robots.txt"),
+    ] {
+        let file = out.join(name);
+        if file.exists() || root.join("dist/public").join(name).exists() {
+            continue;
+        }
+        let resp = client
+            .get(format!("http://127.0.0.1:{port}{url}"))
+            .send()
+            .await?;
+        if resp.status().is_success() {
+            std::fs::write(&file, resp.bytes().await?)?;
+            count += 1;
+        }
     }
 
     // Static hosts (Cloudflare Pages, Netlify, GitHub Pages) serve 404.html for unknown paths.

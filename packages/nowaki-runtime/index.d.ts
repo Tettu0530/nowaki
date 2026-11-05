@@ -33,6 +33,11 @@ export interface NowakiResult {
 export interface LoaderContext {
   /** The request URL. */
   readonly url: URL;
+  /**
+   * The site's URL (`NOWAKI_SITE`, or `site` in nowaki.config), for absolute links in feeds and
+   * the like. Undefined when neither is set; `url.origin` is the request's own origin.
+   */
+  readonly site: URL | undefined;
   /** Route params (catch-all values are arrays). */
   readonly params: RouteParams;
   /** The HTTP method. */
@@ -131,8 +136,42 @@ export interface Meta {
   lang?: string;
   htmlAttrs?: DocumentAttrs;
   bodyAttrs?: DocumentAttrs;
+  /** `<meta name="description">`; Open Graph and Twitter fall back to it. */
+  description?: string;
+  /** `<link rel="canonical">`: a URL or path (against the site), or `true` for this page's path. */
+  canonical?: string | true;
+  /** `<meta name="robots">`. A noindex page is left out of the generated sitemap.xml. */
+  robots?: string | { index?: boolean; follow?: boolean };
+  /** Open Graph. `title` / `description` default to the page's; `url` to this page; relative URLs resolve against the site. */
+  openGraph?: {
+    title?: string;
+    description?: string;
+    type?: string;
+    url?: string;
+    siteName?: string;
+    locale?: string;
+    image?: OpenGraphImage | OpenGraphImage[];
+  };
+  /** Twitter / X cards. `card` defaults to "summary_large_image"; the rest fall back to Open Graph. */
+  twitter?: {
+    card?: "summary" | "summary_large_image" | "app" | "player";
+    site?: string;
+    creator?: string;
+    title?: string;
+    description?: string;
+    image?: string;
+  };
+  /** Structured data, one `<script type="application/ld+json">` per object. */
+  jsonLd?: Record<string, unknown> | Record<string, unknown>[];
 }
 
+export type OpenGraphImage = string | { url: string; width?: number; height?: number; alt?: string };
+
+/**
+ * Route metadata: `export const meta: Meta = {...}`, or a function of the loader data (`MetaFn`).
+ * A layout's `meta` object applies to every page under it (page values win; `openGraph` and
+ * `twitter` merge one level deep).
+ */
 /** Dynamic, possibly async metadata. Can be derived from loader data or params. */
 export type MetaFn<D = unknown> = (info: {
   data: D;

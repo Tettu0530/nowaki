@@ -10,7 +10,15 @@ export const loader = async (ctx: LoaderContext) => {
   return { title: doc.data.title, html: doc.html ?? "", headings: doc.headings ?? [] };
 };
 
-export const meta = ({ data }: { data: { title: string } }) => ({ title: `${data.title} — Nowaki docs` });
+// Typed metadata: description, canonical, Open Graph (its image is the og/[card].png file route),
+// Twitter, and JSON-LD. Relative URLs resolve against `site` in nowaki.config.
+export const meta = ({ data, params }: { data: { title: string }; params: { slug: string } }) => ({
+  title: `${data.title} — Nowaki docs`,
+  description: `${data.title}, from the Nowaki demo docs.`,
+  canonical: true as const,
+  openGraph: { type: "article", image: { url: `/og/${params.slug}.png`, width: 1, height: 1, alt: data.title } },
+  jsonLd: { "@context": "https://schema.org", "@type": "TechArticle", headline: data.title },
+});
 
 type Props = { data: { title: string; html: string; headings: { depth: number; text: string; id: string }[] } };
 

@@ -6,6 +6,7 @@ import { createRequire, register } from "node:module";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { resolveSite } from "./seo.mjs";
 import { loadEnv } from "./env.mjs";
 
 // load .env before routes so routes/loaders can read process.env
@@ -153,8 +154,24 @@ async function devInfo(version) {
   return { routes, conventions, islands };
 }
 
+// NOWAKI_SITE, else `site` in nowaki.config (read once; restart dev after changing it).
+const devSite = await (async () => {
+  for (const name of ["nowaki.config.mjs", "nowaki.config.js"]) {
+    const p = path.join(appRoot, name);
+    if (!existsSync(p)) continue;
+    try {
+      const mod = await import(pathToFileURL(p).href);
+      return (mod.default ?? mod.config ?? {}).site;
+    } catch (err) {
+      console.error(`[nowaki] ${name}: ${err?.message ?? err}`);
+    }
+  }
+  return undefined;
+})();
+
 const env = {
   dev: true,
+  site: resolveSite(devSite),
   // dev rescans on every request (picks up file changes)
   routeTable: () => scanRoutes(appRoot),
   importModule: (file, version) => import(`${pathToFileURL(file).href}?v=${version}`),

@@ -7,6 +7,8 @@ import { renderToReadableStream } from "preact-render-to-string/stream";
 
 import { matchRoute } from "./router.mjs";
 import { mergeAttrs } from "./document.mjs";
+import { mergeMeta, robotsTxt, seoTags, sitemapXml } from "./seo.mjs";
+import { sitemapUrls } from "./isr-urls.mjs";
 import { makeContext } from "./context.mjs";
 import { dispatchServerFn, runWithContext, SERVER_FN_PATH } from "./functions.mjs";
 import { isCrossSite } from "./origin.mjs";
@@ -40,6 +42,8 @@ export async function handleRequest(env, info) {
   const table = await env.routeTable(version);
   const match = matchRoute(table.routes, url.pathname);
   const ctx = makeContext({ ...info, params: match?.params ?? {} });
+  // The site's URL (NOWAKI_SITE / nowaki.config `site`), for absolute links in feeds and the like.
+  ctx.site = env.site ? new URL(env.site) : undefined;
 
   // Handle server function RPC before routing.
   if (env.serverFunctions && url.pathname === SERVER_FN_PATH) {
@@ -59,7 +63,20 @@ export async function handleRequest(env, info) {
     const short = await runMiddleware(env, table, ctx, version);
     if (short) return finalize(ctx, short);
 
-    if (!match) return finalize(ctx, await render404(env, table, ctx, version));
+    if (!match) {
+      // With a site URL, sitemap.xml and robots.txt are generated unless a route or a public/
+      // file (served before this) provides them.
+      if (env.site && (method === "GET" || method === "HEAD")) {
+        if (url.pathname === "/sitemap.xml") {
+          const body = sitemapXml(env.site, await sitemapUrls(env, version));
+          return finalize(ctx, { status: 200, headers: { "content-type": "application/xml; charset=utf-8" }, body });
+        }
+        if (url.pathname === "/robots.txt") {
+          return finalize(ctx, { status: 200, headers: { "content-type": "text/plain; charset=utf-8" }, body: robotsTxt(env.site) });
+        }
+      }
+      return finalize(ctx, await render404(env, table, ctx, version));
+    }
 
     const mod = await env.importModule(match.file, version);
 
@@ -197,7 +214,7 @@ async function renderRoute(env, table, match, mod, ctx, version) {
   // The trade-off: once it's sent, the status and headers are fixed, so `meta` only sees the static
   // exports, and a loader redirect or error is handled inside the stream (see earlyDocument).
   if (mod.streaming === "early" && typeof env.renderShell === "function") {
-    const meta = await withDocAttrs(env, table, match.file, mod, version, await withScripts(env, table, match.file, mod, version, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data: undefined, params: ctx.params, url: ctx.url }))));
+    const meta = await withDocAttrs(env, table, match.file, mod, version, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data: undefined, params: ctx.params, url: ctx.url })))));
     const { head, tail } = env.renderShell({ mod, meta });
     const revalidate = isrSeconds(mod);
     return {
@@ -216,7 +233,7 @@ async function renderRoute(env, table, match, mod, ctx, version) {
     };
   }
   const data = mod.loader ? await mod.loader(ctx) : undefined;
-  const meta = await withDocAttrs(env, table, match.file, mod, version, await withScripts(env, table, match.file, mod, version, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data, params: ctx.params, url: ctx.url }))));
+  const meta = await withDocAttrs(env, table, match.file, mod, version, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data, params: ctx.params, url: ctx.url })))));
   let node = h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url });
 
   // wrap outward in leaf→root order
@@ -316,7 +333,9 @@ async function renderBoundaries(env, table, version) {
 
 async function resolveMeta(mod, info) {
   let dyn = null;
-  if (typeof mod.meta === "function") {
+  if (mod.meta && typeof mod.meta === "object") {
+    dyn = mod.meta; // `export const meta = { title, description, openGraph, … }`
+  } else if (typeof mod.meta === "function") {
     try {
       dyn = await mod.meta(info);
     } catch {
@@ -330,7 +349,32 @@ async function resolveMeta(mod, info) {
     lang: str(dyn?.lang) ?? str(mod.lang),
     htmlAttrs: dyn?.htmlAttrs,
     bodyAttrs: dyn?.bodyAttrs,
+    seo: dyn && typeof dyn === "object" ? dyn : undefined,
   };
+}
+
+// The typed meta's head tags (seo.mjs): layouts' `export const meta` objects first (site-wide
+// defaults like openGraph.siteName), then the route's meta. They go after the route CSS and before
+// the page's own `head`.
+async function withSeo(env, table, file, mod, version, ctx, meta) {
+  const layouts = [];
+  for (const f of file ? layoutChain(table, file) : []) {
+    const l = await env.importModule(f, version);
+    if (l?.meta && typeof l.meta === "object") layouts.push(l.meta);
+  }
+  const own = meta?.seo ?? (mod?.meta && typeof mod.meta === "object" ? mod.meta : undefined);
+  if (layouts.length === 0 && !own) return meta;
+  const merged = mergeMeta(...layouts, own);
+  const title = (typeof meta?.title === "string" ? meta.title : undefined) ?? merged.title ?? mod?.title;
+  const tags = seoTags(merged, { title, pathname: ctx.url.pathname, origin: ctx.url.origin, site: env.site });
+  const next = { ...(meta ?? {}) };
+  if (next.title === undefined && typeof merged.title === "string") next.title = merged.title;
+  if (!tags) return next;
+  const head = typeof next.head === "string" ? next.head : typeof mod?.head === "string" ? mod.head : "";
+  const lead = head.match(/^(?:<link rel="stylesheet"[^>]*>\n?)*/)?.[0] ?? "";
+  const sep = lead && !lead.endsWith("\n") ? "\n" : "";
+  next.head = `${lead}${sep}${tags}${head.length > lead.length ? `\n${head.slice(lead.length)}` : ""}`;
+  return next;
 }
 
 // Page scripts (`export const scripts`) of the layouts (root first) and the route, as module
@@ -454,7 +498,7 @@ async function render404(env, table, ctx, version) {
     if (typeof mod.default === "function") {
       await env.ensureIslands(version);
       const body = await renderToStringAsync(h(mod.default, { url: ctx.url }));
-      const meta = await withScripts(env, table, table.notFound, mod, version, await withRouteCss(env, table.notFound, mod, version));
+      const meta = await withScripts(env, table, table.notFound, mod, version, await withSeo(env, table, table.notFound, mod, version, ctx, await withRouteCss(env, table.notFound, mod, version)));
       return { status: 404, headers: HTML, body: env.renderDocument({ mod, body, meta }) };
     }
   }
@@ -471,7 +515,7 @@ async function render500(env, table, ctx, version, err) {
         await env.ensureIslands(version);
         const message = env.dev ? String(err?.stack ?? err) : String(err?.message ?? err);
         const body = await renderToStringAsync(h(mod.default, { error: { message }, url: ctx.url }));
-        const meta = await withScripts(env, table, table.errorRoute, mod, version, await withRouteCss(env, table.errorRoute, mod, version));
+        const meta = await withScripts(env, table, table.errorRoute, mod, version, await withSeo(env, table, table.errorRoute, mod, version, ctx, await withRouteCss(env, table.errorRoute, mod, version)));
         return { status: 500, headers: HTML, body: env.renderDocument({ mod, body, meta }) };
       }
     } catch {

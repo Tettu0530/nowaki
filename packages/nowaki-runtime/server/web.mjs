@@ -1,6 +1,7 @@
 // Web-standard fetch handler factory for Edge. Uses neither node:http nor runtime file imports;
 // routes/islands/manifest arrive as maps statically imported at build time.
 
+import { resolveSite } from "./seo.mjs";
 import { h, options } from "preact";
 import { handleRequest } from "./handler.mjs";
 import { wrapIsland } from "./island-directive.mjs";
@@ -76,6 +77,7 @@ export function createFetchHandler({
   serverFunctions: serverFnTable,
   live,
   content,
+  site,
 }) {
   const registry = new Map();
   for (const [name, comp] of Object.entries(islandComponents ?? {})) {
@@ -103,6 +105,8 @@ export function createFetchHandler({
 
   const env = {
     dev: false,
+    // NOWAKI_SITE (a Worker var) or nowaki.config `site`, embedded by edge-build.mjs.
+    site: resolveSite(site),
     routeTable: () => routeTable,
     importModule: (key) => modules[key],
     ensureIslands: () => {},

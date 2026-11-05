@@ -117,6 +117,17 @@ curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<span style="font-weight:
 # route / layout CSS (0.16.1): the layout's and the page's stylesheets are linked in the head and
 # served as text/css; a plain .css import's default export is its text (inlined by /styled's head)
 curl -sf http://127.0.0.1:3300/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'
+# SEO: typed meta → head tags (absolute against nowaki.config `site`), generated sitemap.xml
+curl -sf http://127.0.0.1:3300/docs/intro | grep -q '<link rel="canonical" href="https://hello.nowaki.dev/docs/intro" />'
+curl -sf http://127.0.0.1:3300/docs/intro | grep -q '<meta property="og:image" content="https://hello.nowaki.dev/og/intro.png" />'
+curl -sf http://127.0.0.1:3300/docs/intro | grep -q '<meta property="og:site_name" content="Nowaki demo" />'
+curl -sf http://127.0.0.1:3300/docs/intro | grep -q '<script type="application/ld+json">{"@context":"https://schema.org"'
+curl -sf http://127.0.0.1:3300/boom | grep -q '<meta name="robots" content="noindex, follow" />'
+curl -s -D - -o /dev/null http://127.0.0.1:3300/sitemap.xml | grep -qi '^content-type: application/xml'
+curl -sf http://127.0.0.1:3300/sitemap.xml | grep -q '<loc>https://hello.nowaki.dev/docs/intro</loc>'
+! curl -sf http://127.0.0.1:3300/sitemap.xml | grep -qE '/boom<|/secret<|/api/|feed.xml'
+curl -sf http://127.0.0.1:3300/robots.txt | grep -q 'User-agent'   # public/robots.txt wins over the generated one
+curl -sf http://127.0.0.1:3300/feed.xml | grep -q '<link>https://hello.nowaki.dev/docs/intro</link>'
 # page scripts: bundled to /_nowaki/stamp.<hash>.js with preloads for its chunks, counted in the
 # route's first-load JS
 curl -sf http://127.0.0.1:3300/scripted | grep -qE '<script type="module" src="/_nowaki/stamp\.[0-9a-f]+\.js" data-nowaki-script></script>'

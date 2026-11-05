@@ -70,6 +70,18 @@ rm examples/hello/content/docs/e2e-added.md
 for i in $(seq 1 20); do curl -sf $B/docs >/dev/null && break; sleep 0.5; done
 curl -sf $B/docs | grep -q 'href="/docs/intro"'
 # route / layout CSS in dev: linked from the dev server, which serves only .css under the app
+# SEO: typed meta → head tags (absolute against nowaki.config `site`), generated sitemap.xml
+curl -sf $B/docs/intro | grep -q '<link rel="canonical" href="https://hello.nowaki.dev/docs/intro" />'
+curl -sf $B/docs/intro | grep -q '<meta property="og:image" content="https://hello.nowaki.dev/og/intro.png" />'
+curl -sf $B/docs/intro | grep -q '<meta property="og:site_name" content="Nowaki demo" />'
+curl -sf $B/docs/intro | grep -q '<script type="application/ld+json">{"@context":"https://schema.org"'
+curl -sf $B/boom | grep -q '<meta name="robots" content="noindex, follow" />'
+curl -s -D - -o /dev/null $B/sitemap.xml | grep -qi '^content-type: application/xml'
+curl -sf $B/sitemap.xml | grep -q '<loc>https://hello.nowaki.dev/docs/intro</loc>'
+! curl -sf $B/sitemap.xml | grep -qE '/boom<|/secret<|/api/|feed.xml'
+curl -sf $B/robots.txt | grep -q 'User-agent'   # public/robots.txt wins over the generated one
+curl -sf $B/feed.xml | grep -q '<link>https://hello.nowaki.dev/docs/intro</link>'
+node scripts/seo-unit-test.mjs
 # page scripts: a module <script> per listed module, served as JS (dev: its own URL)
 curl -sf $B/scripted | grep -q '<script type="module" src="/scripts/stamp.ts" data-nowaki-script></script>'
 curl -s -D - -o /dev/null $B/scripts/stamp.ts | grep -qi '^content-type: text/javascript'

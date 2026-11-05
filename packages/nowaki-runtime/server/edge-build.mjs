@@ -19,6 +19,8 @@ const manifest = JSON.parse(await readFile(path.join(clientDir, "manifest.json")
 // dist/public (nowaki build copies public/ there)
 const publicIndex = await indexPublic(path.join(clientDir, "..", "public"));
 const publicPaths = [...publicIndex.keys()];
+// nowaki.config `site`, written by the build (NOWAKI_SITE as a Worker var still wins at runtime).
+const site = await readFile(path.join(serverDir, "site.json"), "utf8").then((t) => JSON.parse(t).site).catch(() => undefined);
 // Content collections (written by `nowaki build`), inlined: an edge worker has no file system.
 const contentRaw = await readFile(path.join(serverDir, "content/index.json"), "utf8").catch(() => null);
 const table = await scanRoutes(serverDir);
@@ -119,7 +121,7 @@ const handler = createFetchHandler({
   islandComponents,
   liveIslands,
   routeTable,
-  serverFunctions,${contentRaw ? "\n  content," : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}
+  serverFunctions,${site ? `\n  site: ${JSON.stringify(site)},` : ""}${contentRaw ? "\n  content," : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}
 });
 
 // public/ files by decoded URL path; they win over routes at the same path.
