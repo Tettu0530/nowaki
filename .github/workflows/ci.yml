@@ -293,12 +293,21 @@ jobs:
           echo "620bb9e16fb53eabc9a3fc45f88bdb41fefa3fee5c05e75892011ce320391716  /usr/local/bin/oha" | sha256sum -c -
           chmod +x /usr/local/bin/oha
       - if: steps.scope.outputs.run == 'true'
-        name: Build base and head (release, one shared target dir)
+        # Separate target dirs: base and head have the same crate versions, and in a shared dir Cargo
+        # took head's nowaki for already built (base's binary measured as head; it finished in 0.2 s).
+        name: Build base and head (release, separate target dirs)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           (cd .perf-base && pnpm install --frozen-lockfile)
-          cargo build --release -p nowaki --locked --manifest-path .perf-base/Cargo.toml --target-dir target
-          mkdir -p .perf-base/target/release && cp target/release/nowaki .perf-base/target/release/nowaki
+          cargo build --release -p nowaki --locked --manifest-path .perf-base/Cargo.toml --target-dir .perf-base/target
           cargo build --release -p nowaki --locked
+          # Guard: the two binaries must differ whenever the Rust code does.
+          if ! git diff --quiet "$BASE_SHA" HEAD -- crates Cargo.lock; then
+            if cmp -s target/release/nowaki .perf-base/target/release/nowaki; then
+              echo "::error::head and base binaries are identical although crates/ changed"; exit 1
+            fi
+          fi
       - if: steps.scope.outputs.run == 'true'
         name: Measure head against base
         run: node benchmarks/ci-perf.mjs --base .perf-base --head . --rounds 3
