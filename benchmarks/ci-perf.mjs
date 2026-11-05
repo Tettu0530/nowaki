@@ -61,7 +61,7 @@ async function waitFor(url, ms = 30000, log = () => "") {
     if (last === 200) return;
     await sleep(100);
   }
-  throw new Error(`timed out waiting for ${url} (last status ${last})\n--- server output (tail) ---\n${log().slice(-4000)}`);
+  throw new Error(`timed out waiting for ${url} (last status ${last})\n${log()}`);
 }
 
 function stop(child) {
@@ -74,11 +74,13 @@ function stop(child) {
 }
 
 const lastBuild = {};
+const lastTree = {};
 function measureBuild(side) {
   const t0 = performance.now();
   const r = spawnSync(bin(side), ["build", app(side)], { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`${side}: nowaki build failed\n${r.stdout}\n${r.stderr}`);
   lastBuild[side] = `${r.stdout}\n${r.stderr}`;
+  lastTree[side] = spawnSync("find", [path.join(app(side), "dist/server"), "-maxdepth", "2"], { encoding: "utf8" }).stdout;
   return performance.now() - t0;
 }
 
@@ -119,8 +121,8 @@ async function measureServer(side) {
   const url = `http://127.0.0.1:${p}/about`;
   // On a timeout, also show what the build left in dist/server, and the source tree, side by side.
   const tree = () => {
-    const ls = (d) => spawnSync("find", [d, "-maxdepth", "2", "-name", "*.js", "-o", "-maxdepth", "2", "-type", "d"], { encoding: "utf8" }).stdout;
-    return `${out}\n--- ${app(side)}/dist/server ---\n${ls(path.join(app(side), "dist/server"))}\n--- ${app(side)} (dirs) ---\n${spawnSync("ls", ["-la", app(side)], { encoding: "utf8" }).stdout}\n--- last build output ---\n${(lastBuild[side] ?? "").slice(-3000)}\n--- binary ---\n${bin(side)} ${spawnSync(bin(side), ["--version"], { encoding: "utf8" }).stdout}`;
+    const ls = (d) => spawnSync("find", [d, "-maxdepth", "2"], { encoding: "utf8" }).stdout;
+    return `--- ${app(side)}/dist/server now ---\n${ls(path.join(app(side), "dist/server"))}\n--- right after the last build ---\n${lastTree[side] ?? ""}\n--- server output (tail) ---\n${out.slice(-2500)}`;
   };
   try {
     await waitFor(url, 30000, tree);
