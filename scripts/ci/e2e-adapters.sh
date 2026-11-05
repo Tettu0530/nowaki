@@ -37,6 +37,12 @@ grep -q "Couldn't display this page" /tmp/nowaki-early-fail.html
 ! grep -q 'the data source is down' /tmp/nowaki-early-fail.html   # no message in production
 curl -s 'http://127.0.0.1:3310/stream-early?go=1' | grep -q 'location.replace("/about")'
 curl -sf http://127.0.0.1:3310/api/hello | grep -q '"hello":"nowaki"'
+# public/ on the node adapter (dist/server reads ../public)
+curl -s -D - http://127.0.0.1:3310/robots.txt | grep -qi '^content-type: text/plain'
+curl -sf http://127.0.0.1:3310/raw.css | grep -q '^\.raw { color: red; }'
+curl -sf "http://127.0.0.1:3310/media/hello%20world.txt" | grep -q 'hello from public'
+! curl -sf http://127.0.0.1:3310/.hidden | grep -q 'never served'
+test "$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $(curl -s -D - -o /dev/null http://127.0.0.1:3310/robots.txt | tr -d '\r' | awk 'tolower($1)=="etag:" {print $2}')" http://127.0.0.1:3310/robots.txt)" = 304
 # default security headers on the node adapter (pages and static assets)
 curl -s -D - -o /dev/null http://127.0.0.1:3310/ | grep -qi '^x-content-type-options: nosniff'
 curl -s -D - -o /dev/null http://127.0.0.1:3310/ | grep -qi "^content-security-policy: frame-ancestors 'self'"
@@ -96,6 +102,11 @@ grep -q 'nowaki-live name="LiveCounter"' examples/hello/dist/static/live/index.h
 node -e 'const b=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!Array.isArray(b.loading)||!Array.isArray(b.error)||!b.loading.length) process.exit(1)' examples/hello/dist/static/__nowaki/boundaries
 grep -q '/__nowaki/boundaries' examples/hello/dist/static/_headers
 grep -qi 'x-content-type-options: nosniff' examples/hello/dist/static/_headers
+# public/ files at their own path in the static output, dotfiles left out
+grep -q 'User-agent' examples/hello/dist/static/robots.txt
+grep -q 'hello from public' "examples/hello/dist/static/media/hello world.txt"
+test -f examples/hello/dist/static/.well-known/security.txt
+! test -e examples/hello/dist/static/.hidden
 # cloudflare (edge) adapter: generates a bundled fetch-handler worker + wrangler config
 ./target/debug/nowaki build examples/hello --adapter cloudflare
 # the worker's fetch handler, called directly in Node (web.mjs end to end, no wrangler)
@@ -104,6 +115,11 @@ test -f examples/hello/dist/worker/index.js
 test -f examples/hello/dist/worker/wrangler.jsonc
 grep -q "createFetchHandler" examples/hello/dist/worker/index.js
 grep -q '"binding": "ASSETS"' examples/hello/dist/worker/wrangler.jsonc
+# one Assets directory: dist/client under _nowaki/, public/ at the top
+grep -q '"directory": "./assets"' examples/hello/dist/worker/wrangler.jsonc
+ls examples/hello/dist/worker/assets/_nowaki/manifest.json >/dev/null
+grep -q 'User-agent' examples/hello/dist/worker/assets/robots.txt
+! test -e examples/hello/dist/worker/assets/.hidden
 # vercel adapter: Build Output API v3 (.vercel/output): config + static + a
 # self-contained Node serverless function. Run the function (Vercel's launcher
 # invokes its default (req,res) handler) and confirm SSR + islands + API work.
@@ -114,6 +130,10 @@ grep -q '"x-content-type-options": "nosniff"' examples/hello/.vercel/output/conf
 test -f examples/hello/.vercel/output/functions/index.func/.vc-config.json
 grep -q '"launcherType": "Nodejs"' examples/hello/.vercel/output/functions/index.func/.vc-config.json
 test -d examples/hello/.vercel/output/static/_nowaki
+# public/ files are static files at their own path, with the security headers by exact-path route
+grep -q 'User-agent' examples/hello/.vercel/output/static/robots.txt
+! test -e examples/hello/.vercel/output/static/.hidden
+grep -q 'media/hello%20world' examples/hello/.vercel/output/config.json
 # the function must NOT carry a nested preact (would double-instance and break hooks)
 ! test -d examples/hello/.vercel/output/functions/index.func/node_modules/@nowaki-dev/runtime/node_modules
 # Started with its PID kept, so it is stopped below (a subshell left it running after the script).

@@ -441,6 +441,15 @@ async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Res
     if crate::forward::is_internal_path(&path) {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     }
+    // public/ files are sent as they are (no CSS shim, no TS transform), ahead of routes.
+    if matches!(
+        *req.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD
+    ) {
+        if let Some(resp) = serve_public(&state, &path).await {
+            return resp;
+        }
+    }
     // Virtual ids never contain `..`, so reject it (prevents traversal via root.join when the synthetic dir exists).
     if path.starts_with(&format!("/{VIRTUAL_DIR}/")) {
         if path.split('/').any(|seg| seg == "..") {
@@ -463,6 +472,35 @@ async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Res
         }
     }
     proxy_to_sidecar(state, req).await
+}
+
+/// `public/<path>` for `/<path>`, read on each request so added or edited files show up at once.
+/// The real path must stay inside `public/` (a symlink pointing out of it is refused).
+async fn serve_public(state: &DevState, url_path: &str) -> Option<Response> {
+    let base = nowaki_core::public::dir(&state.core.root);
+    let candidate = nowaki_core::public::resolve(&base, url_path)?;
+    if !candidate.is_file() {
+        return None;
+    }
+    let canon_base = dunce::canonicalize(&base).ok()?;
+    let canon = dunce::canonicalize(&candidate).ok()?;
+    if !canon.starts_with(&canon_base) || is_denied_fs_path(&canon) {
+        return None;
+    }
+    let bytes = tokio::fs::read(&canon).await.ok()?;
+    Some(
+        (
+            [
+                (
+                    header::CONTENT_TYPE,
+                    nowaki_core::public::content_type(url_path),
+                ),
+                (header::CACHE_CONTROL, "no-cache"),
+            ],
+            bytes,
+        )
+            .into_response(),
+    )
 }
 
 async fn serve_file(state: Arc<DevState>, abs: PathBuf) -> Response {

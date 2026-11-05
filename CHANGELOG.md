@@ -11,6 +11,22 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **`public/`** (v0.17). Files in `public/` are served as-is at their own
+  path: `public/robots.txt` → `/robots.txt`, `public/fonts/a.woff2` →
+  `/fonts/a.woff2`. There is no transform: a `.css` or `.ts` there is sent as
+  that file.
+  - `nowaki dev` reads `public/` directly, so new files work without a
+    restart. `nowaki build` copies it to `dist/public/`.
+  - Served by `nowaki start` and the node / bun / deno adapters, with
+    `cache-control: public, no-cache` and an ETag (304 when unchanged), since
+    the names aren't hashed.
+  - The Vercel and Cloudflare adapters and the static output serve them as
+    static files. On Cloudflare the Assets directory is now
+    `dist/worker/assets`, with `dist/client` under `_nowaki/`. A `public/_headers`
+    is placed ahead of the generated rules in the static output's `_headers`.
+  - A public file wins over a route at the same path. Dotfiles and
+    dot-directories are left out, except `.well-known/`. A file under
+    `public/_nowaki/` or `public/__nowaki/` is a build error.
 - **Content collections** (v0.17). Each directory under `content/` is a
   collection, declared in `content/config.ts` with
   `defineCollection({ schema })`. Any Standard Schema library works.

@@ -70,6 +70,16 @@ rm examples/hello/content/docs/e2e-added.md
 for i in $(seq 1 20); do curl -sf $B/docs >/dev/null && break; sleep 0.5; done
 curl -sf $B/docs | grep -q 'href="/docs/intro"'
 # route / layout CSS in dev: linked from the dev server, which serves only .css under the app
+# public/: files at their own path, as-is (a .css stays CSS), dotfiles hidden except .well-known
+curl -s -D - $B/robots.txt | grep -qi '^content-type: text/plain'
+curl -sf $B/robots.txt | grep -q 'User-agent: \*'
+curl -s -D - $B/raw.css | grep -qi '^content-type: text/css'
+curl -sf $B/raw.css | grep -q '^\.raw { color: red; }'
+curl -sf "$B/media/hello%20world.txt" | grep -q 'hello from public'
+curl -sf $B/.well-known/security.txt | grep -q 'Contact:'
+! curl -sf $B/.hidden | grep -q 'never served'
+! curl -sf $B/.private/secret.txt | grep -q 'never served'
+! curl -sf $B/public/robots.txt | grep -q 'User-agent'
 curl -sf $B/styled | grep -q '<link rel="stylesheet" href="/__nowaki/css?f=routes/styled.css"'
 curl -sf $B/styled | grep -q '<style>#styled-probe{color:rgb(1, 2, 3)}</style>'
 curl -s -D - "$B/__nowaki/css?f=routes/styled.css" | grep -qi '^content-type: text/css'

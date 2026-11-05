@@ -4,7 +4,7 @@
 //! only renders components (pages return body + meta as JSON). Separate from the deploy adapters.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -45,6 +45,8 @@ struct ProdState {
     client_dir: PathBuf,
     /// `/_nowaki/*` files held in memory with their `.br` / `.gz` siblings (see `load_assets`).
     assets: HashMap<String, Asset>,
+    /// `dist/public/*` by URL path (see `load_public`).
+    public: HashMap<String, PublicFile>,
     sidecar_port: u16,
     http: reqwest::Client,
     manifest: Manifest,
@@ -157,8 +159,10 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         std::env::var("NOWAKI_HOST").unwrap_or_else(|_| "127.0.0.1".to_string())
     };
     let assets = load_assets(&client_dir);
+    let public = load_public(&client_dir.with_file_name("public"));
     let state = Arc::new(ProdState {
         assets,
+        public,
         client_dir,
         sidecar_port,
         http: reqwest::Client::builder()
@@ -242,6 +246,12 @@ async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
     // Rust serves static assets directly (high-volume hot path).
     if req.method() == Method::GET && path.starts_with("/_nowaki/") {
         return serve_static(&state, &path, req.headers()).await;
+    }
+    // public/ files win over routes at the same path (a file is an exact match).
+    if matches!(*req.method(), Method::GET | Method::HEAD) {
+        if let Some(file) = state.public.get(&path) {
+            return serve_public(file, req.headers()).await;
+        }
     }
     if req.method() == Method::GET {
         let pathname = req.uri().path().to_string();
@@ -634,6 +644,86 @@ fn load_assets(client_dir: &std::path::Path) -> HashMap<String, Asset> {
         );
     }
     out
+}
+
+/// A `dist/public/*` file. Read from disk on each request (public/ can hold large media); the
+/// index is built once at startup, so a miss costs a map lookup and nothing else.
+struct PublicFile {
+    path: PathBuf,
+    content_type: &'static str,
+    /// Weak ETag from size and mtime: the files are never rewritten while `nowaki start` runs.
+    etag: String,
+}
+
+/// Keyed by the URL path as requests send it: file names are percent-encoded the way a browser
+/// would (`/a b.txt` → `/a%20b.txt`), and the decoded form is kept too for clients that don't.
+fn load_public(dir: &Path) -> HashMap<String, PublicFile> {
+    let mut out = HashMap::new();
+    for (url, path) in nowaki_core::public::list(dir).unwrap_or_default() {
+        let Ok(meta) = std::fs::metadata(&path) else {
+            continue;
+        };
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let encoded = url_encode_path(&url);
+        let content_type = nowaki_core::public::content_type(&url);
+        let file = || PublicFile {
+            path: path.clone(),
+            content_type,
+            etag: format!("W/\"{:x}-{:x}\"", meta.len(), mtime),
+        };
+        if encoded != url {
+            out.insert(encoded, file());
+        }
+        out.insert(url, file());
+    }
+    out
+}
+
+/// Percent-encodes what a browser would in a path: everything but unreserved characters, `/`,
+/// and the sub-delims that are safe in a path segment.
+fn url_encode_path(p: &str) -> String {
+    let mut out = String::with_capacity(p.len());
+    for b in p.bytes() {
+        if b.is_ascii_alphanumeric() || b"/-._~!$&'()*+,;=:@".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// `no-cache` with an ETag: public/ names aren't hashed, so a browser revalidates each use and
+/// gets a 304 while the file is unchanged.
+async fn serve_public(file: &PublicFile, req: &axum::http::HeaderMap) -> Response {
+    let not_modified = req
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| {
+            v.split(',')
+                .any(|t| t.trim() == file.etag || t.trim() == "*")
+        });
+    let builder = Response::builder()
+        .header(header::CONTENT_TYPE, file.content_type)
+        .header(header::CACHE_CONTROL, "public, no-cache")
+        .header(header::ETAG, &file.etag);
+    if not_modified {
+        return builder
+            .status(StatusCode::NOT_MODIFIED)
+            .body(Body::empty())
+            .unwrap_or_else(|_| StatusCode::NOT_MODIFIED.into_response());
+    }
+    match tokio::fs::read(&file.path).await {
+        Ok(bytes) => builder
+            .body(Body::from(bytes))
+            .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()),
+        Err(_) => (StatusCode::NOT_FOUND, "not found").into_response(),
+    }
 }
 
 async fn serve_static(state: &ProdState, path: &str, req: &axum::http::HeaderMap) -> Response {

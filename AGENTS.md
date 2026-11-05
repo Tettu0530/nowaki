@@ -179,6 +179,13 @@ code locations and CI coverage.
   `resolve_id`, `load`); `NowakiCore::resolve_spec` + the `VirtualResolve` trait.
 - **Scope hoisting / chunking** — `crates/nowaki-core/src/chunk.rs`.
 - **Deploy adapters** — `crates/nowaki/src/adapter.rs` (+ `server/edge-build.mjs`).
+- **`public/`** — rules (path safety, dotfiles, reserved prefixes, content types) in
+  `crates/nowaki-core/src/public.rs`; copied to `dist/public` by `build_with_client`.
+  Served by `dev.rs` `serve_public` (straight from `public/`), `start.rs`
+  `serve_public` (index built at startup), `server/public-files.mjs` (node / bun /
+  deno), and as static files by `vercel-build.mjs`, `edge-build.mjs`
+  (`dist/worker/assets`), and `prerender.rs`. A public file wins over a route at
+  the same path.
 
 ## Conventions
 

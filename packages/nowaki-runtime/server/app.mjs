@@ -17,6 +17,7 @@ import { prodDocument, prodShell } from "./document.mjs";
 import { liveInitialState, liveRender, liveTopics, liveView } from "./live.mjs";
 import { loadContent } from "./content-load.mjs";
 import { liveProps, warnIfEphemeralLiveKey } from "./live-sign.mjs";
+import { indexPublic, lookupPublic } from "./public-files.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
 // Bun and Deno don't implement Node's module.register; their SSR keeps the old behavior.
@@ -51,11 +52,28 @@ const CONTENT_TYPE = {
   wav: "audio/wav",
   flac: "audio/flac",
   pdf: "application/pdf",
+  // public/ files (not hashed, served as-is)
+  html: "text/html; charset=utf-8",
+  htm: "text/html; charset=utf-8",
+  mjs: "text/javascript; charset=utf-8",
+  txt: "text/plain; charset=utf-8",
+  xml: "application/xml",
+  csv: "text/csv; charset=utf-8",
+  md: "text/markdown; charset=utf-8",
+  webmanifest: "application/manifest+json",
+  wasm: "application/wasm",
+  zip: "application/zip",
+};
+
+const contentTypeOf = (name) => {
+  const base = name.split("/").pop();
+  const dot = base.lastIndexOf(".");
+  return (dot > 0 && CONTENT_TYPE[base.slice(dot + 1).toLowerCase()]) || "application/octet-stream";
 };
 
 /// Builds the production app. Pass `clientDir` (dist/client) and `serverDir` (dist/server).
 /// The returned `handle(req, res)` is a node:http-compatible handler (also works under Bun/Deno node compat).
-export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}) {
+export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = true } = {}) {
   if (!clientDir || !serverDir) {
     throw new Error("createApp requires clientDir and serverDir");
   }
@@ -174,6 +192,9 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
     },
   };
 
+  // dist/public next to dist/client unless given.
+  const publicFiles = await indexPublic(publicDir ?? path.join(clientDir, "..", "public"));
+
   const handle = async (req, res) => {
     // Set before the response's own headers, which override any of these by name.
     for (const [k, v] of missingSecurityHeaders(() => false)) res.setHeader(k, v);
@@ -190,6 +211,25 @@ export async function createApp({ clientDir, serverDir, loadDotenv = true } = {}
             "cache-control": "public, max-age=31536000, immutable",
           });
           res.end(data);
+        } catch {
+          res.writeHead(404).end("not found");
+        }
+        return;
+      }
+
+      // public/ files win over routes at the same path. `no-cache` + ETag: the names aren't hashed.
+      const pub = (req.method === "GET" || req.method === "HEAD") && lookupPublic(publicFiles, url.pathname);
+      if (pub) {
+        const headers = { "content-type": contentTypeOf(url.pathname), "cache-control": "public, no-cache", etag: pub.etag };
+        const inm = req.headers["if-none-match"];
+        if (inm && inm.split(",").some((t) => t.trim() === pub.etag || t.trim() === "*")) {
+          res.writeHead(304, headers).end();
+          return;
+        }
+        try {
+          const data = await readFile(pub.file);
+          res.writeHead(200, { ...headers, "content-length": data.length });
+          res.end(req.method === "HEAD" ? undefined : data);
         } catch {
           res.writeHead(404).end("not found");
         }
