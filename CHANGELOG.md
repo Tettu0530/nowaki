@@ -41,7 +41,9 @@ milestone's worth of work; the codename is noted per entry.
 - **`nowaki dev` no longer drops a change made within 100 ms of the last
   one.** The file watcher used to ignore events inside its 100 ms window, so
   a second quick save, or a file written right after a reload, never
-  reached the page. It now waits out the window and then applies the change.
+  reached the page. Changes are now batched until they have been quiet for
+  100 ms, then applied in one reload. A save that fires several events is
+  still one reload.
 - **`nowaki dev` on Windows reloaded on its own cache writes.** The watcher
   skipped `node_modules`, `dist`, `.nowaki`, and similar directories by
   looking for `/node_modules/` in the path, which never matched Windows
