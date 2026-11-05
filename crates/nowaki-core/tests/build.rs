@@ -104,10 +104,8 @@ const HOISTED_APP: &[(&str, &str)] = &[
 
 #[test]
 fn build_output_is_the_same_every_time() {
-    // Canonical root, as the CLI resolves it: on macOS the temp dir is a symlink, and modules
-    // resolved outside the literal root are not hoisted. dunce, because std's canonicalize
-    // gives a verbatim `\\?\C:\…` path on Windows that resolved modules never match.
-    let root = dunce::canonicalize(temp_app("deterministic", HOISTED_APP)).unwrap();
+    // Not canonicalized: NowakiCore::new does that (on macOS the temp dir is a symlink).
+    let root = temp_app("deterministic", HOISTED_APP);
     let core = NowakiCore::new(root.clone());
     let mut builds = Vec::new();
     for i in 0..8 {
@@ -132,7 +130,7 @@ fn build_output_is_the_same_every_time() {
 
 #[test]
 fn island_chunk_imports_each_shared_file_once_with_mangled_names() {
-    let root = dunce::canonicalize(temp_app("one-import", HOISTED_APP)).unwrap();
+    let root = temp_app("one-import", HOISTED_APP);
     let core = NowakiCore::new(root.clone());
     build_client(&core, &root.join("dist")).expect("build ok");
     let code = island_chunk(&root, "Many");
@@ -153,5 +151,27 @@ fn island_chunk_imports_each_shared_file_once_with_mangled_names() {
     assert!(
         !code.contains("__PURE__"),
         "annotation comments were printed:\n{code}"
+    );
+}
+
+/// #92: a root given through a symlink still hoists the island's app modules.
+#[cfg(unix)]
+#[test]
+fn a_symlinked_root_still_hoists() {
+    let real = temp_app("symlinked", HOISTED_APP);
+    let link = real.with_file_name(format!(
+        "{}-link",
+        real.file_name().unwrap().to_string_lossy()
+    ));
+    let _ = fs::remove_file(&link);
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let core = NowakiCore::new(link.clone());
+    build_client(&core, &link.join("dist")).expect("build ok");
+    let code = island_chunk(&link, "Many");
+    let _ = fs::remove_file(&link);
+    let _ = fs::remove_dir_all(&real);
+    assert!(
+        !code.contains("./cycle-"),
+        "cycle modules were not hoisted through a symlinked root:\n{code}"
     );
 }

@@ -112,6 +112,11 @@ pub struct NowakiCore {
 
 impl NowakiCore {
     pub fn new(root: PathBuf) -> Self {
+        // Resolved module paths are canonical, so the root must be too, or `root.starts_with`
+        // checks (which modules are the app's, and get hoisted) miss through a symlinked path
+        // (macOS /var → /private/var) or a Windows verbatim `\\?\C:\…` one. dunce keeps Windows
+        // paths in their normal form. A root that doesn't exist yet is kept as given.
+        let root = dunce::canonicalize(&root).unwrap_or(root);
         let client_defines = env::load_client_defines(&root);
         // salt = nowaki version + defines. Upgrades/env changes invalidate the disk cache.
         let mut salt_buf = env!("CARGO_PKG_VERSION").as_bytes().to_vec();

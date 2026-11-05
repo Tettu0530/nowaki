@@ -107,6 +107,11 @@ milestone's worth of work; the codename is noted per entry.
   8,895 to 32,101 req/s. Dev mode is unchanged: it re-imports on every edit.
 
 ### Fixed
+- **Scope hoisting through a symlinked or verbatim app root** (#92).
+  `NowakiCore::new` now canonicalizes the root with `dunce`. Before this
+  change, a root opened through a symlink (macOS `/var` → `/private/var`)
+  or given as a Windows `\\?\` path matched no resolved module. Every app
+  module then became its own chunk, and the route JS report missed islands.
 - **Static output no longer ships a live.js that can't work** (#93). Pages
   from `nowaki prerender` and the static adapter used to include live.js in
   POST mode. A static host has no server for its events, so every click
