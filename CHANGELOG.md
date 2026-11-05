@@ -78,6 +78,15 @@ milestone's worth of work; the codename is noted per entry.
   image's `alt`).
 
 ### Changed
+- **Content builds no longer decode every referenced image.**
+  - A Markdown image's size is read from the file's header, and the pixels
+    are decoded only when a variant isn't cached yet.
+  - Each file's image set is built once per build, however many entries
+    reference it.
+  - Entries are read and rendered in parallel.
+  - On a 500-entry docs site (four photos, 1,500 code fences), a build with
+    the caches warm went from 2.3 s to 0.25 s. Before, about 86% of it was
+    decoding the same four JPEGs 500 times.
 - AVIF for `<Image>` / `?image` encodes at rav1e speed 9 (was 7). On photos this
   is about 30% faster for the same or a slightly smaller file, which matters
   for a cold build (variants are cached after it).
