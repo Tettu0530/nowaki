@@ -106,6 +106,16 @@ node scripts/security-e2e.mjs prod http://127.0.0.1:3300
 FB=$(curl -s -N -o /dev/null -w '%{time_starttransfer}' "http://127.0.0.1:3300/api/stream?delay=600")
 awk -v t="$FB" 'BEGIN { exit !(t < 0.3) }'
 test "$(curl -s 'http://127.0.0.1:3300/api/stream?delay=50' | tr -d '\n')" = "chunk1chunk2"
+# streaming = "early": the shell goes out before the 300 ms loader; a loader error renders
+# error.tsx in the page (status stays 200) and a loader redirect becomes location.replace (#112)
+FB=$(curl -s -N -o /tmp/nowaki-early.html -w '%{time_starttransfer}' http://127.0.0.1:3300/stream-early)
+awk -v t="$FB" 'BEGIN { exit !(t < 0.2) }'
+grep -q 'data-testid="early"' /tmp/nowaki-early.html
+grep -q '<title>Early streaming' /tmp/nowaki-early.html
+test "$(curl -s -o /tmp/nowaki-early-fail.html -w '%{http_code}' 'http://127.0.0.1:3300/stream-early?fail=1')" = 200
+grep -q "Couldn't display this page" /tmp/nowaki-early-fail.html
+! grep -q 'the data source is down' /tmp/nowaki-early-fail.html   # no message in production
+curl -s 'http://127.0.0.1:3300/stream-early?go=1' | grep -q 'location.replace("/about")'
 # The build's first-load JS report matches the chunks each page actually references.
 test -f examples/hello/dist/route-js.json
 node scripts/route-js-e2e.mjs http://127.0.0.1:3300 examples/hello

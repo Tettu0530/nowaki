@@ -97,6 +97,17 @@ export type StaticPaths<P extends RouteParams = RouteParams> = P[] | (() => P[] 
  */
 export type RouteBudget = { js: number };
 
+/**
+ * `export const streaming` on a page route.
+ * - `true`: the loaders run first, then the shell is sent and the body streams as it renders
+ *   (Suspense boundaries arrive as they settle). A loader redirect or error still sets the status.
+ * - `"early"`: the shell is sent before any loader runs, so the first byte doesn't wait for data.
+ *   The status and headers are then fixed: `meta` sees only the static `title` / `head`, a loader
+ *   redirect becomes a client-side `location.replace`, and a loader error renders the nearest
+ *   `error.tsx` in the page (its message only in dev). Cookies set by a loader are not sent.
+ */
+export type Streaming = boolean | "early";
+
 /** API route handler (per-method export or default). */
 export type ApiHandler = (
   ctx: LoaderContext,

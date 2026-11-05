@@ -169,6 +169,26 @@ async function renderRoute(env, table, match, mod, ctx, version) {
   if (typeof Page !== "function") {
     throw new Error(`Route does not default-export a component: ${ctx.url.pathname}`);
   }
+  // `streaming = "early"`: the shell goes out before any loader runs (TTFB doesn't wait for data).
+  // The trade-off: once it's sent, the status and headers are fixed, so `meta` only sees the static
+  // exports, and a loader redirect or error is handled inside the stream (see earlyDocument).
+  if (mod.streaming === "early" && typeof env.renderShell === "function") {
+    const meta = await resolveMeta(mod, { data: undefined, params: ctx.params, url: ctx.url });
+    const { head, tail } = env.renderShell({ mod, meta });
+    const revalidate = isrSeconds(mod);
+    return {
+      status: 200,
+      headers: revalidate ? { ...HTML, "cache-control": swr(revalidate) } : HTML,
+      stream: earlyDocument(head, tail, {
+        node: async () => {
+          const n = await routeNode(env, table, match, mod, ctx, version);
+          if (ctx._redirect) throw ctx._redirect; // `return ctx.redirect(…)` from a loader
+          return n;
+        },
+        onError: (err) => earlyError(env, table, ctx, version, err),
+      }),
+    };
+  }
   const data = mod.loader ? await mod.loader(ctx) : undefined;
   const meta = await resolveMeta(mod, { data, params: ctx.params, url: ctx.url });
   let node = h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url });
@@ -266,6 +286,67 @@ async function resolveMeta(mod, info) {
     head: str(dyn?.head) ?? str(mod.head),
     lang: str(dyn?.lang) ?? str(mod.lang),
   };
+}
+
+// The page wrapped in its layouts, with every loader run (route first, then layouts leaf → root).
+async function routeNode(env, table, match, mod, ctx, version) {
+  const data = mod.loader ? await mod.loader(ctx) : undefined;
+  let node = h(mod.default, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url });
+  const layouts = layoutChain(table, match.file);
+  for (let i = layouts.length - 1; i >= 0; i--) {
+    const lmod = await env.importModule(layouts[i], version);
+    if (typeof lmod.default !== "function") continue;
+    const ldata = lmod.loader ? await lmod.loader(ctx) : undefined;
+    node = h(lmod.default, { data: ldata, params: ctx.params, url: ctx.url, children: node });
+  }
+  return node;
+}
+
+// After an early shell, a redirect becomes a client-side `location.replace`, and an error renders
+// the nearest error boundary (`error.tsx`) in place of the page. The message is shown only in dev.
+async function earlyError(env, table, ctx, version, err) {
+  const to = ctx._redirect?.headers?.location;
+  if (to) {
+    const url = JSON.stringify(String(to)).replace(/</g, "\\u003c");
+    return `<script>location.replace(${url})</script>`;
+  }
+  console.error("[nowaki]", err);
+  const boundary = (table.errorBoundaries ?? [])
+    .filter((b) => underPrefix(ctx.url.pathname, b.prefix))
+    .sort((a, b) => b.prefix.length - a.prefix.length)[0];
+  if (boundary) {
+    try {
+      const bmod = await env.importModule(boundary.file, version);
+      if (typeof bmod.default === "function") {
+        const message = env.dev ? String(err?.message ?? err) : "";
+        return await renderToStringAsync(h(bmod.default, { error: { message }, reset: () => {} }));
+      }
+    } catch {
+      // fall through to the generic message
+    }
+  }
+  return "<p>Something went wrong.</p>";
+}
+
+function earlyDocument(head, tail, { node, onError }) {
+  const enc = new TextEncoder();
+  return new ReadableStream({
+    async start(controller) {
+      controller.enqueue(enc.encode(head));
+      try {
+        const reader = (await renderToReadableStream(await node())).getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          controller.enqueue(typeof value === "string" ? enc.encode(value) : value);
+        }
+      } catch (err) {
+        controller.enqueue(enc.encode(await onError(err)));
+      }
+      controller.enqueue(enc.encode(tail));
+      controller.close();
+    },
+  });
 }
 
 function streamedDocument(head, bodyStream, tail) {
