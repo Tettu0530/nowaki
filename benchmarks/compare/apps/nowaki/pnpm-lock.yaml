@@ -20,6 +20,9 @@ importers:
       preact-render-to-string:
         specifier: 6.8.2
         version: 6.8.2(preact@11.1.1)
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       nowaki:
         specifier: 0.16.0
@@ -89,6 +92,9 @@ packages:
       preact-render-to-string:
         optional: true
 
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
+
 snapshots:
 
   '@nowaki-dev/cli-darwin-arm64@0.16.0':
@@ -128,3 +134,5 @@ snapshots:
   preact@11.1.1(preact-render-to-string@6.8.2):
     optionalDependencies:
       preact-render-to-string: 6.8.2(preact@11.1.1)
+
+  zod@4.6.7: {}

@@ -4,8 +4,10 @@
 //
 // Every app has the same pages and markup:
 //   /                 root layout + latest 10 posts + `islands` interactive counters
-//   /posts            every post
+//   /posts            every post, plus a search island (fetches /api/search)
 //   /posts/[slug]     one post, Markdown rendered on the server with `marked`, inside a nested layout
+//   /stats, /contact  a sortable table island; a zod-validated form (see features.mjs)
+// The root layout carries the nav, the global CSS and a theme-toggle island on every page.
 // Data is read on the server only (loader / frontmatter / server load / server component / server API).
 // The home page and post pages carry a marker the dev metrics wait for.
 //
@@ -14,6 +16,7 @@
 //       (Nowaki and Next.js `revalidate = 60`; Nuxt `swr: 60`, its cache for a self-hosted server)
 
 import { postsModule } from "./content.mjs";
+import { astroFeatures, navLinks, nextFeatures, nowakiFeatures, nuxtFeatures, sveltekitFeatures } from "./features-fw.mjs";
 
 export const MARK_HOME = "bench-marker-home";
 export const MARK_POST = "bench-marker-post";
@@ -39,14 +42,17 @@ export default function Island${pad(k)}({ start = 0 }: { start?: number }) {
 `;
 
 // ---------------------------------------------------------------- Nowaki
-function nowaki({ pages, islands, isr }) {
+function nowaki({ pages, islands, mode, isr }) {
   const f = {};
   f["lib/posts.ts"] = postsModule(pages, true);
-  f["routes/_layout.tsx"] = `export default function RootLayout({ children }: { children: unknown }) {
+  f["routes/_layout.tsx"] = `import ThemeToggle from "../islands/ThemeToggle.tsx";
+
+export default function RootLayout({ children }: { children: unknown }) {
   return (
     <div style="${STYLE}">
       <header>
-        <nav><a href="/">Home</a> · <a href="/posts">Posts</a></nav>
+        <nav>${navLinks()}</nav>
+        <ThemeToggle />
       </header>
       {children}
       <footer><p>Built for the framework comparison.</p></footer>
@@ -58,9 +64,11 @@ function nowaki({ pages, islands, isr }) {
     .map((k) => `import Island${pad(k)} from "../islands/Island${pad(k)}.tsx";`)
     .join("\n");
   f["routes/index.tsx"] = `${imports}
+import { HEAD } from "../lib/head.ts";
 import { posts, type Post } from "../lib/posts.ts";
 
 export const title = "Home — Nowaki";
+export const head = HEAD;
 
 export const loader = () => ({ latest: posts.slice(0, 10) });
 
@@ -96,9 +104,12 @@ ${range(islands)
   );
 }
 `;
-  f["routes/posts/index.tsx"] = `import { posts, type Post } from "../../lib/posts.ts";
+  f["routes/posts/index.tsx"] = `import Search from "../../islands/Search.tsx";
+import { HEAD } from "../../lib/head.ts";
+import { posts, type Post } from "../../lib/posts.ts";
 
 export const title = "Posts — Nowaki";
+export const head = HEAD;
 
 export const loader = () => ({ posts: posts.map(({ body, ...p }) => p) });
 
@@ -106,6 +117,7 @@ export default function Posts({ data }: { data: { posts: Omit<Post, "body">[] } 
   return (
     <main>
       <h1>All posts</h1>
+      <Search />
       <ul>
         {data.posts.map((p) => (
           <li key={p.slug}>
@@ -118,11 +130,13 @@ export default function Posts({ data }: { data: { posts: Omit<Post, "body">[] } 
 }
 `;
   f["routes/posts/[slug].tsx"] = `import { marked } from "marked";
+import { HEAD } from "../../lib/head.ts";
 import { posts } from "../../lib/posts.ts";
 
 type Ctx = { params: { slug: string } };
 
 export const title = "Post — Nowaki";
+export const head = HEAD;
 
 export const staticPaths = () => posts.map((p) => ({ slug: p.slug }));
 ${isr ? "\nexport const revalidate = 60;\n" : ""}
@@ -145,6 +159,7 @@ export default function PostPage({ data }: { data: { post: { title: string; date
 }
 `;
   for (const k of range(islands)) f[`islands/Island${pad(k)}.tsx`] = preactIsland(k);
+  Object.assign(f, nowakiFeatures({ mode }));
   return f;
 }
 
@@ -173,6 +188,9 @@ export default defineConfig({
   f["tsconfig.json"] = `{ "extends": "astro/tsconfigs/strict", "include": [".astro/types.d.ts", "**/*"], "exclude": ["dist"], "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "preact" } }\n`;
   f["src/lib/posts.ts"] = postsModule(pages, true);
   f["src/layouts/Base.astro"] = `---
+import "../styles/global.css";
+import ThemeToggle from "../components/ThemeToggle.tsx";
+
 const { title } = Astro.props;
 ---
 
@@ -185,7 +203,8 @@ const { title } = Astro.props;
   <body>
     <div style="${STYLE}">
       <header>
-        <nav><a href="/">Home</a> · <a href="/posts">Posts</a></nav>
+        <nav>${navLinks()}</nav>
+        <ThemeToggle client:load />
       </header>
       <slot />
       <footer><p>Built for the framework comparison.</p></footer>
@@ -240,12 +259,14 @@ ${range(islands)
 `;
   f["src/pages/posts/index.astro"] = `---
 import PostsLayout from "../../layouts/PostsLayout.astro";
+import Search from "../../components/Search.tsx";
 import { posts } from "../../lib/posts";
 ---
 
 <PostsLayout title="Posts — Astro">
   <main>
     <h1>All posts</h1>
+    <Search client:load />
     <ul>
       {
         posts.map((p) => (
@@ -287,6 +308,7 @@ const html = marked.parse(post.body, { async: false }) as string;
 </PostsLayout>
 `;
   for (const k of range(islands)) f[`src/components/Island${pad(k)}.tsx`] = preactIsland(k);
+  Object.assign(f, astroFeatures({ mode }));
   return f;
 }
 
@@ -298,7 +320,12 @@ function sveltekit({ pages, islands, mode }) {
 import { sveltekit } from "@sveltejs/kit/vite";
 import { defineConfig } from "vite";
 
-export default defineConfig({ plugins: [sveltekit({ adapter: adapter() })] });
+${
+  server
+    ? `// adapter-node's CSRF check compares a form's Origin with paths.origin; a deployment sets it.
+export default defineConfig({ plugins: [sveltekit({ adapter: adapter(), paths: { origin: process.env.ORIGIN } })] });`
+    : "export default defineConfig({ plugins: [sveltekit({ adapter: adapter() })] });"
+}
 `;
   f["src/app.html"] = `<!doctype html>
 <html lang="en">
@@ -315,12 +342,16 @@ export default defineConfig({ plugins: [sveltekit({ adapter: adapter() })] });
   f["src/lib/server/posts.js"] = postsModule(pages);
   if (!server) f["src/routes/+layout.js"] = "export const prerender = true;\n";
   f["src/routes/+layout.svelte"] = `<script>
+  import "../app.css";
+  import ThemeToggle from "#lib/ThemeToggle.svelte";
+
   let { children } = $props();
 </script>
 
 <div style="${STYLE}">
   <header>
-    <nav><a href="/">Home</a> · <a href="/posts">Posts</a></nav>
+    <nav>${navLinks()}</nav>
+    <ThemeToggle />
   </header>
   {@render children()}
   <footer><p>Built for the framework comparison.</p></footer>
@@ -376,6 +407,8 @@ export function load() {
 }
 `;
   f["src/routes/posts/+page.svelte"] = `<script>
+  import Search from "#lib/Search.svelte";
+
   let { data } = $props();
 </script>
 
@@ -383,6 +416,7 @@ export function load() {
 
 <main>
   <h1>All posts</h1>
+  <Search />
   <ul>
     {#each data.posts as p (p.slug)}
       <li><a href={\`/posts/\${p.slug}\`}>{p.title}</a> <time>{p.date}</time></li>
@@ -428,6 +462,7 @@ export function load({ params }) {
 </button>
 `;
   }
+  Object.assign(f, sveltekitFeatures({ mode }));
   return f;
 }
 
@@ -465,13 +500,17 @@ function next({ pages, islands, mode, isr }) {
     2,
   )}\n`;
   f["lib/posts.ts"] = postsModule(pages, true);
-  f["app/layout.tsx"] = `export default function RootLayout({ children }: { children: React.ReactNode }) {
+  f["app/layout.tsx"] = `import "./globals.css";
+import ThemeToggle from "../components/ThemeToggle";
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
         <div style={{ fontFamily: "sans-serif", maxWidth: "42rem", margin: "0 auto", padding: "2rem 1rem" }}>
           <header>
-            <nav><a href="/">Home</a> · <a href="/posts">Posts</a></nav>
+            <nav>${navLinks()}</nav>
+            <ThemeToggle />
           </header>
           {children}
           <footer><p>Built for the framework comparison.</p></footer>
@@ -525,6 +564,7 @@ export default function PostsLayout({ children }: { children: React.ReactNode })
 }
 `;
   f["app/posts/page.tsx"] = `import Link from "next/link";
+import Search from "../../components/Search";
 import { posts } from "../../lib/posts";
 
 export const metadata = { title: "Posts — Next" };
@@ -533,6 +573,7 @@ export default function Posts() {
   return (
     <main>
       <h1>All posts</h1>
+      <Search />
       <ul>
         {posts.map((p) => (
           <li key={p.slug}>
@@ -594,6 +635,7 @@ export default function Island${pad(k)}({ start = 0 }: { start?: number }) {
 }
 `;
   }
+  Object.assign(f, nextFeatures({ mode }));
   return f;
 }
 
@@ -603,7 +645,8 @@ function nuxt({ pages, islands, mode, isr }) {
   f["nuxt.config.ts"] = `export default defineNuxtConfig({
   compatibilityDate: "2026-11-01",
   devtools: { enabled: false },
-  telemetry: false,${mode === "static" ? `\n  nitro: { prerender: { crawlLinks: true, routes: ["/"] } },` : ""}${isr ? `\n  routeRules: { "/posts/**": { swr: 60 } },` : ""}
+  telemetry: false,
+  css: ["~/assets/global.css"],${mode === "static" ? `\n  nitro: { prerender: { crawlLinks: true, routes: ["/"] } },` : ""}${isr ? `\n  routeRules: { "/posts/**": { swr: 60 } },` : ""}
 });
 `;
   f["tsconfig.json"] = `{ "files": [], "references": [{ "path": "./.nuxt/tsconfig.app.json" }, { "path": "./.nuxt/tsconfig.server.json" }, { "path": "./.nuxt/tsconfig.shared.json" }, { "path": "./.nuxt/tsconfig.node.json" }] }\n`;
@@ -634,7 +677,8 @@ export default defineEventHandler((event) => {
   f["app/layouts/default.vue"] = `<template>
   <div style="${STYLE}">
     <header>
-      <nav><NuxtLink to="/">Home</NuxtLink> · <NuxtLink to="/posts">Posts</NuxtLink></nav>
+      <nav>${navLinks((h, l) => `<NuxtLink to="${h}">${l}</NuxtLink>`)}</nav>
+      <ThemeToggle />
     </header>
     <slot />
     <footer><p>Built for the framework comparison.</p></footer>
@@ -680,6 +724,7 @@ const { data: posts } = await useFetch("/api/posts");
 <template>
   <main>
     <h1>All posts</h1>
+    <Search />
     <ul>
       <li v-for="p in posts" :key="p.slug">
         <NuxtLink :to="\`/posts/\${p.slug}\`">{{ p.title }}</NuxtLink> <time>{{ p.date }}</time>
@@ -721,6 +766,7 @@ onMounted(() => {
 </template>
 `;
   }
+  Object.assign(f, nuxtFeatures({ mode }));
   return f;
 }
 

@@ -8,7 +8,8 @@
 //   latency      300 sequential GETs (one connection, keep-alive) over 90 post pages:
 //                ttfb (response headers) and total (body received), p50 / p99 in ms
 //   throughput   oha, 50 connections for 10 s, after a 3 s warm-up at the same load:
-//                post pages (random slug per request) and `/`; req/s, p50 / p99, non-2xx count
+//                post pages (random slug per request), `/`, and the JSON API /api/search?q=;
+//                req/s, p50 / p99, non-2xx count
 //   memory       RSS of the server's whole process tree (MB): idle after the warm-up, and the
 //                peak sampled every 100 ms during the post-page throughput step
 // Pages are rendered per request (no ISR or page cache), unless --isr: then post pages use the
@@ -87,6 +88,8 @@ const env = {
   HOST: "127.0.0.1",
   NITRO_HOST: "127.0.0.1",
   NITRO_PORT: String(PORT),
+  // The public origin, as a deployment would set it (SvelteKit reads it at build time).
+  ORIGIN: `http://127.0.0.1:${PORT}`,
   FORCE_COLOR: "0",
   NO_COLOR: "1",
 };
@@ -98,6 +101,8 @@ const series = new Date().toISOString();
 const slugs = posts(pages).map((p) => p.slug);
 // 90 of the posts: the latency loop walks them in order; oha picks one at random per request.
 const pool = slugs.slice(0, Math.min(90, slugs.length));
+// A query that matches (titles are "Post N: ...").
+const API_PATH = "/api/search?q=post%201";
 const urlFile = path.join(os.tmpdir(), `compare-prod-urls-${process.pid}.txt`);
 writeFileSync(urlFile, pool.map((s) => `http://127.0.0.1:${PORT}/posts/${s}`).join("\n") + "\n");
 
@@ -235,6 +240,12 @@ for (let run = 1; run <= RUNS; run++) {
     if (startMs == null) throw new Error(`${fw.label} server did not start:\n${stderr.slice(-2000)}`);
     const check = await get(undefined, `/posts/${pool[0]}`);
     if (check.status !== 200 || !check.body.includes(MARK_POST)) throw new Error(`${fw.label}: post page did not render`);
+    const api = await get(undefined, API_PATH);
+    let hits = null;
+    try {
+      hits = JSON.parse(api.body);
+    } catch {}
+    if (api.status !== 200 || !Array.isArray(hits) || !hits.length) throw new Error(`${fw.label}: ${API_PATH} did not answer with matches`);
 
     // Warm-up at the measured load, so JIT and caches settle before anything is recorded.
     await oha(null, { seconds: 3, posts: true });
@@ -256,11 +267,13 @@ for (let run = 1; run <= RUNS; run++) {
     const post = await ohaWithPeak(pgid, null, { seconds: 10, posts: true });
     await sleep(1000);
     const home = await oha(`http://127.0.0.1:${PORT}/`, { seconds: 10 });
+    await sleep(1000);
+    const apiRun = await oha(`http://127.0.0.1:${PORT}${API_PATH}`, { seconds: 10 });
 
-    const row = { run, startMs, idleMB, peakMB: post.peakMB, latency, post, home };
+    const row = { run, startMs, idleMB, peakMB: post.peakMB, latency, post, home, api: apiRun };
     record(row);
     console.log(
-      `  run ${run}: start ${startMs} ms · idle ${idleMB} MB · peak ${post.peakMB} MB · ttfb p50 ${latency.ttfbP50} ms (p99 ${latency.ttfbP99}) · total p50 ${latency.totalP50} ms · post ${post.rps} req/s (p99 ${post.p99} ms, non-2xx ${post.non2xx}) · / ${home.rps} req/s (p99 ${home.p99} ms, non-2xx ${home.non2xx})`,
+      `  run ${run}: start ${startMs} ms · idle ${idleMB} MB · peak ${post.peakMB} MB · ttfb p50 ${latency.ttfbP50} ms (p99 ${latency.ttfbP99}) · total p50 ${latency.totalP50} ms · post ${post.rps} req/s (p99 ${post.p99} ms, non-2xx ${post.non2xx}) · / ${home.rps} req/s (p99 ${home.p99} ms, non-2xx ${home.non2xx}) · api ${apiRun.rps} req/s (p99 ${apiRun.p99} ms)`,
     );
   } finally {
     try {
