@@ -70,7 +70,7 @@ pub fn handle_sidecar_line(hub: &LiveHub, line: &str) -> bool {
     }
     let topic = topic.trim();
     if !topic.is_empty() && topic.len() <= MAX_TOPIC_LEN {
-        let _ = hub.topics.send(topic.to_string());
+        hub.publish(topic);
     }
     true
 }
@@ -136,13 +136,21 @@ impl RenderError {
     }
 }
 
+#[derive(Clone)]
 struct RenderOk {
     html: String,
     state: Option<Value>,
     sig: String,
     /// Present when the render reported the island's topics (`live.subscribe`).
     topics: Option<Vec<String>>,
+    /// The runtime says this render is the same for every connection that asks for it (a room
+    /// refresh that read no request context), so it can be shared (see `LiveHub::shared`).
+    shareable: bool,
 }
+
+/// One publish refresh, rendered once and handed to every connection waiting on the same key.
+/// `None` once rendered means the render wasn't shareable (or failed): each waiter renders its own.
+type SharedRender = Arc<tokio::sync::OnceCell<Option<RenderOk>>>;
 
 struct Rendered {
     nid: String,
@@ -160,6 +168,11 @@ pub struct LiveHub {
     /// Connections per room (sessions with an island subscribed to `room:<id>`), and its changes.
     rooms: std::sync::Mutex<HashMap<String, usize>>,
     room_presence: broadcast::Sender<(String, usize)>,
+    /// Bumped on every `publish(topic)`: refreshes from one publish share a generation.
+    topic_gen: std::sync::Mutex<HashMap<String, u64>>,
+    /// In-flight and finished refresh renders of the current generation, keyed by
+    /// generation + topic + island + version + state (#97).
+    shared: std::sync::Mutex<HashMap<String, SharedRender>>,
 }
 
 impl LiveHub {
@@ -179,7 +192,38 @@ impl LiveHub {
             topics,
             rooms: std::sync::Mutex::new(HashMap::new()),
             room_presence,
+            topic_gen: std::sync::Mutex::new(HashMap::new()),
+            shared: std::sync::Mutex::new(HashMap::new()),
         })
+    }
+
+    fn publish(&self, topic: &str) {
+        let gen = {
+            let mut g = self.topic_gen.lock().unwrap();
+            let n = g.entry(topic.to_string()).or_default();
+            *n += 1;
+            *n
+        };
+        // Entries of older generations of this topic are done; drop them.
+        let prefix = format!("{topic}\u{1f}");
+        self.shared.lock().unwrap().retain(|k, _| {
+            !k.starts_with(&prefix) || k.starts_with(&format!("{prefix}{gen}\u{1f}"))
+        });
+        let _ = self.topics.send(topic.to_string());
+    }
+
+    fn topic_generation(&self, topic: &str) -> u64 {
+        self.topic_gen
+            .lock()
+            .unwrap()
+            .get(topic)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// The shared slot for one refresh render, created by the first connection that asks.
+    fn shared_render(&self, key: String) -> SharedRender {
+        self.shared.lock().unwrap().entry(key).or_default().clone()
     }
 
     /// Accept one connection. None if over the cap (the caller rejects it).
@@ -326,6 +370,7 @@ pub async fn handle(
     let mut queue = EventQueue::new(MAX_QUEUED);
     let mut inflight: Option<tokio::task::JoinHandle<Rendered>> = None;
     let ctx = RenderCtx {
+        hub: hub.clone(),
         http,
         sidecar_port,
         version,
@@ -431,6 +476,7 @@ pub async fn handle(
 
 #[derive(Clone)]
 struct RenderCtx {
+    hub: Arc<LiveHub>,
     http: reqwest::Client,
     sidecar_port: u16,
     version: String,
@@ -490,6 +536,51 @@ async fn render(
     st: Value,
     sig: String,
 ) -> Rendered {
+    // A publish refresh (no handler) may be shared: the first connection renders, the others
+    // with the same island and state wait for that result instead of asking Node again (#97).
+    if let (Some(topic), true) = (ev.load.clone(), ev.handler.is_null()) {
+        let key = format!(
+            "{topic}\u{1f}{}\u{1f}{name}\u{1f}{}\u{1f}{st}",
+            ctx.hub.topic_generation(&topic),
+            ctx.version
+        );
+        let slot = ctx.hub.shared_render(key);
+        let mut mine = None;
+        let shared = slot
+            .get_or_init(|| async {
+                let r = render_once(&ctx, &ev, &name, &st, &sig).await;
+                let share = r.as_ref().ok().filter(|ok| ok.shareable).cloned();
+                mine = Some(r);
+                share
+            })
+            .await
+            .clone();
+        let result = match (mine, shared) {
+            (Some(r), _) => r,          // this connection rendered it
+            (None, Some(ok)) => Ok(ok), // another one did, and it is shareable
+            (None, None) => render_once(&ctx, &ev, &name, &st, &sig).await,
+        };
+        return Rendered {
+            nid: ev.nid,
+            name,
+            result,
+        };
+    }
+    let result = render_once(&ctx, &ev, &name, &st, &sig).await;
+    Rendered {
+        nid: ev.nid,
+        name,
+        result,
+    }
+}
+
+async fn render_once(
+    ctx: &RenderCtx,
+    ev: &PendingEvent,
+    name: &str,
+    st: &Value,
+    sig: &str,
+) -> Result<RenderOk, RenderError> {
     let body = json!({
         "name": name,
         "state": st,
@@ -535,16 +626,12 @@ async fn render(
             state: rv.get("state").cloned(),
             sig: nsig,
             topics,
+            shareable: rv.get("shareable").and_then(|v| v.as_bool()) == Some(true),
         })
     };
-    let result = match tokio::time::timeout(ctx.timeout, call).await {
+    match tokio::time::timeout(ctx.timeout, call).await {
         Ok(r) => r,
         Err(_) => Err(RenderError::Timeout),
-    };
-    Rendered {
-        nid: ev.nid,
-        name,
-        result,
     }
 }
 
@@ -556,6 +643,7 @@ async fn apply_rendered(socket: &mut WebSocket, islands: &mut Islands, r: Render
         state: new_state,
         sig: nsig,
         topics,
+        ..
     } = match r.result {
         Ok(v) => v,
         Err(e) => {
@@ -681,6 +769,27 @@ mod tests {
         ));
         assert_eq!(rx.try_recv().ok().as_deref(), Some("todos"));
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_publish_starts_a_new_generation_and_drops_older_shared_renders() {
+        let hub = LiveHub::new();
+        assert_eq!(hub.topic_generation("ticks"), 0);
+        hub.publish("ticks");
+        let g1 = hub.topic_generation("ticks");
+        let a = hub.shared_render(format!("ticks\u{1f}{g1}\u{1f}LiveTicks\u{1f}v\u{1f}{{}}"));
+        let b = hub.shared_render(format!("ticks\u{1f}{g1}\u{1f}LiveTicks\u{1f}v\u{1f}{{}}"));
+        assert!(Arc::ptr_eq(&a, &b), "the same refresh shares one slot");
+        let other = hub.shared_render("poll\u{1f}0\u{1f}LivePoll\u{1f}v\u{1f}{}".to_string());
+        hub.publish("ticks");
+        assert_eq!(hub.topic_generation("ticks"), g1 + 1);
+        let keys: Vec<String> = hub.shared.lock().unwrap().keys().cloned().collect();
+        assert!(
+            !keys.iter().any(|k| k.starts_with("ticks\u{1f}")),
+            "older ticks renders are dropped: {keys:?}"
+        );
+        assert_eq!(keys.len(), 1, "other topics are kept");
+        drop(other);
     }
 
     #[test]

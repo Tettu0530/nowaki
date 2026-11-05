@@ -91,6 +91,20 @@ milestone's worth of work; the codename is noted per entry.
   process only: `nowaki dev` and the adapters don't save rooms.
 
 ### Changed
+- **One render per publish for live queries and rooms** (#97). On a
+  `publish(topic)`, every subscribed connection used to ask the renderer for
+  its own refresh. Node renders one at a time, so the last of 1000
+  connections waited for all the others.
+  - Now the first connection renders, and connections with the same island,
+    state, and topic reuse that result.
+  - A render is reused only when the island has no `live.authorize` and the
+    render never called `getContext()`. The runtime reports this, so
+    anything that reads the request is still rendered per connection.
+  - `examples/hello` has a new `LiveViewer` island, which shows the
+    viewer's name. It is the per-connection case.
+  - Measured locally with `benchmarks/live-fanout.mjs` at 1000 connections:
+    - rooms: per-message p95 68 → 28 ms, everyone p50 69 → 24 ms;
+    - live query: per-message p95 65 → 31 ms, everyone p50 62 → 25 ms.
 - **Streamed responses reach the client as they are written** (#90). Before
   this change, `nowaki start` and `nowaki dev` read each response from the
   Node renderer in full before sending it on. With a
