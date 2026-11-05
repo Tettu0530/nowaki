@@ -108,7 +108,7 @@ Make Nowaki a first-class choice for blogs, docs, and marketing sites: content, 
 
 **Exit criteria**: a docs site is built from a typed content collection of Markdown and MDX, with responsive images and a generated sitemap, without third-party Markdown or image code in the app. Its build time and first-load JS are in BENCHMARKS.md, next to Astro's.
 
-- [ ] Content collections: `content/<name>/*` with frontmatter validated by a Standard Schema (the same as `serverFn`), `getCollection` / `getEntry`, generated types
+- [ ] Content collections: `content/<name>/*` (declared in `content/config.ts`) with YAML frontmatter validated by a Standard Schema (the same as `serverFn`), `getCollection` / `getEntry`, generated types; TOML frontmatter (`+++`) as a follow-up
 - [ ] Built-in Markdown, rendered in Rust at build time: heading anchors and table of contents, code highlighting, images through the asset pipeline
 - [ ] MDX: components and islands inside `.mdx` (parsed in Rust; how JSX is emitted is decided in an RFC)
 - [ ] Markdoc as an official plugin (it runs on the Node side through the plugin host)
@@ -132,12 +132,20 @@ Routing features that larger apps and existing Next.js / Remix users expect.
 ### v0.19 "Bora": Production and dev experience
 Control over what is cached, smooth navigation, visibility into a running app, and edits that keep their state.
 
-**Exit criteria**: an action updates a post and the next request for it is fresh on `nowaki start` and on a CDN adapter. A list-to-detail navigation animates with View Transitions and falls back cleanly where they are unsupported. A request shows up as one OpenTelemetry trace (route, middleware, loader, render). Editing an island in `nowaki dev` keeps its state.
+**Exit criteria**: an action updates a post and the next request for it is fresh on `nowaki start` and on a CDN adapter. A list-to-detail navigation animates with View Transitions and falls back cleanly where they are unsupported. A request shows up as one OpenTelemetry trace (route, middleware, loader, render). Editing an island in `nowaki dev` keeps its state, and the dev toolbar shows the page's islands and JS budget.
 
 - [ ] Cache invalidation: `revalidatePath()` / `revalidateTag()` from actions and API routes (route-level `tags`), purging the `nowaki start` ISR cache and calling the adapter's CDN purge where there is one
 - [ ] View Transitions in the client router (`document.startViewTransition`, opt-in per link or route, `view-transition-name` helpers), with a reduced-motion fallback
 - [ ] Observability: `Server-Timing` (middleware, loader, render, ISR status), structured JSON logs (`NOWAKI_LOG=json`), OpenTelemetry traces over OTLP (Rust front and renderer joined by `traceparent`, live events included), and a health endpoint
 - [ ] HMR: island edits keep component state (Preact Fast Refresh), CSS and CSS modules update without a reload, and route / layout edits re-render the page in place
+- [ ] Dev toolbar in `nowaki dev`, from the same data as the dev MCP endpoint:
+  - the current route, its layouts, and their loaders' timing
+  - each island on the page: client or live, hydration state, size, and the "could be live" hint
+  - the route's first-load JS against its `budget`
+  - ISR status and live connections and rooms
+  - recent errors with links to the source
+
+  It is injected only in dev and can be turned off.
 
 ### v1.0 "Nowaki": Stable release
 **Exit criteria**: Stability guarantees for the public API, complete documentation, established governance.
