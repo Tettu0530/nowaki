@@ -45,7 +45,8 @@ export default function Island${pad(k)}({ start = 0 }: { start?: number }) {
 function nowaki({ pages, islands, mode, isr }) {
   const f = {};
   f["lib/posts.ts"] = postsModule(pages, true);
-  f["routes/_layout.tsx"] = `import ThemeToggle from "../islands/ThemeToggle.tsx";
+  f["routes/_layout.tsx"] = `import "../styles/global.css";
+import ThemeToggle from "../islands/ThemeToggle.tsx";
 
 export default function RootLayout({ children }: { children: unknown }) {
   return (
@@ -64,11 +65,9 @@ export default function RootLayout({ children }: { children: unknown }) {
     .map((k) => `import Island${pad(k)} from "../islands/Island${pad(k)}.tsx";`)
     .join("\n");
   f["routes/index.tsx"] = `${imports}
-import { HEAD } from "../lib/head.ts";
 import { posts, type Post } from "../lib/posts.ts";
 
 export const title = "Home — Nowaki";
-export const head = HEAD;
 
 export const loader = () => ({ latest: posts.slice(0, 10) });
 
@@ -105,11 +104,9 @@ ${range(islands)
 }
 `;
   f["routes/posts/index.tsx"] = `import Search from "../../islands/Search.tsx";
-import { HEAD } from "../../lib/head.ts";
 import { posts, type Post } from "../../lib/posts.ts";
 
 export const title = "Posts — Nowaki";
-export const head = HEAD;
 
 export const loader = () => ({ posts: posts.map(({ body, ...p }) => p) });
 
@@ -130,13 +127,11 @@ export default function Posts({ data }: { data: { posts: Omit<Post, "body">[] } 
 }
 `;
   f["routes/posts/[slug].tsx"] = `import { marked } from "marked";
-import { HEAD } from "../../lib/head.ts";
 import { posts } from "../../lib/posts.ts";
 
 type Ctx = { params: { slug: string } };
 
 export const title = "Post — Nowaki";
-export const head = HEAD;
 
 export const staticPaths = () => posts.map((p) => ({ slug: p.slug }));
 ${isr ? "\nexport const revalidate = 60;\n" : ""}

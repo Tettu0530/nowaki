@@ -35,25 +35,17 @@ const STATUS_JSX = (sent, error) => `{${sent} && <p class="notice">Thanks, your 
 export function nowakiFeatures({ mode }) {
   const server = mode === "server";
   const f = {};
-  // As nowaki.dev itself does: the CSS as a string module, and a shared `head` every route
-  // exports (layouts cannot add to <head>). A `.css` import in a route resolves to an empty
-  // module in the server build, so it cannot be used for this.
-  f["lib/global-css.ts"] = `export const GLOBAL_CSS = ${JSON.stringify(GLOBAL_CSS)};\n`;
-  f["lib/head.ts"] = `import { GLOBAL_CSS } from "./global-css.ts";
-
-export const HEAD = \`<style>\${GLOBAL_CSS}</style>\`;
-`;
+  // Imported by the root layout; since 0.16.1 the build links it as a hashed stylesheet.
+  f["styles/global.css"] = GLOBAL_CSS;
   f["lib/search.ts"] = SEARCH_LIB;
   f["lib/contact.ts"] = CONTACT_SCHEMA;
   for (const [name, src] of Object.entries(preactIslands('import styles from "./SortTable.module.css";'))) f[`islands/${name}`] = src;
   f["islands/SortTable.module.css"] = TABLE_CSS;
   f["routes/stats.tsx"] = `import SortTable from "../islands/SortTable.tsx";
-import { HEAD } from "../lib/head.ts";
 import { posts } from "../lib/posts.ts";
 import { statsRows } from "../lib/search.ts";
 
 export const title = "Stats — Nowaki";
-export const head = HEAD;
 
 export const loader = () => ({ rows: statsRows(posts) });
 
@@ -68,10 +60,9 @@ export default function Stats({ data }: { data: { rows: ReturnType<typeof statsR
 }
 `;
   f["routes/contact.tsx"] = `import type { LoaderContext } from "@nowaki-dev/runtime";
-${server ? 'import { Contact } from "../lib/contact.ts";\n' : ""}import { HEAD } from "../lib/head.ts";
+${server ? 'import { Contact } from "../lib/contact.ts";\n' : ""}
 
 export const title = "Contact — Nowaki";
-export const head = HEAD;
 
 export const loader = ({ url }: LoaderContext) => ({
   sent: url.searchParams.has("sent"),

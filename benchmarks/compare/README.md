@@ -33,7 +33,7 @@ Each framework does these the way its docs show:
 
 | | global CSS | component CSS | form handler | API route |
 |---|---|---|---|---|
-| Nowaki | a CSS string module in every route's `head` (as nowaki.dev does; a `.css` import resolves to an empty module in the server build) | CSS module imported by the island | route `action` | `routes/api/search.ts` `GET` |
+| Nowaki | `import "../styles/global.css"` in the root layout (linked as a stylesheet since 0.16.1) | CSS module imported by the island | route `action` | `routes/api/search.ts` `GET` |
 | Astro | `import "../styles/global.css"` in the layout | CSS module | `Astro.request` in the page frontmatter | `src/pages/api/search.ts` `GET` |
 | SvelteKit | `import "../app.css"` in the root layout | `<style>` in the component | form `actions` | `+server.js` `GET` |
 | Next.js | `import "./globals.css"` in the root layout | CSS module | Server Action | Route Handler `GET` |
@@ -46,7 +46,7 @@ can, and absent where it cannot; search is exercised against the server builds.
 
 | app | framework | UI | how data is read |
 |---|---|---|---|
-| `apps/nowaki` | Nowaki 0.16.0 (runtime 0.15.0, released together) | Preact islands | route `loader` |
+| `apps/nowaki` | Nowaki 0.16.1 (runtime 0.15.1, released together) | Preact islands | route `loader` |
 | `apps/astro` | Astro 7.4.5 | Preact islands (`client:load`) | frontmatter |
 | `apps/sveltekit` | SvelteKit 3.1.1 | Svelte 5 | `+page.server.js` `load` |
 | `apps/next` | Next.js 16.4.5 | React 19 client components | async server components |
