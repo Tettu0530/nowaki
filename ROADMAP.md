@@ -103,6 +103,37 @@ Prove the differentiation with numbers and tooling.
 - [x] An MCP endpoint for `nowaki dev` (routes, module graph, recent errors)
 - [ ] Polish Jetstream docs, demos, and benchmarks
 
+### v0.17 "Mistral": Content sites
+Make Nowaki a first-class choice for blogs, docs, and marketing sites: content, images, and SEO out of the box.
+
+**Exit criteria**: a docs site is built from a typed content collection of Markdown and MDX, with responsive images and a generated sitemap, without third-party Markdown or image code in the app. Its build time and first-load JS are in BENCHMARKS.md, next to Astro's.
+
+- [ ] Content collections: `content/<name>/*` with frontmatter validated by a Standard Schema (the same as `serverFn`), `getCollection` / `getEntry`, generated types
+- [ ] Built-in Markdown, rendered in Rust at build time: heading anchors and table of contents, code highlighting, images through the asset pipeline
+- [ ] MDX: components and islands inside `.mdx` (parsed in Rust; how JSX is emitted is decided in an RFC)
+- [ ] Markdoc as an official plugin (it runs on the Node side through the plugin host)
+- [ ] Image component: `srcset` / `sizes`, `width` / `height` from the file (no layout shift), lazy loading by default, AVIF and lossy WebP, remote images with an allow-list
+- [ ] SEO and metadata: a typed `meta` (Open Graph, Twitter cards, canonical, robots, JSON-LD), `sitemap.xml` and `robots.txt` generated from the routes
+
+### v0.18 "Sirocco": Routing for real apps
+Routing features that larger apps and existing Next.js / Remix users expect.
+
+**Exit criteria**: a photo gallery opens a photo in a modal on client navigation and as a full page on reload (intercepting + parallel routes). The same app is served under a `basePath` in two locales.
+
+- [ ] Route groups: `(group)` directories that share layouts without adding a URL segment
+- [ ] Parallel routes (`@slot` directories rendered side by side in a layout) and intercepting routes (`(.)photo`, for modals)
+- [ ] Config-level `redirects`, `rewrites`, and `headers` in `nowaki.config.mjs`, applied by the Rust front and every adapter (`_redirects` / `_headers` / Vercel config where the host supports them)
+- [ ] `basePath`, and a `trailingSlash` policy (`"never"` / `"always"` / `"ignore"`, with redirects)
+- [ ] i18n routing: locale prefixes, a default locale, optional `Accept-Language` negotiation, `getLocale()`, `hreflang`, and per-locale content collections
+
+### v0.19 "Bora": Freshness and motion
+Control over what is cached, and smooth navigation between pages.
+
+**Exit criteria**: an action updates a post and the next request for it is fresh on `nowaki start` and on a CDN adapter. A list-to-detail navigation animates with View Transitions and falls back cleanly where they are unsupported.
+
+- [ ] Cache invalidation: `revalidatePath()` / `revalidateTag()` from actions and API routes (route-level `tags`), purging the `nowaki start` ISR cache and calling the adapter's CDN purge where there is one
+- [ ] View Transitions in the client router (`document.startViewTransition`, opt-in per link or route, `view-transition-name` helpers), with a reduced-motion fallback
+
 ### v1.0 "Nowaki": Stable release
 **Exit criteria**: Stability guarantees for the public API, complete documentation, established governance.
 
