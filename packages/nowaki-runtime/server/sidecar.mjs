@@ -201,8 +201,10 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(info));
     } catch (err) {
+      // The stack goes to the terminal, not into the response (Rust only needs the failure).
+      console.error("[nowaki dev-info]", err);
       res.writeHead(500, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: String(err?.stack ?? err) }));
+      res.end(JSON.stringify({ error: String(err?.message ?? err) }));
     }
     return;
   }
@@ -240,8 +242,9 @@ const server = createServer(async (req, res) => {
       }
       console.error("[nowaki live]", err);
       reportError("live", err);
+      // Logged above with its stack; the response carries only the message.
       res.writeHead(500, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: String(err?.stack ?? err) }));
+      res.end(JSON.stringify({ error: String(err?.message ?? err) }));
     }
     return;
   }
