@@ -99,7 +99,10 @@ The endpoint answers only requests from this machine (loopback peer, `Host`, and
 The native binary is distributed as platform-specific optional dependencies
 (`@nowaki-dev/cli-darwin-arm64`, `@nowaki-dev/cli-linux-x64-gnu`, …). npm/pnpm
 installs only the one matching your `os`/`cpu`/`libc`, and this wrapper resolves
-and executes it. There is no `postinstall` step, so it works with
+and executes it. On Unix, the wrapper **replaces itself** with the native binary
+(`process.execve`), so long-running commands like `nowaki start` do not keep an
+extra Node process resident. Windows and older Node versions fall back to
+`spawnSync`. There is no `postinstall` step, so it works with
 `--ignore-scripts` too.
 
 Prefer building from source? `cargo install nowaki` also works.
