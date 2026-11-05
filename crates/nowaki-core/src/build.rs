@@ -333,13 +333,18 @@ pub fn build_server(
     }
     // Plus every app module those import from anywhere else in the app (`data/`, `sections/`,
     // `utils/`, …): the conventional folders are entry points, not the whole server graph.
+    // One walk over the whole graph: every module is parsed once, however many entries reach it.
     {
         let mut seen: HashSet<PathBuf> = files.iter().cloned().collect();
-        let entries = files.clone();
-        for entry in &entries {
-            for m in crate::chunk::collect_app_modules(core, entry) {
-                if seen.insert(m.clone()) {
-                    files.push(m);
+        let mut stack: Vec<PathBuf> = files.clone();
+        while let Some(m) = stack.pop() {
+            let Ok(deps) = crate::chunk::module_deps(core, &m) else {
+                continue; // the transform below reports it
+            };
+            for d in deps {
+                if crate::chunk::is_app_module(core, &d) && seen.insert(d.clone()) {
+                    files.push(d.clone());
+                    stack.push(d);
                 }
             }
         }
