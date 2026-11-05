@@ -132,6 +132,7 @@ impl NowakiCore {
             salt_buf.extend_from_slice(v.as_bytes());
         }
         let disk_cache = cache::DiskCache::new(&root, xxh3_64(&salt_buf));
+        highlight::set_cache_root(&root);
         Self {
             root,
             resolver: resolve::make_resolver(),

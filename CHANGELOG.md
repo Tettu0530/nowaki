@@ -26,6 +26,13 @@ milestone's worth of work; the codename is noted per entry.
     where a Markdown entry uses `html`.
   - YAML frontmatter in an `.mdx` page is ignored; pages use `export const`
     (`title`, `meta`, …).
+
+### Changed
+- **Highlighted code is cached on disk** (`node_modules/.cache/nowaki/highlight`)
+  for Markdown entries and MDX alike. Syntect's grammars (TypeScript alone takes
+  about 150 ms to compile) load only on a cache miss, so a rebuild or a dev
+  reload of a docs site doesn't pay for them again. On the example app a
+  rebuild goes from about 0.5 s to 0.34 s.
 - **`<Image>` and `?image` imports** (v0.17).
   `import hero from "./hero.jpg?image"` gives the image's size and generated
   variants. `<Image src={hero} alt="…" />` from `@nowaki-dev/runtime/image`

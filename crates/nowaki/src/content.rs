@@ -307,7 +307,7 @@ fn markdown_options() -> Options<'static> {
 
 /// Fenced code blocks with a language (```rust) are highlighted at build time (see
 /// `nowaki_core::highlight`, shared with MDX).
-fn highlighter() -> &'static comrak::plugins::syntect::SyntectAdapter {
+fn highlighter() -> &'static nowaki_core::highlight::CachedAdapter {
     nowaki_core::highlight::adapter()
 }
 
