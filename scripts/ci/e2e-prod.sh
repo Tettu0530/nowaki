@@ -176,7 +176,7 @@ bash scripts/ci/assert-no-orphans.sh $TIMEOUT_PID
 ./target/debug/nowaki start examples/hello --port 3304 > /tmp/nowaki-warm.log &
 WARM_PID=$!
 for i in $(seq 1 20); do grep -q 'ISR warm-up' /tmp/nowaki-warm.log && break; sleep 1; done
-grep -q 'ISR warm-up: 2 of 2 pages cached' /tmp/nowaki-warm.log
+grep -q 'ISR warm-up: 3 of 3 pages cached' /tmp/nowaki-warm.log
 FIRST=$(curl -s -o /dev/null -D - http://127.0.0.1:3304/vary | tr -d '\r' | sed -n 's/^[Xx]-[Nn]owaki-[Cc]ache: //p')
 test "$FIRST" = HIT -o "$FIRST" = STALE
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3304/__nowaki/isr-urls)" = 404

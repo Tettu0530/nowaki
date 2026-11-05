@@ -178,7 +178,9 @@ async function renderRoute(env, table, match, mod, ctx, version) {
     const revalidate = isrSeconds(mod);
     return {
       status: 200,
-      headers: revalidate ? { ...HTML, "cache-control": swr(revalidate) } : HTML,
+      // The loaders run after the headers are sent, so what the page reads from the request is
+      // unknown here: never mark it shareable (a CDN could serve one visitor's page to another).
+      headers: revalidate ? { ...HTML, "cache-control": "private, no-cache" } : HTML,
       stream: earlyDocument(head, tail, {
         node: async () => {
           const n = await routeNode(env, table, match, mod, ctx, version);
@@ -211,7 +213,8 @@ async function renderRoute(env, table, match, mod, ctx, version) {
   if (mod.streaming === true && typeof env.renderShell === "function") {
     const { head, tail } = env.renderShell({ mod, meta });
     const bodyStream = await renderToReadableStream(node);
-    const headers = revalidate ? { ...HTML, "cache-control": swr(revalidate) } : HTML;
+    // The loaders have run (above), so the request inputs they read are known.
+    const headers = revalidate ? { ...HTML, ...sharedCacheHeaders(revalidate, ctx.__vary()) } : HTML;
     return {
       status: 200,
       headers,
@@ -226,7 +229,7 @@ async function renderRoute(env, table, match, mod, ctx, version) {
     const vary = ctx.__vary();
     headers = {
       ...HTML,
-      "cache-control": swr(revalidate),
+      ...sharedCacheHeaders(revalidate, vary),
       "x-nowaki-revalidate": String(revalidate),
       "x-nowaki-vary": vary.headers.join(","),
       "x-nowaki-vary-query": vary.query ? "1" : "0",
@@ -242,6 +245,22 @@ function isrSeconds(mod) {
 
 function swr(seconds) {
   return `public, s-maxage=${seconds}, stale-while-revalidate`;
+}
+
+// Cache headers an ISR page sends to browsers and CDNs. `vary` is what the render read from the
+// request (ctx.__vary()). x-nowaki-vary only reaches the `nowaki start` cache, so a CDN in front
+// (or the edge of an adapter's host) needs the standard headers:
+// - cookie / authorization / the whole request ("*"): the page is per-user. `private`, never
+//   shared; some CDNs ignore `Vary: Cookie`, so Vary alone isn't enough.
+// - other headers (accept-language, …): shareable, with `Vary` naming them.
+// - the query string needs nothing: it is part of the URL every cache keys by.
+const PER_USER = new Set(["*", "cookie", "authorization"]);
+export function sharedCacheHeaders(revalidate, vary) {
+  const read = vary?.headers ?? [];
+  if (read.some((h) => PER_USER.has(h))) return { "cache-control": "private, no-cache" };
+  const out = { "cache-control": swr(revalidate) };
+  if (read.length) out.vary = read.join(", ");
+  return out;
 }
 
 // The client router fetches this once at startup. Error boundaries receive the message and reset
