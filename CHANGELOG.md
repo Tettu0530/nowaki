@@ -11,6 +11,18 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **`export const streaming = "early"`** (#112) sends the document shell
+  before any loader runs, so the first byte doesn't wait for data. On
+  `examples/hello` `/stream-early`, with a 300 ms loader, the shell arrives
+  in about 3 ms. Once the shell is sent, the status and headers are fixed:
+  - `meta` sees only the static `title` / `head`.
+  - A loader redirect becomes a client-side `location.replace`.
+  - A loader error renders the nearest `error.tsx` in the page, with the
+    status still 200. The error message appears only in dev.
+  - Cookies set by a loader are not sent.
+
+  `streaming = true` is unchanged: loaders run first, then the shell is
+  sent and the body streams.
 - **First-load JS per route, and budgets that fail the build.** Every
   `nowaki build` and `nowaki prerender` now prints the gzip size of the JS
   each page route loads first, and writes the same data to
