@@ -138,7 +138,7 @@ mod tests {
     fn js_string_escapes_for_javascript() {
         assert_eq!(js_string("a\"b\\c"), r#""a\"b\\c""#);
         assert_eq!(js_string("x\ny\u{1f}z"), r#""x\ny\u001fz""#);
-        assert_eq!(js_string("caf\u{e9} \u{2028}"), "\"caf\u{e9} \\u2028\"");
+        assert_eq!(js_string("\u{e9} \u{2028}"), "\"\u{e9} \\u2028\"");
     }
 
     #[test]
