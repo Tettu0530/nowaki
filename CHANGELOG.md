@@ -10,6 +10,17 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.16.1] — 2026-11-05 · patch
+
+Packages: `nowaki` / `nowaki-core` 0.16.1 (crates.io, npm), `@nowaki-dev/runtime`
+0.15.1, `create-nowaki` / `create-nowaki-app` 0.17.1. New apps get
+`@nowaki-dev/runtime@^0.15.1` and `nowaki@^0.16.1`.
+
+CSS that routes, layouts, and their components import now reaches the page,
+as linked stylesheets. A plain `.css` import's default export is its text.
+`nowaki dev` no longer drops quick changes, and no longer reloads on its own
+cache writes on Windows.
+
 ### Fixed
 - **CSS imported by routes and layouts now reaches the page.** Only islands
   ship JS to the browser, so `import "../styles/site.css"` in a route,
@@ -717,7 +728,8 @@ and the runtime at 0.9.0.
 - Published to crates.io (`nowaki-core`, `nowaki`) and npm (`@nowaki-dev/runtime`,
   `create-nowaki`, `create-nowaki-app`).
 
-[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.16.1...HEAD
+[0.16.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.16.1
 [0.16.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.16.0
 [0.15.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.15.0
 [0.14.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.14.1
