@@ -97,7 +97,7 @@ const rel = (file) => path.relative(appRoot, file).split(path.sep).join("/");
 
 function routePattern(segments) {
   if (segments.length === 0) return "/";
-  return "/" + segments.map((s) => s.lit ?? (s.rest ? `[...${s.param}]` : `[${s.param}]`)).join("/");
+  return "/" + segments.map((s) => s.lit ?? (s.rest ? `[...${s.param}]` : `[${s.param}]${s.suffix ?? ""}`)).join("/");
 }
 
 // For the dev MCP `routes` / `module_graph` tools: the route table and island registry the
@@ -106,7 +106,7 @@ async function devInfo(version) {
   const table = await scanRoutes(appRoot);
   const routes = [];
   for (const r of table.routes) {
-    const route = { pattern: routePattern(r.segments), file: rel(r.file), kind: r.isApi ? "api" : "page" };
+    const route = { pattern: routePattern(r.segments), file: rel(r.file), kind: r.fileExt ? "file" : r.isApi ? "api" : "page" };
     try {
       const mod = await env.importModule(r.file, version);
       route.exports = Object.keys(mod).sort();

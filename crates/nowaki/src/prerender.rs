@@ -99,12 +99,13 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
                     eprintln!("[nowaki] {url_path}: skipped ({})", resp.status());
                     return Ok::<_, anyhow::Error>(None);
                 }
-                let html = resp.text().await?;
-                let live = html.contains("<nowaki-live");
+                // Bytes, not text: file routes (og/[card].png.ts) can return binary.
+                let bytes = resp.bytes().await?;
+                let live = bytes.windows(12).any(|w| w == b"<nowaki-live");
                 if let Some(parent) = file.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
-                tokio::fs::write(file, html).await?;
+                tokio::fs::write(file, bytes).await?;
                 Ok(Some((url_path.as_str(), live)))
             }
         })

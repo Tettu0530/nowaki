@@ -3,6 +3,8 @@
 // Usage: node static-paths.mjs <dist/server>   → prints [{ url, file }] as JSON
 //   url  — percent-encoded request path, e.g. /blog/a%20b
 //   file — decoded path to write under the output dir, e.g. blog/a b/index.html
+// File routes (feed.xml.ts, og/[card].png.ts) are listed too, static ones included, with `file`
+// being the path itself (og/a.png), unless they `export const prerender = false`.
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -18,6 +20,23 @@ await loadContent(serverDir); // so staticPaths can call getCollection
 const pages = [];
 
 for (const route of routes) {
+  if (route.fileExt) {
+    const mod = await import(pathToFileURL(route.file).href);
+    if (mod.prerender === false) continue;
+    if (!route.segments.some((s) => s.param)) {
+      pages.push(pageFor(route, {}));
+      continue;
+    }
+    let list = mod.staticPaths;
+    if (typeof list === "function") list = await list();
+    if (list === undefined) {
+      console.error(`[nowaki] ${path.relative(serverDir, route.file)}: a dynamic file route needs \`export const staticPaths\` to be prerendered; skipped`);
+      continue;
+    }
+    if (!Array.isArray(list)) throw new Error(`${route.file}: staticPaths must be an array of params objects`);
+    for (const params of list) pages.push(pageFor(route, params ?? {}));
+    continue;
+  }
   if (route.isApi || !route.segments.some((s) => s.param)) continue;
   const mod = await import(pathToFileURL(route.file).href);
   let list = mod.staticPaths;
@@ -46,9 +65,11 @@ function pageFor(route, params) {
       if (s === "" || s === "." || s === ".." || s.includes("/") || s.includes("\\")) {
         throw new Error(`${route.file}: staticPaths param "${seg.param}" has an invalid value ${JSON.stringify(part)}`);
       }
-      url.push(encodeURIComponent(s));
-      file.push(s);
+      const suffix = seg.suffix ?? "";
+      url.push(encodeURIComponent(s) + suffix);
+      file.push(s + suffix);
     }
   }
+  if (route.fileExt) return { url: "/" + url.join("/"), file: file.join("/"), kind: "file" };
   return { url: "/" + url.join("/"), file: [...file, "index.html"].join("/") };
 }

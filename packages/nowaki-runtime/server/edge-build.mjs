@@ -44,6 +44,7 @@ const routeTable = {
     file: (addModule(r.file), keyOf(r.file)),
     segments: r.segments,
     isApi: r.isApi,
+    fileExt: r.fileExt,
     specificity: r.specificity,
   })),
   layouts: table.layouts.map((l) => ({ prefix: l.prefix, file: (addModule(l.file), keyOf(l.file)) })),

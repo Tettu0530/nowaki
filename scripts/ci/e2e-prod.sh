@@ -117,6 +117,13 @@ curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<span style="font-weight:
 # route / layout CSS (0.16.1): the layout's and the page's stylesheets are linked in the head and
 # served as text/css; a plain .css import's default export is its text (inlined by /styled's head)
 curl -sf http://127.0.0.1:3300/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'
+# file routes: feed.xml.ts (static) and og/[card].png.ts (a param with a fixed extension, bytes)
+curl -s -D - -o /dev/null http://127.0.0.1:3300/feed.xml | grep -qi '^content-type: application/xml'
+curl -sf http://127.0.0.1:3300/feed.xml | grep -q '<rss version="2.0">'
+curl -s -D - -o /dev/null http://127.0.0.1:3300/og/intro.png | grep -qi '^content-type: image/png'
+curl -sf http://127.0.0.1:3300/og/intro.png | head -c 4 | od -An -c | grep -q 'P   N   G'
+test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3300/og/nope.png)" = 404
+test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3300/og/intro.jpg)" = 404
 # htmlAttrs / bodyAttrs in the Rust-assembled document
 curl -sf http://127.0.0.1:3300/styled | grep -q '<html lang="ja" data-sheet-rev="3" data-theme="paper" data-nowaki-attrs="data-sheet-rev data-theme">'
 curl -sf http://127.0.0.1:3300/styled | grep -q '<body class="site styled-page" data-site="hello" data-quote="&quot;&lt;x&gt;&quot;" data-nowaki-attrs="class data-site data-quote">'

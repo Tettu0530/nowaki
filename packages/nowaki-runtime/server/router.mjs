@@ -59,7 +59,6 @@ export async function scanRoutes(appRoot) {
     }
     if (base.startsWith("_")) continue; // reserved
 
-    const isApi = rel === "api" || rel.startsWith("api/");
     let urlPath = "/" + rel.replace(ROUTE_EXT, "");
     if (urlPath.endsWith("/index")) {
       urlPath = urlPath.slice(0, -"/index".length) || "/";
@@ -70,14 +69,26 @@ export async function scanRoutes(appRoot) {
       .map((seg) => {
         const rest = seg.match(/^\[\.\.\.(.+)\]$/); // [...slug] = catch-all
         if (rest) return { param: rest[1], rest: true };
+        // [card].png: a param with a fixed extension after it (file routes)
+        const suffixed = seg.match(/^\[([^\].]+)\](\.[^/]+)$/);
+        if (suffixed) return { param: suffixed[1], suffix: suffixed[2] };
         const m = seg.match(/^\[(.+)\]$/);
         return m ? { param: m[1] } : { lit: seg };
       });
+    // A file route's file name has an extension (feed.xml.ts, [card].png.ts): like an API route,
+    // it returns a body instead of rendering a page, with the Content-Type of that extension.
+    // Decided by the file name, so v1.2/index.tsx stays a page (as nowaki-core decides it too).
+    const last = segments[segments.length - 1];
+    const nameExt = base.replace(/^.*\]/, "").match(/\.[A-Za-z0-9]+$/)?.[0];
+    const fileExt = base === "index" ? undefined : (last?.suffix ?? nameExt);
+    const isApi = rel === "api" || rel.startsWith("api/") || fileExt !== undefined;
     routes.push({
       file: abs,
       segments,
       isApi,
-      specificity: segments.filter((s) => s.lit).length,
+      fileExt,
+      // A suffixed param ([card].png) is more specific than a bare one, less than a literal.
+      specificity: segments.filter((s) => s.lit).length + segments.filter((s) => s.suffix).length / 2,
       rest: segments.some((s) => s.rest),
     });
   }
@@ -110,6 +121,9 @@ export function matchRoute(routesOrTable, pathname) {
       const part = decodeURIComponent(parts[i]);
       if (seg.lit !== undefined) {
         if (seg.lit !== part) continue outer;
+      } else if (seg.suffix !== undefined) {
+        if (part.length <= seg.suffix.length || !part.endsWith(seg.suffix)) continue outer;
+        params[seg.param] = part.slice(0, -seg.suffix.length);
       } else {
         params[seg.param] = part;
       }
@@ -118,7 +132,7 @@ export function matchRoute(routesOrTable, pathname) {
       // A catch-all param is an array of the remaining segments.
       params[segs[segs.length - 1].param] = parts.slice(fixed).map((p) => decodeURIComponent(p));
     }
-    return { file: route.file, params, isApi: route.isApi };
+    return { file: route.file, params, isApi: route.isApi, fileExt: route.fileExt };
   }
   return null;
 }

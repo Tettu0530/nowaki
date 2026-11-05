@@ -34,6 +34,8 @@ function internalAnchor(target) {
     return null;
   }
   if (url.origin !== location.origin) return null;
+  // A path ending in a file name (/feed.xml, /og/a.png, /robots.txt) is a file, not a page.
+  if (/\.[A-Za-z0-9]+$/.test(url.pathname.split("/").pop())) return null;
   return url;
 }
 
