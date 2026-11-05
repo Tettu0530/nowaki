@@ -44,6 +44,8 @@ curl -s -D - -o /dev/null http://127.0.0.1:3310/og/intro.png | grep -qi '^conten
 curl -sf http://127.0.0.1:3310/og/intro.png | head -c 4 | od -An -c | grep -q 'P   N   G'
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3310/og/nope.png)" = 404
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3310/og/intro.jpg)" = 404
+# MDX entries render from their compiled module on the node adapter
+curl -sf http://127.0.0.1:3310/docs/components | grep -q 'an expression (42), and highlighted code'
 # the node adapter reads the site from dist/server/site.json
 curl -sf http://127.0.0.1:3310/sitemap.xml | grep -q '<loc>https://hello.nowaki.dev/</loc>'
 curl -sf http://127.0.0.1:3310/docs/intro | grep -q 'og:url" content="https://hello.nowaki.dev/docs/intro"'
@@ -119,6 +121,9 @@ grep -qi 'x-content-type-options: nosniff' examples/hello/dist/static/_headers
 grep -qE '<source type="image/avif" srcset="/_nowaki/hero-640\.[0-9a-f]+\.avif' examples/hello/dist/static/gallery/index.html
 grep -qE '<picture><source type="image/avif"' examples/hello/dist/static/docs/intro/index.html
 ls examples/hello/dist/static/_nowaki/hero-640.*.avif >/dev/null
+# MDX in the static output: the page and the entry (an island inside it)
+grep -q '<h1 id="an-mdx-page">An MDX page</h1>' examples/hello/dist/static/guide/index.html
+grep -q '<nowaki-island name="Counter"' examples/hello/dist/static/docs/components/index.html
 # SEO in the static output: sitemap.xml generated against the site, public/robots.txt kept
 grep -q '<loc>https://hello.nowaki.dev/docs/intro</loc>' examples/hello/dist/static/sitemap.xml
 ! grep -qE '/boom<|/secret<' examples/hello/dist/static/sitemap.xml

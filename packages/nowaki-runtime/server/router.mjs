@@ -14,7 +14,7 @@
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 
-const ROUTE_EXT = /\.(tsx|ts|jsx|js)$/;
+const ROUTE_EXT = /\.(tsx|ts|jsx|js|mdx)$/;
 
 export async function scanRoutes(appRoot) {
   const routesDir = path.join(appRoot, "routes");

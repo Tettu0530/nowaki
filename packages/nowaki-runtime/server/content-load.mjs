@@ -15,7 +15,7 @@ export async function loadContent(serverDir) {
     return null;
   }
   const config = await import(pathToFileURL(path.join(serverDir, "content/config.js")).href);
-  const state = await validateContent(raw, config);
+  const state = await validateContent(raw, config, (e) => import(pathToFileURL(path.join(serverDir, e.module)).href));
   setContent(state);
   return state;
 }

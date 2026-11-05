@@ -4,7 +4,7 @@
 import { fileURLToPath } from "node:url";
 
 const RUST = `http://127.0.0.1:${process.env.NOWAKI_RUST_PORT ?? "3000"}`;
-const TS_RE = /\.(tsx|ts|jsx|tsrx)$/;
+const TS_RE = /\.(tsx|ts|jsx|tsrx|mdx)$/;
 
 export async function resolve(specifier, context, nextResolve) {
   const result = await nextResolve(specifier, context);

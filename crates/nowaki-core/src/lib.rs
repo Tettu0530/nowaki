@@ -7,8 +7,10 @@ pub mod compress;
 pub mod css;
 pub mod env;
 pub mod graph;
+pub mod highlight;
 pub mod image;
 pub mod live_hint;
+pub mod mdx;
 pub mod page_scripts;
 pub mod public;
 pub mod resolve;
@@ -62,7 +64,7 @@ pub trait PluginBridge: Send + Sync {
 pub fn is_transformable(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()),
-        Some("ts" | "tsx" | "js" | "jsx" | "mjs" | "tsrx")
+        Some("ts" | "tsx" | "js" | "jsx" | "mjs" | "tsrx" | "mdx")
     )
 }
 
@@ -195,8 +197,12 @@ impl NowakiCore {
             }
             return Ok(source);
         }
-        let source = std::fs::read_to_string(abs)
+        let mut source = std::fs::read_to_string(abs)
             .with_context(|| format!("failed to read: {}", abs.display()))?;
+        // MDX becomes TSX first; everything after (plugins, oxc, the graph) sees a TSX module.
+        if abs.extension().and_then(|e| e.to_str()) == Some("mdx") {
+            source = crate::mdx::to_tsx(&source).with_context(|| format!("{}", abs.display()))?;
+        }
         let Some(bridge) = &self.plugins else {
             return Ok(source);
         };
@@ -303,7 +309,7 @@ mod tests {
 
     #[test]
     fn transformable_extensions() {
-        for ext in ["ts", "tsx", "js", "jsx", "mjs", "tsrx"] {
+        for ext in ["ts", "tsx", "js", "jsx", "mjs", "tsrx", "mdx"] {
             assert!(is_transformable(Path::new(&format!("a.{ext}"))), "{ext}");
         }
         for ext in ["css", "json", "png", "txt", "md"] {

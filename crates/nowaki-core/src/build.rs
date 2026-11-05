@@ -580,7 +580,7 @@ fn rewrite_server_spec(spec: &str) -> Option<String> {
         // CSS is client-only
         return Some(crate::css::CSS_NOOP_SPECIFIER.to_string());
     }
-    for ext in [".tsx", ".jsx", ".ts", ".tsrx"] {
+    for ext in [".tsx", ".jsx", ".ts", ".tsrx", ".mdx"] {
         if let Some(stem) = spec.strip_suffix(ext) {
             return Some(format!("{stem}.js"));
         }

@@ -45,7 +45,8 @@ async function ensureContent(version) {
     .find((f) => existsSync(f));
   try {
     const config = configFile ? await env.importModule(configFile, version) : {};
-    setContent(await validateContent(raw, config));
+    // MDX entries render from their source in dev (the Rust transform turns .mdx into a module).
+    setContent(await validateContent(raw, config, (e) => env.importModule(path.join(appRoot, e.file), version)));
   } catch (err) {
     setContent({ collections: {}, errors: [`content/config: ${err?.message ?? err}`] });
   }

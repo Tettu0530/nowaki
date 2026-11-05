@@ -77,6 +77,17 @@ curl -s -D - -o /dev/null "$B/__nowaki/image?f=/hero.jpg&w=640&fmt=avif" | grep 
 curl -s -D - -o /dev/null "$B/__nowaki/image?f=/hero.jpg&w=640&fmt=orig" | grep -qi '^content-type: image/jpeg'
 test "$(curl -s -o /dev/null -w '%{http_code}' "$B/__nowaki/image?f=/package.json&w=10&fmt=orig")" = 403
 curl -sf $B/docs/intro | grep -q '<picture><source type="image/avif" srcset="/__nowaki/image?f=/hero.jpg'
+# MDX: a .mdx page (ESM exports, expressions, GFM, an island) and an .mdx content entry
+curl -sf $B/guide | grep -q '<title>Guide (MDX) — Nowaki</title>'
+curl -sf $B/guide | grep -q '<h1 id="an-mdx-page">An MDX page</h1>'
+curl -sf $B/guide | grep -q '1 + 1 = 2.</p>'
+curl -sf $B/guide | grep -q '<th align="left">Feature</th>'
+curl -sf $B/guide | grep -q '<nowaki-island name="Counter"'
+curl -sf $B/docs/components | grep -q 'an expression (42), and highlighted code'
+curl -sf $B/docs/components | grep -q 'client="visible"'
+curl -sf $B/docs/components | grep -q '<pre style="background-color:#ffffff;"><code class="language-ts"><span'
+curl -sf $B/docs/components | grep -q '<picture><source type="image/avif"'
+curl -sf $B/docs | grep -q 'Components in MDX'
 # SEO: typed meta → head tags (absolute against nowaki.config `site`), generated sitemap.xml
 curl -sf $B/docs/intro | grep -q '<link rel="canonical" href="https://hello.nowaki.dev/docs/intro" />'
 curl -sf $B/docs/intro | grep -q '<meta property="og:image" content="https://hello.nowaki.dev/og/intro.png" />'
