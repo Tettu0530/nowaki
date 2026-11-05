@@ -111,6 +111,9 @@ curl -sf http://127.0.0.1:3300/docs | grep -q 'href="/docs/intro">Introduction</
 curl -sf http://127.0.0.1:3300/docs/intro | grep -q '<h2 id="why-content-collections"'
 curl -sf http://127.0.0.1:3300/docs/intro | grep -q 'href="#next-steps"'
 curl -sf http://127.0.0.1:3300/docs/intro | grep -q '<title>Introduction — Nowaki docs</title>'
+# fenced code is highlighted at build time (inline styles, no client JS)
+curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<pre style="background-color:#ffffff;">'
+curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<span style="font-weight:bold;color:#a71d5d;">export'
 # route / layout CSS (0.16.1): the layout's and the page's stylesheets are linked in the head and
 # served as text/css; a plain .css import's default export is its text (inlined by /styled's head)
 curl -sf http://127.0.0.1:3300/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'

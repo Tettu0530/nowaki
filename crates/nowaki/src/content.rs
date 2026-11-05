@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use comrak::nodes::NodeValue;
-use comrak::{format_html, parse_document, Arena, Options};
+use comrak::plugins::syntect::{SyntectAdapter, SyntectAdapterBuilder};
+use comrak::{format_html_with_plugins, parse_document, Arena, Options};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -255,6 +256,22 @@ fn markdown_options() -> Options<'static> {
     o
 }
 
+/// Fenced code blocks with a language (```rust) are highlighted at build time with syntect, as
+/// inline `style` colors (no CSS or client JS needed; CSP allows style attributes). The syntax
+/// and theme sets load once per process. Pure-Rust regexes (no Oniguruma C library). Syntaxes
+/// come from two-face (bat's set): syntect's defaults have no TypeScript / TSX, Vue, or TOML.
+pub const CODE_THEME: &str = "InspiredGitHub";
+
+fn highlighter() -> &'static SyntectAdapter {
+    static ADAPTER: std::sync::OnceLock<SyntectAdapter> = std::sync::OnceLock::new();
+    ADAPTER.get_or_init(|| {
+        SyntectAdapterBuilder::new()
+            .syntax_set(two_face::syntax::extra_newlines())
+            .theme(CODE_THEME)
+            .build()
+    })
+}
+
 /// Renders Markdown to HTML and lists its headings (with the same ids as the anchors comrak adds).
 pub fn render_markdown(md: &str) -> (String, Vec<Heading>) {
     let arena = Arena::new();
@@ -278,8 +295,13 @@ pub fn render_markdown(md: &str) -> (String, Vec<Heading>) {
         let id = anchorizer.anchorize(&text);
         headings.push(Heading { depth, text, id });
     }
+    let mut plugins = comrak::options::Plugins::default();
+    // Loading the syntax set takes a moment: only when the entry has a code fence.
+    if md.contains("```") || md.contains("~~~") {
+        plugins.render.codefence_syntax_highlighter = Some(highlighter());
+    }
     let mut html = String::new();
-    format_html(doc, &options, &mut html).expect("writing to a String");
+    format_html_with_plugins(doc, &options, &mut html, &plugins).expect("writing to a String");
     (html, headings)
 }
 
@@ -351,6 +373,33 @@ mod tests {
                 h.id
             );
         }
+    }
+
+    #[test]
+    fn highlights_fenced_code_with_a_language_at_build_time() {
+        let (html, _) =
+            render_markdown("```rust\nfn main() { let x = 1; }\n```\n\n```\nplain text\n```\n");
+        // TypeScript / TSX come from two-face's syntax set (not in syntect's defaults).
+        let (tsx, _) = render_markdown("```tsx\nconst a: number = 1;\n```\n");
+        let colors: std::collections::HashSet<&str> = tsx
+            .match_indices("color:#")
+            .map(|(i, _)| &tsx[i..i + 13])
+            .collect();
+        assert!(
+            colors.len() > 1,
+            "tsx should get more than one color:\n{tsx}"
+        );
+        // Colored spans for the Rust block (keywords get their own style).
+        assert!(html.contains("<span style=\"color:"), "{html}");
+        assert!(
+            html.contains(">fn</span>") || html.contains(">fn </span>"),
+            "{html}"
+        );
+        // A block without a language stays plain, escaped text.
+        assert!(html.contains("plain text"), "{html}");
+        // Unknown languages don't fail the build.
+        let (html, _) = render_markdown("```not-a-language\n<x>\n```\n");
+        assert!(html.contains("&lt;x&gt;"), "{html}");
     }
 
     #[test]

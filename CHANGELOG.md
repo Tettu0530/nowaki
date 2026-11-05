@@ -34,8 +34,18 @@ milestone's worth of work; the codename is noted per entry.
   - `examples/hello` has a `docs` collection with `/docs` and
     `/docs/[slug]`.
 
-  Code highlighting, images in Markdown, MDX, and TOML frontmatter come
-  later in v0.17.
+  Images in Markdown, MDX, and TOML frontmatter come later in v0.17.
+- **Code highlighting in Markdown, at build time.** Fenced code blocks with
+  a language (` ```tsx `) are highlighted in Rust with syntect when the
+  content is built. The colors are inline styles, so no client JS or theme
+  CSS is needed, and an enforced CSP allows them.
+  - Syntaxes come from two-face (bat's set), which adds TypeScript / TSX,
+    Vue, Svelte, TOML, and more to syntect's defaults.
+  - The theme is `InspiredGitHub` (light). A theme setting is a follow-up.
+  - A block without a language, or with an unknown one, stays plain
+    escaped text.
+  - The regexes are pure Rust (no Oniguruma C library). The `nowaki`
+    binary grows by about 4.8 MB with the syntax and theme data.
 
 ## [0.16.1] — 2026-11-05 · patch
 
