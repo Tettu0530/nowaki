@@ -777,10 +777,10 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
     })
 }
 
-/// Whether it has `export const live`. Checked after read_source (.tsrx already compiled).
+/// Whether it exports `live` (read from the AST, after read_source, so .tsrx is already compiled).
 fn is_live_island(core: &NowakiCore, abs: &Path) -> bool {
     core.read_source(abs)
-        .map(|s| s.contains("export const live"))
+        .map(|s| crate::live_hint::exports_live(abs, &s))
         .unwrap_or(false)
 }
 

@@ -101,6 +101,11 @@ node scripts/livetest.mjs http://127.0.0.1:3300
 # leak) and collapse unused-query floods (#6/#7).
 ! grep -rl "$HOME" examples/hello/dist/client
 node scripts/security-e2e.mjs prod http://127.0.0.1:3300
+# Streamed responses pass through as written: with 600 ms between two chunks, the first byte
+# arrives long before the last (it used to wait for the whole body).
+FB=$(curl -s -N -o /dev/null -w '%{time_starttransfer}' "http://127.0.0.1:3300/api/stream?delay=600")
+awk -v t="$FB" 'BEGIN { exit !(t < 0.3) }'
+test "$(curl -s 'http://127.0.0.1:3300/api/stream?delay=50' | tr -d '\n')" = "chunk1chunk2"
 # streaming = "early": the shell goes out before the 300 ms loader; a loader error renders
 # error.tsx in the page (status stays 200) and a loader redirect becomes location.replace (#112)
 FB=$(curl -s -N -o /tmp/nowaki-early.html -w '%{time_starttransfer}' http://127.0.0.1:3300/stream-early)
