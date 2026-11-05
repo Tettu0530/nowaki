@@ -256,6 +256,53 @@ jobs:
       # Shipped JS is deterministic; fail if it exceeds benchmarks/baseline.json by more than +12%.
       - run: node benchmarks/check-regression.mjs
 
+  perf:
+    name: Performance (regression gate)
+    # Pull requests only: head is measured against its base branch in the same job.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Only when server, build, or runtime code changes
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git diff --name-only "$BASE_SHA" HEAD \
+            | grep -qE '^(crates/|packages/nowaki-runtime/|Cargo\.lock$|benchmarks/ci-perf\.mjs$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No server, build, or runtime change: skipped."
+          fi
+      - if: steps.scope.outputs.run == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .perf-base
+      - if: steps.scope.outputs.run == 'true'
+        uses: ./.github/actions/setup
+      - if: steps.scope.outputs.run == 'true'
+        name: Install oha (pinned, checksum verified)
+        run: |
+          curl -sSfL -o /usr/local/bin/oha https://github.com/hatoo/oha/releases/download/v1.16.0/oha-linux-amd64
+          echo "620bb9e16fb53eabc9a3fc45f88bdb41fefa3fee5c05e75892011ce320391716  /usr/local/bin/oha" | sha256sum -c -
+          chmod +x /usr/local/bin/oha
+      - if: steps.scope.outputs.run == 'true'
+        name: Build base and head (release, one shared target dir)
+        run: |
+          (cd .perf-base && pnpm install --frozen-lockfile)
+          cargo build --release -p nowaki --locked --manifest-path .perf-base/Cargo.toml --target-dir target
+          mkdir -p .perf-base/target/release && cp target/release/nowaki .perf-base/target/release/nowaki
+          cargo build --release -p nowaki --locked
+      - if: steps.scope.outputs.run == 'true'
+        name: Measure head against base
+        run: node benchmarks/ci-perf.mjs --base .perf-base --head . --rounds 3
+
   npm-cli:
     name: npm CLI wrapper (smoke)
     runs-on: ubuntu-latest
@@ -345,7 +392,7 @@ jobs:
   ci-ok:
     name: CI OK
     if: always()
-    needs: [lint, test, msrv, semver, security, e2e, browser, jetstream-load, scaffold, runtimes, bench-regression, npm-cli, docs, workflows, pr-size]
+    needs: [lint, test, msrv, semver, security, e2e, browser, jetstream-load, scaffold, runtimes, bench-regression, perf, npm-cli, docs, workflows, pr-size]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

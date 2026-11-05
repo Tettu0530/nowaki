@@ -47,6 +47,18 @@ milestone's worth of work; the codename is noted per entry.
   - The regexes are pure Rust (no Oniguruma C library). The `nowaki`
     binary grows by about 4.8 MB with the syntax and theme data.
 
+### Changed
+- **CI gates performance, not just client JS size.** A new "Performance
+  (regression gate)" job runs on pull requests that touch `crates/`, the
+  runtime, or `Cargo.lock`. It builds the PR and its base branch in the same
+  job, then measures `examples/hello` alternately, 3 rounds each: `nowaki
+  build` time, `nowaki dev` startup, and `nowaki start` throughput and TTFB
+  on `/about` (oha). The PR fails when the median gets worse than allowed:
+  25% for build and dev, 15% for req/s, 25% for TTFB, with a small
+  absolute allowance. An A/A run of the same build on one machine stayed
+  within 5%. `node benchmarks/ci-perf.mjs --base <dir> --head <dir>` runs it
+  locally.
+
 ## [0.16.1] — 2026-11-05 · patch
 
 Packages: `nowaki` / `nowaki-core` 0.16.1 (crates.io, npm), `@nowaki-dev/runtime`
