@@ -196,9 +196,21 @@ pub fn build_set(
             }],
         });
     }
-    let img = image::load_from_memory(&raw)
-        .with_context(|| format!("failed to decode {}", abs.display()))?;
-    let (width, height) = (img.width(), img.height());
+    // The size from the header; the pixels are decoded only if a variant isn't cached yet (a
+    // rebuild with every variant cached decodes nothing).
+    let (width, height) = image::ImageReader::new(std::io::Cursor::new(&raw))
+        .with_guessed_format()
+        .ok()
+        .and_then(|r| r.into_dimensions().ok())
+        .with_context(|| format!("failed to read the size of {}", abs.display()))?;
+    let decoded: std::sync::OnceLock<std::result::Result<DynamicImage, String>> =
+        std::sync::OnceLock::new();
+    let img = || -> Result<&DynamicImage> {
+        decoded
+            .get_or_init(|| image::load_from_memory(&raw).map_err(|e| e.to_string()))
+            .as_ref()
+            .map_err(|e| anyhow::anyhow!("failed to decode {}: {e}", abs.display()))
+    };
     let widths = widths_for(width, q);
     let quality = q.quality.unwrap_or(DEFAULT_AVIF_QUALITY);
     let cache = cache_dir(root);
@@ -213,6 +225,7 @@ pub fn build_set(
         .map(|(w, avif)| {
             variant(
                 &img,
+                width,
                 &ext,
                 *w,
                 *avif,
@@ -344,10 +357,21 @@ pub fn dev_variant(
     if !is_raster(abs) {
         return Ok((raw, mime_of(&ext)));
     }
-    let img = image::load_from_memory(&raw)?;
-    let w = width.clamp(1, img.width());
+    let (orig_w, _) = image::ImageReader::new(std::io::Cursor::new(&raw))
+        .with_guessed_format()?
+        .into_dimensions()?;
+    let w = width.clamp(1, orig_w);
+    let decoded: std::sync::OnceLock<std::result::Result<DynamicImage, String>> =
+        std::sync::OnceLock::new();
+    let img = || -> Result<&DynamicImage> {
+        decoded
+            .get_or_init(|| image::load_from_memory(&raw).map_err(|e| e.to_string()))
+            .as_ref()
+            .map_err(|e| anyhow::anyhow!("{e}"))
+    };
     let (_, out_ext, bytes) = variant(
         &img,
+        orig_w,
         &ext,
         w,
         avif,
@@ -407,8 +431,12 @@ fn cache_dir(root: &Path) -> Option<PathBuf> {
     std::fs::create_dir_all(&dir).ok().map(|_| dir)
 }
 
-fn variant(
-    img: &DynamicImage,
+/// `img` decodes on first call (shared by the variants of one image); `orig_width` is the file's
+/// width, known from its header.
+#[allow(clippy::too_many_arguments)]
+fn variant<'a>(
+    img: &(dyn Fn() -> Result<&'a DynamicImage> + Sync),
+    orig_width: u32,
     ext: &str,
     width: u32,
     avif: bool,
@@ -436,7 +464,8 @@ fn variant(
     if let Some(bytes) = cached.as_ref().and_then(|p| std::fs::read(p).ok()) {
         return Ok((width, out_ext, bytes));
     }
-    let scaled = if width < img.width() {
+    let img = img()?;
+    let scaled = if width < orig_width {
         img.resize(width, u32::MAX, FilterType::Lanczos3)
     } else {
         img.clone()

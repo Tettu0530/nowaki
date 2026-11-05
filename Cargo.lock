@@ -1842,6 +1842,7 @@ dependencies = [
  "getrandom 0.4.3",
  "notify",
  "nowaki-core",
+ "rayon",
  "reqwest",
  "serde",
  "serde-saphyr",
