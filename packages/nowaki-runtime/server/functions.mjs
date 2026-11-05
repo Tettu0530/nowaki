@@ -29,8 +29,14 @@ export function runWithContext(ctx, fn) {
 
 /// Called inside a server function, returns that call's LoaderContext (null otherwise).
 /// E.g. for auth or reading cookies.`import { getContext } from "@nowaki-dev/runtime/server/functions.mjs"`
+// Request contexts that something read through getContext(). A live render that never read its
+// context gives the same HTML for every connection, so `nowaki start` can share it (#97).
+export const contextReads = new WeakSet();
+
 export function getContext() {
-  return als.getStore() ?? null;
+  const ctx = als.getStore() ?? null;
+  if (ctx) contextReads.add(ctx);
+  return ctx;
 }
 
 /// Handles `/__nowaki/fn`. `sf` is `{ lookup(id, version), importModule(module, version) }`.

@@ -16,8 +16,8 @@ register(new URL("./react-alias-hooks.mjs", import.meta.url));
 const { scanRoutes } = await import("./router.mjs");
 const { loadIslandRegistry, renderDocument, renderShell, errorPage } = await import("./render.mjs");
 const { handleRequest, sendResult } = await import("./handler.mjs");
-const { liveRender, liveContext, LiveForbiddenError } = await import("./live.mjs");
-const { runWithContext } = await import("./functions.mjs");
+const { liveRender, liveContext, liveShareable, LiveForbiddenError } = await import("./live.mjs");
+const { runWithContext, contextReads } = await import("./functions.mjs");
 const { pathToFileURL } = await import("node:url");
 
 const appRoot = process.cwd();
@@ -155,9 +155,11 @@ const server = createServer(async (req, res) => {
         res.end(JSON.stringify({ error: "live island not found" }));
         return;
       }
-      const result = await runWithContext(liveContext(request), () =>
+      const ctx = liveContext(request);
+      const result = await runWithContext(ctx, () =>
         liveRender(entry.mod, state, handler, payload, name, sig, { load }),
       );
+      result.shareable = liveShareable(entry.mod, { handler, load, contextRead: !!ctx && contextReads.has(ctx) });
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(result));
     } catch (err) {

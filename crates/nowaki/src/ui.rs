@@ -107,7 +107,9 @@ pub fn route_js_report(routes: &[nowaki_core::budget::RouteJs]) -> usize {
             Some(b) => dim(&format!("budget {b} KB")),
             None => String::new(),
         };
-        let what = if r.islands.is_empty() && !r.live {
+        let what = if r.islands.is_empty() && !r.live && r.gzip_bytes > 0 {
+            dim("islands runtime (a streaming shell always loads it)")
+        } else if r.islands.is_empty() && !r.live {
             dim("no client JS")
         } else {
             let mut parts = r.islands.clone();

@@ -11,6 +11,35 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **`export const streaming = "early"`** (#112) sends the document shell
+  before any loader runs, so the first byte doesn't wait for data. On
+  `examples/hello` `/stream-early`, with a 300 ms loader, the shell arrives
+  in about 3 ms. Once the shell is sent, the status and headers are fixed:
+  - `meta` sees only the static `title` / `head`.
+  - A loader redirect becomes a client-side `location.replace`.
+  - A loader error renders the nearest `error.tsx` in the page, with the
+    status still 200. The error message appears only in dev.
+  - Cookies set by a loader are not sent.
+
+  `streaming = true` is unchanged: loaders run first, then the shell is
+  sent and the body streams.
+  The route JS report counts the islands runtime for any streaming route.
+  The shell always loads it, even on a page with no islands (5.96 KB on
+  `/stream-early`).
+- **Build hints for islands that could ship no JS.** `nowaki build` reads
+  each client island's AST and points out two kinds:
+  - Islands that only keep state (`useState` / `useReducer`) and handle
+    click or form events (`onClick`, `onSubmit`, `onInput`, `onChange`).
+    Rewritten as live islands, they ship no JS, and pages where they are the
+    only client island lose the islands runtime too. The catch is a server
+    round trip per event.
+  - Islands with no state and no event handlers, which would render the same
+    as plain components.
+
+  No hint is given when an island uses other hooks, other events, `ref`,
+  browser globals, or imports anything but preact / React / CSS.
+  `NOWAKI_HINTS=0` hides the hints. In `examples/hello`: Counter,
+  ReactCounter, and TsrxCounter could be live, and Badge needs no island.
 - **First-load JS per route, and budgets that fail the build.** Every
   `nowaki build` and `nowaki prerender` now prints the gzip size of the JS
   each page route loads first, and writes the same data to
@@ -62,6 +91,32 @@ milestone's worth of work; the codename is noted per entry.
   process only: `nowaki dev` and the adapters don't save rooms.
 
 ### Changed
+- **One render per publish for live queries and rooms** (#97). On a
+  `publish(topic)`, every subscribed connection used to ask the renderer for
+  its own refresh. Node renders one at a time, so the last of 1000
+  connections waited for all the others.
+  - Now the first connection renders, and connections with the same island,
+    state, and topic reuse that result.
+  - A render is reused only when the island has no `live.authorize` and the
+    render never called `getContext()`. The runtime reports this, so
+    anything that reads the request is still rendered per connection.
+  - `examples/hello` has a new `LiveViewer` island, which shows the
+    viewer's name. It is the per-connection case.
+  - Measured locally with `benchmarks/live-fanout.mjs` at 1000 connections:
+    - rooms: per-message p95 68 → 28 ms, everyone p50 69 → 24 ms;
+    - live query: per-message p95 65 → 31 ms, everyone p50 62 → 25 ms.
+- **Streamed responses reach the client as they are written** (#90). Before
+  this change, `nowaki start` and `nowaki dev` read each response from the
+  Node renderer in full before sending it on. With a
+  `ReadableStream` API response, an SSE endpoint, or a streaming-SSR page,
+  the client got nothing until the last byte. Non-page responses now pass
+  straight through, and dev streams every response.
+  - With 600 ms between two chunks, the first byte arrives in about 4 ms.
+    It used to take about 400 ms.
+  - Regular pages are still read whole, because Rust assembles their HTML
+    from the renderer's JSON.
+  - A `streaming = true` page still waits for its loader before the shell
+    is sent. The example and its comments now say so.
 - **The npm `nowaki` command no longer keeps a Node process running** (#91).
   On Linux and macOS, the shim now replaces itself with the Rust binary
   (`process.execve`, Node 22.15+ / 23.11+), so it no longer runs the binary
@@ -107,6 +162,12 @@ milestone's worth of work; the codename is noted per entry.
   8,895 to 32,101 req/s. Dev mode is unchanged: it re-imports on every edit.
 
 ### Fixed
+- **Live islands are detected from the AST.** The build used to look for
+  the text `export const live`. A comment containing it turned a client
+  island into a live one, which then shipped no JS. `export { x as live }`
+  and `export { live } from "…"` were missed and shipped a client chunk.
+  Now any exported binding named `live` counts, and comments and strings
+  don't.
 - **Scope hoisting through a symlinked or verbatim app root** (#92).
   `NowakiCore::new` now canonicalizes the root with `dunce`. Before this
   change, a root opened through a symlink (macOS `/var` → `/private/var`)

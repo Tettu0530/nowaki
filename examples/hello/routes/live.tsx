@@ -3,6 +3,7 @@
 import LiveCounter from "../islands/LiveCounter.tsx";
 import Counter from "../islands/Counter.tsx";
 import LiveTicks from "../islands/LiveTicks.tsx";
+import LiveViewer from "../islands/LiveViewer.tsx";
 
 export default function LivePage() {
   return (
@@ -21,6 +22,7 @@ export default function LivePage() {
         island updates without being clicked.
       </p>
       <LiveTicks />
+      <LiveViewer />
       <p style="margin-top:2rem">
         Below is a regular client island (hydrated, optimistic) on the same page — the two kinds
         coexist:

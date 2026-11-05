@@ -250,3 +250,54 @@ fn build_reports_route_js_and_fails_over_budget() {
     );
     assert!(String::from_utf8_lossy(&out.stderr).contains("budget.js"));
 }
+
+#[test]
+fn build_hints_at_islands_that_could_ship_no_js() {
+    let root = example_root();
+    if !deps_installed(&root) {
+        eprintln!("skip: examples/hello deps not installed");
+        return;
+    }
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    // Its own app: tests run in parallel, and another one rebuilds examples/hello.
+    let app = budget_app("{ js: 100 }");
+    std::fs::write(
+        app.path().join("islands/Tag.tsx"),
+        "export default function Tag() { return <span>v1</span>; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.path().join("islands/Width.tsx"),
+        "import { useEffect, useState } from \"preact/hooks\";\nexport default function Width() { const [w, set] = useState(0); useEffect(() => set(innerWidth), []); return <b onClick={() => set(0)}>{w}</b>; }\n",
+    )
+    .unwrap();
+    let out = Command::new(bin)
+        .arg("build")
+        .arg(app.path())
+        .output()
+        .expect("run nowaki build");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("islands/Clock.tsx could be a live island (useState, onClick)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("islands/Tag.tsx has no state or event handlers"),
+        "{stdout}"
+    );
+    // An island that needs the browser (useEffect) gets no hint.
+    assert!(!stdout.contains("islands/Width.tsx"), "{stdout}");
+
+    let quiet = Command::new(bin)
+        .arg("build")
+        .arg(app.path())
+        .env("NOWAKI_HINTS", "0")
+        .output()
+        .expect("run nowaki build");
+    assert!(!String::from_utf8_lossy(&quiet.stdout).contains("could be a live island"));
+}

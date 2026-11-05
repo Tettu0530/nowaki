@@ -70,6 +70,15 @@ export function liveContext(request) {
   return makeContext({ url, method: "POST", headers, readBody: async () => new Uint8Array() });
 }
 
+/// Whether a live render can be reused for every connection that asked for the same one: a
+/// `publish` refresh (no handler), without `live.authorize`, that never read the request context.
+/// Its HTML then depends only on the island's state (Rust keys the shared render by it) and, for a
+/// room, on the room's shared state, which is the same for every member.
+/// `contextRead`: whether the render called getContext() (the caller tracks it; see functions.mjs).
+export function liveShareable(mod, { handler, load, contextRead }) {
+  return Boolean(load) && !handler && typeof mod.live?.authorize !== "function" && !contextRead;
+}
+
 /// Thrown when an island's `live.authorize` refuses an event; servers answer it with 403.
 export class LiveForbiddenError extends Error {
   constructor() {

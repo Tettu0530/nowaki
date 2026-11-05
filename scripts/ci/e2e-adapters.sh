@@ -17,6 +17,16 @@ PORT=3310 node examples/hello/dist/server/index.mjs &
 NODE_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3310/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3310/ | grep -q "nowaki-island"   # SSR + island marker
+# streaming = "early": the shell goes out before the 300 ms loader; a loader error renders
+# error.tsx in the page (status stays 200) and a loader redirect becomes location.replace (#112)
+FB=$(curl -s -N -o /tmp/nowaki-early.html -w '%{time_starttransfer}' http://127.0.0.1:3310/stream-early)
+awk -v t="$FB" 'BEGIN { exit !(t < 0.2) }'
+grep -q 'data-testid="early"' /tmp/nowaki-early.html
+grep -q '<title>Early streaming' /tmp/nowaki-early.html
+test "$(curl -s -o /tmp/nowaki-early-fail.html -w '%{http_code}' 'http://127.0.0.1:3310/stream-early?fail=1')" = 200
+grep -q "Couldn't display this page" /tmp/nowaki-early-fail.html
+! grep -q 'the data source is down' /tmp/nowaki-early-fail.html   # no message in production
+curl -s 'http://127.0.0.1:3310/stream-early?go=1' | grep -q 'location.replace("/about")'
 curl -sf http://127.0.0.1:3310/api/hello | grep -q '"hello":"nowaki"'
 # default security headers on the node adapter (pages and static assets)
 curl -s -D - -o /dev/null http://127.0.0.1:3310/ | grep -qi '^x-content-type-options: nosniff'

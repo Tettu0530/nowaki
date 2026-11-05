@@ -195,6 +195,42 @@ admin.close();
   q.close();
 }
 
+// Shared refreshes (#97): one publish renders LiveTicks once for every connection with the same
+// state, but LiveViewer reads the request (getContext) and must be rendered per connection.
+{
+  const page = await (await fetch(base + "/live")).text();
+  const islandOf = (name) => {
+    const tag = page.match(new RegExp(`<nowaki-live\\b(?=[^>]*name="${name}")[^>]*>`))?.[0];
+    const a = (n) => tag?.match(new RegExp(`${n}="([^"]*)"`))?.[1];
+    const j = (n) => JSON.parse((a(n) ?? "null").replace(/&quot;/g, '"'));
+    return { nid: a("nid"), name, state: j("state"), sig: a("sig"), topics: j("topics") };
+  };
+  const ticks = islandOf("LiveTicks");
+  const viewer = islandOf("LiveViewer");
+  check(Boolean(viewer.nid), "LiveViewer is rendered on /live");
+  const conns = await Promise.all(["user=alice", "user=bob", "user=carol"].map(withCookie));
+  for (const c of conns) c.send(JSON.stringify({ type: "join", islands: [ticks, viewer] }));
+  await new Promise((r) => setTimeout(r, 150));
+  const got = conns.map((c) =>
+    Promise.all([
+      recvUntil(c, (m) => m.type === "patch" && m.nid === ticks.nid),
+      recvUntil(c, (m) => m.type === "patch" && m.nid === viewer.nid),
+    ]),
+  );
+  const r = await (await fetch(base + "/api/tick", { method: "POST" })).json();
+  const patches = await Promise.all(got);
+  check(
+    patches.every(([t]) => new RegExp(`ticks:\\s*${r.ticks}`).test(t.html)),
+    `a shared LiveTicks refresh reaches all three connections (ticks: ${r.ticks})`,
+  );
+  const names = patches.map(([, v]) => /data-testid="viewer">([^<]*)</.exec(v.html)?.[1]);
+  check(
+    names.join(",") === "alice,bob,carol",
+    `a render that reads getContext() is not shared: each viewer sees their own name (${names.join(",")})`,
+  );
+  for (const c of conns) c.close();
+}
+
 // Rooms: two connections on /poll share one state; a vote on one is pushed to the other.
 {
   const page = await (await fetch(base + "/poll")).text();
