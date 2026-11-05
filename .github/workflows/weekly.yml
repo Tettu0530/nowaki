@@ -34,8 +34,13 @@ jobs:
       - name: Install the comparison apps
         run: |
           (cd nowaki-site && pnpm install --frozen-lockfile)
+          # The comparison apps install exactly what their lockfiles pin.
           for app in benchmarks/apps/*-counter; do
-            (cd "$app" && npm install --no-audit --no-fund --loglevel=error)
+            if [ -f "$app/pnpm-lock.yaml" ]; then
+              (cd "$app" && pnpm install --frozen-lockfile)
+            else
+              (cd "$app" && npm install --no-audit --no-fund --loglevel=error)
+            fi
           done
       - name: Run benchmarks
         run: |
