@@ -12,7 +12,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use comrak::nodes::NodeValue;
-use comrak::plugins::syntect::{SyntectAdapter, SyntectAdapterBuilder};
 use comrak::{format_html_with_plugins, parse_document, Arena, Options};
 use serde::Serialize;
 use serde_json::Value;
@@ -38,6 +37,10 @@ pub struct Entry {
     pub html: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub headings: Option<Vec<Heading>>,
+    /// MDX entries: the compiled module under dist/server (`content/docs/guide.js`), which the
+    /// runtime imports for `entry.render()`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
 }
 
 /// Whether the app has a `content/` directory with a config (the feature is off otherwise).
@@ -203,6 +206,34 @@ fn read_entry(root: &Path, coll: &Path, path: &Path, images: &Images) -> Result<
                 body: Some(body.to_string()),
                 html: Some(html),
                 headings: Some(headings),
+                module: None,
+            }
+        }
+        "mdx" => {
+            let src = text()?;
+            let (front, body) = split_frontmatter(&src);
+            let data = match front {
+                Some(y) => yaml_to_json(y).map_err(|e| anyhow!("{file}: frontmatter: {e}"))?,
+                None => Value::Object(Default::default()),
+            };
+            let headings = nowaki_core::mdx::headings(body)
+                .map_err(|e| anyhow!("{file}: {e:#}"))?
+                .into_iter()
+                .map(|h| Heading {
+                    depth: h.depth,
+                    text: h.text,
+                    id: h.id,
+                })
+                .collect();
+            let module = file.rsplit_once('.').map(|(stem, _)| format!("{stem}.js"));
+            Entry {
+                slug,
+                file,
+                data,
+                body: Some(body.to_string()),
+                html: None,
+                headings: Some(headings),
+                module,
             }
         }
         "json" => Entry {
@@ -212,6 +243,7 @@ fn read_entry(root: &Path, coll: &Path, path: &Path, images: &Images) -> Result<
             body: None,
             html: None,
             headings: None,
+            module: None,
         },
         "yaml" | "yml" => Entry {
             data: yaml_to_json(&text()?).map_err(|e| anyhow!("{file}: {e}"))?,
@@ -220,6 +252,7 @@ fn read_entry(root: &Path, coll: &Path, path: &Path, images: &Images) -> Result<
             body: None,
             html: None,
             headings: None,
+            module: None,
         },
         _ => return Ok(None),
     }))
@@ -272,20 +305,10 @@ fn markdown_options() -> Options<'static> {
     o
 }
 
-/// Fenced code blocks with a language (```rust) are highlighted at build time with syntect, as
-/// inline `style` colors (no CSS or client JS needed; CSP allows style attributes). The syntax
-/// and theme sets load once per process. Pure-Rust regexes (no Oniguruma C library). Syntaxes
-/// come from two-face (bat's set): syntect's defaults have no TypeScript / TSX, Vue, or TOML.
-pub const CODE_THEME: &str = "InspiredGitHub";
-
-fn highlighter() -> &'static SyntectAdapter {
-    static ADAPTER: std::sync::OnceLock<SyntectAdapter> = std::sync::OnceLock::new();
-    ADAPTER.get_or_init(|| {
-        SyntectAdapterBuilder::new()
-            .syntax_set(two_face::syntax::extra_newlines())
-            .theme(CODE_THEME)
-            .build()
-    })
+/// Fenced code blocks with a language (```rust) are highlighted at build time (see
+/// `nowaki_core::highlight`, shared with MDX).
+fn highlighter() -> &'static nowaki_core::highlight::CachedAdapter {
+    nowaki_core::highlight::adapter()
 }
 
 /// The `<picture>` for a Markdown image with a relative URL (`./hero.jpg`, `../img/a.png`), run

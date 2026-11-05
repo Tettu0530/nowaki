@@ -135,7 +135,7 @@ export function createFetchHandler({
 
   // Content collections, inlined by the edge build: validated once, before the first request.
   const contentReady = content
-    ? validateContent(content.raw, content.config).then(({ collections, errors }) => {
+    ? validateContent(content.raw, content.config, (e) => modules[e.module]).then(({ collections, errors }) => {
         if (errors.length) throw new Error(`[nowaki] content collections:\n  ${errors.join("\n  ")}`);
         setContent({ collections, errors });
       })

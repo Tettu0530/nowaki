@@ -1,13 +1,16 @@
 // One entry of the docs collection: its HTML was rendered at build time, with heading anchors.
 import { getCollection, getEntry } from "@nowaki-dev/runtime/content";
 import type { LoaderContext } from "@nowaki-dev/runtime";
+import { h } from "preact";
 
 export const staticPaths = async () => (await getCollection("docs")).map((d) => ({ slug: d.slug }));
 
 export const loader = async (ctx: LoaderContext) => {
   const doc = await getEntry("docs", String(ctx.params.slug));
   if (!doc) return ctx.redirect("/docs");
-  return { title: doc.data.title, html: doc.html ?? "", headings: doc.headings ?? [] };
+  // MDX entries render as a component (with their islands); Markdown entries as HTML.
+  const mdx = doc.render ? await doc.render() : null;
+  return { title: doc.data.title, html: doc.html ?? "", headings: doc.headings ?? [], Content: mdx?.Content };
 };
 
 // Typed metadata: description, canonical, Open Graph (its image is the og/[card].png file route),
@@ -20,7 +23,14 @@ export const meta = ({ data, params }: { data: { title: string }; params: { slug
   jsonLd: { "@context": "https://schema.org", "@type": "TechArticle", headline: data.title },
 });
 
-type Props = { data: { title: string; html: string; headings: { depth: number; text: string; id: string }[] } };
+type Props = {
+  data: {
+    title: string;
+    html: string;
+    headings: { depth: number; text: string; id: string }[];
+    Content?: (props?: Record<string, unknown>) => unknown;
+  };
+};
 
 export default function Doc({ data }: Props) {
   return (
@@ -34,7 +44,11 @@ export default function Doc({ data }: Props) {
             </a>
           ))}
       </nav>
-      <article data-testid="doc" dangerouslySetInnerHTML={{ __html: data.html }} />
+      {data.Content ? (
+        <article data-testid="doc">{h(data.Content as never, null)}</article>
+      ) : (
+        <article data-testid="doc" dangerouslySetInnerHTML={{ __html: data.html }} />
+      )}
     </main>
   );
 }

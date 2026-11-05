@@ -90,6 +90,12 @@ try {
 for (const entry of Object.values(serverFnTable)) {
   addModule(path.join(serverDir, entry.module));
 }
+// MDX content entries render from their compiled modules (a worker can't import at runtime).
+if (contentRaw) {
+  for (const entries of Object.values(JSON.parse(contentRaw))) {
+    for (const e of entries) if (e.module) addModule(path.join(serverDir, e.module));
+  }
+}
 
 const moduleImports = order.map((key) => `import * as ${seen.get(key)} from ${JSON.stringify(specOf(key))};`);
 const moduleEntries = order.map((key) => `  ${JSON.stringify(key)}: ${seen.get(key)},`);

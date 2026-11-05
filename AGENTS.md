@@ -184,6 +184,10 @@ code locations and CI coverage.
   `ServerAssets::image_module` (server); dev modules from `transform.rs` `dev_asset_module`,
   variants from `dev.rs` `dev_image` (`/__nowaki/image`). Component: `packages/nowaki-runtime/image.js`.
   Markdown images: `content.rs` `local_image`.
+- **MDX** — `crates/nowaki-core/src/mdx.rs` (markdown-rs mdast → TSX: hoisted ESM, JSX
+  pass-through, `headings`, images via `?image`, code via `highlight.rs`); applied in
+  `NowakiCore::read_source`, so `.mdx` is an ordinary transformable module (routes, graph, dev,
+  builds). Content entries: `content.rs` (`module`), `render()` in `server/content-store.mjs`.
 - **SEO** — `packages/nowaki-runtime/server/seo.mjs` (site URL, meta tags, sitemap, robots);
   `handler.mjs` `withSeo` (layout + route meta) and the generated `/sitemap.xml` / `/robots.txt`;
   page URLs from `server/isr-urls.mjs` `pageUrls`. The site comes from `crates/nowaki/src/site.rs`

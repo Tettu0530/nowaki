@@ -39,6 +39,13 @@ declare module "*.mp3" { const url: string; export default url; }
 declare module "*.wav" { const url: string; export default url; }
 declare module "*.pdf" { const url: string; export default url; }
 
+// MDX: the default export is the content as a component; `headings` lists its headings.
+declare module "*.mdx" {
+  export const headings: { depth: number; text: string; id: string }[];
+  const MDXContent: (props?: Record<string, unknown>) => import("preact").JSX.Element;
+  export default MDXContent;
+}
+
 // Plugin virtual modules (resolveId/load in nowaki.config). Any export is allowed.
 declare module "virtual:*";
 

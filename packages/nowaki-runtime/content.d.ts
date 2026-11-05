@@ -27,6 +27,11 @@ export interface ContentEntry<D = unknown> {
   /** Markdown entries: rendered HTML, headings with anchor ids. */
   html?: string;
   headings?: ContentHeading[];
+  /**
+   * MDX entries (`.mdx`): the compiled module's component and headings. Render `<Content />`
+   * where Markdown entries put `html`; components and islands it imports work as in TSX.
+   */
+  render?: () => Promise<{ Content: (props?: Record<string, unknown>) => unknown; headings: ContentHeading[] }>;
 }
 
 /**

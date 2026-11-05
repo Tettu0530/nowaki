@@ -9,6 +9,9 @@ use anyhow::Result;
 
 pub const ROUTE_EXTENSIONS: [&str; 4] = ["tsx", "ts", "jsx", "js"];
 
+/// `.mdx` pages (compiled to TSX, see mdx.rs). Kept out of ROUTE_EXTENSIONS so its type stays.
+pub const MDX_EXTENSION: &str = "mdx";
+
 /// Recursively lists files under `routes_dir`.
 pub fn walk_routes_dir(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
@@ -68,7 +71,7 @@ pub fn is_endpoint_rel(rel: &str) -> bool {
 pub fn stem_from_rel(rel: &str) -> Option<String> {
     let rel = rel.replace('\\', "/");
     let (stem, ext) = rel.rsplit_once('.')?;
-    ROUTE_EXTENSIONS.contains(&ext).then(|| stem.to_string())
+    (ROUTE_EXTENSIONS.contains(&ext) || ext == MDX_EXTENSION).then(|| stem.to_string())
 }
 
 /// URL pattern from a route stem (`blog/index` → `/blog`, `index` → `/`).

@@ -11,6 +11,28 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **MDX** (v0.17). `.mdx` files are pages (`routes/guide.mdx`) and content
+  entries (`content/docs/x.mdx`): Markdown with JSX, `{expressions}`, and
+  `import` / `export`.
+  - They are parsed in Rust (markdown-rs: CommonMark, GFM, MDX) and compiled
+    to TSX before the usual transform. Imported components and islands work as
+    in TSX, in dev, the builds, and every adapter. No JavaScript runs to
+    compile them.
+  - Fenced code is highlighted like Markdown, local images go through
+    `?image` / `<Image>`, and heading ids match Markdown's. Each module exports
+    `headings`.
+  - A content entry's frontmatter is validated like a Markdown entry's.
+    `entry.render()` returns `{ Content, headings }`; render `<Content />`
+    where a Markdown entry uses `html`.
+  - YAML frontmatter in an `.mdx` page is ignored; pages use `export const`
+    (`title`, `meta`, …).
+
+### Changed
+- **Highlighted code is cached on disk** (`node_modules/.cache/nowaki/highlight`)
+  for Markdown entries and MDX alike. Syntect's grammars (TypeScript alone takes
+  about 150 ms to compile) load only on a cache miss, so a rebuild or a dev
+  reload of a docs site doesn't pay for them again. On the example app a
+  rebuild goes from about 0.5 s to 0.34 s.
 - **`<Image>` and `?image` imports** (v0.17).
   `import hero from "./hero.jpg?image"` gives the image's size and generated
   variants. `<Image src={hero} alt="…" />` from `@nowaki-dev/runtime/image`

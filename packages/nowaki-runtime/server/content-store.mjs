@@ -22,7 +22,9 @@ const pathOf = (issue) => {
 /// raw: `{ name: [{ slug, file, data, body?, html?, headings? }] }` (from Rust); config: the
 /// module namespace of content/config. Returns `{ collections, errors }`; an entry whose data
 /// fails its schema is left out and reported as `<file>: <field>: <message>`.
-export async function validateContent(raw, config) {
+/// `loadModule(entry)` imports an MDX entry's compiled module (its `module` field, set by the
+/// build); such entries get `render()` → `{ Content, headings }`.
+export async function validateContent(raw, config, loadModule) {
   const defs = Object.fromEntries(
     Object.entries(config ?? {}).filter(([, v]) => v && v.__nowakiCollection === true),
   );
@@ -49,7 +51,14 @@ export async function validateContent(raw, config) {
         }
         data = r.value;
       }
-      collections[name].push(Object.freeze({ ...e, collection: name, data }));
+      const entry = { ...e, collection: name, data };
+      if (e.module && typeof loadModule === "function") {
+        entry.render = async () => {
+          const m = await loadModule(e);
+          return { Content: m.default, headings: m.headings ?? e.headings ?? [] };
+        };
+      }
+      collections[name].push(Object.freeze(entry));
     }
   }
   // Declared collections without a directory are empty, not unknown.
