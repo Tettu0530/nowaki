@@ -23,6 +23,9 @@ milestone's worth of work; the codename is noted per entry.
 
   `streaming = true` is unchanged: loaders run first, then the shell is
   sent and the body streams.
+  The route JS report counts the islands runtime for any streaming route.
+  The shell always loads it, even on a page with no islands (5.96 KB on
+  `/stream-early`).
 - **Build hints for islands that could ship no JS.** `nowaki build` reads
   each client island's AST and points out two kinds:
   - Islands that only keep state (`useState` / `useReducer`) and handle
