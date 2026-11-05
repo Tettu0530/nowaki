@@ -110,7 +110,7 @@ request unless the row says ISR.
 | Astro 7.4.5 | 0.30 ms | 1.02 ms | 5,395 | 7,065 | 14,091 | 341 MB |
 | Nuxt 4.6.4 | 0.63 ms | 5.15 ms | 1,947 | 2,079 | 31,106 | 367 MB |
 | Next.js 16.4.5 | 1.02 ms | 2.43 ms | 1,197 | 1,385 | 6,925 | 438 MB |
-| Nowaki 0.16.1, ISR on post pages | 0.08 ms | 0.27 ms | 91,284 | 11,634 ¹ | 22,076 ¹ | 128 MB |
+| Nowaki 0.16.1, ISR on post pages | 0.08 ms | 0.28 ms | 140,390 | 15,331 ¹ | 29,404 ¹ | 127 MB |
 | Nuxt 4.6.4, ISR (`swr`) | 0.11 ms | 0.33 ms | 18,179 | 2,044 ¹ | 33,358 ¹ | 280 MB |
 | Next.js 16.4.5, ISR | 0.29 ms | 1.22 ms | 4,824 | 1,245 ¹ | 6,665 ¹ | 375 MB |
 
@@ -118,10 +118,9 @@ request unless the row says ISR.
 
 Measured 2026-11-05, Apple M2, Node 24.14.0, `oha` 1.16.0 on the same machine (above roughly
 100k req/s the figure is likely bounded by `oha` and loopback). Nowaki is 0.16.1 / runtime 0.15.1
-from npm. In the Nowaki ISR run, the uncached `/` and `/api/search` served about a third less
-than in the uncached run (11,634 vs 16,746 and 22,076 vs 32,910 req/s), and cached post pages
-fewer than 0.16.0 did on the previous, smaller blog (122,454); Nuxt's ISR run shows no such drop.
-The cause has not been measured yet.
+from npm. The Nowaki ISR row was measured again on its own: the first series had the uncached
+`/` and `/api/search` about a third below the uncached run, which did not reproduce (the run
+likely overlapped other load on the machine), and ISR does not change the uncached path.
 
 On the earlier, counters-only blog, Nowaki 0.15.0 served 4,183 post pages/s at a TTFB p50 of
 0.41 ms and 0.16.0 served 10,424 at 0.20 ms; 0.16.0 includes #101, which stopped calling
