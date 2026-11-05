@@ -179,6 +179,12 @@ code locations and CI coverage.
   `resolve_id`, `load`); `NowakiCore::resolve_spec` + the `VirtualResolve` trait.
 - **Scope hoisting / chunking** — `crates/nowaki-core/src/chunk.rs`.
 - **Deploy adapters** — `crates/nowaki/src/adapter.rs` (+ `server/edge-build.mjs`).
+- **Page scripts (`export const scripts`)** — read from the AST in
+  `crates/nowaki-core/src/page_scripts.rs`, emitted as client entries by
+  `build.rs` `build_route_scripts` (manifest `routeScripts` per module and
+  `scriptPreload`), counted by `budget.rs`. The tags come from `handler.mjs`
+  `withScripts` via `env.routeScripts` (`app.mjs`, `web.mjs`, dev `sidecar.mjs`);
+  `client/router.js` `loadPageScripts` + `nowaki:page-load` on navigation.
 - **`public/`** — rules (path safety, dotfiles, reserved prefixes, content types) in
   `crates/nowaki-core/src/public.rs`; copied to `dist/public` by `build_with_client`.
   Served by `dev.rs` `serve_public` (straight from `public/`), `start.rs`

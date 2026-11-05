@@ -70,6 +70,9 @@ rm examples/hello/content/docs/e2e-added.md
 for i in $(seq 1 20); do curl -sf $B/docs >/dev/null && break; sleep 0.5; done
 curl -sf $B/docs | grep -q 'href="/docs/intro"'
 # route / layout CSS in dev: linked from the dev server, which serves only .css under the app
+# page scripts: a module <script> per listed module, served as JS (dev: its own URL)
+curl -sf $B/scripted | grep -q '<script type="module" src="/scripts/stamp.ts" data-nowaki-script></script>'
+curl -s -D - -o /dev/null $B/scripts/stamp.ts | grep -qi '^content-type: text/javascript'
 # file routes: feed.xml.ts (static) and og/[card].png.ts (a param with a fixed extension, bytes)
 curl -s -D - -o /dev/null $B/feed.xml | grep -qi '^content-type: application/xml'
 curl -sf $B/feed.xml | grep -q '<rss version="2.0">'

@@ -8,6 +8,7 @@ pub mod css;
 pub mod env;
 pub mod graph;
 pub mod live_hint;
+pub mod page_scripts;
 pub mod public;
 pub mod resolve;
 pub mod route_css;

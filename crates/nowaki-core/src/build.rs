@@ -4,7 +4,7 @@
 //! (scope hoisting, chunk.rs). node_modules/shared/css/asset become separate chunks,
 //! shared and deduped. Modules that can't be concatenated fall back to unbundled emit.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -150,6 +150,9 @@ pub fn build_client_with_info(
         None
     };
 
+    // Page scripts (`export const scripts`) of each route and layout: client entries like islands.
+    let route_scripts = build_route_scripts(core, &client_dir, &mut ctx)?;
+
     // Stylesheets for the CSS that routes and layouts import (route_css.rs).
     let route_css = crate::route_css::build_route_css(core, &client_dir)?;
     let mut manifest = render_manifest(
@@ -171,9 +174,28 @@ pub fn build_client_with_info(
     let close = manifest.rfind('}').expect("manifest is an object");
     manifest.truncate(close);
     let trimmed = manifest.trim_end().to_string();
+    // `"routeScripts": { "routes/x.js": ["hero.1a2b3c4d.js"] }` per module (route or layout; the
+    // runtime merges a page's layouts), and `"scriptPreload"`: each script's transitive chunks.
+    let js_list = |v: &[String]| {
+        v.iter()
+            .map(|f| format!("\"{f}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let script_fields: Vec<String> = route_scripts
+        .iter()
+        .map(|(k, v)| format!("    {}: [{}]", crate::css::js_string(k), js_list(v)))
+        .collect();
+    let script_files: BTreeSet<&String> = route_scripts.values().flatten().collect();
+    let script_preload: Vec<String> = script_files
+        .iter()
+        .map(|f| format!("    \"{f}\": [{}]", js_list(&transitive_deps(f, &ctx.deps))))
+        .collect();
     manifest = format!(
-        "{trimmed},\n  \"routeCss\": {{\n{}\n  }}\n}}\n",
-        fields.join(",\n")
+        "{trimmed},\n  \"routeCss\": {{\n{}\n  }},\n  \"routeScripts\": {{\n{}\n  }},\n  \"scriptPreload\": {{\n{}\n  }}\n}}\n",
+        fields.join(",\n"),
+        script_fields.join(",\n"),
+        script_preload.join(",\n")
     );
     fs::write(client_dir.join("manifest.json"), manifest)?;
     // `.gz` / `.br` siblings: `nowaki start` serves them by Accept-Encoding, and most static hosts
@@ -224,6 +246,58 @@ pub fn clear_dir(dir: &Path) -> Result<()> {
         res.with_context(|| format!("failed to clear {}", path.display()))?;
     }
     Ok(())
+}
+
+/// `export const scripts` of every page route, layout, and 404 / 500 page under `routes/`, each
+/// script emitted as a client entry. Keyed by server module (`routes/x.js`), in listed order.
+fn build_route_scripts(
+    core: &NowakiCore,
+    client_dir: &Path,
+    ctx: &mut EmitCtx,
+) -> Result<BTreeMap<String, Vec<String>>> {
+    let routes_dir = core.root.join("routes");
+    let mut out = BTreeMap::new();
+    if !routes_dir.is_dir() {
+        return Ok(out);
+    }
+    for path in crate::routes::walk_routes_dir(&routes_dir)? {
+        let Some(rel) = path
+            .strip_prefix(&routes_dir)
+            .ok()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+        else {
+            continue;
+        };
+        let Some(stem) = crate::routes::stem_from_rel(&rel) else {
+            continue;
+        };
+        let base = stem.rsplit('/').next().unwrap_or(&stem);
+        let page_like = base == "_layout" || base == "_404" || base == "_500";
+        if crate::routes::is_endpoint_rel(&rel)
+            || (crate::routes::is_convention_source(base) && !page_like)
+        {
+            continue;
+        }
+        let source = core.read_source(&path)?;
+        let specs = crate::page_scripts::parse_scripts(&path, &source)
+            .map_err(|e| anyhow::anyhow!("routes/{rel}: {e}"))?;
+        if specs.is_empty() {
+            continue;
+        }
+        let dir = path.parent().unwrap_or(&routes_dir);
+        let mut files = Vec::new();
+        for spec in specs {
+            let Some(abs) = core.resolve_spec(dir, &spec) else {
+                anyhow::bail!("routes/{rel}: page script \"{spec}\" not found");
+            };
+            let name = emit(core, &abs, client_dir, ctx)?;
+            if !files.contains(&name) {
+                files.push(name);
+            }
+        }
+        out.insert(format!("routes/{stem}.js"), files);
+    }
+    Ok(out)
 }
 
 /// Rewrites .tsx/.ts/.jsx in relative imports to .js (bare imports are left to Node resolution).

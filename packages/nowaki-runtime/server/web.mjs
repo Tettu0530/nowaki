@@ -114,6 +114,11 @@ export function createFetchHandler({
     renderDocument: (args) => prodDocument(manifest, args),
     renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta),
     routeCss: (key) => (manifest.routeCss?.[key] ?? []).map((f) => `/_nowaki/${f}`),
+    routeScripts: (key) =>
+      (manifest.routeScripts?.[key] ?? []).map((f) => ({
+        src: `/_nowaki/${f}`,
+        preload: (manifest.scriptPreload?.[f] ?? []).map((d) => `/_nowaki/${d}`),
+      })),
     renderError: (err) => {
       console.error("[nowaki]", err);
       return {

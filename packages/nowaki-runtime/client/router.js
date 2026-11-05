@@ -119,7 +119,25 @@ function applyDocument(entry, push, token) {
     history.pushState({ nowaki: k }, "", finalUrl);
   }
   hydrateIslands(document);
+  loadPageScripts(doc);
   removeProgressBar();
+  // Page scripts run once (they are modules); this is their cue to set up the new page's DOM.
+  document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl } }));
+}
+
+// Page scripts (`export const scripts`) of the page navigated to. A module runs once per URL, so
+// one the previous page already loaded doesn't run again: it listens for nowaki:page-load instead.
+function loadPageScripts(doc) {
+  for (const s of doc.head.querySelectorAll("script[data-nowaki-script]")) {
+    const src = s.getAttribute("src");
+    if (!src || document.querySelector(`script[data-nowaki-script][src="${CSS.escape(src)}"]`)) continue;
+    const el = document.createElement("script");
+    el.type = "module";
+    el.src = src;
+    el.setAttribute("data-nowaki-script", "");
+    if (window.__nowakiNonce) el.nonce = window.__nowakiNonce;
+    document.head.appendChild(el);
+  }
 }
 
 // Under a CSP nonce, <style> from another response carries that response's nonce; re-stamp it with

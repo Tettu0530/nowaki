@@ -117,6 +117,11 @@ curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<span style="font-weight:
 # route / layout CSS (0.16.1): the layout's and the page's stylesheets are linked in the head and
 # served as text/css; a plain .css import's default export is its text (inlined by /styled's head)
 curl -sf http://127.0.0.1:3300/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'
+# page scripts: bundled to /_nowaki/stamp.<hash>.js with preloads for its chunks, counted in the
+# route's first-load JS
+curl -sf http://127.0.0.1:3300/scripted | grep -qE '<script type="module" src="/_nowaki/stamp\.[0-9a-f]+\.js" data-nowaki-script></script>'
+curl -sf http://127.0.0.1:3300/scripted | grep -qE '<link rel="modulepreload" href="/_nowaki/stamp-label\.[0-9a-f]+\.js" />'
+node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); const s=(r.routes??r).find((x)=>x.url==="/scripted"); if(!s||!s.chunks.some((c)=>c.startsWith("stamp."))) process.exit(1)' examples/hello/dist/route-js.json
 # file routes: feed.xml.ts (static) and og/[card].png.ts (a param with a fixed extension, bytes)
 curl -s -D - -o /dev/null http://127.0.0.1:3300/feed.xml | grep -qi '^content-type: application/xml'
 curl -sf http://127.0.0.1:3300/feed.xml | grep -q '<rss version="2.0">'

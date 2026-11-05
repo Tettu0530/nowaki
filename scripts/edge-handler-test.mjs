@@ -47,6 +47,8 @@ const vy = await req("/vary", { headers: { "accept-language": "de" } });
 check("ISR page reading accept-language sends Vary on the edge", /accept-language/i.test(vy.headers.get("vary") || ""));
 const styledAttrs = await (await req("/styled")).text();
 check("htmlAttrs / bodyAttrs on the edge", styledAttrs.includes('<html lang="ja" data-sheet-rev="3"') && styledAttrs.includes('<body class="site styled-page" data-site="hello"') && !styledAttrs.includes("onload"));
+const scripted = await (await req("/scripted")).text();
+check("page scripts on the edge", /<script type="module" src="\/_nowaki\/stamp\.[0-9a-f]+\.js" data-nowaki-script><\/script>/.test(scripted));
 const feed = await req("/feed.xml");
 check("file route feed.xml on the edge", feed.headers.get("content-type") === "application/xml" && (await feed.text()).includes("<rss"));
 const og = await req("/og/intro.png");
