@@ -1,0 +1,56 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@nowaki-dev/runtime':
+        specifier: file:../../../../packages/nowaki-runtime
+        version: file:../../../../packages/nowaki-runtime(preact-render-to-string@6.8.2)(preact@11.1.1)
+      preact:
+        specifier: 11.1.1
+        version: 11.1.1(preact-render-to-string@6.8.2)
+      preact-render-to-string:
+        specifier: 6.8.2
+        version: 6.8.2(preact@11.1.1)
+
+packages:
+
+  '@nowaki-dev/runtime@file:../../../../packages/nowaki-runtime':
+    resolution: {directory: ../../../../packages/nowaki-runtime, type: directory}
+    engines: {node: '>=22'}
+    peerDependencies:
+      preact: ^10.25.0 || ^11.1.0
+      preact-render-to-string: ^6.8.2
+
+  preact-render-to-string@6.8.2:
+    resolution: {integrity: sha512-Hdx7cKD3AMYgt795TdddBpUbuGEFoL/VeA6s7VrBt9Gjt0r6rCy5wMp5xkDjQ9cbKj62frHsEx1x8yV6EjoOpg==}
+    peerDependencies:
+      preact: '>=10 || >= 11.0.0-0'
+
+  preact@11.1.1:
+    resolution: {integrity: sha512-vpFVfai437pbuLri7XVeslCPfrEZX6Z1S2gV+MOFrA/kji+NKUXvH7y01EnVjA1guLigfkVp77Sqipd4SIllCg==}
+    peerDependencies:
+      preact-render-to-string: '>=6.7.0'
+    peerDependenciesMeta:
+      preact-render-to-string:
+        optional: true
+
+snapshots:
+
+  '@nowaki-dev/runtime@file:../../../../packages/nowaki-runtime(preact-render-to-string@6.8.2)(preact@11.1.1)':
+    dependencies:
+      preact: 11.1.1(preact-render-to-string@6.8.2)
+      preact-render-to-string: 6.8.2(preact@11.1.1)
+
+  preact-render-to-string@6.8.2(preact@11.1.1):
+    dependencies:
+      preact: 11.1.1(preact-render-to-string@6.8.2)
+
+  preact@11.1.1(preact-render-to-string@6.8.2):
+    optionalDependencies:
+      preact-render-to-string: 6.8.2(preact@11.1.1)
