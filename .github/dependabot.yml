@@ -36,6 +36,7 @@ updates:
       - "/benchmarks/compare/apps/sveltekit"
       - "/benchmarks/compare/apps/next"
       - "/benchmarks/compare/apps/nuxt"
+      - "/benchmarks/docs-site/apps/astro"
     schedule:
       interval: weekly
     groups:
