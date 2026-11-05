@@ -17,11 +17,12 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     if let Some(host) = &_plugin_host {
         core.set_plugins(host.bridge.clone());
     }
-    let report = core.build(&root.join("dist"))?;
+    let (report, client) = core.build_with_client(&root.join("dist"))?;
     println!(
         "[nowaki] build: client {} / server {} modules",
         report.modules, report.server_modules
     );
+    crate::check_route_budgets(&core, &report, &client)?;
 
     let entry = root.join("node_modules/@nowaki-dev/runtime/server/start.mjs");
     if !entry.exists() {

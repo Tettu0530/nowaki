@@ -18,6 +18,18 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use crate::NowakiCore;
 
+/// What `manifest.json` says, kept in memory for the route JS report (`budget.rs`).
+#[derive(Debug, Default, Clone)]
+pub struct ClientInfo {
+    pub runtime: Option<String>,
+    /// island name → chunk file
+    pub islands: HashMap<String, String>,
+    pub live_islands: Vec<String>,
+    pub live_runtime: Option<String>,
+    /// chunk → the chunks it preloads
+    pub preload: HashMap<String, Vec<String>>,
+}
+
 pub struct BuildReport {
     pub modules: usize,
     pub islands: usize,
@@ -35,6 +47,15 @@ pub fn build_client(
     core: &NowakiCore,
     dist: &Path,
 ) -> Result<(BuildReport, HashMap<PathBuf, String>)> {
+    let (report, assets, _) = build_client_with_info(core, dist)?;
+    Ok((report, assets))
+}
+
+/// `build_client`, plus the manifest data in memory (for the route JS report).
+pub fn build_client_with_info(
+    core: &NowakiCore,
+    dist: &Path,
+) -> Result<(BuildReport, HashMap<PathBuf, String>, ClientInfo)> {
     let client_dir = dist.join("client");
     // Start empty so deleted islands/modules from a previous build don't ship.
     clear_dir(&client_dir)?;
@@ -144,6 +165,18 @@ pub fn build_client(
     // pick them up too.
     crate::compress::precompress_dir(&client_dir)?;
 
+    let client = ClientInfo {
+        runtime: runtime_out.clone(),
+        islands: islands.iter().cloned().collect(),
+        live_islands: live_islands.clone(),
+        live_runtime: live_runtime_out.clone(),
+        // Same transitive lists the manifest's `preload` field holds.
+        preload: runtime_out
+            .iter()
+            .chain(islands.iter().map(|(_, f)| f))
+            .map(|f| (f.clone(), transitive_deps(f, &ctx.deps)))
+            .collect(),
+    };
     Ok((
         BuildReport {
             modules: ctx.emitted.len(),
@@ -154,6 +187,7 @@ pub fn build_client(
             asset_out: ctx.asset_out,
         },
         ctx.assets,
+        client,
     ))
 }
 
