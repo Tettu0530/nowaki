@@ -131,10 +131,11 @@ grep -q '<p id="greeting">Hello from data/</p>' examples/hello/dist/static/about
 grep -q '<h1 id="an-mdx-page">An MDX page</h1>' examples/hello/dist/static/guide/index.html
 grep -q '<nowaki-island name="Counter"' examples/hello/dist/static/docs/components/index.html
 # SEO in the static output: sitemap.xml generated against the site, public/robots.txt kept
-grep -q '<loc>https://hello.nowaki.dev/docs/intro</loc>' examples/hello/dist/static/sitemap.xml
+# static output: page URLs end in / (the page is docs/intro/index.html)
+grep -q '<loc>https://hello.nowaki.dev/docs/intro/</loc>' examples/hello/dist/static/sitemap.xml
 ! grep -qE '/boom<|/secret<' examples/hello/dist/static/sitemap.xml
 grep -q 'User-agent: \*' examples/hello/dist/static/robots.txt
-grep -q '<link rel="canonical" href="https://hello.nowaki.dev/docs/intro" />' examples/hello/dist/static/docs/intro/index.html
+grep -q '<link rel="canonical" href="https://hello.nowaki.dev/docs/intro/" />' examples/hello/dist/static/docs/intro/index.html
 # file routes are written to their own path (not feed.xml/index.html), bytes intact
 grep -q '<rss version="2.0">' examples/hello/dist/static/feed.xml
 head -c 4 examples/hello/dist/static/og/intro.png | od -An -c | grep -q 'P   N   G'
