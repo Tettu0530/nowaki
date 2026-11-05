@@ -7,8 +7,8 @@ import { Readable } from "node:stream";
 import path from "node:path";
 import { createApp } from "./app.mjs";
 import { handleRequest } from "./handler.mjs";
-import { liveContext, liveRender, LiveForbiddenError } from "./live.mjs";
-import { runWithContext } from "./functions.mjs";
+import { liveContext, liveRender, liveShareable, LiveForbiddenError } from "./live.mjs";
+import { contextReads, runWithContext } from "./functions.mjs";
 import { pageMeta } from "./document.mjs";
 import { persistRooms } from "./live-rooms-file.mjs";
 import { isrUrls } from "./isr-urls.mjs";
@@ -46,9 +46,12 @@ const server = createServer(async (req, res) => {
         res.end(JSON.stringify({ error: "live island not found" }));
         return;
       }
-      const result = await runWithContext(liveContext(request), () =>
+      const ctx = liveContext(request);
+      const result = await runWithContext(ctx, () =>
         liveRender(entry.mod, state, handler, payload, name, sig, { load }),
       );
+      // Rust reuses a shareable render for every connection in the room (one render per publish).
+      result.shareable = liveShareable(entry.mod, { handler, load, contextRead: !!ctx && contextReads.has(ctx) });
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(result));
     } catch (err) {
