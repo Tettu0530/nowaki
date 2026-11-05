@@ -108,7 +108,8 @@ pub fn route_js_report(routes: &[nowaki_core::budget::RouteJs]) -> usize {
             None => String::new(),
         };
         let what = if r.islands.is_empty() && !r.live && r.gzip_bytes > 0 {
-            dim("islands runtime (a streaming shell always loads it)")
+            // No island: page scripts, or the islands runtime a streaming shell always loads.
+            dim("page scripts / streaming shell runtime")
         } else if r.islands.is_empty() && !r.live {
             dim("no client JS")
         } else {

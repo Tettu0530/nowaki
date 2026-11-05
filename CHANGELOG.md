@@ -11,6 +11,20 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **Page scripts** (v0.17). A route or layout can ship plain browser modules
+  with no island, like Astro's `<script>`:
+  `export const scripts = ["../scripts/hero.ts"]`.
+  - Each listed module is bundled like an island, npm imports included, and
+    loaded as `<script type="module">`, with preloads for its chunks. The
+    module never runs on the server.
+  - The list is read at build time, so it must be an array of string literals
+    (relative paths or package names). An unreadable list or a missing module
+    fails the build.
+  - Layouts' scripts come first, and duplicates load once. Scripts count in
+    the route's first-load JS and `budget`.
+  - On client navigation the SPA router loads the new page's scripts and then
+    dispatches `nowaki:page-load` on `document`. A module runs once, so a
+    script that sets up the DOM should also listen for that event.
 - **File routes** (v0.17). A route whose last segment has an extension returns
   a file instead of a page: `routes/feed.xml.ts` → `/feed.xml`, and
   `routes/og/[card].png.ts` → `/og/intro.png` (a param followed by a fixed

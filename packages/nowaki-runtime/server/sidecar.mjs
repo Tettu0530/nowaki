@@ -2,7 +2,7 @@
 // Signals readiness to Rust with "NOWAKI_SIDECAR_READY <port>" on stdout.
 
 import { createServer } from "node:http";
-import { register } from "node:module";
+import { createRequire, register } from "node:module";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -53,6 +53,23 @@ const RUST = `http://127.0.0.1:${process.env.NOWAKI_RUST_PORT ?? "3000"}`;
 
 // dev doesn't build, so Rust discovers the server function allowlist. Cached per HMR generation.
 const fnCache = new Map();
+// A page script's URL in dev: under the app root as its own path, elsewhere (node_modules in a pnpm
+// store, say) through /@fs/.
+function devScriptUrl(fromFile, spec) {
+  let abs;
+  if (spec.startsWith(".") || spec.startsWith("/")) abs = path.resolve(path.dirname(fromFile), spec);
+  else {
+    try {
+      abs = createRequire(fromFile).resolve(spec);
+    } catch {
+      return `/${spec}`; // shows up as a 404 in the browser console, naming the specifier
+    }
+  }
+  const rel = path.relative(appRoot, abs);
+  if (!rel.startsWith("..") && !path.isAbsolute(rel)) return "/" + rel.split(path.sep).join("/");
+  return "/@fs/" + abs.split(path.sep).join("/").replace(/^\/+/, "");
+}
+
 const routeCssCache = new Map();
 async function routeCssDev(file, version) {
   const key = `${version}\u0000${file}`;
@@ -145,6 +162,8 @@ const env = {
   // Route / layout CSS in dev: the Rust dev server follows the route's imports and serves each
   // stylesheet (cached per SSR version, so an edit shows up on the next reload).
   routeCss: (file, version) => routeCssDev(file, version),
+  // Page scripts in dev: the listed modules' own URLs, served (and transformed) by the dev server.
+  routeScripts: (file, mod) => (Array.isArray(mod?.scripts) ? mod.scripts : []).map((spec) => ({ src: devScriptUrl(file, String(spec)) })),
   serverFunctions: {
     async lookup(id, version) {
       const entries = await serverFnEntries(String(version ?? "0"));

@@ -68,6 +68,34 @@ pub fn route_first_load(
         })
     };
 
+    // Page scripts come from the manifest the build just wrote (`routeScripts` per route or layout
+    // module, `scriptPreload` per script), so ClientInfo stays as it is.
+    let manifest: serde_json::Value = fs::read(client_dir.join("manifest.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    let scripts_of = |key: &str| -> Vec<String> {
+        let mut v = Vec::new();
+        for f in manifest["routeScripts"][key]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            let Some(f) = f.as_str() else { continue };
+            v.push(f.to_string());
+            for d in manifest["scriptPreload"][f]
+                .as_array()
+                .into_iter()
+                .flatten()
+            {
+                if let Some(d) = d.as_str() {
+                    v.push(d.to_string());
+                }
+            }
+        }
+        v
+    };
+
     let mut out = Vec::new();
     for path in crate::routes::walk_routes_dir(&routes_dir)? {
         let Some(rel) = path
@@ -128,6 +156,15 @@ pub fn route_first_load(
             if let Some(lr) = &client.live_runtime {
                 chunks.insert(lr.clone());
             }
+        }
+        let mut modules: Vec<String> = layouts_for(&routes_dir, &rel)
+            .iter()
+            .filter_map(|l| l.strip_prefix(&routes_dir).ok())
+            .filter_map(|l| stem_from_rel(&l.to_string_lossy().replace('\\', "/")))
+            .collect();
+        modules.push(stem.clone());
+        for m in modules {
+            chunks.extend(scripts_of(&format!("routes/{m}.js")));
         }
         let gzip_bytes = chunks.iter().map(|c| gzip_of(c)).sum();
 

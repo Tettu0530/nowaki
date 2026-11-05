@@ -187,6 +187,21 @@ try {
   check("leaving drops the previous page's <style> and restores lang", !left.stale && left.lang === "en");
   check("leaving drops the previous page's linked stylesheet", !left.staleLink);
 
+  // Page scripts: loaded on client navigation, and nowaki:page-load lets a script that already ran
+  // set up the page again when it comes back.
+  await cdp.evalAsync(`window.__nav('/scripted'); return true;`);
+  await sleep(800);
+  const stamp1 = await cdp.evalAsync(`return document.getElementById('script-stamp')?.textContent ?? null;`);
+  check(`client navigation loads the page's script (${JSON.stringify(stamp1)})`, stamp1 === "page script ran");
+  await cdp.evalAsync(`window.__nav('/about'); return true;`);
+  await sleep(500);
+  await cdp.evalAsync(`window.__nav('/scripted'); return true;`);
+  await sleep(800);
+  const stamp2 = await cdp.evalAsync(`return { text: document.getElementById('script-stamp')?.textContent ?? null,
+    tags: document.querySelectorAll('script[data-nowaki-script][src*="stamp"]').length };`);
+  check(`coming back re-runs it through nowaki:page-load, loading it once (${JSON.stringify(stamp2)})`,
+    stamp2.text === "page script ran" && stamp2.tags === 1);
+
   console.log(`\n${failures === 0 ? "BROWSER ROUTER TEST PASSED" : `BROWSER ROUTER TEST FAILED (${failures})`}`);
 } catch (err) {
   console.error("harness error:", err);
