@@ -106,7 +106,7 @@ Prove the differentiation with numbers and tooling.
 ### v0.17 "Mistral": Content sites
 Make Nowaki a first-class choice for blogs, docs, and marketing sites: content, images, and SEO out of the box.
 
-**Exit criteria**: a docs site is built from a typed content collection of Markdown and MDX, with responsive images and a generated sitemap, without third-party Markdown or image code in the app. Its build time and first-load JS are in BENCHMARKS.md, next to Astro's.
+**Exit criteria**: a docs site is built from a typed content collection of Markdown and MDX, with responsive images and a generated sitemap, without third-party Markdown or image code in the app. Its build time and first-load JS are in BENCHMARKS.md, next to Astro's. A static Astro site of the size of a personal portfolio (page scripts, `public/` assets, generated OG images, attributes on `<html>`) moves to Nowaki without workarounds, following the migration guide.
 
 - [x] Content collections: `content/<name>/*` (declared in `content/config.ts`) with YAML frontmatter validated by a Standard Schema (the same as `serverFn`), `getCollection` / `getEntry`, generated types; TOML frontmatter (`+++`) as a follow-up
 - [ ] Built-in Markdown, rendered in Rust at build time: heading anchors and table of contents and code highlighting (done), images through the asset pipeline
@@ -114,6 +114,11 @@ Make Nowaki a first-class choice for blogs, docs, and marketing sites: content, 
 - [ ] Markdoc as an official plugin (it runs on the Node side through the plugin host)
 - [ ] Image component: `srcset` / `sizes`, `width` / `height` from the file (no layout shift), lazy loading by default, AVIF and lossy WebP, remote images with an allow-list
 - [ ] SEO and metadata: a typed `meta` (Open Graph, Twitter cards, canonical, robots, JSON-LD), `sitemap.xml` and `robots.txt` generated from the routes
+- [ ] `public/`: files served as-is at their own path (favicon, `robots.txt`, fonts referenced from CSS), by `nowaki dev`, `nowaki start`, every adapter, and static output
+- [ ] File routes, prerendered: dynamic routes with an extension (`og/[card].png.ts`, `feed.xml.ts`) and API routes written to files by `nowaki prerender` / the static adapter, for OG images, feeds, and sitemaps
+- [ ] Attributes on `<html>` and `<body>` from a route or layout (`export const htmlAttrs` / `bodyAttrs`)
+- [ ] Page scripts: a route or layout can ship a bundled TS module (npm imports included) without an island, like Astro's `<script>`; counted in the route's first-load JS and `budget`
+- [ ] Migration guide from Astro (`.astro` components to TSX, `<style>` to CSS Modules, `<script>` to page scripts, endpoints to file routes), written from moving a real site
 - [ ] Font optimization: self-hosted Google and local fonts at build time (no third-party request), subsetting, `preload` for the fonts a page uses, `font-display`, and size-adjusted fallbacks so text doesn't shift when the font arrives
 
 ### v0.18 "Sirocco": Routing for real apps
