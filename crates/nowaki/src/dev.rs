@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -69,6 +69,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         expose,
     });
 
+    dev_content(&state);
     let _watcher = start_watcher(&root, state.clone())?;
 
     let app = Router::new()
@@ -118,14 +119,36 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
 }
 
 /// File watch → bump ssr_version + broadcast reload (100ms debounce)
+/// Content collections in dev: re-read content/ into .nowaki/content/index.json, which the
+/// sidecar loads for the next SSR version. A bad file is reported (overlay, MCP) and the last
+/// good output is kept.
+fn dev_content(state: &DevState) {
+    let root = &state.core.root;
+    if !crate::content::enabled(root) {
+        return;
+    }
+    crate::typegen::write(root).ok();
+    if let Err(e) = crate::content::write(root, &root.join(".nowaki/content")) {
+        let msg = format!("{e:#}");
+        eprintln!("[nowaki] content: {msg}");
+        state.errors.record("build", &msg, None, None, None);
+    }
+}
+
 fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::RecommendedWatcher> {
     let root_owned = root.to_path_buf();
-    let last_fire = Mutex::new(Instant::now() - Duration::from_secs(1));
+    // notify's callback only filters and forwards; a worker thread batches the changes and
+    // reloads once they have been quiet for 100 ms. One save (several events) is one reload, a
+    // second quick save is never dropped, and nothing blocks notify's thread.
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<PathBuf>>();
+    let filter_state = state.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         let event = match res {
             Ok(event) => event,
             Err(e) => {
-                state.errors.record("hmr", &e.to_string(), None, None, None);
+                filter_state
+                    .errors
+                    .record("hmr", &e.to_string(), None, None, None);
                 return;
             }
         };
@@ -135,53 +158,71 @@ fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::Recommende
         ) {
             return;
         }
-        let relevant: Vec<_> = event
+        let relevant: Vec<PathBuf> = event
             .paths
-            .iter()
+            .into_iter()
             .filter(|p| {
-                let s = p.to_string_lossy();
-                !s.contains("/node_modules/")
-                    && !s.contains("/.git/")
-                    && !s.contains("/dist/")
-                    && !s.contains("/target/")
-                    && !s.contains("/.nowaki/")
+                !under(
+                    &filter_state.core.root,
+                    p,
+                    &["node_modules", ".git", "dist", "target", ".nowaki"],
+                )
             })
             .collect();
-        if relevant.is_empty() {
-            return;
+        if !relevant.is_empty() {
+            let _ = tx.send(relevant);
         }
-        {
-            let mut last = last_fire.lock().unwrap();
-            if last.elapsed() < Duration::from_millis(100) {
-                return;
-            }
-            *last = Instant::now();
-        }
-        if relevant
-            .iter()
-            .any(|p| p.to_string_lossy().contains("/routes/"))
-        {
-            crate::typegen::write(&state.core.root).ok();
-        }
-        state.ssr_version.fetch_add(1, Ordering::SeqCst);
-        let island_only = relevant
-            .iter()
-            .all(|p| p.to_string_lossy().contains("/islands/"));
-        let kind = if island_only { "update" } else { "reload" };
-        let files: Vec<String> = relevant
-            .iter()
-            .map(|p| {
-                p.strip_prefix(&state.core.root)
-                    .unwrap_or(p)
-                    .to_string_lossy()
-                    .into_owned()
-            })
-            .collect();
-        crate::ui::hmr_log(kind, &files);
-        let _ = state.hmr_tx.send(json!({ "type": kind }).to_string());
     })?;
+    std::thread::spawn(move || {
+        while let Ok(first) = rx.recv() {
+            let mut batch: std::collections::BTreeSet<PathBuf> = first.into_iter().collect();
+            while let Ok(more) = rx.recv_timeout(Duration::from_millis(100)) {
+                batch.extend(more);
+            }
+            apply_changes(&state, batch.into_iter().collect());
+        }
+    });
     watcher.watch(&root_owned, RecursiveMode::Recursive)?;
     Ok(watcher)
+}
+
+/// Whether `p` is inside a directory named one of `names` (by path component, so Windows `\`
+/// paths match too; "/x/" substring checks never did there).
+fn under(root: &Path, p: &Path, names: &[&str]) -> bool {
+    p.strip_prefix(root)
+        .unwrap_or(p)
+        .components()
+        .any(|c| names.iter().any(|n| c.as_os_str() == *n))
+}
+
+fn apply_changes(state: &DevState, relevant: Vec<PathBuf>) {
+    let root = &state.core.root;
+    if relevant.iter().any(|p| under(root, p, &["routes"])) {
+        crate::typegen::write(root).ok();
+    }
+    let under_content = relevant.iter().any(|p| {
+        p.strip_prefix(root)
+            .ok()
+            .and_then(|r| r.components().next())
+            .is_some_and(|c| c.as_os_str() == "content")
+    });
+    if under_content {
+        dev_content(state);
+    }
+    state.ssr_version.fetch_add(1, Ordering::SeqCst);
+    let island_only = relevant.iter().all(|p| under(root, p, &["islands"]));
+    let kind = if island_only { "update" } else { "reload" };
+    let files: Vec<String> = relevant
+        .iter()
+        .map(|p| {
+            p.strip_prefix(root)
+                .unwrap_or(p)
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    crate::ui::hmr_log(kind, &files);
+    let _ = state.hmr_tx.send(json!({ "type": kind }).to_string());
 }
 
 async fn hmr_ws(

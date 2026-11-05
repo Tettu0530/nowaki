@@ -19,6 +19,44 @@ fn render(routes: &[(String, String)]) -> String {
     s
 }
 
+/// Content collections: `Collections` gets one key per content/ sub-directory, typed by the
+/// output of that collection's schema in content/config.
+fn render_content(root: &Path) -> String {
+    let config = ["config.ts", "config.mts", "config.js", "config.mjs"]
+        .into_iter()
+        .find(|f| root.join("content").join(f).is_file());
+    let Some(config) = config else {
+        return String::new();
+    };
+    let mut names: Vec<String> = std::fs::read_dir(root.join("content"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|n| !n.starts_with('.') && !n.starts_with('_'))
+        .collect();
+    names.sort();
+    let mut s = String::new();
+    s.push_str(
+        "\n// Content collections for @nowaki-dev/runtime/content (getCollection / getEntry).\n",
+    );
+    s.push_str("import type { CollectionData } from \"@nowaki-dev/runtime/content\";\n");
+    s.push_str(&format!(
+        "type NowakiContentConfig = typeof import(\"../content/{config}\");\n\n"
+    ));
+    s.push_str("declare module \"@nowaki-dev/runtime/content\" {\n");
+    s.push_str("  interface Collections {\n");
+    for n in names {
+        s.push_str(&format!(
+            "    {:?}: CollectionData<NowakiContentConfig[{:?}]>;\n",
+            n, n
+        ));
+    }
+    s.push_str("  }\n}\n");
+    s
+}
+
 /// Skip the write if unchanged (avoids needlessly triggering the dev file watcher).
 pub fn write(root: &Path) -> Result<()> {
     let routes_dir = root.join("routes");
@@ -29,7 +67,7 @@ pub fn write(root: &Path) -> Result<()> {
     let out_dir = root.join(".nowaki");
     std::fs::create_dir_all(&out_dir)
         .with_context(|| format!("failed to create: {}", out_dir.display()))?;
-    let content = render(&routes);
+    let content = render(&routes) + &render_content(root);
     let path = out_dir.join("types.d.ts");
     if std::fs::read_to_string(&path).ok().as_deref() != Some(content.as_str()) {
         std::fs::write(&path, &content)

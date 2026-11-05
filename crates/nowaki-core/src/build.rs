@@ -223,7 +223,15 @@ pub fn build_server(
     let server_dir = dist.join("server");
     clear_dir(&server_dir)?;
     let mut files = Vec::new();
-    for sub in ["routes", "islands", "components", "lib", "actions"] {
+    // `content` holds the collections' config.ts (its Markdown / JSON entries aren't modules).
+    for sub in [
+        "routes",
+        "islands",
+        "components",
+        "lib",
+        "actions",
+        "content",
+    ] {
         let src_root = core.root.join(sub);
         if !src_root.is_dir() {
             continue;

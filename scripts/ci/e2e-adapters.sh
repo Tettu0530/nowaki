@@ -73,6 +73,9 @@ grep -q 'Post: hello' examples/hello/dist/static/blog/hello/index.html
 grep -q 'Post: nowaki' examples/hello/dist/static/blog/nowaki/index.html
 grep -q 'docs / intro (2)' examples/hello/dist/static/files/docs/intro/index.html
 grep -q 'Page not found' examples/hello/dist/static/404.html
+# content collections: staticPaths from getCollection, one page per entry
+grep -q '<h2 id="why-content-collections"' examples/hello/dist/static/docs/intro/index.html
+test -f examples/hello/dist/static/docs/routing/index.html
 # live islands on a static host: their first HTML, but no live.js (no server for its events), and
 # the build says which pages they are on (#93)
 grep -q 'nowaki-live name="LiveCounter"' examples/hello/dist/static/live/index.html
@@ -102,9 +105,13 @@ grep -q '"launcherType": "Nodejs"' examples/hello/.vercel/output/functions/index
 test -d examples/hello/.vercel/output/static/_nowaki
 # the function must NOT carry a nested preact (would double-instance and break hooks)
 ! test -d examples/hello/.vercel/output/functions/index.func/node_modules/@nowaki-dev/runtime/node_modules
-( cd examples/hello/.vercel/output/functions/index.func \
-  && node -e 'import("./index.mjs").then(m=>require("http").createServer(m.default).listen(3320))' & )
+# Started with its PID kept, so it is stopped below (a subshell left it running after the script).
+(cd examples/hello/.vercel/output/functions/index.func \
+  && exec node -e 'import("./index.mjs").then(m=>require("http").createServer(m.default).listen(3320))') &
+VERCEL_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3320/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3320/ | grep -q "nowaki-island"
 curl -sf http://127.0.0.1:3320/api/hello | grep -q '"hello":"nowaki"'
+curl -sf http://127.0.0.1:3320/docs/intro | grep -q '<h2 id="why-content-collections"'   # content on vercel
 curl -sf http://127.0.0.1:3320/nav | grep -q 'href="/blog/hello"'
+kill $VERCEL_PID
