@@ -101,6 +101,9 @@ node scripts/livetest.mjs http://127.0.0.1:3300
 # leak) and collapse unused-query floods (#6/#7).
 ! grep -rl "$HOME" examples/hello/dist/client
 node scripts/security-e2e.mjs prod http://127.0.0.1:3300
+# The build's first-load JS report matches the chunks each page actually references.
+test -f examples/hello/dist/route-js.json
+node scripts/route-js-e2e.mjs http://127.0.0.1:3300 examples/hello
 # Windows has no SIGTERM for the sidecar, so rooms rely on the periodic write (every 2 s): wait for
 # it there. Elsewhere `kill` is a SIGTERM, and the sidecar must write the rooms on its way out.
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) sleep 3 ;; esac

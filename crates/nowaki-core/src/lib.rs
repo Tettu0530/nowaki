@@ -1,4 +1,5 @@
 pub mod asset;
+pub mod budget;
 pub mod build;
 pub mod cache;
 pub mod chunk;
@@ -257,9 +258,18 @@ impl NowakiCore {
     /// Production build: writes the client graph to dist/client/ and server modules
     /// to dist/server/.
     pub fn build(&self, dist: &Path) -> Result<build::BuildReport> {
-        let (mut report, assets) = build::build_client(self, dist)?;
+        Ok(self.build_with_client(dist)?.0)
+    }
+
+    /// `build`, plus what the client manifest says (islands, chunks, preloads), for
+    /// `budget::route_first_load`.
+    pub fn build_with_client(
+        &self,
+        dist: &Path,
+    ) -> Result<(build::BuildReport, build::ClientInfo)> {
+        let (mut report, assets, client) = build::build_client_with_info(self, dist)?;
         report.server_modules = build::build_server(self, dist, &assets)?;
-        Ok(report)
+        Ok((report, client))
     }
 
     /// For a virtual module, returns it as a data: module Node can import directly (for SSR).
