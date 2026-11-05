@@ -89,6 +89,14 @@ export type Action = (ctx: LoaderContext) => unknown | Promise<unknown>;
  */
 export type StaticPaths<P extends RouteParams = RouteParams> = P[] | (() => P[] | Promise<P[]>);
 
+/**
+ * `export const budget` on a page route: the most first-load client JS the page may ship, in KB of
+ * gzip (the islands runtime, the islands it can render, and the live runtime). `nowaki build`
+ * fails when the page goes over it. `js` must be a number literal; `0` means no client JS.
+ * @example export const budget = { js: 12 };
+ */
+export type RouteBudget = { js: number };
+
 /** API route handler (per-method export or default). */
 export type ApiHandler = (
   ctx: LoaderContext,

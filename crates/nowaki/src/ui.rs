@@ -88,6 +88,40 @@ pub fn dir_js_kb(dir: &std::path::Path) -> f64 {
     bytes as f64 / 1024.0
 }
 
+/// First-load JS per page route (gzip), with its budget when the route sets one. Returns how many
+/// routes are over budget; the caller fails the build on any.
+pub fn route_js_report(routes: &[nowaki_core::budget::RouteJs]) -> usize {
+    if routes.is_empty() {
+        return 0;
+    }
+    let width = routes.iter().map(|r| r.url.len()).max().unwrap_or(1).max(5);
+    println!("  {}", bold("first-load JS per route (gzip):"));
+    let mut over = 0;
+    for r in routes {
+        let size = format!("{:>7.2} KB", r.kb());
+        let note = match r.budget_kb {
+            Some(b) if r.over_budget() => {
+                over += 1;
+                red(&format!("over budget {b} KB"))
+            }
+            Some(b) => dim(&format!("budget {b} KB")),
+            None => String::new(),
+        };
+        let what = if r.islands.is_empty() && !r.live {
+            dim("no client JS")
+        } else {
+            let mut parts = r.islands.clone();
+            if r.live {
+                parts.push("live".into());
+            }
+            dim(&parts.join(", "))
+        };
+        println!("    {:<width$}  {size}  {note}  {what}", r.url);
+    }
+    println!();
+    over
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn build_summary(
     client_modules: usize,
