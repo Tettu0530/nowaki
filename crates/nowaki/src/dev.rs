@@ -79,6 +79,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         .route("/__nowaki/ssr-module", get(ssr_module))
         .route("/__nowaki/route-css", get(route_css))
         .route("/__nowaki/css", get(dev_css))
+        .route("/__nowaki/image", get(dev_image))
         .route("/@fs/{*path}", get(serve_fs))
         .route(crate::mcp::PATH, axum::routing::any(crate::mcp::handle))
         .fallback(serve_or_proxy)
@@ -130,7 +131,11 @@ fn dev_content(state: &DevState) {
         return;
     }
     crate::typegen::write(root).ok();
-    if let Err(e) = crate::content::write(root, &root.join(".nowaki/content")) {
+    if let Err(e) = crate::content::write(
+        root,
+        &root.join(".nowaki/content"),
+        &crate::content::Images::Dev,
+    ) {
         let msg = format!("{e:#}");
         eprintln!("[nowaki] content: {msg}");
         state.errors.record("build", &msg, None, None, None);
@@ -333,6 +338,54 @@ struct RouteCssQuery {
 
 /// The stylesheets a route (and its layouts) imports, as `/__nowaki/css` URLs, for the dev
 /// sidecar to link in the page head. Only route files under `routes/` are accepted.
+#[derive(serde::Deserialize)]
+struct ImageVariantQuery {
+    /// The image's dev URL (`/photo.png`, or `/@fs/...` outside the root).
+    f: String,
+    w: u32,
+    /// `avif` or `orig` (the source format, resized).
+    fmt: String,
+    q: Option<u8>,
+}
+
+/// One `?image` variant in dev, encoded on first request (cached on disk by nowaki-core). The file
+/// must be one the dev server would serve anyway: under the root, or an allowed /@fs/ root.
+async fn dev_image(
+    State(state): State<Arc<DevState>>,
+    Query(q): Query<ImageVariantQuery>,
+) -> Response {
+    let requested = match q.f.strip_prefix("/@fs/") {
+        Some(rest) => nowaki_core::resolve::fs_url_to_path(rest),
+        None => state.core.root.join(q.f.trim_start_matches('/')),
+    };
+    let Ok(canon) = dunce::canonicalize(&requested) else {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    let allowed = (canon.starts_with(&state.core.root) && !is_denied_fs_path(&canon))
+        || fs_path_allowed(&canon, &state.fs_allow);
+    if !allowed || !nowaki_core::is_asset(&canon) {
+        return (StatusCode::FORBIDDEN, "forbidden").into_response();
+    }
+    let root = state.core.root.clone();
+    let avif = q.fmt == "avif";
+    let out = tokio::task::spawn_blocking(move || {
+        nowaki_core::image::dev_variant(&root, &canon, q.w, avif, q.q)
+    })
+    .await;
+    match out {
+        Ok(Ok((bytes, mime))) => (
+            [
+                (header::CONTENT_TYPE, mime),
+                (header::CACHE_CONTROL, "no-cache"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
 async fn route_css(State(state): State<Arc<DevState>>, Query(q): Query<RouteCssQuery>) -> Response {
     let routes_dir = state.core.root.join("routes");
     let Ok(canon) = dunce::canonicalize(&q.file) else {

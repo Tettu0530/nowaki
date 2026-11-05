@@ -7,6 +7,7 @@ pub mod compress;
 pub mod css;
 pub mod env;
 pub mod graph;
+pub mod image;
 pub mod live_hint;
 pub mod page_scripts;
 pub mod public;

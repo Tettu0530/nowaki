@@ -215,12 +215,7 @@ fn map_specifier(
     match resolver.resolve(dir, spec) {
         Ok(resolution) => {
             let full = resolution.full_path();
-            let url = fs_path_to_url(root, &full);
-            if crate::is_asset(&full) {
-                Some(asset_module_data_url(&url))
-            } else {
-                Some(url)
-            }
+            dev_asset_module(root, &full).or_else(|| Some(fs_path_to_url(root, &full)))
         }
         Err(err) => {
             // Virtual modules get a dev URL for their synthetic path; the dev server serves them via load.
@@ -330,13 +325,34 @@ fn rewrite_ssr_imports<'a>(
         }
         if let Ok(resolution) = resolver.resolve(dir, spec) {
             let full = resolution.full_path();
-            if crate::is_asset(&full) {
-                let url = fs_path_to_url(root, &full);
-                lit.value = allocator.alloc_str(&asset_module_data_url(&url)).into();
+            if let Some(data) = dev_asset_module(root, &full) {
+                lit.value = allocator.alloc_str(&data).into();
                 lit.raw = None;
             }
         }
     }
+}
+
+/// The data: module an asset import becomes in dev, for the browser and SSR alike: its URL, or for
+/// `?image` the image set with `/__nowaki/image` URLs (sizes from the file header; the variants
+/// are encoded when the browser asks). None when `full` isn't an asset.
+fn dev_asset_module(root: &Path, full: &Path) -> Option<String> {
+    let (file, query) = crate::image::split_query(full);
+    if let Some(q) = query.as_deref().and_then(crate::image::image_query) {
+        return match crate::image::dev_set(root, &file, &q) {
+            Ok(set) => Some(data_module(set.module().trim_end())),
+            Err(e) => {
+                eprintln!("[nowaki] {}: {e}", file.display());
+                None
+            }
+        };
+    }
+    let file = if crate::is_asset(&file) {
+        file
+    } else {
+        full.to_path_buf()
+    };
+    crate::is_asset(&file).then(|| asset_module_data_url(&fs_path_to_url(root, &file)))
 }
 
 #[cfg(test)]

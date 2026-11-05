@@ -179,6 +179,11 @@ code locations and CI coverage.
   `resolve_id`, `load`); `NowakiCore::resolve_spec` + the `VirtualResolve` trait.
 - **Scope hoisting / chunking** — `crates/nowaki-core/src/chunk.rs`.
 - **Deploy adapters** — `crates/nowaki/src/adapter.rs` (+ `server/edge-build.mjs`).
+- **Images (`?image`, `<Image>`)** — `crates/nowaki-core/src/image.rs` (widths, AVIF via ravif
+  + fallback, disk cache, `picture_html` for Markdown), emitted by `build.rs` `emit` (client) and
+  `ServerAssets::image_module` (server); dev modules from `transform.rs` `dev_asset_module`,
+  variants from `dev.rs` `dev_image` (`/__nowaki/image`). Component: `packages/nowaki-runtime/image.js`.
+  Markdown images: `content.rs` `local_image`.
 - **Page scripts (`export const scripts`)** — read from the AST in
   `crates/nowaki-core/src/page_scripts.rs`, emitted as client entries by
   `build.rs` `build_route_scripts` (manifest `routeScripts` per module and
