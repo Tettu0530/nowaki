@@ -140,6 +140,7 @@ fn main() -> anyhow::Result<()> {
                 report.asset_out,
             );
             check_route_budgets(&core, &report, &client)?;
+            print_island_hints(&core, &report.out_dir);
             let unvalidated = nowaki_core::server_fn::discover_unvalidated(
                 &core,
                 &["routes", "islands", "components", "lib", "actions"],
@@ -221,4 +222,67 @@ fn check_route_budgets(
         );
     }
     Ok(())
+}
+
+/// Points out client islands that could ship no JS: ones that only keep state and handle
+/// click / form events (a live island does the same on the server), and ones with no state or
+/// events at all (a plain component). `NOWAKI_HINTS=0` turns this off.
+fn print_island_hints(core: &nowaki_core::NowakiCore, client_dir: &std::path::Path) {
+    if matches!(
+        std::env::var("NOWAKI_HINTS").ok().as_deref(),
+        Some("0" | "off" | "false")
+    ) {
+        return;
+    }
+    let Ok(text) = std::fs::read_to_string(client_dir.join("manifest.json")) else {
+        return;
+    };
+    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return;
+    };
+    let Some(islands) = manifest.get("islands").and_then(|v| v.as_object()) else {
+        return;
+    };
+    let islands_dir = core.root.join("islands");
+    let Ok(entries) = std::fs::read_dir(&islands_dir) else {
+        return;
+    };
+    let mut files: Vec<_> = entries.flatten().map(|e| e.path()).collect();
+    files.sort();
+    let mut lines = Vec::new();
+    for path in files {
+        let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Some(chunk) = islands.get(name).and_then(|v| v.as_str()) else {
+            continue; // live islands, or files that aren't islands
+        };
+        let Ok(source) = core.read_source(&path) else {
+            continue;
+        };
+        let Some(hint) = nowaki_core::live_hint::hint_for_island(&path, &source) else {
+            continue;
+        };
+        let kb = std::fs::read(client_dir.join(chunk))
+            .map(|b| nowaki_core::compress::gzip(&b, 9).len() as f64 / 1024.0)
+            .unwrap_or(0.0);
+        let file = format!("islands/{}", path.file_name().unwrap().to_string_lossy());
+        lines.push(match hint.kind {
+            nowaki_core::live_hint::HintKind::CouldBeLive => format!(
+                "{file} could be a live island ({}): rewritten with `export const live` (state on the server, `data-live` events) it ships none of its {kb:.2} KB, nor the islands runtime on pages where it is the only client island; each event becomes a server round trip",
+                hint.uses.join(", ")
+            ),
+            nowaki_core::live_hint::HintKind::NoInteractivity => format!(
+                "{file} has no state or event handlers: as a plain component (outside islands/) it would ship none of its {kb:.2} KB of JS"
+            ),
+        });
+    }
+    if lines.is_empty() {
+        return;
+    }
+    println!("  {}", ui::bold("hints (NOWAKI_HINTS=0 hides these):"));
+    for l in lines {
+        println!("    {}", ui::dim(&l));
+    }
+    println!();
 }
