@@ -15,7 +15,7 @@ A "structural answer to the slowness of Next.js", built on three pillars:
 
 ## Where we are
 
-**alpha (CLI / crates 0.15.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands: WebSocket on `nowaki dev` / `nowaki start`, per-event HTTP POST on every deploy adapter), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Production use is not yet recommended (the API is still stabilizing).
+**alpha (CLI / crates 0.16.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands: WebSocket on `nowaki dev` / `nowaki start`, per-event HTTP POST on every deploy adapter), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Production use is not yet recommended (the API is still stabilizing).
 
 ## Milestones
 
@@ -93,6 +93,8 @@ Make "LiveView for the npm ecosystem, with 0KB of component JS" practical. Forms
 Prove the differentiation with numbers and tooling.
 
 **Exit criteria**: `nowaki build` reports first-load JS per route and fails when a budget is exceeded. TTFB and Jetstream benchmark results are in the docs. Claude Code can connect to the `nowaki dev` MCP.
+
+**Status**: 0.16.0 ships the checked items below, plus streamed responses through the Rust front, `streaming = "early"`, and one render per publish for live queries and rooms. The Jetstream fan-out benchmark is in BENCHMARKS.md. Still open: TTFB numbers from the 0.16.0 re-run of `benchmarks/compare`, and the Jetstream docs and demo polish on nowaki.dev.
 
 - [x] Per-route client JS budgets (`export const budget = { js: <KB> }`; every build prints first-load JS per route and fails over budget)
 - [x] Build-time "this island could be live" suggestions (including moving live detection to the AST)

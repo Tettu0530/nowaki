@@ -10,6 +10,42 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-11-05 · "Chinook"
+
+Packages: `nowaki` / `nowaki-core` 0.16.0 (crates.io, npm), `@nowaki-dev/runtime`
+0.15.0, `create-nowaki` / `create-nowaki-app` 0.17.0. New apps get
+`@nowaki-dev/runtime@^0.15.0` and `nowaki@^0.16.0`.
+
+"Show it with numbers":
+- **Speed.** `nowaki start` renders about 4x faster than 0.15. In a local
+  run of the comparison app it outpaced Astro on post pages (1.5x req/s)
+  and on `/` (2.2x req/s), and its TTFB was lower.
+- **Fewer round trips.** ISR pages are cached from the first request,
+  responses are pre-compressed with 304s, and streamed responses are no
+  longer buffered.
+- **Budgets.** Every build reports the first-load JS of each route and
+  fails when a route goes over its budget.
+- **Tooling.** `nowaki dev` serves an MCP endpoint for coding agents.
+
+It also finishes v0.15: stale notifications, rooms that survive a restart,
+and a 1000-connection fan-out benchmark, with publish refreshes now rendered
+once.
+
+### Upgrade notes
+- `nowaki start` renders every ISR page once right after startup, so route
+  middleware and loaders run at boot. `NOWAKI_ISR_WARM=0` turns this off.
+- `nowaki start` stops its Node process with SIGTERM and a 3 s grace period,
+  where it used to kill it outright. It writes rooms to
+  `.nowaki/live-rooms.json`; set `NOWAKI_LIVE_ROOMS_FILE=off` to keep them
+  in memory only.
+- `nowaki build` writes `.br` / `.gz` siblings into `dist/client`, so a
+  static host that uploads the whole directory uploads those too.
+- A route with `export const budget` fails the build when it goes over.
+  Routes without one only get the report.
+- Live islands are now recognized by an exported binding named `live` in
+  the AST. An island that only *mentions* `export const live` in a comment
+  becomes a client island again.
+
 ### Added
 - **`export const streaming = "early"`** (#112) sends the document shell
   before any loader runs, so the first byte doesn't wait for data. On
@@ -638,7 +674,8 @@ and the runtime at 0.9.0.
 - Published to crates.io (`nowaki-core`, `nowaki`) and npm (`@nowaki-dev/runtime`,
   `create-nowaki`, `create-nowaki-app`).
 
-[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.16.0
 [0.15.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.15.0
 [0.14.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.14.1
 [0.14.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.14.0
