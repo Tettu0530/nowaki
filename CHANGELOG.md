@@ -27,6 +27,9 @@ milestone's worth of work; the codename is noted per entry.
   replay one visitor's cookie to others. A response with `Set-Cookie` and a
   shared Cache-Control now gets `private, no-cache` (all servers and adapters).
   `nowaki start` already kept such responses out of its ISR cache (#150).
+- `nowaki dev` now percent-decodes the request path before looking up an app
+  file, so islands and files with spaces or non-ASCII names load (they were
+  404). Malformed escapes and `..` / `.` segments are refused (#150).
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 

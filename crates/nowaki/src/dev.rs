@@ -557,19 +557,31 @@ async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Res
         axum::http::Method::GET | axum::http::Method::HEAD
     );
     if read && path != "/" {
-        let candidate = state.core.root.join(path.trim_start_matches('/'));
-        if candidate.is_file() {
-            // Check the real path hasn't escaped the root via `..`/symlinks, and never serve sensitive paths
-            // (root is already canonicalized in main.rs).
-            match dunce::canonicalize(&candidate) {
-                Ok(canon) if canon.starts_with(&state.core.root) && !is_denied_fs_path(&canon) => {
-                    return serve_file(state, candidate).await;
-                }
-                _ => {}
-            }
+        if let Some(candidate) = app_file(&state.core.root, &path) {
+            return serve_file(state, candidate).await;
         }
     }
     proxy_to_sidecar(state, req).await
+}
+
+/// The app file a request path names, decoded (the renderer writes island and script URLs
+/// unencoded, so the browser asks for `/islands/Cnt%20%C3%84.tsx`). None for a malformed escape,
+/// a `.` / `..` / empty segment, a backslash or NUL, a missing file, a real path that leaves the
+/// root (via a symlink), or a sensitive file. `root` is canonical (main.rs).
+fn app_file(root: &Path, url_path: &str) -> Option<PathBuf> {
+    let decoded = nowaki_core::public::percent_decode(url_path)?;
+    let mut candidate = root.to_path_buf();
+    for seg in decoded.strip_prefix('/')?.split('/') {
+        if seg.is_empty() || seg == "." || seg == ".." || seg.contains(['\\', '\0']) {
+            return None;
+        }
+        candidate.push(seg);
+    }
+    if !candidate.is_file() {
+        return None;
+    }
+    let canon = dunce::canonicalize(&candidate).ok()?;
+    (canon.starts_with(root) && !is_denied_fs_path(&canon)).then_some(candidate)
 }
 
 /// `public/<path>` for `/<path>`, read on each request so added or edited files show up at once.
@@ -1023,5 +1035,30 @@ mod tests {
             assert!(r.starts_with("HTTP/1.1 200"), "{path}: {r}");
         }
         server.abort();
+    }
+
+    #[test]
+    fn app_file_decodes_the_request_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("islands")).unwrap();
+        std::fs::write(root.join("islands/Cnt Ä.tsx"), "x").unwrap();
+        std::fs::write(root.join(".env"), "SECRET=1").unwrap();
+        assert_eq!(
+            app_file(&root, "/islands/Cnt%20%C3%84.tsx"),
+            Some(root.join("islands").join("Cnt Ä.tsx"))
+        );
+        for bad in [
+            "/islands/Cnt%20%C3%8",
+            "/islands/Cnt%zz.tsx",
+            "/islands/%2e%2e/islands/Cnt%20%C3%84.tsx",
+            "/islands/..%2fislands/Cnt%20%C3%84.tsx",
+            "/islands%5cCnt%20%C3%84.tsx",
+            "/%2eenv",
+            "/.env",
+            "/islands/missing.tsx",
+        ] {
+            assert_eq!(app_file(&root, bad), None, "{bad}");
+        }
     }
 }
