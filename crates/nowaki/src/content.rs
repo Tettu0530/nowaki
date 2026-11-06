@@ -41,6 +41,23 @@ pub struct Entry {
     /// runtime imports for `entry.render()`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub module: Option<String>,
+    /// Local images the HTML references through placeholders (`IMAGE_REF`), filled in by
+    /// `collect` once every image is built.
+    #[serde(skip)]
+    pub image_refs: Vec<ImageRef>,
+}
+
+/// One Markdown image to turn into a `<picture>` (see `collect`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageRef {
+    pub abs: PathBuf,
+    pub alt: String,
+    pub title: String,
+}
+
+/// The placeholder an image stands as in an entry's HTML until its set is built.
+fn image_ref_placeholder(i: usize) -> String {
+    format!("<nowaki-image-ref data-i=\"{i}\"></nowaki-image-ref>")
 }
 
 /// Whether the app has a `content/` directory with a config (the feature is off otherwise).
@@ -91,7 +108,7 @@ pub fn collect(root: &Path, images: &Images) -> Result<BTreeMap<String, Vec<Entr
         use rayon::prelude::*;
         let read: Vec<Result<Option<Entry>>> = files
             .par_iter()
-            .map(|path| read_entry(root, &coll, path, images))
+            .map(|path| read_entry(root, &coll, path))
             .collect();
         for e in read {
             if let Some(e) = e? {
@@ -111,6 +128,7 @@ pub fn collect(root: &Path, images: &Images) -> Result<BTreeMap<String, Vec<Entr
         }
         out.insert(name, entries);
     }
+    fill_images(root, &mut out, images)?;
     Ok(out)
 }
 
@@ -184,7 +202,7 @@ fn rel(root: &Path, p: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn read_entry(root: &Path, coll: &Path, path: &Path, images: &Images) -> Result<Option<Entry>> {
+fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     let file = rel(root, path);
     let slug = {
@@ -201,8 +219,20 @@ fn read_entry(root: &Path, coll: &Path, path: &Path, images: &Images) -> Result<
                 None => Value::Object(Default::default()),
             };
             let dir = path.parent().unwrap_or(coll);
-            let mut image =
-                |url: &str, alt: &str, title: &str| local_image(root, dir, url, alt, title, images);
+            // Images are only recorded here; `collect` builds each file once, after every entry
+            // is read (building inside this parallel read could wait on itself, see collect).
+            let mut image_refs = Vec::new();
+            let mut image = |url: &str, alt: &str, title: &str| -> Result<Option<String>> {
+                let Some(abs) = local_image_path(dir, url)? else {
+                    return Ok(None);
+                };
+                image_refs.push(ImageRef {
+                    abs,
+                    alt: alt.to_string(),
+                    title: title.to_string(),
+                });
+                Ok(Some(image_ref_placeholder(image_refs.len() - 1)))
+            };
             let (html, headings) =
                 render_markdown_with(body, &mut image).map_err(|e| anyhow!("{file}: {e:#}"))?;
             Entry {
@@ -213,6 +243,7 @@ fn read_entry(root: &Path, coll: &Path, path: &Path, images: &Images) -> Result<
                 html: Some(html),
                 headings: Some(headings),
                 module: None,
+                image_refs,
             }
         }
         "mdx" => {
@@ -240,6 +271,7 @@ fn read_entry(root: &Path, coll: &Path, path: &Path, images: &Images) -> Result<
                 html: None,
                 headings: Some(headings),
                 module,
+                image_refs: Vec::new(),
             }
         }
         "json" => Entry {
@@ -250,6 +282,7 @@ fn read_entry(root: &Path, coll: &Path, path: &Path, images: &Images) -> Result<
             html: None,
             headings: None,
             module: None,
+            image_refs: Vec::new(),
         },
         "yaml" | "yml" => Entry {
             data: yaml_to_json(&text()?).map_err(|e| anyhow!("{file}: {e}"))?,
@@ -259,6 +292,7 @@ fn read_entry(root: &Path, coll: &Path, path: &Path, images: &Images) -> Result<
             html: None,
             headings: None,
             module: None,
+            image_refs: Vec::new(),
         },
         _ => return Ok(None),
     }))
@@ -317,17 +351,11 @@ fn highlighter() -> &'static nowaki_core::highlight::CachedAdapter {
     nowaki_core::highlight::adapter()
 }
 
-/// The `<picture>` for a Markdown image with a relative URL (`./hero.jpg`, `../img/a.png`), run
-/// through the same pipeline as `?image`. None leaves the image as Markdown wrote it: remote and
-/// root-relative URLs (`/logo.svg`, from public/), and files that aren't images.
-fn local_image(
-    root: &Path,
-    dir: &Path,
-    url: &str,
-    alt: &str,
-    title: &str,
-    images: &Images,
-) -> Result<Option<String>> {
+/// The file a Markdown image with a relative URL (`./hero.jpg`, `../img/a.png`) points at, to
+/// go through the same pipeline as `?image`. None leaves the image as Markdown wrote it: remote
+/// and root-relative URLs (`/logo.svg`, from public/). A relative path that isn't an image file
+/// is an error.
+fn local_image_path(dir: &Path, url: &str) -> Result<Option<PathBuf>> {
     if url.is_empty()
         || url.starts_with('/')
         || url.starts_with('#')
@@ -337,72 +365,70 @@ fn local_image(
         return Ok(None);
     }
     let path_part = url.split(['?', '#']).next().unwrap_or(url);
-    let decoded = percent_decode(path_part);
-    let abs = dir.join(&decoded);
+    let abs = dir.join(percent_decode(path_part));
     if !abs.is_file() || !nowaki_core::is_asset(&abs) {
         return Err(anyhow!(
             "image {url} not found (paths are relative to the entry)"
         ));
     }
     // `../../hero.jpg` → the real path, so dev URLs and file names don't carry `..`.
-    let abs = dunce::canonicalize(&abs).unwrap_or(abs);
-    let q = nowaki_core::image::ImageQuery::default();
-    let set = image_set(root, &abs, &q, images)?;
-    Ok(Some(nowaki_core::image::picture_html(
-        &set,
-        alt,
-        Some(title),
-    )))
+    Ok(Some(dunce::canonicalize(&abs).unwrap_or(abs)))
 }
 
-/// One image set per file (and mode) for the whole build: a photo referenced from 500 entries is
-/// processed once. Keyed by the file's size and modification time too, so a dev rebuild after an
-/// edit sees the new file.
-fn image_set(
-    root: &Path,
-    abs: &Path,
-    q: &nowaki_core::image::ImageQuery,
-    images: &Images,
-) -> Result<nowaki_core::image::ImageSet> {
-    use std::collections::HashMap;
-    use std::sync::{Arc, Mutex, OnceLock};
-    type Key = (PathBuf, u64, u128, Option<PathBuf>);
-    type Slot = Arc<OnceLock<std::result::Result<nowaki_core::image::ImageSet, String>>>;
-    static SETS: OnceLock<Mutex<HashMap<Key, Slot>>> = OnceLock::new();
-    let meta = std::fs::metadata(abs)?;
-    let mtime = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let mode = match images {
-        Images::Dev => None,
-        Images::Build(dir) => Some(dir.clone()),
-    };
-    let key = (abs.to_path_buf(), meta.len(), mtime, mode);
-    // One slot per file: entries are read in parallel, and the first to reach a photo builds it
-    // while the others wait for that result (instead of encoding the same variants at once).
-    let slot: Slot = SETS
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap()
-        .entry(key)
-        .or_default()
-        .clone();
-    slot.get_or_init(|| {
-        match images {
-            Images::Dev => nowaki_core::image::dev_set(root, abs, q),
-            Images::Build(client_dir) => {
-                nowaki_core::image::build_set(root, abs, q, |stem, w, ext, bytes| {
-                    nowaki_core::image::write_variant(client_dir, stem, w, ext, bytes)
-                })
-            }
+/// The image set for a file: dev URLs, or the variants written into dist/client.
+fn image_set(root: &Path, abs: &Path, images: &Images) -> Result<nowaki_core::image::ImageSet> {
+    let q = nowaki_core::image::ImageQuery::default();
+    match images {
+        Images::Dev => nowaki_core::image::dev_set(root, abs, &q),
+        Images::Build(client_dir) => {
+            nowaki_core::image::build_set(root, abs, &q, |stem, w, ext, bytes| {
+                nowaki_core::image::write_variant(client_dir, stem, w, ext, bytes)
+            })
         }
-        .map_err(|e| format!("{e:#}"))
-    })
-    .clone()
-    .map_err(|e| anyhow!(e))
+    }
+}
+
+/// Builds every image the entries reference, each file once and in parallel, then swaps each
+/// entry's placeholders for its `<picture>`. This runs after the entries are read, outside that
+/// parallel loop: building an image (its own parallel variants) while other entries wait on the
+/// same file deadlocked rayon, whose waiting worker picks up one of those entries.
+fn fill_images(root: &Path, all: &mut BTreeMap<String, Vec<Entry>>, images: &Images) -> Result<()> {
+    use rayon::prelude::*;
+    let mut files: Vec<PathBuf> = all
+        .values()
+        .flatten()
+        .flat_map(|e| e.image_refs.iter().map(|r| r.abs.clone()))
+        .collect();
+    files.sort();
+    files.dedup();
+    if files.is_empty() {
+        return Ok(());
+    }
+    let built: Vec<(PathBuf, Result<nowaki_core::image::ImageSet>)> = files
+        .into_par_iter()
+        .map(|f| {
+            let set = image_set(root, &f, images);
+            (f, set)
+        })
+        .collect();
+    let mut sets = std::collections::HashMap::new();
+    for (f, set) in built {
+        sets.insert(
+            f.clone(),
+            set.map_err(|e| anyhow!("{}: {e:#}", f.display()))?,
+        );
+    }
+    for entry in all.values_mut().flatten() {
+        let Some(html) = entry.html.as_mut() else {
+            continue;
+        };
+        for (i, r) in entry.image_refs.iter().enumerate() {
+            let picture = nowaki_core::image::picture_html(&sets[&r.abs], &r.alt, Some(&r.title));
+            *html = html.replacen(&image_ref_placeholder(i), &picture, 1);
+        }
+        entry.image_refs.clear();
+    }
+    Ok(())
 }
 
 /// `%20` → ` ` (Markdown URLs are often percent-encoded); a malformed escape stays as written.
@@ -577,17 +603,14 @@ mod tests {
         // examples/hello/hero.jpg is 1200×750.
         let hero = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello/hero.jpg");
         std::fs::copy(hero, dir.path().join("content/docs/a b.jpg")).unwrap();
-        let client = dir.path().join("dist/client");
-        let images = Images::Build(client.clone());
-        let docs = dir.path().join("content/docs");
-        let mut cb = |url: &str, alt: &str, title: &str| {
-            local_image(dir.path(), &docs, url, alt, title, &images)
-        };
-        let (html, _) = render_markdown_with(
+        std::fs::write(
+            dir.path().join("content/docs/a.md"),
             "![A *wide* image](./a%20b.jpg \"Caption\")\n\n![logo](/logo.svg) ![remote](https://x.test/a.png)\n",
-            &mut cb,
         )
         .unwrap();
+        let client = dir.path().join("dist/client");
+        let all = collect(dir.path(), &Images::Build(client.clone())).unwrap();
+        let html = all["docs"][0].html.clone().unwrap();
         assert!(
             html.contains("<picture><source type=\"image/avif\" srcset=\"/_nowaki/a b-640."),
             "{html}"
@@ -601,11 +624,40 @@ mod tests {
             "{html}"
         );
         assert!(html.contains("<img src=\"https://x.test/a.png\""), "{html}");
+        assert!(!html.contains("nowaki-image-ref"), "{html}");
         assert!(std::fs::read_dir(&client).unwrap().count() >= 4);
-        let mut missing = |url: &str, alt: &str, title: &str| {
-            local_image(dir.path(), &docs, url, alt, title, &images)
-        };
-        assert!(render_markdown_with("![x](./nope.png)\n", &mut missing).is_err());
+
+        std::fs::write(dir.path().join("content/docs/b.md"), "![x](./nope.png)\n").unwrap();
+        let err = collect(dir.path(), &Images::Build(client))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("content/docs/b.md") && err.contains("not found"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn many_entries_sharing_one_uncached_image_build_it_once() {
+        // Each entry used to build its image inside the parallel read; with the cache empty, a
+        // worker waiting on a photo it was itself building picked up another entry and hung.
+        let dir = tempfile::tempdir().unwrap();
+        let docs = dir.path().join("content/docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        let hero = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello/hero.jpg");
+        std::fs::copy(hero, docs.join("shared.jpg")).unwrap();
+        for i in 0..64 {
+            std::fs::write(
+                docs.join(format!("e{i:02}.md")),
+                format!("# E{i}\n\n![p](./shared.jpg)\n"),
+            )
+            .unwrap();
+        }
+        let all = collect(dir.path(), &Images::Build(dir.path().join("dist/client"))).unwrap();
+        assert_eq!(all["docs"].len(), 64);
+        assert!(all["docs"]
+            .iter()
+            .all(|e| e.html.as_deref().unwrap().contains("<picture>")));
     }
 
     #[test]

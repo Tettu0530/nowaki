@@ -82,7 +82,10 @@ milestone's worth of work; the codename is noted per entry.
   - A Markdown image's size is read from the file's header, and the pixels
     are decoded only when a variant isn't cached yet.
   - Each file's image set is built once per build, however many entries
-    reference it.
+    reference it. The images are built after the entries are read, all
+    unique files in parallel. Building them inside the parallel read could
+    deadlock a cold build: a worker waiting on a photo it was itself building
+    picked up another entry that needed the same photo.
   - Entries are read and rendered in parallel.
   - On a 500-entry docs site (four photos, 1,500 code fences), a build with
     the caches warm went from 2.3 s to 0.25 s. Before, about 86% of it was
