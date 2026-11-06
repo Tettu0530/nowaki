@@ -27,6 +27,11 @@ milestone's worth of work; the codename is noted per entry.
   characters in the source file name become `_` (`logo@2x.svg` →
   `logo_2x.<hash>.svg`). Before, the name kept the source stem as is, and
   `nowaki start`, which serves only such names, answered 404.
+- The dev transform cache, in memory and in `node_modules/.cache/nowaki`,
+  also checks the files a module inlines: a CSS Module's class map (with its
+  `@import`s), plain CSS text in SSR, and `?image` sizes. Before, editing one
+  of those kept serving the old class names or sizes until the importing file
+  changed, even across restarts.
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 

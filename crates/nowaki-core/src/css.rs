@@ -13,15 +13,26 @@ pub fn inline_imports(
     css: &str,
     resolve: &dyn Fn(&Path, &str) -> Option<std::path::PathBuf>,
 ) -> String {
+    inline_imports_with_files(abs, css, resolve).0
+}
+
+/// [`inline_imports`], plus the files it inlined (for cache invalidation).
+pub fn inline_imports_with_files(
+    abs: &Path,
+    css: &str,
+    resolve: &dyn Fn(&Path, &str) -> Option<std::path::PathBuf>,
+) -> (String, Vec<std::path::PathBuf>) {
     let mut seen = std::collections::HashSet::new();
     seen.insert(abs.to_path_buf());
     let mut remote = Vec::new();
     let body = inline_rec(abs, css, resolve, &mut seen, &mut remote);
-    if remote.is_empty() {
+    let css = if remote.is_empty() {
         body
     } else {
         format!("{}\n{body}", remote.join("\n"))
-    }
+    };
+    seen.remove(abs);
+    (css, seen.into_iter().collect())
 }
 
 fn inline_rec(
