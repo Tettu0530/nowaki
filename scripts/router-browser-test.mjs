@@ -22,6 +22,7 @@ class CDP {
     this.ws = new WebSocket(wsUrl);
     this.id = 0;
     this.pending = new Map();
+    this.events = []; // CDP events (method + params), for checks on requests the page made
     this.ready = new Promise((res, rej) => {
       this.ws.onopen = () => res();
       this.ws.onerror = (e) => rej(e);
@@ -32,6 +33,8 @@ class CDP {
         const { resolve, reject } = this.pending.get(msg.id);
         this.pending.delete(msg.id);
         msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result);
+      } else if (msg.method) {
+        this.events.push(msg);
       }
     };
   }
@@ -201,6 +204,109 @@ try {
     tags: document.querySelectorAll('script[data-nowaki-script][src*="stamp"]').length };`);
   check(`coming back re-runs it through nowaki:page-load, loading it once (${JSON.stringify(stamp2)})`,
     stamp2.text === "page script ran" && stamp2.tags === 1);
+
+  // Back/forward restores the scroll of the page returned to, not of the page left.
+  const targetTop = (sel) => `return Math.round(document.querySelector(${JSON.stringify(sel)})?.getBoundingClientRect().top ?? -1);`;
+  await cdp.evalAsync(`window.__nav('/anchors'); return true;`);
+  await sleep(800);
+  await cdp.evalAsync(`scrollTo(0, 1234); return true;`);
+  await sleep(100);
+  await cdp.evalAsync(`window.__nav('/about'); return true;`);
+  await sleep(500);
+  await cdp.evalAsync(`history.back(); return true;`);
+  await sleep(600);
+  const backY = await cdp.evalAsync(`return { path: location.pathname, y: scrollY };`);
+  check(`back restores the scroll of the page returned to (${JSON.stringify(backY)})`, backY.path === "/anchors" && backY.y === 1234);
+
+  // Hash-only history entries: back/forward between them keeps the document (island state) and
+  // doesn't fetch, and scroll follows the entry.
+  await cdp.evalAsync(`
+    document.querySelectorAll('main button')[1].click();
+    document.querySelector('main').dataset.keep = '1';
+    scrollTo(0, 500); return true;`);
+  await sleep(100);
+  const anchorFetches = () =>
+    cdp.evalAsync(`return performance.getEntriesByType('resource').filter((e) => new URL(e.name).pathname === '/anchors' && e.initiatorType === 'fetch').length;`);
+  const fetches0 = await anchorFetches();
+  const url0 = await cdp.evalAsync(`return location.pathname + location.hash;`);
+  await cdp.evalAsync(`document.querySelector('a[href="#three"]').click(); return true;`);
+  await sleep(300);
+  const threeTop = await cdp.evalAsync(targetTop("#three"));
+  await cdp.evalAsync(`history.back(); return true;`);
+  await sleep(500);
+  const hashBack = await cdp.evalAsync(`
+    return { url: location.pathname + location.hash, y: scrollY, keep: document.querySelector('main')?.dataset.keep ?? null,
+             count: document.querySelector('main strong')?.textContent };`);
+  check(`back from a same-page #hash entry keeps the page and its scroll (${JSON.stringify({ threeTop, ...hashBack })})`,
+    Math.abs(threeTop) <= 1 && hashBack.url === url0 && hashBack.keep === "1" && hashBack.count === "1" && hashBack.y === 500);
+  await cdp.evalAsync(`history.forward(); return true;`);
+  await sleep(500);
+  const hashFwd = await cdp.evalAsync(`return { url: location.pathname + location.hash, keep: document.querySelector('main')?.dataset.keep ?? null };`);
+  const threeTop2 = await cdp.evalAsync(targetTop("#three"));
+  check(`forward to the #hash entry scrolls to #three, same document (${JSON.stringify({ ...hashFwd, threeTop2 })})`,
+    hashFwd.url === "/anchors#three" && hashFwd.keep === "1" && Math.abs(threeTop2) <= 1);
+  check("hash-only history moves don't fetch the page", (await anchorFetches()) === fetches0);
+
+  // Fragments on client navigation: /anchors#two lands on #two (an <a name> counts too, and a
+  // fragment with no target lands at the top).
+  await cdp.evalAsync(`window.__nav('/about'); return true;`);
+  await sleep(500);
+  await cdp.evalAsync(`window.__nav('/anchors#two'); return true;`);
+  await sleep(800);
+  const two = await cdp.evalAsync(`return { url: location.pathname + location.hash, y: scrollY };`);
+  const twoTop = await cdp.evalAsync(targetTop("#two"));
+  check(`client navigation to /anchors#two scrolls to #two (${JSON.stringify({ ...two, twoTop })})`,
+    two.url === "/anchors#two" && two.y > 0 && Math.abs(twoTop) <= 1);
+  await cdp.evalAsync(`window.__nav('/about'); return true;`);
+  await sleep(500);
+  await cdp.evalAsync(`window.__nav('/anchors#named'); return true;`);
+  await sleep(800);
+  const namedTop = await cdp.evalAsync(targetTop('a[name="named"]'));
+  check(`client navigation to /anchors#named scrolls to <a name="named"> (${namedTop})`, Math.abs(namedTop) <= 1);
+  await cdp.evalAsync(`window.__nav('/about'); return true;`);
+  await sleep(500);
+  await cdp.evalAsync(`window.__nav('/anchors#missing'); return true;`);
+  await sleep(800);
+  check("client navigation to a missing fragment lands at the top", (await cdp.evalAsync(`return scrollY;`)) === 0);
+
+  // Responses that aren't a page are left to the browser (a full navigation): a download, JSON,
+  // and a redirect to another origin.
+  await cdp.send("Browser.setDownloadBehavior", { behavior: "deny" }).catch(() => {});
+  await cdp.evalAsync(`window.__nav('/about'); return true;`);
+  await sleep(500);
+  cdp.events.length = 0;
+  await cdp.evalAsync(`window.__nav('/api/export'); return true;`);
+  await sleep(1000);
+  const dl = await cdp.evalAsync(`return { path: location.pathname, h1: document.querySelector('h1')?.textContent ?? '' };`);
+  const dlNav = cdp.events.some((e) => e.method === "Network.requestWillBeSent" && e.params.type === "Document" &&
+    e.params.request.url.endsWith("/api/export"));
+  check(`an attachment response is a browser download, not swapped in (${JSON.stringify({ ...dl, dlNav })})`,
+    dl.path === "/about" && /About/.test(dl.h1) && dlNav);
+  // A slow one: the loading boundary that showed meanwhile gives the page back.
+  await cdp.evalAsync(`window.__nav('/api/export?ms=500'); return true;`);
+  await sleep(300);
+  const dlLoading = await cdp.evalAsync(`return !!document.querySelector('[data-testid="loading"]');`);
+  await sleep(1200);
+  const dlSlow = await cdp.evalAsync(`return { path: location.pathname, h1: document.querySelector('h1')?.textContent ?? '',
+    loading: !!document.querySelector('[data-testid="loading"]') };`);
+  check(`a slow download puts back the page the loading boundary replaced (${JSON.stringify({ dlLoading, ...dlSlow })})`,
+    dlLoading && dlSlow.path === "/about" && /About/.test(dlSlow.h1) && !dlSlow.loading);
+  await cdp.evalAsync(`window.__nav('/api/hello'); return true;`);
+  await sleep(1000);
+  const json = await cdp.evalAsync(`return { path: location.pathname, type: document.contentType };`);
+  check(`a JSON response is a full navigation (${JSON.stringify(json)})`, json.path === "/api/hello" && json.type === "application/json");
+  await cdp.send("Page.navigate", { url: BASE + "/" });
+  await sleep(800);
+  await cdp.evalAsync(`
+    window.__nav = (href) => { const a=document.createElement('a'); a.href=href; a.textContent=href; document.body.appendChild(a); a.click(); };
+    return true;`);
+  await cdp.evalAsync(`window.__nav('/api/away'); return true;`);
+  await sleep(1500);
+  const away = await cdp.evalAsync(`
+    return { origin: location.origin, path: location.pathname, h1: document.querySelector('h1')?.textContent ?? '',
+             error: !!document.querySelector('[data-testid="error"], [data-nowaki-reset]') };`);
+  check(`a cross-origin redirect is a full navigation (${JSON.stringify(away)})`,
+    away.origin !== new URL(BASE).origin && away.path === "/about" && /About/.test(away.h1) && !away.error);
 
   console.log(`\n${failures === 0 ? "BROWSER ROUTER TEST PASSED" : `BROWSER ROUTER TEST FAILED (${failures})`}`);
 } catch (err) {

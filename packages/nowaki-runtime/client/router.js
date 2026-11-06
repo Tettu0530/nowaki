@@ -9,6 +9,8 @@ const hydrateIslands = (root) => window.__nowakiHydrateIslands?.(root);
 
 const pageCache = createPageCache({ ttlMs: readCacheTtl(), max: 32 });
 const scrollPos = new Map(); // history key -> scrollY
+let curKey; // history key of the entry on screen (history.state has already moved on popstate)
+let curDoc; // path + query of the document on screen, null while a boundary shows
 let boundariesPromise = null; // result of /__nowaki/boundaries (fetched once)
 let navToken = 0; // token guarding against racing navigations
 
@@ -39,12 +41,25 @@ function internalAnchor(target) {
   return url;
 }
 
+// Resolves to null for a response that isn't a page (a download, JSON, a redirect to another
+// origin): the browser loads those itself.
 async function fetchPage(url) {
-  const res = await fetch(url, { headers: { "x-nowaki-nav": "1" } });
+  let res;
+  try {
+    res = await fetch(url, { headers: { "x-nowaki-nav": "1" } });
+  } catch (e) {
+    // A redirect to another origin fails CORS (x-nowaki-nav needs a preflight).
+    if ((await fetch(url, { redirect: "manual" })).type === "opaqueredirect") return null;
+    throw e;
+  }
+  const h = (n) => res.headers.get(n) || "";
+  const page = /html/.test(h("content-type")) && !/^attachment/i.test(h("content-disposition"));
+  // (A Response a fetch wrapper built itself has no url.)
+  if (!page || (res.url && new URL(res.url).origin !== location.origin)) return null;
   const html = await res.text();
   return {
     doc: new DOMParser().parseFromString(html, "text/html"),
-    finalUrl: res.redirected ? res.url : url.toString(),
+    finalUrl: res.redirected ? res.url : url.href.split("#")[0],
     status: res.status,
   };
 }
@@ -60,30 +75,28 @@ function loadBoundaries() {
 }
 
 function prefetch(url) {
-  const key = url.toString();
+  const key = url.href.split("#")[0];
   if (pageCache.has(key)) return;
   fetchPage(url)
     .then((r) => {
-      if (r.status === 200) pageCache.set(key, r);
+      if (r?.status === 200) pageCache.set(key, r);
     })
     .catch(() => {});
 }
 
 async function navigate(url, { push = true } = {}) {
-  const key = url.toString();
+  const key = url.href.split("#")[0];
   const token = ++navToken;
 
   // Immediate Router Cache hit (no loading shown).
   const cached = pageCache.get(key);
   if (cached) {
-    applyDocument(cached, push, token);
+    applyDocument(cached, push, token, url.hash);
     return cached.finalUrl;
   }
 
-  const pending = fetchPage(url).then(
-    (r) => r,
-    () => null,
-  );
+  const body = document.body;
+  const pending = fetchPage(url).catch(() => 0);
 
   // Show loading after 150ms (no flicker on fast navigations).
   const timer = setTimeout(async () => {
@@ -97,27 +110,36 @@ async function navigate(url, { push = true } = {}) {
   clearTimeout(timer);
   if (token !== navToken) return; // superseded by a newer navigation
 
-  if (!result) {
+  if (result === 0) {
     await showError(url, "Failed to load the page");
     return;
   }
+  if (!result) {
+    // Not a page: put back the page a loading boundary replaced, and let the browser have it.
+    if (document.body !== body) {
+      document.body.replaceWith(body);
+      curDoc = location.pathname + location.search;
+    }
+    removeProgressBar();
+    location.assign(url.href);
+    return;
+  }
   if (result.status === 200) pageCache.set(key, result);
-  applyDocument(result, push, token);
+  applyDocument(result, push, token, url.hash);
   return result.finalUrl;
 }
 
 // Apply a cached/fetched document to the live DOM (clones body to keep the cache intact).
-function applyDocument(entry, push, token) {
+// Pages are cached without the #hash, and the link's own goes on the pushed URL.
+function applyDocument(entry, push, token, hash = "") {
   if (token !== undefined && token !== navToken) return;
-  scrollPos.set(historyKey(), window.scrollY);
   const { doc, finalUrl } = entry;
+  if (push) scrollPos.set(curKey, window.scrollY);
   document.title = doc.title;
   syncHead(doc);
   document.body.replaceWith(stampNonce(doc.body.cloneNode(true)));
-  if (push) {
-    const k = String(Date.now()) + Math.round(performance.now());
-    history.pushState({ nowaki: k }, "", finalUrl);
-  }
+  if (push) history.pushState({ nowaki: (curKey = newKey()) }, "", finalUrl + hash);
+  curDoc = location.pathname + location.search;
   hydrateIslands(document);
   loadPageScripts(doc);
   syncLive();
@@ -184,6 +206,7 @@ function stampNonce(root) {
 // Loading boundary (swaps body for its skeleton if present). Otherwise, the default progress bar.
 function showLoading(boundary) {
   if (boundary) {
+    curDoc = null;
     const tmp = new DOMParser().parseFromString(`<body>${boundary.html}</body>`, "text/html");
     document.body.replaceWith(stampNonce(tmp.body));
   } else {
@@ -193,6 +216,7 @@ function showLoading(boundary) {
 
 // Error boundary (if present, shows it with the message in data-nowaki-error and retry wired to data-nowaki-reset).
 async function showError(url, message) {
+  curDoc = null;
   const { error } = await loadBoundaries();
   const boundary = matchBoundary(error, url.pathname);
   if (boundary) {
@@ -293,18 +317,33 @@ function syncAttrs(cur, next, always) {
   }
 }
 
+const newKey = () => Math.random().toString(36).slice(2);
+
+// The current entry's key. Entries the browser added (a #hash link) get one on first sight.
 function historyKey() {
   if (!history.state?.nowaki) {
-    history.replaceState({ ...(history.state ?? {}), nowaki: "init" }, "");
+    history.replaceState({ ...(history.state ?? {}), nowaki: newKey() }, "");
   }
   return history.state.nowaki;
+}
+
+// Like the browser on a fragment navigation: the element with that id (or name), else the top.
+function scrollToHash(hash) {
+  let id = hash.slice(1);
+  try {
+    id = decodeURIComponent(id);
+  } catch {}
+  const el = id && (document.getElementById(id) || document.getElementsByName(id)[0]);
+  if (el) el.scrollIntoView();
+  else window.scrollTo(0, 0);
 }
 
 export function installRouter() {
   if (typeof window === "undefined" || typeof document === "undefined") return;
   if (window.__nowakiRouter) return;
   window.__nowakiRouter = true;
-  historyKey();
+  curKey = historyKey();
+  curDoc = location.pathname + location.search;
   loadBoundaries();
 
   document.addEventListener("click", (e) => {
@@ -317,10 +356,7 @@ export function installRouter() {
       return; // leave same-page (hash etc.) to the browser
     }
     e.preventDefault();
-    navigate(url, { push: true }).then((final) => {
-      window.scrollTo(0, 0);
-      if (final) scrollPos.set(historyKey(), 0);
-    });
+    navigate(url, { push: true }).then((final) => final && scrollToHash(url.hash));
   });
 
   const onHover = (e) => {
@@ -330,12 +366,23 @@ export function installRouter() {
   document.addEventListener("mouseover", onHover, { passive: true });
   document.addEventListener("touchstart", onHover, { passive: true });
 
+  // Back/forward, and #hash links (the browser scrolls to those after this event).
   window.addEventListener("popstate", () => {
-    const url = new URL(location.href);
-    navigate(url, { push: false }).then(() => {
-      const y = scrollPos.get(historyKey()) ?? 0;
-      window.scrollTo(0, y);
-    });
+    // The entry left is curKey: history.state is already the one returned to.
+    scrollPos.set(curKey, window.scrollY);
+    const key = (curKey = historyKey());
+    const restore = () => {
+      const y = scrollPos.get(key);
+      if (y === undefined) scrollToHash(location.hash);
+      else window.scrollTo(0, y);
+    };
+    // Same document, another #hash: nothing to fetch (and a pending navigation is dropped).
+    if (location.pathname + location.search === curDoc) {
+      navToken++;
+      removeProgressBar();
+      return restore();
+    }
+    navigate(new URL(location.href), { push: false }).then((final) => final && key === curKey && restore());
   });
 
   // disable the browser's default scroll restoration (we manage it)
