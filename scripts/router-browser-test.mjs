@@ -215,6 +215,35 @@ try {
   const backY = await cdp.evalAsync(`return { path: location.pathname, y: scrollY };`);
   check(`back restores the scroll of the page returned to (${JSON.stringify(backY)})`, backY.path === "/anchors" && backY.y === 1234);
 
+  // Hash-only history entries: back/forward between them keeps the document (island state) and
+  // doesn't fetch, and scroll follows the entry.
+  await cdp.evalAsync(`
+    document.querySelectorAll('main button')[1].click();
+    document.querySelector('main').dataset.keep = '1';
+    scrollTo(0, 500); return true;`);
+  await sleep(100);
+  const anchorFetches = () =>
+    cdp.evalAsync(`return performance.getEntriesByType('resource').filter((e) => new URL(e.name).pathname === '/anchors' && e.initiatorType === 'fetch').length;`);
+  const fetches0 = await anchorFetches();
+  const url0 = await cdp.evalAsync(`return location.pathname + location.hash;`);
+  await cdp.evalAsync(`document.querySelector('a[href="#three"]').click(); return true;`);
+  await sleep(300);
+  const threeTop = await cdp.evalAsync(targetTop("#three"));
+  await cdp.evalAsync(`history.back(); return true;`);
+  await sleep(500);
+  const hashBack = await cdp.evalAsync(`
+    return { url: location.pathname + location.hash, y: scrollY, keep: document.querySelector('main')?.dataset.keep ?? null,
+             count: document.querySelector('main strong')?.textContent };`);
+  check(`back from a same-page #hash entry keeps the page and its scroll (${JSON.stringify({ threeTop, ...hashBack })})`,
+    Math.abs(threeTop) <= 1 && hashBack.url === url0 && hashBack.keep === "1" && hashBack.count === "1" && hashBack.y === 500);
+  await cdp.evalAsync(`history.forward(); return true;`);
+  await sleep(500);
+  const hashFwd = await cdp.evalAsync(`return { url: location.pathname + location.hash, keep: document.querySelector('main')?.dataset.keep ?? null };`);
+  const threeTop2 = await cdp.evalAsync(targetTop("#three"));
+  check(`forward to the #hash entry scrolls to #three, same document (${JSON.stringify({ ...hashFwd, threeTop2 })})`,
+    hashFwd.url === "/anchors#three" && hashFwd.keep === "1" && Math.abs(threeTop2) <= 1);
+  check("hash-only history moves don't fetch the page", (await anchorFetches()) === fetches0);
+
   console.log(`\n${failures === 0 ? "BROWSER ROUTER TEST PASSED" : `BROWSER ROUTER TEST FAILED (${failures})`}`);
 } catch (err) {
   console.error("harness error:", err);

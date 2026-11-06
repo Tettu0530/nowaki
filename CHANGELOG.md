@@ -13,6 +13,9 @@ milestone's worth of work; the codename is noted per entry.
 ### Fixed
 - Client router: back/forward restores the scroll position of the page you
   return to. It used to restore the position of the page you left.
+- Client router: a same-page `#hash` link, and back/forward between such
+  entries, no longer re-fetches and re-renders the page (which reset island
+  state). It scrolls to the fragment, or to the position saved for that entry.
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 
