@@ -32,6 +32,10 @@ milestone's worth of work; the codename is noted per entry.
   inside `dist/client`, `dist/server`, or `dist/public`) is refused before
   building, instead of deleting the build it renders from. Paths like `dist/`
   and `./dist` are normalized first. (#150)
+- Prerender keeps reading the temporary server's stdout for the whole run, and
+  passes the app's logs through. It used to stop at READY, so on Linux (where
+  Node writes to pipes synchronously) an app that logged more than ~64 KiB
+  hung every pending render. (#150)
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 

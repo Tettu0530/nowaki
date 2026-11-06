@@ -4,7 +4,7 @@ use std::process::Stdio;
 use anyhow::{anyhow, Context, Result};
 use futures_util::StreamExt;
 use nowaki_core::NowakiCore;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
 /// Pages requested from the temporary prod server at once.
@@ -55,18 +55,39 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         .context("failed to start node")?;
 
     let stdout = child.stdout.take().expect("piped stdout");
-    let mut lines = BufReader::new(stdout).lines();
-    let ready = async {
-        while let Some(line) = lines.next_line().await? {
-            if let Some(rest) = line.strip_prefix("NOWAKI_START_READY ") {
-                return rest.trim().parse::<u16>().context("failed to parse port");
+    let ready = async move {
+        let mut reader = BufReader::new(stdout);
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            if reader.read_until(b'\n', &mut line).await? == 0 {
+                return Err(anyhow!("prod server exited without reporting READY"));
             }
+            let text = String::from_utf8_lossy(&line);
+            if let Some(rest) = text.trim_end().strip_prefix("NOWAKI_START_READY ") {
+                let port = rest.trim().parse::<u16>().context("failed to parse port")?;
+                return Ok((port, reader));
+            }
+            print!("{text}"); // the app's own logs
         }
-        Err(anyhow!("prod server exited without reporting READY"))
     };
     // Both are Node processes that only read dist/; starting them together hides one Node startup.
-    let (port, dynamic_pages) = tokio::join!(ready, static_paths(&root));
-    let port = port?;
+    let (ready, dynamic_pages) = tokio::join!(ready, static_paths(&root));
+    let (port, mut server_out) = ready?;
+    // Keep draining the server's stdout for the whole run: Node writes to a pipe synchronously
+    // on Linux, so once app logs fill it (~64 KiB) the renderer would block and every request
+    // would hang. (stderr is inherited, so it's never a pipe of ours.)
+    let mut drain = tokio::spawn(async move {
+        let mut buf = vec![0u8; 16 * 1024];
+        let mut stdout = tokio::io::stdout();
+        let mut forward = true;
+        // Read to the end even if our own stdout goes away: the reading is what matters.
+        while let Ok(n @ 1..) = server_out.read(&mut buf).await {
+            if forward {
+                forward = stdout.write_all(&buf[..n]).await.is_ok();
+            }
+        }
+    });
 
     let mut pages: Vec<(String, PathBuf)> =
         nowaki_core::routes::enumerate_static_prerender_urls(&root.join("dist/server/routes"))?
@@ -217,6 +238,14 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         ),
     )?;
 
+    // Closing stdin ends the server (exit-with-parent.mjs); its last logs then reach EOF here.
+    // Killed on drop if it doesn't exit in time.
+    let grace = std::time::Duration::from_secs(5);
+    drop(child.stdin.take());
+    let _ = tokio::time::timeout(grace, child.wait()).await;
+    if tokio::time::timeout(grace, &mut drain).await.is_err() {
+        drain.abort();
+    }
     drop(child);
     println!("[nowaki] prerender done: {count} pages → {}", out.display());
     Ok(())
