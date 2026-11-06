@@ -415,6 +415,46 @@ A static Astro site moves over with the migration guide.
   within 5%. `node benchmarks/ci-perf.mjs --base <dir> --head <dir>` runs it
   locally.
 
+## [0.16.3] — 2026-11-06 · security patch
+
+Packages: `nowaki` / `nowaki-core` 0.16.3 (crates.io, npm), `@nowaki-dev/runtime`
+0.15.3, `create-nowaki` / `create-nowaki-app` 0.17.3. Update both `nowaki` and
+`@nowaki-dev/runtime`: the fixes are split between the binary and the runtime.
+
+These come from a bug hunt on the v0.17 branch; each finding was confirmed by an
+independent check before it was fixed.
+
+### Security
+- **A forged Jetstream signature could receive a shared room refresh.** When a
+  publish refreshed several connections showing the same island and state, only
+  the first connection's signature was checked. Another connection with a forged
+  signature got the room's HTML and a valid signature, and could then send
+  events. An expired signature was refreshed instead of answering `stale`. Now
+  every connection's signature is checked (a verify-only call, no extra render)
+  before it shares the result.
+- **The `nowaki start` ISR cache could store a personal page under the
+  anonymous key.** The key used only the first value of a varied header, and
+  mapped non-ASCII values to empty. A request with `Cookie:` and a second
+  `Cookie: user=…` header was cached as anonymous and served to everyone. Now
+  the key uses every value, and a request whose varied header repeats or isn't
+  visible ASCII skips the cache.
+- **`_middleware` in a dynamic directory never ran.** `routes/[org]/_middleware.ts`
+  (and `_layout`, `loading`, `error` there) didn't apply, so an auth check in
+  it was bypassed. Middleware now matches the request URL against its
+  directory, with `[param]` matching any segment and literal segments compared
+  decoded (`/%61dmin` is still under `routes/admin/`). Layouts and boundaries
+  apply to route files inside their directory.
+  - Behavior change: a page file next to a same-named directory
+    (`routes/admin.tsx` beside `routes/admin/_layout.tsx`) is no longer wrapped
+    by that directory's layout, matching the CSS the build already gave it.
+    Middleware still covers its URL.
+
+### Fixed
+- A state with an `undefined`-valued key or a `Date` no longer fails the
+  Jetstream signature check on the next event.
+- A malformed percent-escape in the path gives 404, and one in a cookie keeps
+  that cookie's raw value, instead of a 500 on every page reading `ctx.cookies`.
+
 ## [0.16.2] — 2026-11-05 · security patch
 
 Packages: `nowaki` / `nowaki-core` 0.16.2 (crates.io, npm), `@nowaki-dev/runtime`
