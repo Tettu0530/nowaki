@@ -10,6 +10,25 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.17.1] — 2026-11-06 · patch
+
+Packages: `nowaki` / `nowaki-core` 0.17.1 (crates.io, npm), `@nowaki-dev/runtime`
+0.16.1, `create-nowaki` / `create-nowaki-app` 0.18.1. Update both `nowaki` and
+`@nowaki-dev/runtime`.
+
+### Upgrade notes
+- `ctx.url.origin` on `nowaki start` / `nowaki dev` is now the browser's
+  origin, not the sidecar's `http://127.0.0.1:<port>`. It is `https` only
+  behind a trusted proxy (`NOWAKI_TRUST_PROXY`). Set `site` for fixed
+  canonical / `og:url`.
+- The `nowaki start` ISR cache is keyed per host.
+- A response that sets a cookie and asks for `public` / `s-maxage` is sent as
+  `private, no-cache`.
+- Built asset names with characters outside `[A-Za-z0-9._-]` change; they
+  returned 404 before.
+- `nowaki prerender --out` refuses a path that is, contains, or is inside the
+  build.
+
 ### Changed
 - Dependencies: `oxc` 0.135 → 0.146 and `oxc_resolver` 11.21 → 11.24.3, with
   `nowaki-core` moved to oxc's split export AST (`ExportDeclaration` /
