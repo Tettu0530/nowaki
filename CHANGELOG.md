@@ -19,6 +19,10 @@ milestone's worth of work; the codename is noted per entry.
   client. Before, SSR (dev and the server build) scoped the file without its
   imports, so classes from the imported file were `undefined` in the
   server-rendered HTML.
+- CSS Modules scope only class selectors. Before, a `.ext` inside `url()`,
+  a string, an attribute selector or a comment was scoped too:
+  `url(/img/bg.png)` became `url(/img/bg.png_<hash>)` and 404ed, and
+  `[href$=".pdf"]` stopped matching.
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 
