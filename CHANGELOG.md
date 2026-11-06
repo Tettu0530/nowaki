@@ -51,6 +51,22 @@ milestone's worth of work; the codename is noted per entry.
     (`title`, `meta`, …).
 
 ### Fixed
+- **Security:** a shared Jetstream refresh render (one render per `publish`,
+  #114) was handed to every connection with the same island and state, without
+  checking that connection's own signature. A client that knew a room id could
+  join with a forged signature, receive every patch of the room, and get a
+  valid signature back to send events with. An expired signature was refreshed
+  the same way instead of answering `stale`. A connection now gets the shared
+  render only when its signature is the one the renderer had, or when the
+  sidecar verifies it (a signature check, no render); otherwise it gets
+  `render failed` or `stale`. Legitimate refreshes still render once per
+  publish.
+- Live island state is now signed as JSON carries it. A state with an
+  undefined-valued property (`{ ...state, error: undefined }`, or an optional
+  field left undefined) or a `Date` was signed differently from the JSON the
+  client and the Rust session send back, so the next event failed with a
+  signature error (403 on `POST /__nowaki/live-event`) and the island stopped
+  working.
 - Node children no longer outlive a killed `nowaki`. That covers the dev and
   production sidecars, the prerender server, and the plugin host. When
   `nowaki` was stopped with SIGKILL (or crashed), it couldn't stop them, and

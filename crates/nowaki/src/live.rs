@@ -148,9 +148,10 @@ struct RenderOk {
     shareable: bool,
 }
 
-/// One publish refresh, rendered once and handed to every connection waiting on the same key.
-/// `None` once rendered means the render wasn't shareable (or failed): each waiter renders its own.
-type SharedRender = Arc<tokio::sync::OnceCell<Option<RenderOk>>>;
+/// One publish refresh, rendered once and handed to every connection waiting on the same key,
+/// with the signature the renderer's state carried (the sidecar verified it). `None` once rendered
+/// means the render wasn't shareable (or failed): each waiter renders its own.
+type SharedRender = Arc<tokio::sync::OnceCell<Option<(String, RenderOk)>>>;
 
 struct Rendered {
     nid: String,
@@ -551,13 +552,17 @@ async fn render(
                 let r = render_once(&ctx, &ev, &name, &st, &sig).await;
                 let share = r.as_ref().ok().filter(|ok| ok.shareable).cloned();
                 mine = Some(r);
-                share
+                share.map(|ok| (sig.clone(), ok))
             })
             .await
             .clone();
         let result = match (mine, shared) {
-            (Some(r), _) => r,          // this connection rendered it
-            (None, Some(ok)) => Ok(ok), // another one did, and it is shareable
+            (Some(r), _) => r, // this connection rendered it
+            // Another one did, and it is shareable. The key has no signature in it, so this
+            // connection's own one still has to be genuine before it gets the HTML and a fresh sig.
+            (None, Some((verified, ok))) => verify_own_sig(&ctx, &name, &st, &sig, &verified)
+                .await
+                .map(|()| ok),
             (None, None) => render_once(&ctx, &ev, &name, &st, &sig).await,
         };
         return Rendered {
@@ -571,6 +576,50 @@ async fn render(
         nid: ev.nid,
         name,
         result,
+    }
+}
+
+/// Whether a connection waiting on a shared refresh holds a genuine signature for its state. The
+/// same signature string the renderer had is already verified (it binds name and state, which the
+/// key matched), so steady-state refreshes cost nothing; any other one is checked by the sidecar
+/// without rendering.
+async fn verify_own_sig(
+    ctx: &RenderCtx,
+    name: &str,
+    st: &Value,
+    sig: &str,
+    verified: &str,
+) -> Result<(), RenderError> {
+    if sig == verified {
+        return Ok(());
+    }
+    let body = json!({ "verifyOnly": true, "name": name, "state": st, "sig": sig });
+    let url = format!("http://127.0.0.1:{}/__nowaki/live-render", ctx.sidecar_port);
+    let call = async {
+        let r = ctx
+            .http
+            .post(&url)
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .send()
+            .await
+            .map_err(|_| RenderError::Failed)?;
+        let rv: Value = serde_json::from_str(&r.text().await.map_err(|_| RenderError::Failed)?)
+            .map_err(|_| RenderError::Failed)?;
+        sig_status(&rv)
+    };
+    match tokio::time::timeout(ctx.timeout, call).await {
+        Ok(r) => r,
+        Err(_) => Err(RenderError::Timeout),
+    }
+}
+
+/// The sidecar's `verifyOnly` answer: only "ok" passes; "expired" reloads the page like a render would.
+fn sig_status(rv: &Value) -> Result<(), RenderError> {
+    match rv.get("verified").and_then(|v| v.as_str()) {
+        Some("ok") => Ok(()),
+        Some("expired") => Err(RenderError::Stale),
+        _ => Err(RenderError::Failed),
     }
 }
 
@@ -825,5 +874,118 @@ mod tests {
         sync_rooms(&hub, &mut b, &Islands::new());
         assert_eq!(hub.room_count("p"), 1);
         assert!(!b.contains("p") && a.contains("p"));
+    }
+
+    /// A stand-in sidecar: signatures starting with "good" are genuine, "old" is expired, anything
+    /// else is forged. Counts full renders and verify-only calls.
+    async fn fake_sidecar() -> (u16, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+        let renders = Arc::new(AtomicUsize::new(0));
+        let verifies = Arc::new(AtomicUsize::new(0));
+        let (r, v) = (renders.clone(), verifies.clone());
+        let app = axum::Router::new().route(
+            "/__nowaki/live-render",
+            axum::routing::post(move |body: String| {
+                let (r, v) = (r.clone(), v.clone());
+                async move {
+                    let b: Value = serde_json::from_str(&body).unwrap();
+                    let sig = b["sig"].as_str().unwrap_or("");
+                    let status = if sig.starts_with("good") {
+                        "ok"
+                    } else if sig == "old" {
+                        "expired"
+                    } else {
+                        "invalid"
+                    };
+                    if b["verifyOnly"] == json!(true) {
+                        v.fetch_add(1, Ordering::SeqCst);
+                        return (
+                            axum::http::StatusCode::OK,
+                            json!({ "verified": status }).to_string(),
+                        );
+                    }
+                    r.fetch_add(1, Ordering::SeqCst);
+                    match status {
+                        "ok" => (
+                            axum::http::StatusCode::OK,
+                            json!({ "html": "<p>room data</p>", "state": b["state"], "sig": "good-fresh", "shareable": true }).to_string(),
+                        ),
+                        "expired" => (axum::http::StatusCode::CONFLICT, "{}".into()),
+                        _ => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "{}".into()),
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (port, renders, verifies)
+    }
+
+    #[tokio::test]
+    async fn a_shared_refresh_goes_only_to_connections_with_a_genuine_signature() {
+        let (port, renders, verifies) = fake_sidecar().await;
+        let hub = LiveHub::new();
+        hub.publish("room:r-secret");
+        let ctx = RenderCtx {
+            hub,
+            http: reqwest::Client::new(),
+            sidecar_port: port,
+            version: "v".into(),
+            timeout: Duration::from_secs(5),
+            request: Arc::new(json!({ "headers": {} })),
+        };
+        let st = json!({ "room": "r-secret" });
+        let refresh = |nid: &str| PendingEvent {
+            nid: nid.into(),
+            handler: Value::Null,
+            payload: Value::Null,
+            load: Some("room:r-secret".into()),
+        };
+        let go = |nid: &str, sig: &str| {
+            render(
+                ctx.clone(),
+                refresh(nid),
+                "Room".into(),
+                st.clone(),
+                sig.into(),
+            )
+        };
+
+        let first = go("A", "good-1").await.result.expect("the renderer");
+        assert_eq!(first.html, "<p>room data</p>");
+        assert_eq!(renders.load(Ordering::SeqCst), 1);
+
+        assert_eq!(
+            go("B", "v1.0.forged").await.result.err(),
+            Some(RenderError::Failed),
+            "a forged signature gets neither the room's HTML nor a fresh signature"
+        );
+        assert_eq!(
+            go("C", "old").await.result.err(),
+            Some(RenderError::Stale),
+            "an expired signature reloads instead of being refreshed"
+        );
+
+        let same = go("D", "good-1")
+            .await
+            .result
+            .expect("same signature as the renderer");
+        assert_eq!(same.sig, "good-fresh");
+        assert_eq!(
+            verifies.load(Ordering::SeqCst),
+            2,
+            "the renderer's own sig needs no check"
+        );
+        let other = go("E", "good-2")
+            .await
+            .result
+            .expect("another genuine signature");
+        assert_eq!(other.html, "<p>room data</p>");
+        assert_eq!(verifies.load(Ordering::SeqCst), 3);
+        assert_eq!(
+            renders.load(Ordering::SeqCst),
+            1,
+            "still one render per publish"
+        );
     }
 }
