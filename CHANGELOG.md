@@ -45,6 +45,34 @@ milestone's worth of work; the codename is noted per entry.
   the directories above it), `package.json` and `tsconfig.json`. Before, after
   an install that moved a dependency, `nowaki dev` kept serving import URLs
   that pointed at the old location.
+### Fixed
+- `nowaki start` and `nowaki dev` gave `ctx.url` (and canonical / `og:url` on an
+  app without `site`) the sidecar's loopback origin, `http://127.0.0.1:<port>`.
+  It is now the browser's `Host`, with `https` and `X-Forwarded-Host` taken from
+  a proxy only under `NOWAKI_TRUST_PROXY`; `site` still wins for canonical /
+  `og:url`. ISR entries are now kept per host (#150).
+- With `NOWAKI_CSP` on, `nowaki start` sent `public/` HTML files with a
+  constant ETag while each response carried a new nonce, so a 304 paired the
+  cached body with a different policy. Those files are now sent without an ETag
+  (#150).
+- `HEAD` now mirrors `GET` for `/_nowaki/*` assets on `nowaki start` (it was a
+  404) and for app files on `nowaki dev` (#150).
+- An ISR page that set a cookie went out with a shared
+  `public, s-maxage=…` Cache-Control next to `Set-Cookie`, so a CDN could
+  replay one visitor's cookie to others. A response with `Set-Cookie` and a
+  shared Cache-Control now gets `private, no-cache` (all servers and adapters).
+  `nowaki start` already kept such responses out of its ISR cache (#150).
+- `nowaki dev` now percent-decodes the request path before looking up an app
+  file, so islands and files with spaces or non-ASCII names load (they were
+  404). Malformed escapes and `..` / `.` segments are refused (#150).
+- `nowaki dev` 404'd the client runtime (`/node_modules/@nowaki-dev/runtime/client/*.js`)
+  when `@nowaki-dev/runtime` was a symlink out of the app (pnpm workspace,
+  `npm link`), so no island hydrated. Files inside that package's own real
+  directory are now served; other symlinks and its nested `node_modules` are
+  still refused (#150).
+- Dev SSR now picks up edits to the app's plain `.js` / `.mjs` modules (such as
+  `lib/msg.js`); they were served stale until a restart. Files in
+  `node_modules` and outside the app root still load once (#150).
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 

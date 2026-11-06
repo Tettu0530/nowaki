@@ -13,6 +13,7 @@ import { contextReads, runWithContext } from "./functions.mjs";
 import { pageMeta } from "./document.mjs";
 import { persistRooms } from "./live-rooms-file.mjs";
 import { isrUrls } from "./isr-urls.mjs";
+import { requestOrigin } from "./origin.mjs";
 
 const appRoot = process.cwd();
 persistRooms(appRoot);
@@ -78,7 +79,7 @@ const server = createServer(async (req, res) => {
     return;
   }
   try {
-    const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
+    const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
     const result = await handleRequest(env, { method: req.method, url, version: "prod", req });
     const b = result.body;
     if (b && typeof b === "object" && b.__nowakiPage) {

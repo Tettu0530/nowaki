@@ -254,7 +254,8 @@ async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     }
     // Rust serves static assets directly (high-volume hot path).
-    if req.method() == Method::GET && path.starts_with("/_nowaki/") {
+    // HEAD mirrors GET everywhere below; axum drops the body.
+    if matches!(*req.method(), Method::GET | Method::HEAD) && path.starts_with("/_nowaki/") {
         return serve_static(&state, &path, req.headers()).await;
     }
     // public/ files win over routes at the same path (a file is an exact match).
@@ -304,6 +305,18 @@ fn isr_key(
             k.push('?');
             k.push_str(q);
         }
+    }
+    // `ctx.url.origin` (and canonical / og:url without a `site`) comes from the public host, so a
+    // render for one host must not be served to another.
+    let trust = crate::forward::trust_proxy();
+    if let Some(host) = crate::forward::public_host(headers, trust) {
+        if !host.bytes().all(|b| b.is_ascii_graphic()) {
+            return None;
+        }
+        k.push('\u{1e}');
+        k.push_str(crate::forward::public_proto(headers, trust));
+        k.push_str("://");
+        k.push_str(&host);
     }
     for name in &spec.headers {
         k.push('\u{1f}'); // Unit Separator: header boundary (to_str() rejects control chars in values)
@@ -562,7 +575,7 @@ fn maybe_store(
     };
     // isr_key returned Some, so each varied header is absent or a single visible-ASCII value:
     // replaying these reproduces exactly the request the key describes.
-    let refetch_headers: Vec<(String, String)> = spec
+    let mut refetch_headers: Vec<(String, String)> = spec
         .headers
         .iter()
         .filter_map(|n| {
@@ -572,6 +585,7 @@ fn maybe_store(
                 .map(|v| (n.clone(), v.to_string()))
         })
         .collect();
+    refetch_headers.extend(public_origin_headers(req_headers));
 
     isr_store(
         state,
@@ -589,6 +603,21 @@ fn maybe_store(
     );
 }
 
+/// The canonical `x-forwarded-host` / `-proto` that `forward::apply` sends, for an ISR refetch to
+/// render with the same public origin as the request it replays.
+fn public_origin_headers(headers: &axum::http::HeaderMap) -> Vec<(String, String)> {
+    let trust = crate::forward::trust_proxy();
+    let mut out = Vec::new();
+    if let Some(host) = crate::forward::public_host(headers, trust) {
+        out.push(("x-forwarded-host".to_string(), host));
+    }
+    out.push((
+        "x-forwarded-proto".to_string(),
+        crate::forward::public_proto(headers, trust).to_string(),
+    ));
+    out
+}
+
 /// When over the cap, evict the oldest entry of the same pathname first (a query/header flood doesn't hit other routes).
 fn isr_store(state: &ProdState, key: &str, mut entry: CacheEntry) {
     // Compress and tag once here, outside the lock. Not with CSP: the CSP layer rewrites each
@@ -599,10 +628,10 @@ fn isr_store(state: &ProdState, key: &str, mut entry: CacheEntry) {
     }
     let mut map = state.isr.entries.lock().unwrap();
     if map.len() >= state.isr.max && !map.contains_key(key) {
-        let path = key.split(['?', '\u{1f}']).next().unwrap_or(key);
+        let path = key.split(['?', '\u{1e}', '\u{1f}']).next().unwrap_or(key);
         let victim = map
             .iter()
-            .filter(|(k, _)| k.split(['?', '\u{1f}']).next() == Some(path))
+            .filter(|(k, _)| k.split(['?', '\u{1e}', '\u{1f}']).next() == Some(path))
             .min_by_key(|(_, e)| e.stored_at)
             .map(|(k, _)| k.clone())
             .or_else(|| {
@@ -722,20 +751,31 @@ fn url_encode_path(p: &str) -> String {
     out
 }
 
+/// Whether a public file may carry its `W/"size-mtime"` ETag. Not an HTML file under CSP: the CSP
+/// layer stamps each response with a new nonce, so the body changes while the file doesn't, and a
+/// 304 would pair the cached body (old nonce) with a new policy.
+fn public_etag(content_type: &str, csp: crate::csp::Mode) -> bool {
+    csp == crate::csp::Mode::Off || !content_type.starts_with("text/html")
+}
+
 /// `no-cache` with an ETag: public/ names aren't hashed, so a browser revalidates each use and
 /// gets a 304 while the file is unchanged.
 async fn serve_public(file: &PublicFile, req: &axum::http::HeaderMap) -> Response {
-    let not_modified = req
-        .get(header::IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| {
-            v.split(',')
-                .any(|t| t.trim() == file.etag || t.trim() == "*")
-        });
-    let builder = Response::builder()
+    let etag = public_etag(file.content_type, crate::csp::mode());
+    let not_modified = etag
+        && req
+            .get(header::IF_NONE_MATCH)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| {
+                v.split(',')
+                    .any(|t| t.trim() == file.etag || t.trim() == "*")
+            });
+    let mut builder = Response::builder()
         .header(header::CONTENT_TYPE, file.content_type)
-        .header(header::CACHE_CONTROL, "public, no-cache")
-        .header(header::ETAG, &file.etag);
+        .header(header::CACHE_CONTROL, "public, no-cache");
+    if etag {
+        builder = builder.header(header::ETAG, &file.etag);
+    }
     if not_modified {
         return builder
             .status(StatusCode::NOT_MODIFIED)
@@ -1100,5 +1140,27 @@ mod tests {
             isr_key("/p", None, &header_map(&[("cookie", b"user=a")]), &spec),
             a
         );
+    }
+
+    #[test]
+    fn isr_key_keeps_hosts_apart() {
+        // ctx.url.origin is the public host, so one host's render must not reach another.
+        let spec = VarySpec::default();
+        let a = isr_key("/p", None, &header_map(&[("host", b"a.example")]), &spec);
+        let b = isr_key("/p", None, &header_map(&[("host", b"b.example")]), &spec);
+        assert!(a.is_some() && b.is_some());
+        assert_ne!(a, b);
+        let refetch = public_origin_headers(&header_map(&[("host", b"a.example")]));
+        assert!(refetch.contains(&("x-forwarded-host".into(), "a.example".into())));
+        assert!(refetch.contains(&("x-forwarded-proto".into(), "http".into())));
+    }
+
+    #[test]
+    fn public_html_has_no_etag_under_csp() {
+        use crate::csp::Mode;
+        assert!(public_etag("text/html; charset=utf-8", Mode::Off));
+        assert!(!public_etag("text/html; charset=utf-8", Mode::Enforce));
+        assert!(!public_etag("text/html; charset=utf-8", Mode::ReportOnly));
+        assert!(public_etag("text/css; charset=utf-8", Mode::Enforce));
     }
 }

@@ -552,20 +552,55 @@ async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Res
         let abs = state.core.root.join(path.trim_start_matches('/'));
         return transform_response(state, abs, Mode::Browser).await;
     }
-    if req.method() == axum::http::Method::GET && path != "/" {
-        let candidate = state.core.root.join(path.trim_start_matches('/'));
-        if candidate.is_file() {
-            // Check the real path hasn't escaped the root via `..`/symlinks, and never serve sensitive paths
-            // (root is already canonicalized in main.rs).
-            match dunce::canonicalize(&candidate) {
-                Ok(canon) if canon.starts_with(&state.core.root) && !is_denied_fs_path(&canon) => {
-                    return serve_file(state, candidate).await;
-                }
-                _ => {}
-            }
+    let read = matches!(
+        *req.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD
+    );
+    if read && path != "/" {
+        if let Some(candidate) = app_file(&state.core.root, &path) {
+            return serve_file(state, candidate).await;
         }
     }
     proxy_to_sidecar(state, req).await
+}
+
+/// The app file a request path names, decoded (the renderer writes island and script URLs
+/// unencoded, so the browser asks for `/islands/Cnt%20%C3%84.tsx`). None for a malformed escape,
+/// a `.` / `..` / empty segment, a backslash or NUL, a missing file, a real path that leaves the
+/// root (via a symlink), or a sensitive file. `root` is canonical (main.rs).
+fn app_file(root: &Path, url_path: &str) -> Option<PathBuf> {
+    let decoded = nowaki_core::public::percent_decode(url_path)?;
+    let mut candidate = root.to_path_buf();
+    for seg in decoded.strip_prefix('/')?.split('/') {
+        if seg.is_empty() || seg == "." || seg == ".." || seg.contains(['\\', '\0']) {
+            return None;
+        }
+        candidate.push(seg);
+    }
+    if !candidate.is_file() {
+        return None;
+    }
+    let canon = dunce::canonicalize(&candidate).ok()?;
+    if is_denied_fs_path(&canon) {
+        return None;
+    }
+    (canon.starts_with(root) || in_runtime_package(root, &decoded, &canon)).then_some(candidate)
+}
+
+/// The page loads the client runtime from `/node_modules/@nowaki-dev/runtime/client/*`. In a pnpm
+/// workspace or after `npm link` that package is a symlink whose real path is outside the root, so
+/// it is allowed by name: only files inside the package's own real directory, nothing it links to.
+fn in_runtime_package(root: &Path, decoded: &str, canon: &Path) -> bool {
+    const RUNTIME: &str = "/node_modules/@nowaki-dev/runtime/";
+    if !decoded.starts_with(RUNTIME) {
+        return false;
+    }
+    let Ok(pkg) = dunce::canonicalize(root.join("node_modules/@nowaki-dev/runtime")) else {
+        return false;
+    };
+    canon
+        .strip_prefix(&pkg)
+        .is_ok_and(|rest| !rest.components().any(|c| c.as_os_str() == "node_modules"))
 }
 
 /// `public/<path>` for `/<path>`, read on each request so added or edited files show up at once.
@@ -1019,5 +1054,60 @@ mod tests {
             assert!(r.starts_with("HTTP/1.1 200"), "{path}: {r}");
         }
         server.abort();
+    }
+
+    #[test]
+    fn app_file_decodes_the_request_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("islands")).unwrap();
+        std::fs::write(root.join("islands/Cnt Ä.tsx"), "x").unwrap();
+        std::fs::write(root.join(".env"), "SECRET=1").unwrap();
+        assert_eq!(
+            app_file(&root, "/islands/Cnt%20%C3%84.tsx"),
+            Some(root.join("islands").join("Cnt Ä.tsx"))
+        );
+        for bad in [
+            "/islands/Cnt%20%C3%8",
+            "/islands/Cnt%zz.tsx",
+            "/islands/%2e%2e/islands/Cnt%20%C3%84.tsx",
+            "/islands/..%2fislands/Cnt%20%C3%84.tsx",
+            "/islands%5cCnt%20%C3%84.tsx",
+            "/%2eenv",
+            "/.env",
+            "/islands/missing.tsx",
+        ] {
+            assert_eq!(app_file(&root, bad), None, "{bad}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn app_file_serves_a_symlinked_runtime_package_only() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let base = dunce::canonicalize(dir.path()).unwrap();
+        let root = base.join("app");
+        let pkg = base.join("packages/nowaki-runtime");
+        std::fs::create_dir_all(root.join("node_modules/@nowaki-dev")).unwrap();
+        std::fs::create_dir_all(pkg.join("client")).unwrap();
+        std::fs::create_dir_all(pkg.join("node_modules/dep")).unwrap();
+        std::fs::write(pkg.join("client/islands.js"), "x").unwrap();
+        std::fs::write(pkg.join("node_modules/dep/index.js"), "x").unwrap();
+        std::fs::write(pkg.join(".env"), "SECRET=1").unwrap();
+        std::fs::write(base.join("secret.txt"), "s").unwrap();
+        symlink(base.join("secret.txt"), pkg.join("client/leak.js")).unwrap();
+        symlink(&pkg, root.join("node_modules/@nowaki-dev/runtime")).unwrap();
+        symlink(&base, root.join("node_modules/other")).unwrap();
+        assert!(app_file(&root, "/node_modules/@nowaki-dev/runtime/client/islands.js").is_some());
+        for bad in [
+            "/node_modules/@nowaki-dev/runtime/client/leak.js",
+            "/node_modules/@nowaki-dev/runtime/node_modules/dep/index.js",
+            "/node_modules/@nowaki-dev/runtime/.env",
+            "/node_modules/other/secret.txt",
+            "/node_modules/@nowaki-dev/runtime/../../secret.txt",
+        ] {
+            assert_eq!(app_file(&root, bad), None, "{bad}");
+        }
     }
 }

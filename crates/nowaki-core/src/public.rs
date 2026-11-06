@@ -158,15 +158,18 @@ pub fn content_type(path: &str) -> &'static str {
     }
 }
 
-/// Decodes `%XX`; None for malformed escapes or a result that isn't UTF-8.
-fn percent_decode(s: &str) -> Option<String> {
+/// Decodes `%XX` in a URL path; None for a malformed escape or a result that isn't UTF-8.
+pub fn percent_decode(s: &str) -> Option<String> {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%' {
-            let hex = std::str::from_utf8(b.get(i + 1..i + 3)?).ok()?;
-            out.push(u8::from_str_radix(hex, 16).ok()?);
+            let hex = b.get(i + 1..i + 3)?;
+            if !hex.iter().all(u8::is_ascii_hexdigit) {
+                return None;
+            }
+            out.push(u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok()?);
             i += 3;
         } else {
             out.push(b[i]);
@@ -269,5 +272,16 @@ mod tests {
         assert_eq!(content_type("/fonts/a.WOFF2"), "font/woff2");
         assert_eq!(content_type("/CNAME"), "application/octet-stream");
         assert_eq!(content_type("/v1.2/LICENSE"), "application/octet-stream");
+    }
+
+    #[test]
+    fn percent_decode_rejects_malformed_escapes() {
+        assert_eq!(
+            percent_decode("/islands/Cnt%20%C3%84.tsx").as_deref(),
+            Some("/islands/Cnt Ä.tsx")
+        );
+        for bad in ["/a%2", "/a%zz", "/a%+1", "/a%-1", "/a%C3"] {
+            assert_eq!(percent_decode(bad), None, "{bad}");
+        }
     }
 }

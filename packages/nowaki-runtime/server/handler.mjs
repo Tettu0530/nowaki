@@ -134,11 +134,25 @@ function finalize(ctx, result) {
   }
   const cookies = ctx.collectSetCookies();
   if (cookies.length) headers["set-cookie"] = cookies.length === 1 ? cookies[0] : cookies;
+  privateIfSetsCookie(headers);
   let status = result.status ?? ctx.resStatus ?? 200;
   if (ctx.resStatus && (result.status === undefined || result.status === 200)) {
     status = ctx.resStatus;
   }
   return { status, headers, body: result.body, stream: result.stream };
+}
+
+// A response that sets a cookie is per-user: a shared cache (CDN, an adapter host's edge) must not
+// store it and replay the cookie to other visitors, whatever Cache-Control the render asked for.
+export function privateIfSetsCookie(headers) {
+  const keys = Object.keys(headers);
+  if (!keys.some((k) => k.toLowerCase() === "set-cookie")) return headers;
+  const cc = keys.find((k) => k.toLowerCase() === "cache-control");
+  if (cc !== undefined && /\b(public|s-maxage)\b/i.test(String(headers[cc]))) {
+    delete headers[cc];
+    headers["cache-control"] = "private, no-cache";
+  }
+  return headers;
 }
 
 // table.middleware is in root→leaf order. A middleware runs for every request whose URL is under

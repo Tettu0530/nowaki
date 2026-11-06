@@ -9,12 +9,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveSite } from "./seo.mjs";
 import { loadEnv } from "./env.mjs";
+import { requestOrigin } from "./origin.mjs";
 
 // load .env before routes so routes/loaders can read process.env
 loadEnv();
 
 // from here on, dynamically imported .tsx/.ts go through Rust's transform endpoint
-register(new URL("./loader-hooks.mjs", import.meta.url));
+register(new URL("./loader-hooks.mjs", import.meta.url), { data: { root: process.cwd() } });
 register(new URL("./react-alias-hooks.mjs", import.meta.url));
 
 const { scanRoutes } = await import("./router.mjs");
@@ -299,7 +300,7 @@ const server = createServer(async (req, res) => {
   try {
     const version = String(req.headers["x-nowaki-ssr-version"] ?? "0");
     await ensureContent(version);
-    const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
+    const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
     const result = await handleRequest(env, {
       method: req.method,
       url,
