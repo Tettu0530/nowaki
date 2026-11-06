@@ -94,6 +94,19 @@ milestone's worth of work; the codename is noted per entry.
   `../utils/` import, for example) were missing, so `nowaki start` returned 500
   with `ERR_MODULE_NOT_FOUND` where dev worked. String-literal `import()`
   specifiers in server output are also rewritten to `.js`, like static imports.
+- **Security (dev):** `nowaki dev` refuses requests whose `Host` is not
+  `localhost`, `127.0.0.1` or `[::1]` (403), unless it was started with
+  `--host`. A page on another domain could rebind its name to 127.0.0.1 and
+  read dev responses: server-only source with its source map, `/@fs/` files,
+  and files such as `.npmrc`. The MCP endpoint and the WebSocket upgrades
+  already checked this; app files and the other `/__nowaki/*` routes did not.
+- A `console.log` in a plugin hook no longer kills the plugin host. Rust
+  stopped reading the host's stdout after the handshake, so the host's next
+  stdout write failed with EPIPE and it exited. Every transform after that was
+  skipped without an error, and dev served untransformed source with a 200.
+  The host now sends plugin console output to stderr, Rust keeps reading its
+  stdout, and a failed hook (the host is down, a plugin threw, `.tsrx` has
+  compile errors) is reported as an error in dev and fails the build.
 - Node children no longer outlive a killed `nowaki`. That covers the dev and
   production sidecars, the prerender server, and the plugin host. When
   `nowaki` was stopped with SIGKILL (or crashed), it couldn't stop them, and

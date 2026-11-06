@@ -20,23 +20,35 @@ struct HttpPluginBridge {
 }
 
 impl HttpPluginBridge {
-    fn call(&self, path: &str, id: &str, code: &str) -> Option<String> {
+    fn call(&self, path: &str, id: &str, code: &str) -> Result<Option<String>> {
         let body = serde_json::json!({ "id": id, "code": code }).to_string();
         self.post_field(path, &body, "code")
     }
 
-    fn post_field(&self, path: &str, body: &str, field: &str) -> Option<String> {
-        let resp = http_post(self.port, path, body).ok()?;
-        let v: serde_json::Value = serde_json::from_str(&resp).ok()?;
-        v.get(field).and_then(|c| c.as_str()).map(|s| s.to_string())
+    /// POSTs to the host and returns `field` (`Ok(None)` when it is null). A host that can't be
+    /// reached, answers non-200, or reports `error` is an `Err`: a failure must never read as
+    /// "no plugin changed it", or the untransformed source would be served as if it were fine.
+    fn post_field(&self, path: &str, body: &str, field: &str) -> Result<Option<String>> {
+        let (status, resp) = http_post(self.port, path, body).map_err(|e| {
+            anyhow!("plugin host is not responding ({e}); it may have crashed, see the log above")
+        })?;
+        let v: serde_json::Value = serde_json::from_str(&resp)
+            .with_context(|| format!("plugin host sent a bad {path} response (HTTP {status})"))?;
+        if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
+            return Err(anyhow!("{err}"));
+        }
+        if status != 200 {
+            return Err(anyhow!("plugin host answered {path} with HTTP {status}"));
+        }
+        Ok(v.get(field).and_then(|c| c.as_str()).map(|s| s.to_string()))
     }
 }
 
 impl PluginBridge for HttpPluginBridge {
-    fn transform(&self, id: &str, code: &str) -> Option<String> {
+    fn transform(&self, id: &str, code: &str) -> Result<Option<String>> {
         self.call("/transform", id, code)
     }
-    fn compile_tsrx(&self, id: &str, code: &str) -> Option<String> {
+    fn compile_tsrx(&self, id: &str, code: &str) -> Result<Option<String>> {
         self.call("/tsrx", id, code)
     }
     fn resolve_id(&self, source: &str, importer: &str) -> Option<String> {
@@ -44,11 +56,18 @@ impl PluginBridge for HttpPluginBridge {
             return None;
         }
         let body = serde_json::json!({ "source": source, "importer": importer }).to_string();
-        self.post_field("/resolveId", &body, "id")
+        // resolve_id has no error channel (a miss ends as "unresolved import"), so say why here.
+        match self.post_field("/resolveId", &body, "id") {
+            Ok(id) => id,
+            Err(e) => {
+                eprintln!("[nowaki] plugin resolveId failed for {source:?}: {e:#}");
+                None
+            }
+        }
     }
-    fn load(&self, id: &str) -> Option<String> {
+    fn load(&self, id: &str) -> Result<Option<String>> {
         if !self.has_load {
-            return None;
+            return Ok(None);
         }
         let body = serde_json::json!({ "id": id }).to_string();
         self.post_field("/load", &body, "code")
@@ -112,9 +131,15 @@ pub fn start(root: &Path) -> Result<Option<PluginHost>> {
         }
     }
     let port = port.ok_or_else(|| anyhow!("plugin host did not report READY"))?;
+    // Keep reading the host's stdout for as long as it runs. Dropping the reader here would close
+    // the pipe, and the host's next stdout write (a plugin writing to process.stdout) would die
+    // with EPIPE, taking every later transform with it.
+    std::thread::spawn(move || {
+        let _ = std::io::copy(&mut reader, &mut std::io::stderr());
+    });
 
     // No transform hook and no tsrx means no bridge is needed (kill the host).
-    let caps_body = http_get(port, "/caps")?;
+    let (_, caps_body) = http_get(port, "/caps")?;
     let caps: serde_json::Value = serde_json::from_str(&caps_body).unwrap_or_default();
     let cap = |k: &str| caps.get(k).and_then(|b| b.as_bool()).unwrap_or(false);
     let has_transform = cap("hasTransform");
@@ -148,15 +173,16 @@ pub fn start(root: &Path) -> Result<Option<PluginHost>> {
 
 // Connection: close, so reading the body to EOF is enough.
 
-fn http_post(port: u16, path: &str, body: &str) -> Result<String> {
+fn http_post(port: u16, path: &str, body: &str) -> Result<(u16, String)> {
     request(port, "POST", path, Some(body))
 }
 
-fn http_get(port: u16, path: &str) -> Result<String> {
+fn http_get(port: u16, path: &str) -> Result<(u16, String)> {
     request(port, "GET", path, None)
 }
 
-fn request(port: u16, method: &str, path: &str, body: Option<&str>) -> Result<String> {
+/// Returns the status code and the body.
+fn request(port: u16, method: &str, path: &str, body: Option<&str>) -> Result<(u16, String)> {
     let mut stream = TcpStream::connect(("127.0.0.1", port))?;
     let body = body.unwrap_or("");
     let req = format!(
@@ -166,8 +192,77 @@ fn request(port: u16, method: &str, path: &str, body: Option<&str>) -> Result<St
     stream.write_all(req.as_bytes())?;
     let mut resp = String::new();
     stream.read_to_string(&mut resp)?;
-    Ok(resp
+    let (head, body) = resp
         .split_once("\r\n\r\n")
-        .map(|(_, b)| b.to_string())
-        .unwrap_or_default())
+        .ok_or_else(|| anyhow!("incomplete HTTP response from the plugin host"))?;
+    let status = head
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse::<u16>().ok())
+        .ok_or_else(|| anyhow!("bad status line from the plugin host"))?;
+    Ok((status, body.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A temp app whose node_modules/@nowaki-dev/runtime points at this repo's runtime package.
+    fn app_with_config(config: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/nowaki-runtime");
+        let scope = dir.path().join("node_modules/@nowaki-dev");
+        std::fs::create_dir_all(&scope).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(runtime.canonicalize().unwrap(), scope.join("runtime")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(runtime.canonicalize().unwrap(), scope.join("runtime"))
+            .unwrap();
+        std::fs::write(dir.path().join("nowaki.config.mjs"), config).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_plugin_that_logs_keeps_the_host_alive() {
+        // console.log and a raw stdout write in the hook: both used to land on a closed pipe
+        // (EPIPE), which killed the host after the first transform.
+        let app = app_with_config(
+            r#"export default { plugins: [{ name: "loud", transform(code, id) {
+                console.log("[loud] transform", id);
+                process.stdout.write("raw stdout write\n");
+                return code.replaceAll("__MARK__", "done");
+            } }] };"#,
+        );
+        let host = start(app.path())
+            .unwrap()
+            .expect("plugin host should start");
+        for i in 0..5 {
+            let out = host
+                .bridge
+                .transform(&format!("/app/{i}.ts"), "export const x = '__MARK__';")
+                .unwrap();
+            assert_eq!(out.as_deref(), Some("export const x = 'done';"), "call {i}");
+        }
+    }
+
+    #[test]
+    fn a_throwing_plugin_or_a_dead_host_is_an_error() {
+        let app = app_with_config(
+            r#"export default { plugins: [{ name: "bad", transform(code) {
+                if (code.includes("boom")) throw new Error("plugin exploded");
+                return null;
+            } }] };"#,
+        );
+        let mut host = start(app.path())
+            .unwrap()
+            .expect("plugin host should start");
+        assert_eq!(host.bridge.transform("/a.ts", "ok").unwrap(), None);
+        let err = host.bridge.transform("/a.ts", "boom").unwrap_err();
+        assert!(format!("{err:#}").contains("plugin exploded"), "{err:#}");
+
+        host.child.kill().unwrap();
+        host.child.wait().unwrap();
+        let err = host.bridge.transform("/a.ts", "ok").unwrap_err();
+        assert!(format!("{err:#}").contains("not responding"), "{err:#}");
+    }
 }

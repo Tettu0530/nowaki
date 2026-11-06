@@ -9,6 +9,7 @@
 //   };
 
 import "./exit-with-parent.mjs";
+import { Console } from "node:console";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
@@ -16,6 +17,16 @@ import { createRequire } from "node:module";
 import path from "node:path";
 
 const appRoot = process.cwd();
+
+// stdout carries the READY handshake to Rust; everything a plugin prints goes to stderr so it
+// can't be mistaken for protocol output. Rust keeps draining stdout anyway (a plugin may call
+// process.stdout.write directly), and a write error there must not kill the host.
+const writeStdout = process.stdout.write.bind(process.stdout);
+const stderrConsole = new Console({ stdout: process.stderr, stderr: process.stderr });
+for (const key of Object.keys(stderrConsole)) {
+  if (typeof stderrConsole[key] === "function") console[key] = stderrConsole[key].bind(stderrConsole);
+}
+process.stdout.on("error", () => {});
 
 async function loadConfig() {
   for (const name of ["nowaki.config.mjs", "nowaki.config.js"]) {
@@ -150,7 +161,7 @@ const server = createServer(async (req, res) => {
 
 server.listen(0, "127.0.0.1", () => {
   const port = server.address().port;
-  console.log(`NOWAKI_PLUGIN_HOST_READY ${port}`);
+  writeStdout(`NOWAKI_PLUGIN_HOST_READY ${port}\n`);
   console.error(
     `[nowaki] plugin host: ${plugins.length} plugin(s), ${transformers.length} transform, ${resolvers.length} resolveId, ${loaders.length} load, tsrx=${!!tsrxCompile}`,
   );
