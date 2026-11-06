@@ -112,6 +112,8 @@ pub struct NowakiCore {
     pub root: PathBuf,
     resolver: Resolver,
     cache: cache::ModuleCache,
+    /// The files each cached module inlines (see `remember`).
+    inputs: cache::InputsCache,
     /// Persistent cache that survives restarts
     disk_cache: cache::DiskCache,
     /// Client constant-replacement pairs for import.meta.env.PUBLIC_* / MODE (from .env)
@@ -150,6 +152,7 @@ impl NowakiCore {
             root,
             resolver: resolve::make_resolver(),
             cache: cache::ModuleCache::default(),
+            inputs: cache::InputsCache::default(),
             disk_cache,
             client_defines,
             plugins: None,
@@ -310,22 +313,14 @@ impl NowakiCore {
         // A hit must also have unchanged inputs: files the output inlines (a CSS Module's class
         // map, `?image` sizes) change without this file changing.
         if let Some(hit) = self.cache.get(&key) {
-            if hit.is_fresh(hash) {
+            if hit.source_hash == hash && self.inputs_fresh(&key) {
                 return Ok(hit.code.clone());
             }
         }
 
         let disk_key = self.disk_cache.key(abs, mode, hash);
-        if let Some((code, inputs)) = self.disk_cache.get(disk_key) {
-            self.cache.insert(
-                key,
-                cache::CachedModule {
-                    source_hash: hash,
-                    code: code.clone(),
-                    inputs_hash: cache::inputs_hash(&inputs),
-                    inputs,
-                },
-            );
+        if let Some((code, inputs)) = self.disk_cache.get_with_inputs(disk_key) {
+            self.remember(key, hash, &code, inputs);
             return Ok(code);
         }
 
@@ -342,17 +337,32 @@ impl NowakiCore {
             &self.client_defines,
             Some(self),
         )?;
-        self.disk_cache.put(disk_key, &code, &inputs);
+        self.disk_cache.put_with_inputs(disk_key, &code, &inputs);
+        self.remember(key, hash, &code, inputs);
+        Ok(code)
+    }
+
+    /// Whether none of the files the cached module inlines changed since it was cached.
+    fn inputs_fresh(&self, key: &(PathBuf, Mode)) -> bool {
+        self.inputs
+            .get(key)
+            .is_none_or(|e| cache::inputs_hash(&e.0) == e.1)
+    }
+
+    fn remember(&self, key: (PathBuf, Mode), hash: u64, code: &str, inputs: Vec<PathBuf>) {
+        if inputs.is_empty() {
+            self.inputs.remove(&key);
+        } else {
+            let h = cache::inputs_hash(&inputs);
+            self.inputs.insert(key.clone(), (inputs, h));
+        }
         self.cache.insert(
             key,
             cache::CachedModule {
                 source_hash: hash,
-                code: code.clone(),
-                inputs_hash: cache::inputs_hash(&inputs),
-                inputs,
+                code: code.to_string(),
             },
         );
-        Ok(code)
     }
 
     /// Production build: writes the client graph to dist/client/ and server modules

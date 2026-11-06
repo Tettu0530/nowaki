@@ -23,18 +23,6 @@ pub struct CachedModule {
     /// xxh3 hash of the source. Used to check freshness when the file is re-read.
     pub source_hash: u64,
     pub code: String,
-    /// Other files whose content the code inlines (CSS Module class maps, `?image` sizes; see
-    /// `transform::transform_file_with_inputs`), and [`inputs_hash`] of them when cached.
-    pub inputs: Vec<PathBuf>,
-    pub inputs_hash: u64,
-}
-
-impl CachedModule {
-    /// Still valid for a file whose source hashes to `source_hash`: same source, and none of the
-    /// inlined files changed.
-    pub fn is_fresh(&self, source_hash: u64) -> bool {
-        self.source_hash == source_hash && inputs_hash(&self.inputs) == self.inputs_hash
-    }
 }
 
 /// A hash of `inputs`' paths and contents (0 for none). A missing file hashes differently from
@@ -61,6 +49,11 @@ pub fn inputs_hash(inputs: &[PathBuf]) -> u64 {
 /// (absolute path, mode) → transform result. Content hashes invalidate entries automatically,
 /// so no explicit invalidation by the watcher is needed.
 pub type ModuleCache = DashMap<(PathBuf, Mode), CachedModule>;
+
+/// For a [`ModuleCache`] entry whose code inlines other files (CSS Module class maps, `?image`
+/// sizes; see `transform::transform_file_with_inputs`): those files and [`inputs_hash`] of them
+/// when it was cached. The entry is fresh only while the hash still matches.
+pub type InputsCache = DashMap<(PathBuf, Mode), (Vec<PathBuf>, u64)>;
 
 /// Persistent transform cache that survives restarts. Content-addressed, so it doesn't depend on mtime;
 /// entries are reused when source, mode, and salt (nowaki version + defines) match.
@@ -98,7 +91,17 @@ impl DiskCache {
     /// The cached code for `key` and the inputs it inlines. A module with inputs is stored under
     /// `key` mixed with [`inputs_hash`] of them (the list itself is in `<key>.inputs`), so an
     /// entry whose inlined files changed is never returned.
-    pub fn get(&self, key: u64) -> Option<(String, Vec<PathBuf>)> {
+    /// The cached code for `key` (see [`DiskCache::get_with_inputs`]).
+    pub fn get(&self, key: u64) -> Option<String> {
+        self.get_with_inputs(key).map(|(code, _)| code)
+    }
+
+    /// Stores `code` for `key` for a module that inlines no other file.
+    pub fn put(&self, key: u64, code: &str) {
+        self.put_with_inputs(key, code, &[]);
+    }
+
+    pub fn get_with_inputs(&self, key: u64) -> Option<(String, Vec<PathBuf>)> {
         let dir = self.dir.as_ref()?;
         let inputs: Vec<PathBuf> =
             match std::fs::read_to_string(dir.join(format!("{key:016x}.inputs"))) {
@@ -110,7 +113,7 @@ impl DiskCache {
         Some((code, inputs))
     }
 
-    pub fn put(&self, key: u64, code: &str, inputs: &[PathBuf]) {
+    pub fn put_with_inputs(&self, key: u64, code: &str, inputs: &[PathBuf]) {
         if let Some(dir) = &self.dir {
             // A write failure isn't fatal (it just degrades to no cache)
             let list = dir.join(format!("{key:016x}.inputs"));
