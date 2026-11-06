@@ -79,6 +79,13 @@ export function liveShareable(mod, { handler, load, contextRead }) {
   return Boolean(load) && !handler && typeof mod.live?.authorize !== "function" && !contextRead;
 }
 
+/// "ok" | "expired" | "invalid" for a connection's own signature, without rendering. Rust asks this
+/// (`verifyOnly` on /__nowaki/live-render) before handing a shared refresh render to a connection
+/// whose signature differs from the one the renderer had, since the shared key leaves the sig out.
+export function liveSigStatus(name, state, sig) {
+  return verifyStatus(String(name ?? ""), state, sig);
+}
+
 /// Thrown when an island's `live.authorize` refuses an event; servers answer it with 403.
 export class LiveForbiddenError extends Error {
   constructor() {
