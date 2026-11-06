@@ -10,6 +10,13 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Fixed
+- `nowaki start` and `nowaki dev` gave `ctx.url` (and canonical / `og:url` on an
+  app without `site`) the sidecar's loopback origin, `http://127.0.0.1:<port>`.
+  It is now the browser's `Host`, with `https` and `X-Forwarded-Host` taken from
+  a proxy only under `NOWAKI_TRUST_PROXY`; `site` still wins for canonical /
+  `og:url`. ISR entries are now kept per host (#150).
+
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 
 Packages: `nowaki` / `nowaki-core` 0.17.0 (crates.io, npm), `@nowaki-dev/runtime`

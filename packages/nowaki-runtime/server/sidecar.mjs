@@ -9,6 +9,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveSite } from "./seo.mjs";
 import { loadEnv } from "./env.mjs";
+import { requestOrigin } from "./origin.mjs";
 
 // load .env before routes so routes/loaders can read process.env
 loadEnv();
@@ -299,7 +300,7 @@ const server = createServer(async (req, res) => {
   try {
     const version = String(req.headers["x-nowaki-ssr-version"] ?? "0");
     await ensureContent(version);
-    const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
+    const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
     const result = await handleRequest(env, {
       method: req.method,
       url,

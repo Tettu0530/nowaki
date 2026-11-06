@@ -149,6 +149,8 @@ test "$(curl -s -o /dev/null -w '%{http_code}' "$B/__nowaki/css?f=routes/styled.
 # outside routes/: 403, or 404 where the path doesn't exist (Windows has no /etc/hosts)
 test "$(curl -s -o /dev/null -w '%{http_code}' "$B/__nowaki/route-css?file=/etc/hosts")" != 200
 curl -sf "$B/api/echo?q=hi" | grep -q '"q":"hi"'
+# ctx.url.origin is the browser's Host, not the sidecar's loopback address
+curl -sf -H 'Host: localhost:4242' "$B/api/echo" | grep -q '"origin":"http://localhost:4242"'
 curl -sf -X POST -H 'content-type: application/json' -d '{"a":1}' $B/api/echo | grep -q '"received":{"a":1}'
 test "$(status -X DELETE $B/api/echo)" = "405"
 test "$(curl -s $B/api/stream | tr -d '\n')" = "chunk1chunk2"

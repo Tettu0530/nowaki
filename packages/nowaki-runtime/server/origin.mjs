@@ -54,6 +54,16 @@ export function browserHost(get) {
   return host ?? forwarded;
 }
 
+/// The origin the browser addressed (`proto://host`), for `ctx.url`. Host as in `browserHost`.
+/// The scheme comes from `x-forwarded-proto` only where that header is trusted: a trusted proxy,
+/// the Rust front's loopback sidecar hop (it sets the header canonically), or Vercel's edge.
+export function requestOrigin(get) {
+  const host = browserHost(get) ?? "localhost";
+  const trusted = trustProxy() || isLoopbackHost(get("host")) || !get("host") || vercelHosted();
+  const proto = trusted && firstCommaSeparated(get("x-forwarded-proto")) === "https" ? "https" : "http";
+  return `${proto}://${host}`;
+}
+
 /// Whether a non-GET request came from another site. Browsers send Origin on POST; when
 /// Origin is absent, Sec-Fetch-Site may still mark cross-site requests. When neither
 /// header is present (curl, server-to-server), the request is not treated as cross-site

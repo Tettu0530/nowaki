@@ -153,6 +153,8 @@ curl -sf http://127.0.0.1:3300/docs/components | grep -q 'client="visible"'
 curl -sf http://127.0.0.1:3300/docs/components | grep -q '<pre style="background-color:#ffffff;"><code class="language-ts"><span'
 curl -sf http://127.0.0.1:3300/docs/components | grep -q '<picture><source type="image/avif"'
 curl -sf http://127.0.0.1:3300/docs | grep -q 'Components in MDX'
+# ctx.url.origin is the browser's Host, not the sidecar's loopback address
+curl -sf -H 'Host: app.example' "http://127.0.0.1:3300/api/echo" | grep -q '"origin":"http://app.example"'
 # SEO: typed meta → head tags (absolute against nowaki.config `site`), generated sitemap.xml
 curl -sf http://127.0.0.1:3300/docs/intro | grep -q '<link rel="canonical" href="https://hello.nowaki.dev/docs/intro" />'
 curl -sf http://127.0.0.1:3300/docs/intro | grep -q '<meta property="og:image" content="https://hello.nowaki.dev/og/intro.png" />'

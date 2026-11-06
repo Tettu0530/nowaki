@@ -1,5 +1,5 @@
 // Unit tests for server/origin.mjs (browserHost / isCrossSite / NOWAKI_TRUST_PROXY).
-import { browserHost, isCrossSite, trustProxy } from "../packages/nowaki-runtime/server/origin.mjs";
+import { browserHost, isCrossSite, requestOrigin, trustProxy } from "../packages/nowaki-runtime/server/origin.mjs";
 
 let failures = 0;
 const check = (label, cond) => {
@@ -79,6 +79,25 @@ check("trustProxy reads env", trustProxy());
 check(
   "browserHost uses first x-forwarded-host when trust is on",
   browserHost(hdr({ host: "internal:8787", "x-forwarded-host": "app.example, other" })) === "app.example",
+);
+delete process.env.NOWAKI_TRUST_PROXY;
+
+check(
+  "requestOrigin: Rust sidecar hop uses the public host and proto, not the loopback Host",
+  requestOrigin(
+    hdr({ host: "127.0.0.1:51234", "x-forwarded-host": "app.example", "x-forwarded-proto": "https" }),
+  ) === "https://app.example",
+);
+check(
+  "requestOrigin: client x-forwarded-* are ignored on a public Host",
+  requestOrigin(hdr({ host: "app.example", "x-forwarded-host": "evil.test", "x-forwarded-proto": "https" })) ===
+    "http://app.example",
+);
+process.env.NOWAKI_TRUST_PROXY = "1";
+check(
+  "requestOrigin: trusted proxy sets host and proto",
+  requestOrigin(hdr({ host: "10.0.0.5:3000", "x-forwarded-host": "app.example", "x-forwarded-proto": "https" })) ===
+    "https://app.example",
 );
 delete process.env.NOWAKI_TRUST_PROXY;
 

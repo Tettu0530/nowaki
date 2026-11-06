@@ -19,6 +19,7 @@ import { loadContent } from "./content-load.mjs";
 import { liveProps, warnIfEphemeralLiveKey } from "./live-sign.mjs";
 import { indexPublic, lookupPublic } from "./public-files.mjs";
 import { resolveSite } from "./seo.mjs";
+import { requestOrigin } from "./origin.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
 // Bun and Deno don't implement Node's module.register; their SSR keeps the old behavior.
@@ -218,7 +219,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
     // Set before the response's own headers, which override any of these by name.
     for (const [k, v] of missingSecurityHeaders(() => false)) res.setHeader(k, v);
     try {
-      const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
+      const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
 
       if (url.pathname.startsWith("/_nowaki/")) {
         const name = path.basename(url.pathname); // basename prevents traversal
