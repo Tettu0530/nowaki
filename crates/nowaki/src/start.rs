@@ -130,6 +130,10 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         .arg(&entry)
         .current_dir(&root)
         .env("NOWAKI_PUBLISH_TOKEN", crate::live::publish_token())
+        // The pipe stays in `child`; when this process ends (even by SIGKILL) it closes and the
+        // sidecar exits (server/exit-with-parent.mjs) instead of lingering.
+        .env("NOWAKI_EXIT_WITH_PARENT", "1")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .kill_on_drop(true)

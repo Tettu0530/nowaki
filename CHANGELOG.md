@@ -51,6 +51,13 @@ milestone's worth of work; the codename is noted per entry.
     (`title`, `meta`, …).
 
 ### Fixed
+- Node children no longer outlive a killed `nowaki`. That covers the dev and
+  production sidecars, the prerender server, and the plugin host. When
+  `nowaki` was stopped with SIGKILL (or crashed), it couldn't stop them, and
+  they lingered with PID 1 as their parent. Fifty-one such sidecars had piled
+  up over four days on one machine. Each child now gets a stdin pipe and exits
+  when it closes, which happens however the parent ends. Run on their own (an
+  adapter's `node index.mjs`), the scripts behave as before.
 - These came up while porting an Astro site.
   - The server build compiles every app module that routes, islands, and
     actions import, wherever it lives (`data/`, `sections/`, …). Before, only
@@ -78,11 +85,27 @@ milestone's worth of work; the codename is noted per entry.
   image's `alt`).
 
 ### Changed
+- **A module cache hit no longer asks the plugin host.**
+  - The module cache used to be keyed by the source after the plugins ran,
+    so every load, hits included, first made a round trip to the Node
+    plugin host (and compiled MDX).
+  - It's now keyed by the file's own text plus a hash of nowaki.config, so a
+    hit returns before any plugin runs. The plugins' output is also kept per
+    version of a file, so the graph, chunking, and budgets reading a module
+    again don't run them again.
+  - On the example app (two plugins, `.tsrx`) a warm build went from about
+    0.35 s to 0.25 s, and dev's first render of a page got faster too.
+  - This assumes plugins depend on the file and nowaki.config. A plugin
+    reading other files or the environment should be reflected in one of
+    them, or its cached output can go stale.
 - **Content builds no longer decode every referenced image.**
   - A Markdown image's size is read from the file's header, and the pixels
     are decoded only when a variant isn't cached yet.
   - Each file's image set is built once per build, however many entries
-    reference it.
+    reference it. The images are built after the entries are read, all
+    unique files in parallel. Building them inside the parallel read could
+    deadlock a cold build: a worker waiting on a photo it was itself building
+    picked up another entry that needed the same photo.
   - Entries are read and rendered in parallel.
   - On a 500-entry docs site (four photos, 1,500 code fences), a build with
     the caches warm went from 2.3 s to 0.25 s. Before, about 86% of it was
