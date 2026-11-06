@@ -22,6 +22,11 @@ milestone's worth of work; the codename is noted per entry.
   (#150).
 - `HEAD` now mirrors `GET` for `/_nowaki/*` assets on `nowaki start` (it was a
   404) and for app files on `nowaki dev` (#150).
+- An ISR page that set a cookie went out with a shared
+  `public, s-maxage=…` Cache-Control next to `Set-Cookie`, so a CDN could
+  replay one visitor's cookie to others. A response with `Set-Cookie` and a
+  shared Cache-Control now gets `private, no-cache` (all servers and adapters).
+  `nowaki start` already kept such responses out of its ISR cache (#150).
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 
