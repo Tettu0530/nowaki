@@ -773,7 +773,6 @@ pub(crate) fn is_loopback_host(host: &str) -> bool {
     matches!(h, "localhost" | "127.0.0.1" | "::1")
 }
 
-/// Validate the WebSocket upgrade Origin (CSWSH guard). No Origin (non-browser) is allowed;
 /// DNS-rebinding guard for every dev route. On the default bind (127.0.0.1) a page on another
 /// domain can rebind its name to 127.0.0.1 and read dev responses same-origin: server-only source
 /// with its source map, `/@fs/` files, `.npmrc`. The browser still sends the attacker's name as
@@ -812,6 +811,7 @@ async fn host_guard(
         .into_response()
 }
 
+/// Validate the WebSocket upgrade Origin (CSWSH guard). No Origin (non-browser) is allowed;
 /// same-origin is allowed, but on the default bind Host must be loopback to defeat DNS rebinding.
 fn ws_origin_ok(headers: &axum::http::HeaderMap, expose: bool) -> bool {
     let origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
