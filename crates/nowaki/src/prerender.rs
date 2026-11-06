@@ -43,6 +43,9 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         .env("PORT", "0")
         // Static pages: live islands render their first HTML without live.js (see app.mjs).
         .env("NOWAKI_PRERENDER", "1")
+        // Exits with this process, however it ends (server/exit-with-parent.mjs).
+        .env("NOWAKI_EXIT_WITH_PARENT", "1")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .kill_on_drop(true)

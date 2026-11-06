@@ -2,6 +2,7 @@
 // components (Rust handles static serving and HTML assembly). Signals readiness to Rust
 // with "NOWAKI_START_READY <port>" on stdout.
 
+import "./exit-with-parent.mjs";
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
 import path from "node:path";

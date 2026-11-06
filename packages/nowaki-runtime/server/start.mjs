@@ -1,6 +1,7 @@
 // Entry for `nowaki start` (cwd = app root).
 // Local `nowaki start` binds to 127.0.0.1 (only the deploy entry uses 0.0.0.0).
 
+import "./exit-with-parent.mjs";
 import path from "node:path";
 import { startServer } from "./app.mjs";
 

@@ -1,6 +1,7 @@
 // Dev SSR sidecar. Spawned by the Rust dev server; handles page rendering and API routes.
 // Signals readiness to Rust with "NOWAKI_SIDECAR_READY <port>" on stdout.
 
+import "./exit-with-parent.mjs";
 import { createServer } from "node:http";
 import { createRequire, register } from "node:module";
 import { existsSync, readFileSync, statSync } from "node:fs";
