@@ -16,6 +16,10 @@ milestone's worth of work; the codename is noted per entry.
   It is now the browser's `Host`, with `https` and `X-Forwarded-Host` taken from
   a proxy only under `NOWAKI_TRUST_PROXY`; `site` still wins for canonical /
   `og:url`. ISR entries are now kept per host (#150).
+- With `NOWAKI_CSP` on, `nowaki start` sent `public/` HTML files with a
+  constant ETag while each response carried a new nonce, so a 304 paired the
+  cached body with a different policy. Those files are now sent without an ETag
+  (#150).
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 

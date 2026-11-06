@@ -750,20 +750,31 @@ fn url_encode_path(p: &str) -> String {
     out
 }
 
+/// Whether a public file may carry its `W/"size-mtime"` ETag. Not an HTML file under CSP: the CSP
+/// layer stamps each response with a new nonce, so the body changes while the file doesn't, and a
+/// 304 would pair the cached body (old nonce) with a new policy.
+fn public_etag(content_type: &str, csp: crate::csp::Mode) -> bool {
+    csp == crate::csp::Mode::Off || !content_type.starts_with("text/html")
+}
+
 /// `no-cache` with an ETag: public/ names aren't hashed, so a browser revalidates each use and
 /// gets a 304 while the file is unchanged.
 async fn serve_public(file: &PublicFile, req: &axum::http::HeaderMap) -> Response {
-    let not_modified = req
-        .get(header::IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| {
-            v.split(',')
-                .any(|t| t.trim() == file.etag || t.trim() == "*")
-        });
-    let builder = Response::builder()
+    let etag = public_etag(file.content_type, crate::csp::mode());
+    let not_modified = etag
+        && req
+            .get(header::IF_NONE_MATCH)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| {
+                v.split(',')
+                    .any(|t| t.trim() == file.etag || t.trim() == "*")
+            });
+    let mut builder = Response::builder()
         .header(header::CONTENT_TYPE, file.content_type)
-        .header(header::CACHE_CONTROL, "public, no-cache")
-        .header(header::ETAG, &file.etag);
+        .header(header::CACHE_CONTROL, "public, no-cache");
+    if etag {
+        builder = builder.header(header::ETAG, &file.etag);
+    }
     if not_modified {
         return builder
             .status(StatusCode::NOT_MODIFIED)
@@ -1141,5 +1152,14 @@ mod tests {
         let refetch = public_origin_headers(&header_map(&[("host", b"a.example")]));
         assert!(refetch.contains(&("x-forwarded-host".into(), "a.example".into())));
         assert!(refetch.contains(&("x-forwarded-proto".into(), "http".into())));
+    }
+
+    #[test]
+    fn public_html_has_no_etag_under_csp() {
+        use crate::csp::Mode;
+        assert!(public_etag("text/html; charset=utf-8", Mode::Off));
+        assert!(!public_etag("text/html; charset=utf-8", Mode::Enforce));
+        assert!(!public_etag("text/html; charset=utf-8", Mode::ReportOnly));
+        assert!(public_etag("text/css; charset=utf-8", Mode::Enforce));
     }
 }
