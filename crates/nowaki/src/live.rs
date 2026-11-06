@@ -1001,6 +1001,7 @@ mod tests {
             render(
                 ctx.clone(),
                 refresh(nid),
+                0,
                 "Room".into(),
                 st.clone(),
                 sig.into(),
