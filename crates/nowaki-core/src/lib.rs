@@ -37,14 +37,18 @@ pub const VIRTUAL_DIR: &str = "__nowaki_virtual__";
 /// Bridge for calling plugin transform hooks from Rust. The CLI implements it by delegating
 /// over HTTP to the Node plugin host (which loads `nowaki.config`).
 /// nowaki-core itself runs no JS, so this trait keeps them loosely coupled.
+///
+/// `transform` / `compile_tsrx` / `load` return `Err` when the hook could not run (the host is
+/// down, a plugin threw, the compiler reported errors). `Ok(None)` means "no change", so a failure
+/// must never be reported as `None`: that would serve the untransformed source as if it were fine.
 pub trait PluginBridge: Send + Sync {
     /// The `transform(code, id)` hook for transformable sources (ts/tsx/js/jsx/mjs).
-    /// None if no plugin changed it.
-    fn transform(&self, id: &str, code: &str) -> Option<String>;
+    /// `Ok(None)` if no plugin changed it.
+    fn transform(&self, id: &str, code: &str) -> Result<Option<String>>;
 
     /// Compiles `.tsrx` source to standard JSX with `@tsrx/preact`. The output then goes
-    /// through oxc's JSX→preact pipeline. None if the compiler isn't installed.
-    fn compile_tsrx(&self, id: &str, code: &str) -> Option<String>;
+    /// through oxc's JSX→preact pipeline. `Ok(None)` if the compiler isn't installed.
+    fn compile_tsrx(&self, id: &str, code: &str) -> Result<Option<String>>;
 
     /// `resolveId(source, importer)` for virtual modules. If a plugin claims the specifier, returns
     /// the resolved id (a real path or a virtual id string). None if no plugin claims it.
@@ -53,9 +57,10 @@ pub trait PluginBridge: Send + Sync {
         None
     }
 
-    /// `load(id)` for virtual modules. Returns the source for a virtual id from `resolveId`. None if unsupported.
-    fn load(&self, _id: &str) -> Option<String> {
-        None
+    /// `load(id)` for virtual modules. Returns the source for a virtual id from `resolveId`.
+    /// `Ok(None)` if unsupported.
+    fn load(&self, _id: &str) -> Result<Option<String>> {
+        Ok(None)
     }
 }
 
@@ -220,9 +225,13 @@ impl NowakiCore {
                 .ok_or_else(|| anyhow::anyhow!("virtual module but no plugin configured: {vid}"))?;
             let mut source = bridge
                 .load(&vid)
+                .with_context(|| format!("plugin load hook failed: {vid}"))?
                 .ok_or_else(|| anyhow::anyhow!("failed to load virtual module: {vid}"))?;
             // Run generated source through the transform hook too (lets plugins compose).
-            if let Some(code) = bridge.transform(&vid, &source) {
+            if let Some(code) = bridge
+                .transform(&vid, &source)
+                .with_context(|| format!("plugin transform failed: {vid}"))?
+            {
                 source = code;
             }
             return Ok(source);
@@ -253,11 +262,17 @@ impl NowakiCore {
         };
         let id = abs.to_string_lossy();
         if abs.extension().and_then(|e| e.to_str()) == Some("tsrx") {
-            if let Some(code) = bridge.compile_tsrx(&id, &source) {
+            if let Some(code) = bridge
+                .compile_tsrx(&id, &source)
+                .with_context(|| format!(".tsrx compile failed: {}", abs.display()))?
+            {
                 return Ok(code);
             }
         } else if is_transformable(abs) {
-            if let Some(code) = bridge.transform(&id, &source) {
+            if let Some(code) = bridge
+                .transform(&id, &source)
+                .with_context(|| format!("plugin transform failed: {}", abs.display()))?
+            {
                 return Ok(code);
             }
         }
@@ -397,35 +412,35 @@ mod tests {
     // Mock bridge for testing virtual modules (resolveId/load) without the Node host.
     struct MockBridge;
     impl PluginBridge for MockBridge {
-        fn transform(&self, _id: &str, _code: &str) -> Option<String> {
-            None
+        fn transform(&self, _id: &str, _code: &str) -> Result<Option<String>> {
+            Ok(None)
         }
-        fn compile_tsrx(&self, _id: &str, _code: &str) -> Option<String> {
-            None
+        fn compile_tsrx(&self, _id: &str, _code: &str) -> Result<Option<String>> {
+            Ok(None)
         }
         fn resolve_id(&self, source: &str, _importer: &str) -> Option<String> {
             (source == "virtual:greeting").then(|| source.to_string())
         }
-        fn load(&self, id: &str) -> Option<String> {
-            (id == "virtual:greeting").then(|| "export const hi = \"hello\";\n".to_string())
+        fn load(&self, id: &str) -> Result<Option<String>> {
+            Ok((id == "virtual:greeting").then(|| "export const hi = \"hello\";\n".to_string()))
         }
     }
 
     /// Counts transform calls, to see a cache hit never reaches the plugin host.
     struct CountingBridge(std::sync::atomic::AtomicUsize);
     impl PluginBridge for CountingBridge {
-        fn transform(&self, _id: &str, code: &str) -> Option<String> {
+        fn transform(&self, _id: &str, code: &str) -> Result<Option<String>> {
             self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Some(code.replace("__MARK__", "\"marked\""))
+            Ok(Some(code.replace("__MARK__", "\"marked\"")))
         }
-        fn compile_tsrx(&self, _id: &str, _code: &str) -> Option<String> {
-            None
+        fn compile_tsrx(&self, _id: &str, _code: &str) -> Result<Option<String>> {
+            Ok(None)
         }
         fn resolve_id(&self, _source: &str, _importer: &str) -> Option<String> {
             None
         }
-        fn load(&self, _id: &str) -> Option<String> {
-            None
+        fn load(&self, _id: &str) -> Result<Option<String>> {
+            Ok(None)
         }
     }
 
@@ -483,5 +498,36 @@ mod tests {
         assert!(src.contains("hello"), "load() source expected: {src}");
         // Unclaimed specifiers yield None (= normal resolution failure).
         assert!(core.resolve_spec(&dir, "virtual:unknown").is_none());
+    }
+
+    /// A plugin host that can't answer (it crashed, a plugin threw).
+    struct FailingBridge;
+    impl PluginBridge for FailingBridge {
+        fn transform(&self, _id: &str, _code: &str) -> Result<Option<String>> {
+            Err(anyhow::anyhow!("plugin host unreachable"))
+        }
+        fn compile_tsrx(&self, _id: &str, _code: &str) -> Result<Option<String>> {
+            Err(anyhow::anyhow!("plugin host unreachable"))
+        }
+    }
+
+    #[test]
+    fn a_failed_plugin_transform_is_an_error_not_the_raw_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.ts");
+        std::fs::write(&file, "export const x = __MARK__;\n").unwrap();
+        let mut core = NowakiCore::new(dir.path().to_path_buf());
+        core.set_plugins(Arc::new(FailingBridge));
+
+        let err = core.read_source(&file).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("plugin host unreachable"),
+            "{err:#}"
+        );
+        let err = core.load_module(&file, Mode::Browser).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("plugin transform failed"),
+            "{err:#}"
+        );
     }
 }
