@@ -120,7 +120,7 @@ function applyDocument(entry, push, token) {
   }
   hydrateIslands(document);
   loadPageScripts(doc);
-  runBodyScripts();
+  syncLive();
   removeProgressBar();
   // Page scripts run once (they are modules); this is their cue to set up the new page's DOM.
   document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl } }));
@@ -141,16 +141,35 @@ function loadPageScripts(doc) {
   }
 }
 
-// Scripts parsed by DOMParser never run, so the module scripts in the new <body> (the islands
-// runtime, live.js) are swapped for fresh elements that do. A module runs once per URL: one an
-// earlier page already loaded doesn't run again (live.js re-joins on nowaki:page-load instead).
-function runBodyScripts() {
-  for (const old of document.body.querySelectorAll('script[type="module"][src]')) {
-    const el = document.createElement("script");
-    for (const a of old.attributes) if (a.name !== "nonce") el.setAttribute(a.name, a.value);
-    if (window.__nowakiNonce) el.nonce = window.__nowakiNonce;
-    old.replaceWith(el);
-  }
+// Scripts parsed by DOMParser never run, and the router doesn't run the new <body>'s scripts:
+// that would also run whatever else got into the page's HTML. The one body script a page may need
+// that an earlier page didn't load is live.js (id="nowaki-live", added by the server). Once loaded
+// it exposes window.__nowakiLive, and the router asks it to sync with the new page's islands
+// (join them on the open socket, or close it on a page without any).
+function syncLive() {
+  if (window.__nowakiLive) return window.__nowakiLive.sync();
+  // Same origin only: like a full load under the 'self' policy. The framework's script comes after
+  // the page's own HTML, so the last one wins.
+  const sameOrigin = (s) => {
+    try {
+      const url = new URL(s.getAttribute("src"), location.href);
+      return url.origin === location.origin ? url : null;
+    } catch {
+      return null;
+    }
+  };
+  const old = [...document.body.querySelectorAll("script#nowaki-live[src]")].reverse().find(sameOrigin);
+  if (!old) return;
+  const url = sameOrigin(old);
+  const el = document.createElement("script");
+  el.type = "module";
+  el.src = url.href;
+  const transport = old.getAttribute("data-live-transport");
+  if (transport !== null) el.setAttribute("data-live-transport", transport);
+  // Under NOWAKI_CSP the server nonced it (its nonce slot survives the clone). It carries this
+  // document's nonce only then: a script never gains a nonce it didn't have.
+  if (window.__nowakiNonce && (old.nonce || old.getAttribute("nonce"))) el.nonce = window.__nowakiNonce;
+  old.replaceWith(el);
 }
 
 // Under a CSP nonce, <style> from another response carries that response's nonce; re-stamp it with

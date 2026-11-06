@@ -922,7 +922,9 @@ fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
     };
     let live_script = if meta.body.contains("<nowaki-live") {
         match &manifest.live_runtime {
-            Some(f) => format!("<script type=\"module\" src=\"/_nowaki/{f}\"></script>"),
+            Some(f) => {
+                format!("<script id=\"nowaki-live\" type=\"module\" src=\"/_nowaki/{f}\"></script>")
+            }
             None => String::new(),
         }
     } else {

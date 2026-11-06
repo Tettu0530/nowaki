@@ -57,6 +57,7 @@ function failed(nid, reason) {
 }
 
 function connect() {
+  if (window.__nowakiLive) return; // already running (another copy of this module)
   const proto = location.protocol === "https:" ? "wss" : "ws";
   let ws = null;
   let retry = 0;
@@ -111,9 +112,9 @@ function connect() {
   };
 
   // Match the socket to the islands on the page: at startup, and after each client navigation
-  // (the router swaps <body> and fires nowaki:page-load). The new page's islands replace the old
-  // ones on the open socket; a page without any closes it, so the server forgets the old islands
-  // and their rooms.
+  // (the router swaps <body>, then calls window.__nowakiLive.sync()). The new page's islands
+  // replace the old ones on the open socket; a page without any closes it, so the server forgets
+  // the old islands and their rooms.
   const sync = () => {
     if (mode === "post") return;
     const els = lives();
@@ -132,8 +133,8 @@ function connect() {
     }
     // Otherwise the socket is connecting or a reconnect is pending: its onopen joins these.
   };
+  window.__nowakiLive = { sync };
   sync();
-  document.addEventListener("nowaki:page-load", sync);
 
   const post = (el, handler, payload) => {
     chain = chain.then(async () => {
