@@ -109,7 +109,7 @@ export function createLiveHub({
             // Keep the new signature too so the next event can be verified.
             if (r.state !== undefined) islands.set(ev.nid, { name: isl.name, state: r.state, sig: r.sig ?? "" });
             const cur = islands.get(ev.nid);
-            if (cur) send(sock, { type: "patch", nid: ev.nid, html: r.html, state: cur.state, sig: cur.sig });
+            if (cur) send(sock, { type: "patch", page, nid: ev.nid, html: r.html, state: cur.state, sig: cur.sig });
             pump();
           },
           (err) => {
@@ -125,7 +125,7 @@ export function createLiveHub({
                     ? "stale"
                     : "render failed";
             console.error(`[nowaki live] ${isl.name} re-render ${reason}`);
-            send(sock, { type: "error", nid: ev.nid, reason });
+            send(sock, { type: "error", page, nid: ev.nid, reason });
             pump();
           },
         );
@@ -163,7 +163,7 @@ export function createLiveHub({
         const nid = typeof v.nid === "string" ? v.nid : "";
         if (!islands.has(nid)) return;
         if (queue.length >= MAX_QUEUED) {
-          send(sock, { type: "error", nid, reason: "busy" });
+          send(sock, { type: "error", page, nid, reason: "busy" });
           return;
         }
         queue.push({ nid, handler: v.handler ?? null, payload: v.payload ?? null });

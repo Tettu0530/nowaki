@@ -60,6 +60,14 @@ function connect() {
   if (window.__nowakiLive) return; // already running (another copy of this module)
   const proto = location.protocol === "https:" ? "wss" : "ws";
   let ws = null;
+  // Replacing joins sent on `ws`. The server counts them too and tags each patch / error with its
+  // count when it sent it, so one sent before the server saw the latest join (an event on the
+  // previous page) is dropped instead of landing on a new island that reuses the nid.
+  let joins = 0;
+  const rejoin = (sock) => {
+    joins++;
+    sock.send(joinMsg(lives(), true));
+  };
   let retry = 0;
   let timer = null; // pending reconnect
   // One POST at a time, so each event starts from the state the previous one returned.
@@ -72,7 +80,8 @@ function connect() {
     sock.onopen = () => {
       if (sock !== ws) return;
       retry = 0;
-      sock.send(joinMsg(lives(), true));
+      joins = 0;
+      rejoin(sock);
     };
     sock.onmessage = (e) => {
       if (sock !== ws) return; // a socket closed by a client navigation
@@ -82,6 +91,8 @@ function connect() {
       } catch {
         return;
       }
+      // A server without the count sends no `page`; its messages are taken as they come.
+      if ((msg.type === "patch" || msg.type === "error") && msg.page !== undefined && msg.page !== joins) return;
       if (msg.type === "patch") {
         const el = document.querySelector(`nowaki-live[nid="${cssEscape(msg.nid)}"]`);
         if (el) apply(el, msg);
@@ -126,7 +137,7 @@ function connect() {
       sock?.close();
       return;
     }
-    if (ws?.readyState === 1) ws.send(joinMsg(els, true));
+    if (ws?.readyState === 1) rejoin(ws);
     else if (!ws && !timer) {
       retry = 0; // also after giving up: a navigation is a fresh start
       open();
