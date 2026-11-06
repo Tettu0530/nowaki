@@ -335,6 +335,9 @@ pub fn build_server(
     // Plus every app module those import from anywhere else in the app (`data/`, `sections/`,
     // `utils/`, …): the conventional folders are entry points, not the whole server graph.
     // One walk over the whole graph: every module is parsed once, however many entries reach it.
+    // JSON the server graph imports (`import site from "../data/site.json" with { type: "json" }`)
+    // is loaded by Node as is, so it's copied next to the emitted modules.
+    let mut json_files: HashSet<PathBuf> = HashSet::new();
     {
         let mut seen: HashSet<PathBuf> = files.iter().cloned().collect();
         let mut stack: Vec<PathBuf> = files.clone();
@@ -345,6 +348,9 @@ pub fn build_server(
                 continue; // the transform below reports it
             };
             for d in imports.into_iter().filter_map(|i| i.resolved) {
+                if is_app_json(core, &d) {
+                    json_files.insert(d.clone());
+                }
                 if crate::chunk::is_app_module(core, &d) && seen.insert(d.clone()) {
                     files.push(d.clone());
                     stack.push(d);
@@ -380,6 +386,13 @@ pub fn build_server(
         fs::write(&out_path, code)?;
         count += 1;
     }
+    for json in &json_files {
+        let out_path = server_dir.join(json.strip_prefix(&core.root)?);
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(json, &out_path).with_context(|| format!("failed to copy: {}", json.display()))?;
+    }
 
     // Write the server function (`"use server"`) allowlist to dist/server/functions.json.
     // The runtime dispatches via this id→{module,export} (the client can't call arbitrary exports).
@@ -387,6 +400,13 @@ pub fn build_server(
     write_server_functions(core, &server_dir)?;
 
     Ok(count)
+}
+
+/// A `.json` file of the app (under the root, outside node_modules).
+fn is_app_json(core: &NowakiCore, abs: &Path) -> bool {
+    abs.extension().is_some_and(|e| e == "json")
+        && abs.starts_with(&core.root)
+        && !abs.components().any(|c| c.as_os_str() == "node_modules")
 }
 
 /// Generates dist/server/functions.json. module is a .js path relative to serverDir.
@@ -439,7 +459,7 @@ impl ServerAssets {
             .and_then(Path::parent)
             .unwrap_or(Path::new("."));
         let set = crate::image::build_set(root, &file, q, |stem, w, ext, bytes| {
-            crate::image::write_variant(&self.client_dir, stem, w, ext, bytes)
+            crate::image::write_variant(&self.client_dir, &sanitize_name(stem), w, ext, bytes)
         })?;
         let code = set.module();
         self.urls
@@ -510,7 +530,8 @@ fn transform_for_server(
         if spec.ends_with(".module.css") {
             if let Ok(resolution) = core.resolver.resolve(dir, spec) {
                 let full = resolution.full_path();
-                if let Ok(css) = fs::read_to_string(&full) {
+                // `read_css` inlines `@import`s, as the client stylesheet does.
+                if let Ok(css) = core.read_css(&full) {
                     // Scope with the same id as the client so class names match.
                     let id = crate::css::css_scope_id(&core.root, &full);
                     let (_scoped, map) = crate::css::scope_css(&id, &css);
@@ -620,7 +641,8 @@ impl<'a> VisitMut<'a> for DynamicImportSpecs<'a> {
     }
 }
 
-/// Rewrites TS extensions in relative local imports to .js. Leaves bare/absolute/.js alone.
+/// Rewrites TS extensions (and `.mjs`, also emitted as `.js`) in relative local imports to .js.
+/// Leaves bare/absolute/.js alone.
 fn rewrite_server_spec(spec: &str) -> Option<String> {
     if !spec.starts_with('.') {
         return None;
@@ -629,7 +651,7 @@ fn rewrite_server_spec(spec: &str) -> Option<String> {
         // CSS is client-only
         return Some(crate::css::CSS_NOOP_SPECIFIER.to_string());
     }
-    for ext in [".tsx", ".jsx", ".ts", ".tsrx", ".mdx"] {
+    for ext in [".tsx", ".jsx", ".ts", ".tsrx", ".mdx", ".mjs"] {
         if let Some(stem) = spec.strip_suffix(ext) {
             return Some(format!("{stem}.js"));
         }
@@ -697,11 +719,11 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
     if let Some(q) = query.as_deref().and_then(crate::image::image_query) {
         let set = crate::image::build_set(&core.root, &file, &q, |stem, w, ext, bytes| {
             ctx.asset_out += bytes.len() as u64;
-            crate::image::write_variant(out_dir, stem, w, ext, bytes)
+            crate::image::write_variant(out_dir, &sanitize_name(stem), w, ext, bytes)
         })?;
         ctx.asset_in += fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
         let code = set.module();
-        let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
+        let stem = output_stem(&file, "image");
         let mod_name = format!("{stem}.image.{:08x}.js", xxh3_64(code.as_bytes()) as u32);
         fs::write(out_dir.join(&mod_name), &code)?;
         ctx.assets.insert(abs.to_path_buf(), code);
@@ -719,7 +741,7 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
         let (asset_name, size_in, size_out) = write_asset(abs, out_dir)?;
         ctx.asset_in += size_in;
         ctx.asset_out += size_out;
-        let stem = abs.file_stem().and_then(|s| s.to_str()).unwrap_or("asset");
+        let stem = output_stem(abs, "asset");
         let out_ext = asset_name.rsplit('.').next().unwrap_or("bin");
         let url = format!("/_nowaki/{asset_name}");
         ctx.assets.insert(abs.to_path_buf(), url.clone());
@@ -742,7 +764,7 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
             crate::css::css_shim(&id, &css)
         };
         let hash = xxh3_64(code.as_bytes()) as u32;
-        let stem = abs.file_stem().and_then(|s| s.to_str()).unwrap_or("style");
+        let stem = output_stem(abs, "style");
         let filename = format!("{stem}.css.{hash:08x}.js");
         fs::write(out_dir.join(&filename), &code)?;
         ctx.deps.insert(filename.clone(), Vec::new());
@@ -769,7 +791,7 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
         let key = crate::server_fn::module_key(&core.root, abs);
         let exports = crate::server_fn::collect_exports(abs, &source)?;
         let code = crate::server_fn::client_proxy(&key, &exports);
-        let stem = abs.file_stem().and_then(|s| s.to_str()).unwrap_or("module");
+        let stem = output_stem(abs, "module");
         let hash = xxh3_64(code.as_bytes()) as u32;
         let filename = format!("{stem}.{hash:08x}.js");
         fs::write(out_dir.join(&filename), &code)?;
@@ -778,11 +800,7 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
         return Ok(filename);
     }
     let module = transform_for_bundle(abs, &source, core)?;
-    let stem = abs
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("module")
-        .to_string();
+    let stem = output_stem(abs, "module");
 
     // Fix the provisional name from the pre-rewrite hash first (so back-edges can reference it).
     let prov_hash = xxh3_64(module.code.as_bytes()) as u32;
@@ -861,10 +879,7 @@ fn emit_island(
         }
     }
 
-    let stem = island
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("island");
+    let stem = output_stem(island, "island");
     match crate::chunk::hoist_chunk(core, island, &internal, &external_name) {
         Ok(source) => {
             let chunk_name = format!("{stem}.js");
@@ -888,11 +903,44 @@ fn emit_island(
     }
 }
 
+/// The file stem of `path` as an output name part (see [`sanitize_name`]); `fallback` when it has
+/// none.
+fn output_stem(path: &Path, fallback: &str) -> String {
+    match path.file_stem() {
+        Some(s) => sanitize_name(&s.to_string_lossy()),
+        None => fallback.to_string(),
+    }
+}
+
+/// Makes a source-derived name part safe for dist/client: every character outside
+/// `[A-Za-z0-9._-]` becomes `_`, and a leading `.` too. `nowaki start` (start.rs `asset_name`)
+/// serves only such names, and the adapters and static output copy dist/client as is, so a
+/// name like `logo@2x` is changed here rather than allowed there.
+pub fn sanitize_name(stem: &str) -> String {
+    let mut out: String = stem
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if out.starts_with('.') {
+        out.replace_range(..1, "_");
+    }
+    if out.is_empty() {
+        out.push('_');
+    }
+    out
+}
+
 /// Optimizes an asset and writes it under a content-hashed name. Returns (name, bytes in, bytes out).
 fn write_asset(abs: &Path, out_dir: &Path) -> Result<(String, u64, u64)> {
     let raw = fs::read(abs).with_context(|| format!("failed to read: {}", abs.display()))?;
     let ext = abs.extension().and_then(|e| e.to_str()).unwrap_or("bin");
-    let stem = abs.file_stem().and_then(|s| s.to_str()).unwrap_or("asset");
+    let stem = output_stem(abs, "asset");
     let (bytes, out_ext) = crate::asset::optimize(&raw, ext, &crate::asset::Transform::default());
     let hash = xxh3_64(&bytes) as u32;
     let name = format!("{stem}.{hash:08x}.{out_ext}");

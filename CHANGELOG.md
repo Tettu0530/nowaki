@@ -18,6 +18,33 @@ milestone's worth of work; the codename is noted per entry.
   `a.b || (a.b = c)` unless `a` provably can't change (an upstream correctness
   fix), so first-load JS grows by about 20 bytes gzip. `serde-saphyr` 2.1.0
   (yanked) → 2.1.1.
+### Fixed
+- The server build rewrites imports of `.mjs` modules to the `.js` file it
+  writes, and copies JSON the server imports (`import site from
+  "../data/site.json" with { type: "json" }`) into `dist/server`. Before,
+  `nowaki start` failed with `ERR_MODULE_NOT_FOUND` where `nowaki dev` worked.
+- A CSS Module that uses `@import` has the same class map in SSR as on the
+  client. Before, SSR (dev and the server build) scoped the file without its
+  imports, so classes from the imported file were `undefined` in the
+  server-rendered HTML.
+- CSS Modules scope only class selectors. Before, a `.ext` inside `url()`,
+  a string, an attribute selector or a comment was scoped too:
+  `url(/img/bg.png)` became `url(/img/bg.png_<hash>)` and 404ed, and
+  `[href$=".pdf"]` stopped matching.
+- Build output names in `dist/client` use only `[A-Za-z0-9._-]`: other
+  characters in the source file name become `_` (`logo@2x.svg` →
+  `logo_2x.<hash>.svg`). Before, the name kept the source stem as is, and
+  `nowaki start`, which serves only such names, answered 404.
+- The dev transform cache, in memory and in `node_modules/.cache/nowaki`,
+  also checks the files a module inlines: a CSS Module's class map (with its
+  `@import`s), plain CSS text in SSR, and `?image` sizes. Before, editing one
+  of those kept serving the old class names or sizes until the importing file
+  changed, even across restarts.
+- The persistent dev transform cache is keyed on what import resolution
+  depends on too: lockfiles and package-manager install state (in the app and
+  the directories above it), `package.json` and `tsconfig.json`. Before, after
+  an install that moved a dependency, `nowaki dev` kept serving import URLs
+  that pointed at the old location.
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 

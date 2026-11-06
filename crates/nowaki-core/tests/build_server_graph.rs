@@ -59,3 +59,43 @@ fn server_build_follows_use_server_reexports_and_dynamic_imports() {
         "dynamic import specifier not rewritten:\n{route}"
     );
 }
+
+/// `.mjs` modules are emitted as `.js`, so the import that names them must say `.js` too, and
+/// JSON the server imports must be in dist/server next to the module that imports it.
+#[test]
+fn server_build_rewrites_mjs_imports_and_copies_json() {
+    let root = std::env::temp_dir().join(format!("nowaki-server-mjs-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let files: &[(&str, &str)] = &[
+        ("lib/util.mjs", "export const util = \"from-mjs\";\n"),
+        ("data/site.json", "{ \"name\": \"site\" }\n"),
+        (
+            "routes/index.tsx",
+            "import { util } from \"../lib/util.mjs\";\nimport site from \"../data/site.json\" with { type: \"json\" };\nexport default function I() {\n  return <p>{util}|{site.name}</p>;\n}\n",
+        ),
+    ];
+    for (rel, src) in files {
+        let p = root.join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, src).unwrap();
+    }
+
+    NowakiCore::new(root.clone())
+        .build(&root.join("dist"))
+        .expect("build ok");
+    let server = root.join("dist/server");
+    let route = fs::read_to_string(server.join("routes/index.js")).unwrap_or_default();
+    let util_js = server.join("lib/util.js").is_file();
+    let json = fs::read_to_string(server.join("data/site.json")).unwrap_or_default();
+    let _ = fs::remove_dir_all(&root);
+
+    assert!(util_js, "lib/util.mjs not emitted as lib/util.js");
+    assert!(
+        route.contains("\"../lib/util.js\"") && !route.contains("util.mjs"),
+        ".mjs import not rewritten:\n{route}"
+    );
+    assert!(
+        json.contains("\"site\""),
+        "data/site.json not copied to dist/server"
+    );
+}

@@ -307,19 +307,23 @@ impl NowakiCore {
         };
         let key = (abs.to_path_buf(), mode);
 
+        // A hit must also have unchanged inputs: files the output inlines (a CSS Module's class
+        // map, `?image` sizes) change without this file changing.
         if let Some(hit) = self.cache.get(&key) {
-            if hit.source_hash == hash {
+            if hit.is_fresh(hash) {
                 return Ok(hit.code.clone());
             }
         }
 
         let disk_key = self.disk_cache.key(abs, mode, hash);
-        if let Some(code) = self.disk_cache.get(disk_key) {
+        if let Some((code, inputs)) = self.disk_cache.get(disk_key) {
             self.cache.insert(
                 key,
                 cache::CachedModule {
                     source_hash: hash,
                     code: code.clone(),
+                    inputs_hash: cache::inputs_hash(&inputs),
+                    inputs,
                 },
             );
             return Ok(code);
@@ -329,7 +333,7 @@ impl NowakiCore {
             Some(s) => s,
             None => self.read_source(abs)?,
         };
-        let code = transform::transform_file(
+        let (code, inputs) = transform::transform_file_with_inputs(
             &self.root,
             abs,
             &source,
@@ -338,14 +342,16 @@ impl NowakiCore {
             &self.client_defines,
             Some(self),
         )?;
+        self.disk_cache.put(disk_key, &code, &inputs);
         self.cache.insert(
             key,
             cache::CachedModule {
                 source_hash: hash,
                 code: code.clone(),
+                inputs_hash: cache::inputs_hash(&inputs),
+                inputs,
             },
         );
-        self.disk_cache.put(disk_key, &code);
         Ok(code)
     }
 
@@ -528,6 +534,92 @@ mod tests {
         assert!(
             format!("{err:#}").contains("plugin transform failed"),
             "{err:#}"
+        );
+    }
+
+    /// SSR inlines a CSS Module's class map (with its `@import`s) and `?image` sizes into the
+    /// importer, so editing those files must invalidate the importer's cache entry, in memory
+    /// and on disk, though the importer itself didn't change.
+    #[test]
+    fn the_transform_cache_sees_changes_to_inlined_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        let file = root.join("a.tsx");
+        std::fs::write(&file, "import s from \"./a.module.css\";\nimport img from \"./p.png?image\";\nexport const x = [s, img];\n").unwrap();
+        std::fs::write(root.join("a.module.css"), "@import \"./base.css\";\n").unwrap();
+        std::fs::write(root.join("base.css"), ".first { color: red }\n").unwrap();
+        let png = |w: u32| {
+            ::image::RgbImage::new(w, 1)
+                .save(root.join("p.png"))
+                .unwrap()
+        };
+        png(3);
+
+        let core = NowakiCore::new(root.clone());
+        let before = core.load_module(&file, Mode::Ssr).unwrap();
+        assert!(before.contains("first"), "{before}");
+        assert!(before.contains("width%3A%203"), "{before}");
+
+        std::fs::write(root.join("base.css"), ".second { color: red }\n").unwrap();
+        png(5);
+        let after = core.load_module(&file, Mode::Ssr).unwrap();
+        assert!(
+            after.contains("second") && !after.contains("first"),
+            "stale class map in memory:\n{after}"
+        );
+        assert!(
+            after.contains("width%3A%205"),
+            "stale ?image size in memory:\n{after}"
+        );
+
+        // A restart reads the disk cache: it must not return the first entry either.
+        std::fs::write(root.join("base.css"), ".first { color: red }\n").unwrap();
+        png(3);
+        let _ = NowakiCore::new(root.clone())
+            .load_module(&file, Mode::Ssr)
+            .unwrap();
+        std::fs::write(root.join("base.css"), ".third { color: red }\n").unwrap();
+        let restarted = NowakiCore::new(root.clone())
+            .load_module(&file, Mode::Ssr)
+            .unwrap();
+        assert!(
+            restarted.contains("third"),
+            "stale class map from the disk cache:\n{restarted}"
+        );
+    }
+
+    /// Browser output holds resolved import URLs, so after an install changes the dependency
+    /// layout (lockfile and node_modules), a restart must not serve the old URLs from disk.
+    #[test]
+    fn the_disk_cache_is_dropped_when_dependencies_are_reinstalled() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        let file = root.join("a.ts");
+        std::fs::write(&file, "import { v } from \"pkg\";\nexport const x = v;\n").unwrap();
+        let pkg = root.join("node_modules/pkg");
+        std::fs::create_dir_all(&pkg).unwrap();
+        let install = |main: &str, lock: &str| {
+            std::fs::write(
+                pkg.join("package.json"),
+                format!("{{\"name\":\"pkg\",\"main\":\"{main}\"}}"),
+            )
+            .unwrap();
+            std::fs::write(pkg.join(main), "export const v = 1;\n").unwrap();
+            std::fs::write(root.join("package-lock.json"), lock).unwrap();
+        };
+        install("one.js", "{\"lockfileVersion\":3,\"v\":1}");
+        let first = NowakiCore::new(root.clone())
+            .load_module(&file, Mode::Browser)
+            .unwrap();
+        assert!(first.contains("/node_modules/pkg/one.js"), "{first}");
+
+        install("two.js", "{\"lockfileVersion\":3,\"v\":2}");
+        let after = NowakiCore::new(root.clone())
+            .load_module(&file, Mode::Browser)
+            .unwrap();
+        assert!(
+            after.contains("/node_modules/pkg/two.js"),
+            "stale import URL from the disk cache:\n{after}"
         );
     }
 }

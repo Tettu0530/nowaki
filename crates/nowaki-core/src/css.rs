@@ -13,15 +13,26 @@ pub fn inline_imports(
     css: &str,
     resolve: &dyn Fn(&Path, &str) -> Option<std::path::PathBuf>,
 ) -> String {
+    inline_imports_with_files(abs, css, resolve).0
+}
+
+/// [`inline_imports`], plus the files it inlined (for cache invalidation).
+pub fn inline_imports_with_files(
+    abs: &Path,
+    css: &str,
+    resolve: &dyn Fn(&Path, &str) -> Option<std::path::PathBuf>,
+) -> (String, Vec<std::path::PathBuf>) {
     let mut seen = std::collections::HashSet::new();
     seen.insert(abs.to_path_buf());
     let mut remote = Vec::new();
     let body = inline_rec(abs, css, resolve, &mut seen, &mut remote);
-    if remote.is_empty() {
+    let css = if remote.is_empty() {
         body
     } else {
         format!("{}\n{body}", remote.join("\n"))
-    }
+    };
+    seen.remove(abs);
+    (css, seen.into_iter().collect())
 }
 
 fn inline_rec(
@@ -187,6 +198,47 @@ pub fn scope_css(id: &str, css: &str) -> (String, Vec<(String, String)>) {
     let mut i = 0;
     while i < bytes.len() {
         let c = bytes[i];
+        // Comments, strings, `url(…)` and attribute selectors hold file names and text
+        // (`url(/img/bg.png)`, `content: "a.b"`, `[href$=".pdf"]`), not class selectors.
+        if c == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            i = css[i + 2..]
+                .find("*/")
+                .map_or(bytes.len(), |e| i + 2 + e + 2);
+            continue;
+        }
+        if c == b'"' || c == b'\'' {
+            i = skip_string(bytes, i);
+            continue;
+        }
+        if c == b'[' {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j] != b']' {
+                j = if bytes[j] == b'"' || bytes[j] == b'\'' {
+                    skip_string(bytes, j)
+                } else {
+                    j + 1
+                };
+            }
+            i = (j + 1).min(bytes.len());
+            continue;
+        }
+        if (c == b'u' || c == b'U')
+            && bytes.len() >= i + 4
+            && bytes[i..i + 4].eq_ignore_ascii_case(b"url(")
+            && (i == 0 || !is_ident_char(bytes[i - 1]))
+        {
+            let mut j = i + 4;
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            // A quoted URL is skipped as a string by the next turn of the loop.
+            i = if j < bytes.len() && (bytes[j] == b'"' || bytes[j] == b'\'') {
+                j
+            } else {
+                css[j..].find(')').map_or(bytes.len(), |e| j + e + 1)
+            };
+            continue;
+        }
         // Class selector start: '.' followed by an ident-start (a-zA-Z_ or -<letter>)
         if c == b'.' && i + 1 < bytes.len() && is_ident_start(bytes[i + 1]) {
             out.push_str(&css[copied..i]);
@@ -210,6 +262,20 @@ pub fn scope_css(id: &str, css: &str) -> (String, Vec<(String, String)>) {
     }
     out.push_str(&css[copied..]);
     (out, map)
+}
+
+/// The index just past the string literal that opens at `start` (backslash escapes included).
+fn skip_string(bytes: &[u8], start: usize) -> usize {
+    let quote = bytes[start];
+    let mut j = start + 1;
+    while j < bytes.len() {
+        match bytes[j] {
+            b'\\' => j += 2,
+            b if b == quote => return j + 1,
+            _ => j += 1,
+        }
+    }
+    bytes.len()
 }
 
 fn is_ident_start(b: u8) -> bool {
@@ -410,5 +476,29 @@ mod tests {
         assert!(out.contains("@layer vendor {\n.x { top: 0; }"), "{out}");
         assert!(out.contains("@import \"./missing.css\";"), "{out}");
         assert!(out.trim_end().ends_with("body { margin: 0; }"), "{out}");
+    }
+
+    /// Only class selectors are scoped: `.ext` in URLs, strings, attribute selectors and
+    /// comments stays as written.
+    #[test]
+    fn scope_css_leaves_urls_strings_attributes_and_comments_alone() {
+        let css = "/* see a.b */\n.hero { background: url(/img/bg.png); }\n.q { background: URL( \"/img/q.jpg\" ); }\n@font-face { src: url('/fonts/x.woff2') format(\"woff2\"); }\n.t::after { content: \"a.b\\\".c\"; }\na[href$=\".pdf\"].doc, a[data-x='y.z'] { color: red }\n.last { color: blue }";
+        let (scoped, map) = scope_css("routes/a.module.css", css);
+        let names: Vec<&str> = map.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(names, ["hero", "q", "t", "doc", "last"], "{scoped}");
+        let s = &map[0].1["hero_".len()..];
+        for kept in [
+            "/* see a.b */",
+            "url(/img/bg.png)",
+            "URL( \"/img/q.jpg\" )",
+            "url('/fonts/x.woff2')",
+            "content: \"a.b\\\".c\"",
+            "[href$=\".pdf\"]",
+            "[data-x='y.z']",
+        ] {
+            assert!(scoped.contains(kept), "{kept} changed:\n{scoped}");
+        }
+        assert!(scoped.contains(&format!(".doc_{s},")), "{scoped}");
+        assert!(scoped.contains(&format!(".last_{s} ")), "{scoped}");
     }
 }
