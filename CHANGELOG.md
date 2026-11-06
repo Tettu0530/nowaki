@@ -20,6 +20,10 @@ milestone's worth of work; the codename is noted per entry.
   no subset name, are preloaded only when one covers basic Latin; the
   `@font-face` rules stay, so the browser fetches the slices a page uses.
   (#150)
+- MDX footnote ids keep each label distinct: they are built like a Markdown
+  entry's (lowercased, non-URL-safe bytes percent-encoded) instead of turning
+  every non-ASCII character into `-`, so `[^あ]` and `[^い]` no longer share
+  `fn--`. (#150)
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 
