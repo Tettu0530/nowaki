@@ -28,6 +28,10 @@ milestone's worth of work; the codename is noted per entry.
   headings (a setext heading over two lines, or one with a hard break): the
   text is taken the way comrak anchorizes it, with a break as a space. MDX
   `headings` ids now agree with Markdown's for such headings too. (#150)
+- `nowaki prerender --out dist` (or any `--out` that is, contains, or is
+  inside `dist/client`, `dist/server`, or `dist/public`) is refused before
+  building, instead of deleting the build it renders from. Paths like `dist/`
+  and `./dist` are normalized first. (#150)
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 

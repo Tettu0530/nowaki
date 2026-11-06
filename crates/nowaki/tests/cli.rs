@@ -351,3 +351,40 @@ export const posts = defineCollection({ schema: post });
         "{stderr}"
     );
 }
+
+#[test]
+fn prerender_refuses_an_out_that_is_the_build() {
+    let root = example_root();
+    if !deps_installed(&root) {
+        eprintln!("skip: examples/hello deps not installed");
+        return;
+    }
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    let app = budget_app("{ js: 100 }");
+    let built = Command::new(bin)
+        .arg("build")
+        .arg(app.path())
+        .output()
+        .unwrap();
+    assert!(built.status.success());
+    for out in ["dist", "dist/", "dist/server"] {
+        let run = Command::new(bin)
+            .arg("prerender")
+            .arg(app.path())
+            .args(["--out", out])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(!run.status.success(), "--out {out} must be refused");
+        assert!(
+            stderr.to_lowercase().contains("choose another directory"),
+            "{stderr}"
+        );
+        // The earlier build is untouched.
+        assert!(
+            app.path().join("dist/server/routes/index.js").is_file(),
+            "--out {out}"
+        );
+        assert!(app.path().join("dist/client").is_dir(), "--out {out}");
+    }
+}

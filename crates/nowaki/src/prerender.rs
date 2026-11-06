@@ -12,6 +12,8 @@ const PRERENDER_JOBS: usize = 8;
 
 /// Static site generation: build → start a temporary prod server → render each static route to HTML → write out.
 pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
+    // Checked before building: the build writes dist/, and clearing `out` must never reach it.
+    let clear_out = check_out(&root, &out)?;
     let _plugin_host = crate::plugins::start(&root)?;
     let mut core = NowakiCore::new(root.clone());
     if let Some(host) = &_plugin_host {
@@ -86,7 +88,7 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
     // Output under dist/ (the static adapter) is ours to replace; a user-chosen `--out` is not.
-    if out.starts_with(root.join("dist")) {
+    if clear_out {
         nowaki_core::build::clear_dir(&out)?;
     }
     std::fs::create_dir_all(&out)?;
@@ -220,6 +222,67 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     Ok(())
 }
 
+/// Refuses an `--out` that is, contains, or sits inside a part of the build it renders from
+/// (`dist/`, `dist/client`, `dist/server`, `dist/public`): clearing or writing it would delete the
+/// build mid-render. Returns whether `out` is a strict subdirectory of `dist/` of our own (like the
+/// default `dist/static`), which is cleared before writing.
+fn check_out(root: &Path, out: &Path) -> Result<bool> {
+    let dist = normalize(&root.join("dist"));
+    let out = normalize(out);
+    if dist.starts_with(&out) {
+        return Err(anyhow!(
+            "--out {} is or contains the build directory {}; prerender reads the build from there. Choose another directory, such as dist/static",
+            out.display(),
+            dist.display()
+        ));
+    }
+    for part in ["client", "server", "public"] {
+        if out.starts_with(dist.join(part)) {
+            return Err(anyhow!(
+                "--out {} is inside the build ({}); choose another directory, such as dist/static",
+                out.display(),
+                dist.join(part).display()
+            ));
+        }
+    }
+    Ok(out.starts_with(&dist))
+}
+
+/// `p` without `.` / `..` segments, resolved through symlinks for the part that exists, so
+/// `dist/`, `./dist` and `x/../dist` compare equal.
+fn normalize(p: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut lexical = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                lexical.pop();
+            }
+            other => lexical.push(other),
+        }
+    }
+    // Canonicalize the longest existing prefix, then re-append the rest.
+    let mut rest = Vec::new();
+    let mut base = lexical.clone();
+    loop {
+        if let Ok(real) = dunce::canonicalize(&base) {
+            let mut out = real;
+            for part in rest.iter().rev() {
+                out.push(part);
+            }
+            return out;
+        }
+        match (base.file_name().map(|n| n.to_os_string()), base.parent()) {
+            (Some(name), Some(parent)) => {
+                rest.push(name);
+                base = parent.to_path_buf();
+            }
+            _ => return lexical,
+        }
+    }
+}
+
 /// Runs the runtime's static-paths.mjs, which evaluates `export const staticPaths` in Node
 /// (nowaki-core never runs JS). Returns (request path, file relative to `out`).
 async fn static_paths(root: &Path) -> Result<Vec<(String, String)>> {
@@ -300,4 +363,33 @@ fn copy_dir(from: &Path, to: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn out_may_not_be_or_contain_the_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("dist/server")).unwrap();
+        for bad in [
+            "dist",
+            "dist/",
+            "./dist",
+            "dist/static/..",
+            ".",
+            "dist/server",
+            "dist/client/x",
+            "dist/public",
+        ] {
+            assert!(check_out(&root, &root.join(bad)).is_err(), "{bad}");
+        }
+        assert!(check_out(&root, &root.join("..")).is_err());
+        assert!(check_out(&root, &root.join("dist/static")).unwrap());
+        assert!(check_out(&root, &root.join("./dist/site")).unwrap());
+        assert!(!check_out(&root, &root.join("public-site")).unwrap());
+        assert!(!check_out(&root, &root.join("distro")).unwrap());
+    }
 }
