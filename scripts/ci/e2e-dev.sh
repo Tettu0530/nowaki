@@ -31,6 +31,10 @@ echo "$BADGE_CLASS" > /tmp/nowaki-css-module-badge-class
 ! curl -sf $B/ | grep -qE '/Users/|/home/[^/]+/'
 curl -sf $B/ | grep -q 'data-router=.*client/router.js'
 curl -sf "$B/islands/Counter.tsx" | grep -q "jsx-runtime"
+# the client runtime loads, also when @nowaki-dev/runtime is a workspace symlink out of the app
+for f in islands router live hmr; do
+  curl -sf "$B/node_modules/@nowaki-dev/runtime/client/$f.js" >/dev/null
+done
 # HEAD mirrors GET for app files
 test "$(curl -s -I -o /dev/null -w '%{http_code}' "$B/islands/Counter.tsx")" = 200
 curl -s -I "$B/islands/Counter.tsx" | grep -qi '^content-type: text/javascript'

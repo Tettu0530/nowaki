@@ -581,7 +581,26 @@ fn app_file(root: &Path, url_path: &str) -> Option<PathBuf> {
         return None;
     }
     let canon = dunce::canonicalize(&candidate).ok()?;
-    (canon.starts_with(root) && !is_denied_fs_path(&canon)).then_some(candidate)
+    if is_denied_fs_path(&canon) {
+        return None;
+    }
+    (canon.starts_with(root) || in_runtime_package(root, &decoded, &canon)).then_some(candidate)
+}
+
+/// The page loads the client runtime from `/node_modules/@nowaki-dev/runtime/client/*`. In a pnpm
+/// workspace or after `npm link` that package is a symlink whose real path is outside the root, so
+/// it is allowed by name: only files inside the package's own real directory, nothing it links to.
+fn in_runtime_package(root: &Path, decoded: &str, canon: &Path) -> bool {
+    const RUNTIME: &str = "/node_modules/@nowaki-dev/runtime/";
+    if !decoded.starts_with(RUNTIME) {
+        return false;
+    }
+    let Ok(pkg) = dunce::canonicalize(root.join("node_modules/@nowaki-dev/runtime")) else {
+        return false;
+    };
+    canon
+        .strip_prefix(&pkg)
+        .is_ok_and(|rest| !rest.components().any(|c| c.as_os_str() == "node_modules"))
 }
 
 /// `public/<path>` for `/<path>`, read on each request so added or edited files show up at once.
@@ -1057,6 +1076,36 @@ mod tests {
             "/%2eenv",
             "/.env",
             "/islands/missing.tsx",
+        ] {
+            assert_eq!(app_file(&root, bad), None, "{bad}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn app_file_serves_a_symlinked_runtime_package_only() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let base = dunce::canonicalize(dir.path()).unwrap();
+        let root = base.join("app");
+        let pkg = base.join("packages/nowaki-runtime");
+        std::fs::create_dir_all(root.join("node_modules/@nowaki-dev")).unwrap();
+        std::fs::create_dir_all(pkg.join("client")).unwrap();
+        std::fs::create_dir_all(pkg.join("node_modules/dep")).unwrap();
+        std::fs::write(pkg.join("client/islands.js"), "x").unwrap();
+        std::fs::write(pkg.join("node_modules/dep/index.js"), "x").unwrap();
+        std::fs::write(pkg.join(".env"), "SECRET=1").unwrap();
+        std::fs::write(base.join("secret.txt"), "s").unwrap();
+        symlink(base.join("secret.txt"), pkg.join("client/leak.js")).unwrap();
+        symlink(&pkg, root.join("node_modules/@nowaki-dev/runtime")).unwrap();
+        symlink(&base, root.join("node_modules/other")).unwrap();
+        assert!(app_file(&root, "/node_modules/@nowaki-dev/runtime/client/islands.js").is_some());
+        for bad in [
+            "/node_modules/@nowaki-dev/runtime/client/leak.js",
+            "/node_modules/@nowaki-dev/runtime/node_modules/dep/index.js",
+            "/node_modules/@nowaki-dev/runtime/.env",
+            "/node_modules/other/secret.txt",
+            "/node_modules/@nowaki-dev/runtime/../../secret.txt",
         ] {
             assert_eq!(app_file(&root, bad), None, "{bad}");
         }

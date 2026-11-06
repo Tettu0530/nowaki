@@ -30,6 +30,11 @@ milestone's worth of work; the codename is noted per entry.
 - `nowaki dev` now percent-decodes the request path before looking up an app
   file, so islands and files with spaces or non-ASCII names load (they were
   404). Malformed escapes and `..` / `.` segments are refused (#150).
+- `nowaki dev` 404'd the client runtime (`/node_modules/@nowaki-dev/runtime/client/*.js`)
+  when `@nowaki-dev/runtime` was a symlink out of the app (pnpm workspace,
+  `npm link`), so no island hydrated. Files inside that package's own real
+  directory are now served; other symlinks and its nested `node_modules` are
+  still refused (#150).
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 
