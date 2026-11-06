@@ -36,6 +36,7 @@ const addModule = (abs) => {
 const routeTable = {
   routes: table.routes.map((r) => ({
     file: (addModule(r.file), keyOf(r.file)),
+    dir: r.dir,
     segments: r.segments,
     isApi: r.isApi,
     specificity: r.specificity,

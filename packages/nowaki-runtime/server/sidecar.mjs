@@ -16,7 +16,7 @@ register(new URL("./react-alias-hooks.mjs", import.meta.url));
 const { scanRoutes } = await import("./router.mjs");
 const { loadIslandRegistry, renderDocument, renderShell, errorPage } = await import("./render.mjs");
 const { handleRequest, sendResult } = await import("./handler.mjs");
-const { liveRender, liveContext, liveShareable, LiveForbiddenError } = await import("./live.mjs");
+const { liveRender, liveContext, liveShareable, liveSigStatus, LiveForbiddenError } = await import("./live.mjs");
 const { runWithContext, contextReads } = await import("./functions.mjs");
 const { pathToFileURL } = await import("node:url");
 
@@ -163,9 +163,14 @@ const server = createServer(async (req, res) => {
     try {
       const chunks = [];
       for await (const c of req) chunks.push(c);
-      const { name, state, handler, payload, version, sig, request, load } = JSON.parse(
+      const { name, state, handler, payload, version, sig, request, load, verifyOnly } = JSON.parse(
         Buffer.concat(chunks).toString("utf8"),
       );
+      if (verifyOnly) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ verified: liveSigStatus(name, state, sig) }));
+        return;
+      }
       const reg = await loadIslandRegistry(appRoot, String(version ?? "0"));
       const entry = [...reg.values()].find((e) => e.name === name);
       if (!entry?.live) {
