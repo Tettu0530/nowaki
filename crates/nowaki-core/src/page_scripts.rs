@@ -22,10 +22,10 @@ pub fn parse_scripts(path: &Path, source: &str) -> Result<Vec<String>> {
     let source_type = crate::transform::source_type_for_path(path);
     let program = crate::transform::parse_program(&allocator, path, source, source_type)?;
     for stmt in &program.body {
-        let Statement::ExportNamedDeclaration(d) = stmt else {
+        let Statement::ExportDeclaration(d) = stmt else {
             continue;
         };
-        let Some(Declaration::VariableDeclaration(var)) = &d.declaration else {
+        let Declaration::VariableDeclaration(var) = &d.declaration else {
             continue;
         };
         for decl in &var.declarations {

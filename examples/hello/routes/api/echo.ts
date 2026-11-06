@@ -8,7 +8,7 @@ type Ctx = {
 };
 
 export function GET(ctx: Ctx) {
-  return ctx.json({ method: "GET", q: ctx.url.searchParams.get("q") });
+  return ctx.json({ method: "GET", q: ctx.url.searchParams.get("q"), origin: ctx.url.origin });
 }
 
 export async function POST(ctx: Ctx) {

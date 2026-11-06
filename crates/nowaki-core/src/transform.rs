@@ -35,13 +35,31 @@ pub fn transform_file(
     client_defines: &[(String, String)],
     vr: Option<&dyn VirtualResolve>,
 ) -> Result<String> {
+    transform_file_with_inputs(root, path, source, mode, resolver, client_defines, vr)
+        .map(|(code, _)| code)
+}
+
+/// [`transform_file`], plus the other files whose content the output inlines: CSS Module class
+/// maps (the stylesheet and what it `@import`s), plain CSS text for SSR, and `?image` sizes. A
+/// cache of the output must check these too, not only `source`.
+#[allow(clippy::too_many_arguments)]
+pub fn transform_file_with_inputs(
+    root: &Path,
+    path: &Path,
+    source: &str,
+    mode: Mode,
+    resolver: &Resolver,
+    client_defines: &[(String, String)],
+    vr: Option<&dyn VirtualResolve>,
+) -> Result<(String, Vec<PathBuf>)> {
     // When transforming a server module (`"use server"`) for the browser, emit no implementation;
     // swap in a client proxy (tiny async functions that fetch). SSR keeps the real thing.
     if mode == Mode::Browser && crate::server_fn::has_use_server(source) {
         let key = crate::server_fn::module_key(root, path);
         let exports = crate::server_fn::collect_exports(path, source)?;
-        return Ok(crate::server_fn::client_proxy(&key, &exports));
+        return Ok((crate::server_fn::client_proxy(&key, &exports), Vec::new()));
     }
+    let mut inputs = Vec::new();
 
     let allocator = Allocator::default();
     let mut program = parse_program(&allocator, path, source, source_type_for_path(path))?;
@@ -50,11 +68,27 @@ pub fn transform_file(
     run_preact_transform(&allocator, path, source, scoping, &mut program)?;
 
     if mode == Mode::Browser {
-        rewrite_imports(&allocator, root, path, &mut program, resolver, vr);
+        rewrite_imports(
+            &allocator,
+            root,
+            path,
+            &mut program,
+            resolver,
+            vr,
+            &mut inputs,
+        );
     } else {
         // SSR: .css becomes a no-op, assets become URL-string data modules (so Node doesn't crash
         // importing svg etc. directly; the rendered <img src> matches the client).
-        rewrite_ssr_imports(&allocator, root, path, &mut program, resolver, vr);
+        rewrite_ssr_imports(
+            &allocator,
+            root,
+            path,
+            &mut program,
+            resolver,
+            vr,
+            &mut inputs,
+        );
     }
 
     // No minification, so inline source map positions are exact.
@@ -70,7 +104,9 @@ pub fn transform_file(
         code.push_str(&map.to_data_url());
         code.push('\n');
     }
-    Ok(code)
+    inputs.sort();
+    inputs.dedup();
+    Ok((code, inputs))
 }
 
 /// Rewrites top-level import / re-export specifiers to dev server URLs.
@@ -82,12 +118,13 @@ fn rewrite_imports<'a>(
     program: &mut Program<'a>,
     resolver: &Resolver,
     vr: Option<&dyn VirtualResolve>,
+    inputs: &mut Vec<PathBuf>,
 ) {
     let dir = path.parent().unwrap_or(root);
     for stmt in program.body.iter_mut() {
         let source = match stmt {
             Statement::ImportDeclaration(decl) => Some(&mut decl.source),
-            Statement::ExportNamedDeclaration(decl) => decl.source.as_mut(),
+            Statement::ExportFromDeclaration(decl) => Some(&mut decl.source),
             Statement::ExportAllDeclaration(decl) => Some(&mut decl.source),
             _ => None,
         };
@@ -96,7 +133,7 @@ fn rewrite_imports<'a>(
             lit.value = allocator.alloc_str(aliased).into();
             lit.raw = None;
         }
-        let Some(url) = map_specifier(lit.value.as_str(), dir, root, resolver, vr) else {
+        let Some(url) = map_specifier(lit.value.as_str(), dir, root, resolver, vr, inputs) else {
             continue;
         };
         lit.value = allocator.alloc_str(&url).into();
@@ -144,10 +181,10 @@ pub(crate) fn parse_program<'a>(
     source_type: SourceType,
 ) -> Result<Program<'a>> {
     let parsed = Parser::new(allocator, source, source_type).parse();
-    if !parsed.errors.is_empty() {
+    if !parsed.diagnostics.is_empty() {
         return Err(anyhow!(
             "parse error\n{}",
-            render_diagnostics(path, source, &parsed.errors)
+            render_diagnostics(path, source, &parsed.diagnostics)
         ));
     }
     Ok(parsed.program)
@@ -170,10 +207,10 @@ pub(crate) fn run_preact_transform<'a>(
 ) -> Result<Scoping> {
     let ret = Transformer::new(allocator, path, &preact_transform_options())
         .build_with_scoping(scoping, program);
-    if !ret.errors.is_empty() {
+    if !ret.diagnostics.is_empty() {
         return Err(anyhow!(
             "transform error\n{}",
-            render_diagnostics(path, source, &ret.errors)
+            render_diagnostics(path, source, &ret.diagnostics)
         ));
     }
     Ok(ret.scoping)
@@ -208,6 +245,7 @@ fn map_specifier(
     root: &Path,
     resolver: &Resolver,
     vr: Option<&dyn VirtualResolve>,
+    inputs: &mut Vec<PathBuf>,
 ) -> Option<String> {
     if spec.starts_with('/') || spec.contains("://") || spec.starts_with("data:") {
         return None;
@@ -215,7 +253,7 @@ fn map_specifier(
     match resolver.resolve(dir, spec) {
         Ok(resolution) => {
             let full = resolution.full_path();
-            dev_asset_module(root, &full).or_else(|| Some(fs_path_to_url(root, &full)))
+            dev_asset_module(root, &full, inputs).or_else(|| Some(fs_path_to_url(root, &full)))
         }
         Err(err) => {
             // Virtual modules get a dev URL for their synthetic path; the dev server serves them via load.
@@ -265,12 +303,13 @@ fn rewrite_ssr_imports<'a>(
     program: &mut Program<'a>,
     resolver: &Resolver,
     vr: Option<&dyn VirtualResolve>,
+    inputs: &mut Vec<PathBuf>,
 ) {
     let dir = path.parent().unwrap_or(root);
     for stmt in program.body.iter_mut() {
         let source = match stmt {
             Statement::ImportDeclaration(decl) => Some(&mut decl.source),
-            Statement::ExportNamedDeclaration(decl) => decl.source.as_mut(),
+            Statement::ExportFromDeclaration(decl) => Some(&mut decl.source),
             Statement::ExportAllDeclaration(decl) => Some(&mut decl.source),
             _ => None,
         };
@@ -293,7 +332,9 @@ fn rewrite_ssr_imports<'a>(
         if spec.ends_with(".module.css") {
             if let Ok(resolution) = resolver.resolve(dir, spec) {
                 let full = resolution.full_path();
-                if let Ok(css) = std::fs::read_to_string(&full) {
+                // `@import`s inlined, as the browser's stylesheet has them (else the map lacks
+                // the imported classes).
+                if let Some(css) = read_css_inlined(resolver, &full, inputs) {
                     let id = crate::css::css_scope_id(root, &full);
                     let (_scoped, map) = crate::css::scope_css(&id, &css);
                     let body = format!("export default {}", crate::css::mapping_object(&map));
@@ -306,10 +347,11 @@ fn rewrite_ssr_imports<'a>(
         // Plain CSS: SSR gets its text as the default export (`import css from "./a.css"` is a
         // string, as nowaki-env.d.ts says); the page links it as a stylesheet (route CSS).
         if spec.ends_with(".css") {
-            let text = resolver
-                .resolve(dir, spec)
-                .ok()
-                .and_then(|r| std::fs::read_to_string(r.full_path()).ok());
+            let text = resolver.resolve(dir, spec).ok().and_then(|r| {
+                let full = r.full_path();
+                inputs.push(full.clone());
+                std::fs::read_to_string(full).ok()
+            });
             let module = match text {
                 Some(css) => {
                     data_module(&format!("export default {}", crate::css::js_string(&css)))
@@ -325,7 +367,7 @@ fn rewrite_ssr_imports<'a>(
         }
         if let Ok(resolution) = resolver.resolve(dir, spec) {
             let full = resolution.full_path();
-            if let Some(data) = dev_asset_module(root, &full) {
+            if let Some(data) = dev_asset_module(root, &full, inputs) {
                 lit.value = allocator.alloc_str(&data).into();
                 lit.raw = None;
             }
@@ -333,12 +375,28 @@ fn rewrite_ssr_imports<'a>(
     }
 }
 
+/// A stylesheet with its `@import`s inlined, like `NowakiCore::read_css`. Adds the stylesheet and
+/// every file it inlined to `inputs`.
+fn read_css_inlined(resolver: &Resolver, abs: &Path, inputs: &mut Vec<PathBuf>) -> Option<String> {
+    inputs.push(abs.to_path_buf());
+    let css = std::fs::read_to_string(abs).ok()?;
+    if !css.contains("@import") {
+        return Some(css);
+    }
+    let resolve = |dir: &Path, spec: &str| resolver.resolve(dir, spec).ok().map(|r| r.full_path());
+    let (css, inlined) = crate::css::inline_imports_with_files(abs, &css, &resolve);
+    inputs.extend(inlined);
+    Some(css)
+}
+
 /// The data: module an asset import becomes in dev, for the browser and SSR alike: its URL, or for
 /// `?image` the image set with `/__nowaki/image` URLs (sizes from the file header; the variants
 /// are encoded when the browser asks). None when `full` isn't an asset.
-fn dev_asset_module(root: &Path, full: &Path) -> Option<String> {
+/// For `?image`, the file goes into `inputs` (its sizes are inlined).
+fn dev_asset_module(root: &Path, full: &Path, inputs: &mut Vec<PathBuf>) -> Option<String> {
     let (file, query) = crate::image::split_query(full);
     if let Some(q) = query.as_deref().and_then(crate::image::image_query) {
+        inputs.push(file.clone());
         return match crate::image::dev_set(root, &file, &q) {
             Ok(set) => Some(data_module(set.module().trim_end())),
             Err(e) => {
@@ -368,8 +426,8 @@ mod tests {
         let source = "export default () => <;\n";
         let allocator = Allocator::default();
         let parsed = Parser::new(&allocator, source, SourceType::tsx()).parse();
-        assert!(!parsed.errors.is_empty());
-        let out = render_diagnostics(path, source, &parsed.errors);
+        assert!(!parsed.diagnostics.is_empty());
+        let out = render_diagnostics(path, source, &parsed.diagnostics);
         assert!(
             out.contains("Broken.tsx") || out.contains('╭') || out.contains('|'),
             "expected a code frame, got: {out}"

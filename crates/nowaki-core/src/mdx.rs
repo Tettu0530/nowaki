@@ -296,7 +296,7 @@ impl Gen {
                 out.push_str("</table>\n");
             }
             Node::FootnoteReference(f) => {
-                let id = slug(&f.identifier);
+                let id = footnote_id(&f.identifier);
                 let _ = write!(
                     out,
                     "<sup><a href={} id={} data-footnote-ref>{}</a></sup>",
@@ -306,7 +306,7 @@ impl Gen {
                 );
             }
             Node::FootnoteDefinition(f) => {
-                let id = slug(&f.identifier);
+                let id = footnote_id(&f.identifier);
                 let _ = write!(
                     out,
                     "<div id={} data-footnote>",
@@ -383,10 +383,13 @@ impl Gen {
 }
 
 /// The text of a node and its descendants (for heading ids and anchors).
+/// A line ending (soft break) or a hard break is a space, as in comrak's `collect_text`, so a
+/// multi-line heading gets the id a Markdown entry would give it.
 fn plain_text(node: &Node) -> String {
     match node {
-        Node::Text(t) => t.value.clone(),
+        Node::Text(t) => t.value.replace("\r\n", " ").replace(['\n', '\r'], " "),
         Node::InlineCode(c) => c.value.clone(),
+        Node::Break(_) => " ".to_string(),
         other => other
             .children()
             .map(|c| c.iter().map(plain_text).collect::<String>())
@@ -406,16 +409,19 @@ fn is_local(url: &str) -> bool {
         ))
 }
 
-fn slug(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect()
+/// The id part of a footnote's `fn-` / `fnref-` ids, as a Markdown entry (comrak) writes it: the
+/// label lowercased, with bytes outside comrak's URL-safe set percent-encoded (`[^é]` →
+/// `%C3%A9`). Distinct labels get distinct ids: `%`, `&` and `'` are encoded too.
+fn footnote_id(identifier: &str) -> String {
+    let mut out = String::new();
+    for b in identifier.to_lowercase().bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.+!*(),#@?=;:/$~".contains(&b) {
+            out.push(b as char);
+        } else {
+            let _ = write!(out, "%{b:02X}");
+        }
+    }
+    out
 }
 
 /// A JS string literal (JSON is a subset).
@@ -554,5 +560,42 @@ mod tests {
         let ids: Vec<&str> = h.iter().map(|x| x.id.as_str()).collect();
         assert_eq!(ids, ["intro", "why-nowaki", "intro-1"]);
         assert_eq!(h[1].text, "Why nowaki?");
+    }
+
+    #[test]
+    fn footnote_ids_are_distinct_for_distinct_labels() {
+        let tsx = to_tsx(
+            "A[^\u{3042}] B[^\u{3044}] C[^a.b] D[^a-b] E[^Note] F[^a&b]\n\n[^\u{3042}]: one\n\n[^\u{3044}]: two\n\n[^a.b]: three\n\n[^a-b]: four\n\n[^note]: five\n\n[^a&b]: six\n",
+        )
+        .unwrap();
+        // The same ids a Markdown entry (comrak) gives these labels.
+        for id in ["%E3%81%82", "%E3%81%84", "a.b", "a-b", "note", "a%26b"] {
+            assert!(
+                tsx.contains(&format!("id={{\"fnref-{id}\"}}")),
+                "{id}: {tsx}"
+            );
+            assert!(tsx.contains(&format!("id={{\"fn-{id}\"}}")), "{id}: {tsx}");
+            assert!(
+                tsx.contains(&format!("href={{\"#fn-{id}\"}}")),
+                "{id}: {tsx}"
+            );
+            assert!(
+                tsx.contains(&format!("href={{\"#fnref-{id}\"}}")),
+                "{id}: {tsx}"
+            );
+        }
+        assert_eq!(tsx.matches("id={\"fn-").count(), 6, "{tsx}");
+    }
+
+    #[test]
+    fn multi_line_heading_ids_match_markdown_anchors() {
+        let src = "Setext\nline two\n========\n\nHard  \nbreak `code`\n--------\n";
+        let h = headings(src).unwrap();
+        let ids: Vec<&str> = h.iter().map(|x| x.id.as_str()).collect();
+        assert_eq!(ids, ["setext-line-two", "hard-break-code"]);
+        assert_eq!(h[0].text, "Setext line two");
+        let tsx = to_tsx(src).unwrap();
+        assert!(tsx.contains("<h1 id={\"setext-line-two\"}>"), "{tsx}");
+        assert!(tsx.contains("<h2 id={\"hard-break-code\"}>"), "{tsx}");
     }
 }

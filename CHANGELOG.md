@@ -10,6 +10,108 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Changed
+- Dependencies: `oxc` 0.135 → 0.146 and `oxc_resolver` 11.21 → 11.24.3, with
+  `nowaki-core` moved to oxc's split export AST (`ExportDeclaration` /
+  `ExportNamedDeclaration` / `ExportFromDeclaration`) and its `diagnostics`
+  field. Output is unchanged apart from the minifier: it now keeps
+  `a.b || (a.b = c)` unless `a` provably can't change (an upstream correctness
+  fix), so first-load JS grows by about 20 bytes gzip. `serde-saphyr` 2.1.0
+  (yanked) → 2.1.1.
+
+### Fixed
+- The server build rewrites imports of `.mjs` modules to the `.js` file it
+  writes, and copies JSON the server imports (`import site from
+  "../data/site.json" with { type: "json" }`) into `dist/server`. Before,
+  `nowaki start` failed with `ERR_MODULE_NOT_FOUND` where `nowaki dev` worked.
+- A CSS Module that uses `@import` has the same class map in SSR as on the
+  client. Before, SSR (dev and the server build) scoped the file without its
+  imports, so classes from the imported file were `undefined` in the
+  server-rendered HTML.
+- CSS Modules scope only class selectors. Before, a `.ext` inside `url()`,
+  a string, an attribute selector or a comment was scoped too:
+  `url(/img/bg.png)` became `url(/img/bg.png_<hash>)` and 404ed, and
+  `[href$=".pdf"]` stopped matching.
+- Build output names in `dist/client` use only `[A-Za-z0-9._-]`: other
+  characters in the source file name become `_` (`logo@2x.svg` →
+  `logo_2x.<hash>.svg`). Before, the name kept the source stem as is, and
+  `nowaki start`, which serves only such names, answered 404.
+- The dev transform cache, in memory and in `node_modules/.cache/nowaki`,
+  also checks the files a module inlines: a CSS Module's class map (with its
+  `@import`s), plain CSS text in SSR, and `?image` sizes. Before, editing one
+  of those kept serving the old class names or sizes until the importing file
+  changed, even across restarts.
+- The persistent dev transform cache is keyed on what import resolution
+  depends on too: lockfiles and package-manager install state (in the app and
+  the directories above it), `package.json` and `tsconfig.json`. Before, after
+  an install that moved a dependency, `nowaki dev` kept serving import URLs
+  that pointed at the old location.
+- `nowaki start` and `nowaki dev` gave `ctx.url` (and canonical / `og:url` on an
+  app without `site`) the sidecar's loopback origin, `http://127.0.0.1:<port>`.
+  It is now the browser's `Host`, with `https` and `X-Forwarded-Host` taken from
+  a proxy only under `NOWAKI_TRUST_PROXY`; `site` still wins for canonical /
+  `og:url`. ISR entries are now kept per host (#150).
+- With `NOWAKI_CSP` on, `nowaki start` sent `public/` HTML files with a
+  constant ETag while each response carried a new nonce, so a 304 paired the
+  cached body with a different policy. Those files are now sent without an ETag
+  (#150).
+- `HEAD` now mirrors `GET` for `/_nowaki/*` assets on `nowaki start` (it was a
+  404) and for app files on `nowaki dev` (#150).
+- An ISR page that set a cookie went out with a shared
+  `public, s-maxage=…` Cache-Control next to `Set-Cookie`, so a CDN could
+  replay one visitor's cookie to others. A response with `Set-Cookie` and a
+  shared Cache-Control now gets `private, no-cache` (all servers and adapters).
+  `nowaki start` already kept such responses out of its ISR cache (#150).
+- `nowaki dev` now percent-decodes the request path before looking up an app
+  file, so islands and files with spaces or non-ASCII names load (they were
+  404). Malformed escapes and `..` / `.` segments are refused (#150).
+- `nowaki dev` 404'd the client runtime (`/node_modules/@nowaki-dev/runtime/client/*.js`)
+  when `@nowaki-dev/runtime` was a symlink out of the app (pnpm workspace,
+  `npm link`), so no island hydrated. Files inside that package's own real
+  directory are now served; other symlinks and its nested `node_modules` are
+  still refused (#150).
+- Dev SSR now picks up edits to the app's plain `.js` / `.mjs` modules (such as
+  `lib/msg.js`); they were served stale until a restart. Files in
+  `node_modules` and outside the app root still load once (#150).
+- `?image` applies the EXIF orientation: a portrait phone photo (stored
+  landscape with Orientation 6) is emitted upright, with width and height
+  swapped to match, in build, dev, and the header-only size read. Image asset
+  queries (`?w=`, `?format=`) apply it too. (#150)
+- Google CJK fonts no longer preload every `unicode-range` slice on every page
+  (121 preloads / 3.1 MB for Noto Sans JP). The numbered slices, which carry
+  no subset name, are preloaded only when one covers basic Latin; the
+  `@font-face` rules stay, so the browser fetches the slices a page uses.
+  (#150)
+- MDX footnote ids keep each label distinct: they are built like a Markdown
+  entry's (lowercased, non-URL-safe bytes percent-encoded) instead of turning
+  every non-ASCII character into `-`, so `[^é]` and `[^ü]` no longer share
+  `fn--`. (#150)
+- A content entry's `headings` ids match the HTML anchors for multi-line
+  headings (a setext heading over two lines, or one with a hard break): the
+  text is taken the way comrak anchorizes it, with a break as a space. MDX
+  `headings` ids now agree with Markdown's for such headings too. (#150)
+- `nowaki prerender --out dist` (or any `--out` that is, contains, or is
+  inside `dist/client`, `dist/server`, or `dist/public`) is refused before
+  building, instead of deleting the build it renders from. Paths like `dist/`
+  and `./dist` are normalized first. (#150)
+- Prerender keeps reading the temporary server's stdout for the whole run, and
+  passes the app's logs through. It used to stop at READY, so on Linux (where
+  Node writes to pipes synchronously) an app that logged more than ~64 KiB
+  hung every pending render. (#150)
+- Client router: back/forward restores the scroll position of the page you
+  return to. It used to restore the position of the page you left.
+- Client router: a same-page `#hash` link, and back/forward between such
+  entries, no longer re-fetches and re-renders the page (which reset island
+  state). It scrolls to the fragment, or to the position saved for that entry.
+- Client router: a link to `/page#fragment` lands on the element with that id
+  (or `name`) instead of the top of the page. A fragment with no such element
+  still lands at the top.
+- Client router: a link to a same-origin URL that answers with something other
+  than an HTML page (JSON, CSV, `content-disposition: attachment`) or redirects
+  to another origin is handed to the browser as a full navigation. Before, the
+  response text was swapped in as the page body, or a cross-origin redirect
+  showed the error page.
+
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 
 Packages: `nowaki` / `nowaki-core` 0.17.0 (crates.io, npm), `@nowaki-dev/runtime`

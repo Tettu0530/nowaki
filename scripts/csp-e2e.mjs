@@ -34,6 +34,22 @@ if (header === "content-security-policy") {
   check("ISR cached response carries its own nonce", b.allNonced);
 }
 
+// A public/ HTML file stamped with a per-response nonce must not be revalidated to a 304: the
+// cached body would keep the old nonce under the new policy.
+{
+  const p = await page("/plain.html");
+  const etag = p.r.headers.get("etag");
+  const stamped = p.tags.some((t) => /\snonce="/.test(t));
+  if (stamped) {
+    check("public/ HTML: the nonce matches the policy", p.allNonced);
+    check(`public/ HTML with a nonce has no ETag (${etag})`, !etag);
+    const again = await fetch(`${base}/plain.html`, { headers: { "if-none-match": etag ?? "*" } });
+    check(`public/ HTML with a nonce is not answered 304 (${again.status})`, again.status === 200);
+  } else {
+    check("public/ HTML served unstamped", p.r.status === 200);
+  }
+}
+
 // The default security headers still add `frame-ancestors` everywhere; only HTML gets the nonce policy.
 const api = await fetch(`${base}/api/hello`);
 check("non-HTML responses get no nonce policy", !/nonce-/.test(api.headers.get(header) ?? ""));

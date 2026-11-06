@@ -6,6 +6,8 @@
 //! ```
 //!
 //! - `width` / `height` come from the file, so the browser reserves the space (no layout shift).
+//!   The EXIF orientation is applied to the size and to the pixels, so a portrait phone photo
+//!   stored landscape comes out upright.
 //! - Widths: 640, 960, 1280, 1920 below the original, plus the original (at most 2560), or the
 //!   list in `?image&w=400,800`. Nothing is upscaled.
 //! - Formats: AVIF (lossy, pure Rust through ravif / rav1e without asm), then the original
@@ -19,7 +21,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use image::imageops::FilterType;
-use image::DynamicImage;
+use image::metadata::Orientation;
+use image::{DynamicImage, ImageDecoder};
 use rayon::prelude::*;
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -198,16 +201,13 @@ pub fn build_set(
     }
     // The size from the header; the pixels are decoded only if a variant isn't cached yet (a
     // rebuild with every variant cached decodes nothing).
-    let (width, height) = image::ImageReader::new(std::io::Cursor::new(&raw))
-        .with_guessed_format()
-        .ok()
-        .and_then(|r| r.into_dimensions().ok())
+    let (width, height) = oriented_size(&raw)
         .with_context(|| format!("failed to read the size of {}", abs.display()))?;
     let decoded: std::sync::OnceLock<std::result::Result<DynamicImage, String>> =
         std::sync::OnceLock::new();
     let img = || -> Result<&DynamicImage> {
         decoded
-            .get_or_init(|| image::load_from_memory(&raw).map_err(|e| e.to_string()))
+            .get_or_init(|| decode_oriented(&raw, None).map_err(|e| e.to_string()))
             .as_ref()
             .map_err(|e| anyhow::anyhow!("failed to decode {}: {e}", abs.display()))
     };
@@ -278,6 +278,8 @@ pub fn write_variant(
     ext: &str,
     bytes: &[u8],
 ) -> Result<String> {
+    // Every caller gets a name `nowaki start` serves (Markdown content images included).
+    let stem = crate::build::sanitize_name(stem);
     let name = format!("{stem}-{width}.{:08x}.{ext}", xxh3_64(bytes) as u32);
     std::fs::create_dir_all(out_dir)?;
     let path = out_dir.join(&name);
@@ -357,15 +359,13 @@ pub fn dev_variant(
     if !is_raster(abs) {
         return Ok((raw, mime_of(&ext)));
     }
-    let (orig_w, _) = image::ImageReader::new(std::io::Cursor::new(&raw))
-        .with_guessed_format()?
-        .into_dimensions()?;
+    let (orig_w, _) = oriented_size(&raw)?;
     let w = width.clamp(1, orig_w);
     let decoded: std::sync::OnceLock<std::result::Result<DynamicImage, String>> =
         std::sync::OnceLock::new();
     let img = || -> Result<&DynamicImage> {
         decoded
-            .get_or_init(|| image::load_from_memory(&raw).map_err(|e| e.to_string()))
+            .get_or_init(|| decode_oriented(&raw, None).map_err(|e| e.to_string()))
             .as_ref()
             .map_err(|e| anyhow::anyhow!("{e}"))
     };
@@ -401,7 +401,9 @@ pub fn dev_set(root: &Path, abs: &Path, q: &ImageQuery) -> Result<ImageSet> {
             }],
         });
     }
-    let (width, height) = image::image_dimensions(abs)
+    let (width, height) = std::fs::read(abs)
+        .map_err(anyhow::Error::from)
+        .and_then(|raw| oriented_size(&raw))
         .with_context(|| format!("failed to read {}", abs.display()))?;
     let widths = widths_for(width, q);
     let url = |w: u32, f: &str| format!("/__nowaki/image?f={enc}&w={w}&fmt={f}{quality}");
@@ -424,6 +426,45 @@ pub fn dev_set(root: &Path, abs: &Path, q: &ImageQuery) -> Result<ImageSet> {
             },
         ],
     })
+}
+
+/// The displayed size from the header alone (no pixel decode): the stored size, swapped when the
+/// EXIF orientation turns the image by 90° or 270°.
+fn oriented_size(raw: &[u8]) -> Result<(u32, u32)> {
+    let mut dec = image::ImageReader::new(std::io::Cursor::new(raw))
+        .with_guessed_format()?
+        .into_decoder()?;
+    let (w, h) = dec.dimensions();
+    let o = dec.orientation().unwrap_or(Orientation::NoTransforms);
+    Ok(if swaps_axes(o) { (h, w) } else { (w, h) })
+}
+
+fn swaps_axes(o: Orientation) -> bool {
+    matches!(
+        o,
+        Orientation::Rotate90
+            | Orientation::Rotate270
+            | Orientation::Rotate90FlipH
+            | Orientation::Rotate270FlipH
+    )
+}
+
+/// Decodes `raw` and applies its EXIF orientation, so the pixels are upright (re-encoding drops
+/// the EXIF data the browser would otherwise have used). `format` None guesses from the bytes.
+pub(crate) fn decode_oriented(
+    raw: &[u8],
+    format: Option<image::ImageFormat>,
+) -> image::ImageResult<DynamicImage> {
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(raw));
+    match format {
+        Some(f) => reader.set_format(f),
+        None => reader = reader.with_guessed_format()?,
+    }
+    let mut dec = reader.into_decoder()?;
+    let o = dec.orientation().unwrap_or(Orientation::NoTransforms);
+    let mut img = DynamicImage::from_decoder(dec)?;
+    img.apply_orientation(o);
+    Ok(img)
 }
 
 fn cache_dir(root: &Path) -> Option<PathBuf> {
@@ -455,7 +496,7 @@ fn variant<'a>(
     };
     let key = xxh3_64(
         format!(
-            "{}|{source_hash:x}|{width}|{out_ext}|{quality}|{AVIF_SPEED}",
+            "{}|{source_hash:x}|{width}|{out_ext}|{quality}|{AVIF_SPEED}|oriented",
             env!("CARGO_PKG_VERSION")
         )
         .as_bytes(),
@@ -602,5 +643,76 @@ mod tests {
                 .count()
                 >= 6
         );
+    }
+
+    /// A 40x20 JPEG (left half red, right half blue) tagged EXIF Orientation=6: displayed upright
+    /// it's 20x40 with red on top, as a phone stores a portrait photo.
+    fn rotated_jpeg(path: &Path) {
+        let img = image::RgbImage::from_fn(40, 20, |x, _| {
+            if x < 20 {
+                image::Rgb([255, 0, 0])
+            } else {
+                image::Rgb([0, 0, 255])
+            }
+        });
+        let mut jpeg = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(
+                &mut std::io::Cursor::new(&mut jpeg),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+        // APP1 Exif: big-endian TIFF, one IFD entry: Orientation (0x0112), SHORT, 1, value 6.
+        let exif: &[u8] = b"Exif\0\0MM\x00\x2a\x00\x00\x00\x08\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01\x00\x06\x00\x00\x00\x00\x00\x00";
+        let len = (exif.len() + 2) as u16;
+        let mut out = jpeg[..2].to_vec(); // SOI
+        out.extend_from_slice(&[0xFF, 0xE1]);
+        out.extend_from_slice(&len.to_be_bytes());
+        out.extend_from_slice(exif);
+        out.extend_from_slice(&jpeg[2..]);
+        std::fs::write(path, out).unwrap();
+    }
+
+    #[test]
+    fn applies_the_exif_orientation() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("portrait.jpg");
+        rotated_jpeg(&file);
+        let mut jpg = None;
+        let set = build_set(
+            dir.path(),
+            &file,
+            &ImageQuery::default(),
+            |stem, w, ext, bytes| {
+                if ext == "jpg" {
+                    jpg = Some(bytes.to_vec());
+                }
+                Ok(format!("/_nowaki/{stem}-{w}.{ext}"))
+            },
+        )
+        .unwrap();
+        assert_eq!((set.width, set.height), (20, 40));
+        let out = image::load_from_memory(&jpg.unwrap()).unwrap().to_rgb8();
+        assert_eq!(out.dimensions(), (20, 40));
+        let (top, bottom) = (out.get_pixel(10, 5), out.get_pixel(10, 35));
+        assert!(top[0] > 200 && top[2] < 60, "top should be red: {top:?}");
+        assert!(
+            bottom[2] > 200 && bottom[0] < 60,
+            "bottom should be blue: {bottom:?}"
+        );
+        // Dev reads the size from the header the same way.
+        let dev = dev_set(dir.path(), &file, &ImageQuery::default()).unwrap();
+        assert_eq!((dev.width, dev.height), (20, 40));
+        let (bytes, _) = dev_variant(dir.path(), &file, 20, false, None).unwrap();
+        let out = image::load_from_memory(&bytes).unwrap();
+        assert_eq!((out.width(), out.height()), (20, 40));
+    }
+
+    #[test]
+    fn variant_names_are_servable() {
+        let dir = std::env::temp_dir().join(format!("nowaki-variant-{}", std::process::id()));
+        let url = write_variant(&dir, "photo@2x b", 320, "avif", b"x").unwrap();
+        assert!(url.contains("photo_2x_b-320."), "{url}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

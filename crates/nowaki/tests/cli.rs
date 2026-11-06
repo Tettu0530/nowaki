@@ -351,3 +351,85 @@ export const posts = defineCollection({ schema: post });
         "{stderr}"
     );
 }
+
+#[test]
+fn prerender_refuses_an_out_that_is_the_build() {
+    let root = example_root();
+    if !deps_installed(&root) {
+        eprintln!("skip: examples/hello deps not installed");
+        return;
+    }
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    let app = budget_app("{ js: 100 }");
+    let built = Command::new(bin)
+        .arg("build")
+        .arg(app.path())
+        .output()
+        .unwrap();
+    assert!(built.status.success());
+    for out in ["dist", "dist/", "dist/server"] {
+        let run = Command::new(bin)
+            .arg("prerender")
+            .arg(app.path())
+            .args(["--out", out])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(!run.status.success(), "--out {out} must be refused");
+        assert!(
+            stderr.to_lowercase().contains("choose another directory"),
+            "{stderr}"
+        );
+        // The earlier build is untouched.
+        assert!(
+            app.path().join("dist/server/routes/index.js").is_file(),
+            "--out {out}"
+        );
+        assert!(app.path().join("dist/client").is_dir(), "--out {out}");
+    }
+}
+
+/// An app that logs ~1 MiB to stdout per render: Node's pipe writes are synchronous on Linux,
+/// so prerender has to keep reading the server's stdout after READY or every request hangs. (On
+/// macOS Node buffers instead; there the test still checks that the logs are passed through.)
+#[test]
+fn prerender_keeps_reading_a_chatty_servers_stdout() {
+    let root = example_root();
+    if !deps_installed(&root) {
+        eprintln!("skip: examples/hello deps not installed");
+        return;
+    }
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    let app = budget_app("{ js: 100 }");
+    std::fs::write(
+        app.path().join("routes/about.tsx"),
+        "export default function About() {\n  const line = \"x\".repeat(4096);\n  for (let i = 0; i < 256; i++) console.log(line);\n  return <p>about</p>;\n}\n",
+    )
+    .unwrap();
+    let log = app.path().join("prerender.log");
+    let mut child = Command::new(bin)
+        .arg("prerender")
+        .arg(app.path())
+        .stdout(std::fs::File::create(&log).unwrap())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let status = loop {
+        if let Some(s) = child.try_wait().unwrap() {
+            break s;
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("prerender hung (the server's stdout isn't being drained)");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    let out = std::fs::read_to_string(&log).unwrap();
+    let tail = &out[out.len().saturating_sub(2000)..];
+    assert!(status.success(), "{tail}");
+    assert!(out.contains("prerender done"), "{tail}");
+    assert!(app.path().join("dist/static/about/index.html").is_file());
+    // The app's logs are passed through.
+    assert!(out.contains(&"x".repeat(4096)));
+}

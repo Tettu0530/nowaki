@@ -48,6 +48,12 @@ curl -s -o /dev/null -D - -H 'Accept-Encoding: gzip' "$ASSET" | grep -qi '^conte
 ! curl -s -o /dev/null -D - "$ASSET" | grep -qi '^content-encoding'
 ETAG=$(curl -s -o /dev/null -D - "$ASSET" | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]: //p')
 test "$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $ETAG" "$ASSET")" = 304
+# HEAD mirrors GET (status and headers, no body): assets, public/ files, pages
+test "$(curl -s -I -o /dev/null -w '%{http_code}' "$ASSET")" = 200
+curl -s -I "$ASSET" | grep -qi '^content-type: text/javascript'
+test "$(curl -s -I "$ASSET" -o /dev/null -w '%{size_download}')" = 0
+test "$(curl -s -I -o /dev/null -w '%{http_code}' http://127.0.0.1:3300/raw.css)" = 200
+test "$(curl -s -I -o /dev/null -w '%{http_code}' http://127.0.0.1:3300/about)" = 200
 curl -sf http://127.0.0.1:3300/ | grep -q '<code>a→b</code>'
 # CSS Modules: prod SSR must use the same scoped class names as dev (css_scope_id).
 PROD_BADGE=$(curl -sf http://127.0.0.1:3300/ | grep -oE 'badge_[0-9a-f]{8}' | head -1)
@@ -90,6 +96,11 @@ sleep 1                                            # let background revalidation
 isr regenerated; test "$S" = "HIT"; test "$N" -gt "$R1"
 # a cookie-setting response is per-user and must never be ISR-cached
 test -z "$(curl -s -D - -o /dev/null "$ISR" | grep -i '^set-cookie:')"
+SC_ISR=http://127.0.0.1:3300/isr-sets-cookie
+curl -s -D - -o /dev/null "$SC_ISR" | grep -qi '^cache-control: private, no-cache'
+! curl -s -D - -o /dev/null "$SC_ISR" | grep -qiE '^cache-control:.*(public|s-maxage)'
+! curl -s -D - -o /dev/null "$SC_ISR" | grep -qiE '^x-nowaki-cache: (HIT|STALE)'
+test "$(curl -s "$SC_ISR" | grep -o 'RENDER=[0-9]*')" != "$(curl -s "$SC_ISR" | grep -o 'RENDER=[0-9]*')"
 # ISR hits are compressed once and answer If-None-Match with 304.
 curl -s -o /dev/null -D - -H 'Accept-Encoding: br' http://127.0.0.1:3300/isr | grep -qi '^content-encoding: br'
 ISR_ETAG=$(curl -s -o /dev/null -D - http://127.0.0.1:3300/isr | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]: //p')
@@ -153,6 +164,8 @@ curl -sf http://127.0.0.1:3300/docs/components | grep -q 'client="visible"'
 curl -sf http://127.0.0.1:3300/docs/components | grep -q '<pre style="background-color:#ffffff;"><code class="language-ts"><span'
 curl -sf http://127.0.0.1:3300/docs/components | grep -q '<picture><source type="image/avif"'
 curl -sf http://127.0.0.1:3300/docs | grep -q 'Components in MDX'
+# ctx.url.origin is the browser's Host, not the sidecar's loopback address
+curl -sf -H 'Host: app.example' "http://127.0.0.1:3300/api/echo" | grep -q '"origin":"http://app.example"'
 # SEO: typed meta → head tags (absolute against nowaki.config `site`), generated sitemap.xml
 curl -sf http://127.0.0.1:3300/docs/intro | grep -q '<link rel="canonical" href="https://hello.nowaki.dev/docs/intro" />'
 curl -sf http://127.0.0.1:3300/docs/intro | grep -q '<meta property="og:image" content="https://hello.nowaki.dev/og/intro.png" />'
@@ -253,7 +266,8 @@ bash scripts/ci/assert-no-orphans.sh $TIMEOUT_PID
 ./target/debug/nowaki start examples/hello --port 3304 > /tmp/nowaki-warm.log &
 WARM_PID=$!
 for i in $(seq 1 20); do grep -q 'ISR warm-up' /tmp/nowaki-warm.log && break; sleep 1; done
-grep -q 'ISR warm-up: 3 of 3 pages cached' /tmp/nowaki-warm.log
+# (/isr-sets-cookie sets a cookie, so it is never cached)
+grep -q 'ISR warm-up: 3 of 4 pages cached' /tmp/nowaki-warm.log
 FIRST=$(curl -s -o /dev/null -D - http://127.0.0.1:3304/vary | tr -d '\r' | sed -n 's/^[Xx]-[Nn]owaki-[Cc]ache: //p')
 test "$FIRST" = HIT -o "$FIRST" = STALE
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3304/__nowaki/isr-urls)" = 404

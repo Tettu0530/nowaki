@@ -43,7 +43,10 @@ const styled = await (await req("/styled")).text();
 check("route CSS is linked on the edge", /<link rel="stylesheet" href="\/_nowaki\/styled\.[0-9a-f]+\.css"/.test(styled));
 const ck = await req("/isr-cookie", { headers: { cookie: "user=alice" } });
 check("ISR page reading a cookie is private on the edge", /private/.test(ck.headers.get("cache-control") || "") && !/s-maxage/.test(ck.headers.get("cache-control") || ""));
-const vy = await req("/vary", { headers: { "accept-language": "de" } });
+const sc = await req("/isr-sets-cookie");
+check("ISR page that sets a cookie is private, no-cache on the edge",
+  /visited=1/.test(sc.headers.get("set-cookie") || "") && sc.headers.get("cache-control") === "private, no-cache");
+const vy = await req("/vary",{ headers: { "accept-language": "de" } });
 check("ISR page reading accept-language sends Vary on the edge", /accept-language/i.test(vy.headers.get("vary") || ""));
 const styledAttrs = await (await req("/styled")).text();
 check("htmlAttrs / bodyAttrs on the edge", styledAttrs.includes('<html lang="ja" data-sheet-rev="3"') && styledAttrs.includes('<body class="site styled-page" data-site="hello"') && !styledAttrs.includes("onload"));

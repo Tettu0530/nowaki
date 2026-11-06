@@ -31,6 +31,13 @@ echo "$BADGE_CLASS" > /tmp/nowaki-css-module-badge-class
 ! curl -sf $B/ | grep -qE '/Users/|/home/[^/]+/'
 curl -sf $B/ | grep -q 'data-router=.*client/router.js'
 curl -sf "$B/islands/Counter.tsx" | grep -q "jsx-runtime"
+# the client runtime loads, also when @nowaki-dev/runtime is a workspace symlink out of the app
+for f in islands router live hmr; do
+  curl -sf "$B/node_modules/@nowaki-dev/runtime/client/$f.js" >/dev/null
+done
+# HEAD mirrors GET for app files
+test "$(curl -s -I -o /dev/null -w '%{http_code}' "$B/islands/Counter.tsx")" = 200
+curl -s -I "$B/islands/Counter.tsx" | grep -qi '^content-type: text/javascript'
 
 # layouts (root + nested) and dynamic param
 curl -sf $B/ | grep -q 'href="/todos"'
@@ -149,6 +156,8 @@ test "$(curl -s -o /dev/null -w '%{http_code}' "$B/__nowaki/css?f=routes/styled.
 # outside routes/: 403, or 404 where the path doesn't exist (Windows has no /etc/hosts)
 test "$(curl -s -o /dev/null -w '%{http_code}' "$B/__nowaki/route-css?file=/etc/hosts")" != 200
 curl -sf "$B/api/echo?q=hi" | grep -q '"q":"hi"'
+# ctx.url.origin is the browser's Host, not the sidecar's loopback address
+curl -sf -H 'Host: localhost:4242' "$B/api/echo" | grep -q '"origin":"http://localhost:4242"'
 curl -sf -X POST -H 'content-type: application/json' -d '{"a":1}' $B/api/echo | grep -q '"received":{"a":1}'
 test "$(status -X DELETE $B/api/echo)" = "405"
 test "$(curl -s $B/api/stream | tr -d '\n')" = "chunk1chunk2"
