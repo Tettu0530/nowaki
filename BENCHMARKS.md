@@ -186,23 +186,24 @@ deletes only the output. Median [p25–p75] of 5 runs after a warm-up:
 
 | entries | Nowaki cold | Nowaki warm | Astro cold | Astro warm |
 |---|---|---|---|---|
-| 20 | 2,096 [2,090–2,127] ms | **334** [324–360] ms | **1,671** [1,658–1,680] ms | 1,058 [1,039–1,132] ms |
-| 100 | 5,217 [4,882–5,235] ms | **724** [723–730] ms | **1,965** [1,933–2,040] ms | 1,311 [1,235–1,516] ms |
-| 500 | 8,232 [7,751–8,306] ms | 2,603 [2,602–2,635] ms | **3,284** [3,186–3,287] ms | **1,996** [1,965–2,013] ms |
+| 20 | 2,201 [2,168–2,279] ms | **233** [233–239] ms | **1,644** [1,638–1,680] ms | 1,022 [1,017–1,025] ms |
+| 100 | 4,677 [4,399–5,009] ms | **287** [273–317] ms | **1,878** [1,869–1,896] ms | 1,167 [1,162–1,168] ms |
+| 500 | 5,254 [4,856–5,330] ms | **490** [489–492] ms | **2,873** [2,866–2,878] ms | 1,877 [1,849–1,878] ms |
 
 Without a cache Nowaki is slower: AVIF takes much longer to encode than WebP, and Nowaki uses no
-C codecs, so it cannot use sharp / libwebp. With its cache it is faster up to 100 entries, and
-slower at 500. Its cost per entry is higher than Astro's (least squares over the cold medians:
-11.1 ms per entry vs 3.3 ms). Taking caches away one at a time at 500 entries: without the
-image cache the build takes about 3.8 s longer, without the highlight cache about 1.8 s longer
-(1,500 code fences), and with both caches the build (bundling and content, before rendering any
-page) already takes 2.4 s of the 2.7–3.0 s; the cause of that last part has not been measured.
+C codecs, so it cannot use sharp / libwebp. With its cache it is faster at every size (3.8–4.4×).
+
+The first measurement of this benchmark (`1fcc2ae`) had a higher cost per entry: the warm build
+at 500 entries took 2,603 ms (now 490 ms), and the cold medians fit 11.1 ms per entry (now
+4.8 ms; Astro 2.5 ms). The cause was that every Markdown image reference decoded the whole JPEG
+to read its size, so the four photos were decoded 500 times; #146 reads the size from the file
+header and processes each image once per build (#147 fixed a deadlock in that change).
 
 | output (100 entries) | Nowaki | Astro |
 |---|---|---|
 | images | 966 KB: AVIF 54 KB (16 files) + JPEG fallback 912 KB (16 files); `<picture>`, 4 widths | 297 KB: WebP (48 files); `<img srcset>`, 6 widths |
 | HTML (all pages) | 838 KB | 912 KB |
-| CSS / JS files | 1.4 KB / 21.1 KB ¹ | 0 / 0 (CSS inlined) |
+| CSS / JS files | 1.4 KB / 22.0 KB ¹ | 0 / 0 (CSS inlined) |
 | sitemap URLs | 102 | 102 |
 | first-load JS: Markdown entry / MDX entry / `/docs/` | 0 / 0 / 0 KB | 0 / 0 / 0 KB |
 
@@ -210,8 +211,8 @@ page) already takes 2.4 s of the 2.7–3.0 s; the cause of that last part has no
 page has an island).
 
 Browsers that take AVIF get the 54 KB set; the JPEG files are the fallback for the rest. Astro
-inlines its small CSS into each page (`<style>`), so it has no CSS file. Measured 2026-11-05
-(UTC) on an Apple M2, Node 24.14.0: Nowaki built from `main` at `1fcc2ae` (0.16.2 + #143),
+inlines its small CSS into each page (`<style>`), so it has no CSS file. Measured 2026-11-06
+(UTC) on an Apple M2, Node 24.14.0: Nowaki built from `main` at `70f9e0a` (after 0.16.2),
 Astro 7.4.5. Raw runs: `benchmarks/docs-site/results/`.
 
 ## Methodology
