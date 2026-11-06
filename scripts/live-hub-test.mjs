@@ -239,9 +239,13 @@ const event = (nid = "L0", handler = "inc") => JSON.stringify({ type: "event", n
   c.onText(event("L2"));
   await tick();
   check("replacing join: the new page's island works", s.of("patch").length === 1 && s.of("patch")[0].nid === "L2" && s.of("patch")[0].state.count === 8);
+  c.onText(JSON.stringify({ type: "join", islands: [{ nid: "L3", name: "LiveCounter", state: { count: 0 }, sig: "sig:0" }] }));
+  c.onText(event("L3"));
+  await tick();
+  check("a join that only adds islands doesn't change the page count", s.of("patch")[1]?.page === 1);
   c.onText(event("L0"));
   await tick();
-  check("replacing join: the old islands are gone", s.of("patch").length === 1);
+  check("replacing join: the old islands are gone", s.of("patch").length === 2);
   c.onClose();
 }
 
@@ -264,6 +268,9 @@ const event = (nid = "L0", handler = "inc") => JSON.stringify({ type: "event", n
   c.onText(event("L0"));
   await tick();
   check("replacing join (same nid): the new page's event starts from its own state", s.of("patch").length === 1 && s.of("patch")[0].state.count === 1);
+  // The client drops a patch whose page isn't its own count of replacing joins (one here): one
+  // sent before the server saw the join belongs to the previous page.
+  check("patches carry the count of replacing joins", s.of("patch")[0].page === 1);
   c.onClose();
 }
 
