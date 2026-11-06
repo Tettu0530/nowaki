@@ -8,7 +8,7 @@ import { Readable } from "node:stream";
 import path from "node:path";
 import { createApp } from "./app.mjs";
 import { handleRequest } from "./handler.mjs";
-import { liveContext, liveRender, liveShareable, LiveForbiddenError } from "./live.mjs";
+import { liveContext, liveRender, liveShareable, liveSigStatus, LiveForbiddenError } from "./live.mjs";
 import { contextReads, runWithContext } from "./functions.mjs";
 import { pageMeta } from "./document.mjs";
 import { persistRooms } from "./live-rooms-file.mjs";
@@ -38,9 +38,14 @@ const server = createServer(async (req, res) => {
     try {
       const chunks = [];
       for await (const c of req) chunks.push(c);
-      const { name, state, handler, payload, sig, request, load } = JSON.parse(
+      const { name, state, handler, payload, sig, request, load, verifyOnly } = JSON.parse(
         Buffer.concat(chunks).toString("utf8"),
       );
+      if (verifyOnly) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ verified: liveSigStatus(name, state, sig) }));
+        return;
+      }
       const entry = [...liveRegistry.values()].find((e) => e.name === name);
       if (!entry) {
         res.writeHead(404, { "content-type": "application/json" });

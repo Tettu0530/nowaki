@@ -15,9 +15,12 @@ function lives() {
   return [...document.querySelectorAll("nowaki-live")];
 }
 
-const joinMsg = (els) =>
+// `replace`: these are all the islands on the page now, so the server drops any others it holds
+// (the previous page's, after a client navigation). A join that only hands over new state doesn't.
+const joinMsg = (els, replace = false) =>
   JSON.stringify({
     type: "join",
+    ...(replace ? { replace: true } : {}),
     islands: els.map((el) => ({
       nid: el.getAttribute("nid"),
       name: el.getAttribute("name"),
@@ -54,21 +57,25 @@ function failed(nid, reason) {
 }
 
 function connect() {
-  if (!lives().length) return;
-
+  if (window.__nowakiLive) return; // already running (another copy of this module)
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  let ws;
+  let ws = null;
   let retry = 0;
+  let timer = null; // pending reconnect
   // One POST at a time, so each event starts from the state the previous one returned.
   let chain = Promise.resolve();
 
   const open = () => {
-    ws = new WebSocket(`${proto}://${location.host}/__nowaki/live`);
-    ws.onopen = () => {
+    timer = null;
+    const sock = new WebSocket(`${proto}://${location.host}/__nowaki/live`);
+    ws = sock;
+    sock.onopen = () => {
+      if (sock !== ws) return;
       retry = 0;
-      ws.send(joinMsg(lives()));
+      sock.send(joinMsg(lives(), true));
     };
-    ws.onmessage = (e) => {
+    sock.onmessage = (e) => {
+      if (sock !== ws) return; // a socket closed by a client navigation
       let msg;
       try {
         msg = JSON.parse(e.data);
@@ -94,14 +101,40 @@ function connect() {
     };
     // Reconnect (exponential backoff, capped). Re-joining restores state. Give up after
     // MAX_RETRIES failures in a row (~1 min) so a host without a live endpoint isn't hammered.
-    ws.onclose = () => {
+    sock.onclose = () => {
+      if (sock !== ws) return;
+      ws = null;
       if (retry >= MAX_RETRIES) return;
       const delay = Math.min(1000 * 2 ** retry++, 10000);
-      setTimeout(open, delay);
+      timer = setTimeout(open, delay);
     };
-    ws.onerror = () => ws.close();
+    sock.onerror = () => sock.close();
   };
-  if (mode !== "post") open();
+
+  // Match the socket to the islands on the page: at startup, and after each client navigation
+  // (the router swaps <body>, then calls window.__nowakiLive.sync()). The new page's islands
+  // replace the old ones on the open socket; a page without any closes it, so the server forgets
+  // the old islands and their rooms.
+  const sync = () => {
+    if (mode === "post") return;
+    const els = lives();
+    if (!els.length) {
+      clearTimeout(timer);
+      timer = null;
+      const sock = ws;
+      ws = null;
+      sock?.close();
+      return;
+    }
+    if (ws?.readyState === 1) ws.send(joinMsg(els, true));
+    else if (!ws && !timer) {
+      retry = 0; // also after giving up: a navigation is a fresh start
+      open();
+    }
+    // Otherwise the socket is connecting or a reconnect is pending: its onopen joins these.
+  };
+  window.__nowakiLive = { sync };
+  sync();
 
   const post = (el, handler, payload) => {
     chain = chain.then(async () => {

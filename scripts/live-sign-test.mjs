@@ -33,5 +33,19 @@ check("a forged signature with an old timestamp is invalid (never expired)", ver
 check("a future-dated signature is invalid", verifyStatus("Counter", st, sign("Counter", st, { now: now + 120 }), { now }) === "invalid");
 check("tampered state is invalid even when old", verifyStatus("Counter", { count: 99 }, sig, { now: now + 3601 }) === "invalid");
 
+// The state comes back as JSON (embedded in the page, held by Rust as serde_json, echoed by the client).
+const roundTrip = (v) => JSON.parse(JSON.stringify(v));
+for (const [label, state] of [
+  ["an undefined-valued key", { count: 0, error: undefined }],
+  ["a nested undefined-valued key", { user: { id: 1, nick: undefined }, list: [1, 2] }],
+  ["a Date", { at: new Date(0) }],
+  ["undefined inside an array", { list: [1, undefined, 3] }],
+  ["a non-finite number", { n: NaN }],
+]) {
+  const s = sign("Counter", state, { now });
+  check(`state with ${label} verifies after the JSON round trip`, verifyStatus("Counter", roundTrip(state), s, { now }) === "ok");
+}
+check("a round-tripped Date still differs from another value", !verify("Counter", { at: "x" }, sign("Counter", { at: new Date(0) }, { now }), { now }));
+
 console.log(failures ? `\nLIVE SIGN TEST FAILED (${failures})` : "\nLIVE SIGN TEST PASSED");
 process.exit(failures ? 1 : 0);

@@ -51,6 +51,94 @@ milestone's worth of work; the codename is noted per entry.
     (`title`, `meta`, …).
 
 ### Fixed
+- **Security:** a shared Jetstream refresh render (one render per `publish`,
+  #114) was handed to every connection with the same island and state, without
+  checking that connection's own signature. A client that knew a room id could
+  join with a forged signature, receive every patch of the room, and get a
+  valid signature back to send events with. An expired signature was refreshed
+  the same way instead of answering `stale`. A connection now gets the shared
+  render only when its signature is the one the renderer had, or when the
+  sidecar verifies it (a signature check, no render); otherwise it gets
+  `render failed` or `stale`. Legitimate refreshes still render once per
+  publish.
+- Live island state is now signed as JSON carries it. A state with an
+  undefined-valued property (`{ ...state, error: undefined }`, or an optional
+  field left undefined) or a `Date` was signed differently from the JSON the
+  client and the Rust session send back, so the next event failed with a
+  signature error (403 on `POST /__nowaki/live-event`) and the island stopped
+  working.
+- One request could fill the `nowaki start` ISR cache entry that anonymous
+  visitors get. The cache key read only the first value of each header the
+  page varies on, and read a value with non-ASCII bytes as empty. The renderer
+  sees every value, though. So `Cookie:` followed by `Cookie: user=attacker`,
+  or `Cookie: user=` with a `\xff` byte in it, was rendered for that user and
+  stored under the no-cookie key. Requests where a varied header repeats or
+  has bytes outside visible ASCII now skip the cache (no lookup, no store). An
+  empty header and a missing one now get separate keys.
+- CSS Modules no longer corrupt non-ASCII text. The class scoper copied the
+  file one byte at a time as Latin-1 characters, so Japanese font names,
+  `content: "→"`, emoji and comments in a `*.module.css` came out as mojibake
+  in dev, `nowaki start`, adapters and static output. Text outside class
+  selectors is now copied through unchanged.
+- Production island chunks no longer read undefined names when an island
+  imports a binding that a module forwards with `export { x }` /
+  `export { x as y }` (a barrel file), or one exported through destructuring
+  (`export const { a, b } = obj`). Scope hoisting now follows the forwarded
+  import to its binding and records every name a destructuring pattern binds.
+  When an import still can't be resolved, the island is emitted unbundled
+  instead of hoisted. Before, the build passed and hydration threw a
+  ReferenceError.
+- `nowaki build` now writes every app module the server can load to
+  `dist/server`, including ones reached only through a `"use server"` module,
+  `export … from`, or a string-literal `import()`. Such modules (an action's
+  `../utils/` import, for example) were missing, so `nowaki start` returned 500
+  with `ERR_MODULE_NOT_FOUND` where dev worked. String-literal `import()`
+  specifiers in server output are also rewritten to `.js`, like static imports.
+- **Security (dev):** `nowaki dev` refuses requests whose `Host` is not
+  `localhost`, `127.0.0.1` or `[::1]` (403), unless it was started with
+  `--host`. A page on another domain could rebind its name to 127.0.0.1 and
+  read dev responses: server-only source with its source map, `/@fs/` files,
+  and files such as `.npmrc`. The MCP endpoint and the WebSocket upgrades
+  already checked this; app files and the other `/__nowaki/*` routes did not.
+- A `console.log` in a plugin hook no longer kills the plugin host. Rust
+  stopped reading the host's stdout after the handshake, so the host's next
+  stdout write failed with EPIPE and it exited. Every transform after that was
+  skipped without an error, and dev served untransformed source with a 200.
+  The host now sends plugin console output to stderr, Rust keeps reading its
+  stdout, and a failed hook (the host is down, a plugin threw, `.tsrx` has
+  compile errors) is reported as an error in dev and fails the build.
+- **`_middleware`, `_layout` and `error.tsx` inside a `[param]` directory now
+  apply.** Their prefix kept the directory name (`/org/[org]`) and was compared
+  as a plain string with the request path, so `routes/org/[org]/_middleware.ts`
+  never ran (an auth guard there was skipped) and the layout never wrapped the
+  pages. A prefix is now matched segment by segment: a `[param]` directory
+  matches any one path segment, `[...rest]` the rest, and a literal directory
+  the percent-decoded segment (so `/%61dmin/x` no longer skips
+  `routes/admin/_middleware.ts`). Middleware still goes by the URL, for every
+  request under its directory: pages, API routes and 404s, whichever route
+  serves them. Layouts and `error.tsx` go by where the route file is, like the
+  build's layout CSS: `routes/org/[org]/_layout.tsx` wraps the files inside
+  `routes/org/[org]/`, not the sibling `routes/org/[org].tsx`. The same holds
+  for literal names: `routes/admin.tsx` is no longer wrapped by
+  `routes/admin/_layout.tsx`, whose CSS the build never gave it.
+- **A malformed percent-escape in the path is a 404**, not a `URIError` thrown
+  out of the request handler.
+- **A cookie with a malformed percent-escape (`_ga=50%`) no longer makes every
+  page that reads `ctx.cookies` return 500.** Each cookie is decoded on its own;
+  one that fails to decode keeps its raw value.
+- Jetstream islands now work on a page reached by client (SPA) navigation.
+  The router swapped in the new `<body>`, but scripts parsed that way never run,
+  so live.js didn't load when the previous page had no live islands. When it
+  had, the open socket never joined the new page's islands, so their buttons
+  did nothing. The router still runs none of the fetched body's scripts (so
+  nothing else in the page's HTML runs or picks up the CSP nonce). It loads
+  live.js (`id="nowaki-live"`, same origin only) if it isn't running yet, and
+  otherwise calls `window.__nowakiLive.sync()`. The new page's islands replace
+  the old ones on the socket (`join` with `replace: true`, in live.rs and the
+  JS hub): the old ones' rooms and topics go, their queued events and
+  refreshes are dropped, and a render still in flight for the old page is
+  discarded, even when the new page reuses its nid (a Router Cache revisit).
+  A page without live islands closes the socket.
 - Node children no longer outlive a killed `nowaki`. That covers the dev and
   production sidecars, the prerender server, and the plugin host. When
   `nowaki` was stopped with SIGKILL (or crashed), it couldn't stop them, and

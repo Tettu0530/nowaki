@@ -7,7 +7,7 @@ const BASE = process.env.BASE || "http://127.0.0.1:8233";
 const CHROME =
   process.env.CHROME ||
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const PORT = 9223;
+const PORT = Number(process.env.CDP_PORT || 9223);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

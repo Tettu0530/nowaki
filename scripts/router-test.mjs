@@ -4,7 +4,12 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { scanRoutes, matchRoute } from "../packages/nowaki-runtime/server/router.mjs";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import os from "node:os";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+import { scanRoutes, matchRoute, underPrefix, routeUnderPrefix } from "../packages/nowaki-runtime/server/router.mjs";
+import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const app = path.join(ROOT, "examples/hello");
@@ -127,6 +132,140 @@ eq(matchRoute(syn3, "/shop/shoes"), null, "two-param route rejects missing segme
 
 // matchRoute accepts a bare routes array (not only a scanRoutes table).
 eq(matchRoute(syn, "/users/me")?.file, "static", "matchRoute(array) same as table.routes");
+
+// A malformed percent-escape in a segment is no route (404), not a URIError thrown out of the handler.
+eq(snap(table, "/blog/50%"), null, "malformed escape in a param → no match");
+eq(snap(table, "/files/a/%E0%A4"), null, "malformed escape in a catch-all → no match");
+
+// Convention-file prefixes are directories as written; [param] matches any one segment.
+eq(underPrefix("/org/acme/settings", "/org/[org]"), true, "[param] dir prefix matches a real segment");
+eq(underPrefix("/org", "/org/[org]"), false, "[param] dir prefix needs its segment");
+eq(underPrefix("/orgs/acme", "/org/[org]"), false, "literal part of a dynamic prefix still compared");
+eq(underPrefix("/%61dmin/x", "/admin"), true, "literal prefix compared percent-decoded");
+eq(underPrefix("/docs/a/b", "/docs/[...rest]"), true, "[...rest] dir prefix matches deeper paths");
+eq(underPrefix("/blogger", "/blog"), false, "/blogger is not under /blog");
+eq(underPrefix("/rel/7.v2/x", "/rel/[id].v2"), true, "suffixed-param dir prefix matches like a route segment");
+eq(underPrefix("/rel/7/x", "/rel/[id].v2"), false, "suffixed-param dir prefix needs the suffix");
+eq(underPrefix("/admin/50%", "/admin"), true, "a malformed escape past the prefix still counts as under it");
+eq(underPrefix("/50%/x", "/[a]"), false, "a malformed escape in a prefix segment never matches");
+// Layout / error-boundary containment goes by the route file's directory (as budget::layouts_for).
+eq(routeUnderPrefix({ dir: "/org/[org]" }, "/org/[org]"), true, "a file directly in the dir is inside it (index too)");
+eq(routeUnderPrefix({ dir: "/org/[org]/x" }, "/org/[org]"), true, "a file deeper in the dir is inside it");
+eq(routeUnderPrefix({ dir: "/org" }, "/org/[org]"), false, "the sibling file routes/org/[org].tsx is not inside it");
+eq(routeUnderPrefix({ dir: "/org/[orgs]" }, "/org/[org]"), false, "a differently named dir is not inside it");
+eq(routeUnderPrefix({ dir: "/org" }, ""), true, "root prefix contains everything");
+
+// _middleware / _layout / error.tsx inside a [param] directory apply to the URLs under it,
+// end to end through handleRequest (plain .js route files, no JSX).
+{
+  const dir = await mkdtemp(path.join(os.tmpdir(), "nowaki-router-"));
+  const put = async (rel, src) => {
+    await mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await writeFile(path.join(dir, rel), src);
+  };
+  // The same preact copy (ESM build) the runtime renders with.
+  const runtimeRequire = createRequire(path.join(ROOT, "packages/nowaki-runtime/server/handler.mjs"));
+  const preactDir = path.dirname(runtimeRequire.resolve("preact/package.json"));
+  const preact = JSON.stringify(pathToFileURL(path.join(preactDir, "dist/preact.mjs")).href);
+  const wrap = (id) => `import { h } from ${preact};\nexport default (p) => h("div", { id: ${JSON.stringify(id)} }, p.children);\n`;
+  await put("routes/_layout.js", wrap("root"));
+  await put("routes/org/[org]/_layout.js", wrap("org-layout"));
+  await put(
+    "routes/org/[org]/_middleware.js",
+    `export default (ctx) => { if (!ctx.cookies.admin) return ctx.text("denied by middleware", { status: 401 }); };\n`,
+  );
+  await put(
+    "routes/org/[org]/settings.js",
+    `import { h } from ${preact};\nexport default ({ params }) => h("p", null, "settings of " + params.org);\n`,
+  );
+  await put("routes/org/[org]/error.js", `export default () => null;\n`);
+  await put("routes/org/acme-public.js", `import { h } from ${preact};\nexport default () => h("p", null, "public");\n`);
+  await put("routes/api/me.js", `export const GET = (ctx) => ctx.text("sid:" + ctx.cookies.sid + " ga:" + ctx.cookies._ga);\n`);
+  // A sibling file named like the [org] directory is not inside it.
+  await put("routes/org/[org].js", `import { h } from ${preact};\nexport default ({ params }) => h("p", null, "org " + params.org);\n`);
+  // Literal-directory guards. URLs under them are also served by routes outside the directory
+  // (a catch-all page and a dynamic API route), and must still be guarded.
+  const guard = `export default (ctx) => { if (!ctx.cookies.admin) return ctx.text("admin only", { status: 401 }); };\n`;
+  await put("routes/admin/_middleware.js", guard);
+  await put("routes/admin/_layout.js", wrap("admin-layout"));
+  await put("routes/admin/dash.js", `import { h } from ${preact};\nexport default () => h("p", null, "dash");\n`);
+  await put("routes/docs/[...slug].js", `import { h } from ${preact};\nexport default ({ params }) => h("p", null, "doc " + params.slug.join("/"));\n`);
+  await put("routes/[top]/secret.js", `import { h } from ${preact};\nexport default ({ params }) => h("p", null, "secret of " + params.top);\n`);
+  await put("routes/api/admin/_middleware.js", guard);
+  await put("routes/api/admin/users.js", `export const GET = (ctx) => ctx.text("users");\n`);
+  await put("routes/api/[section]/[page].js", `export const GET = (ctx) => ctx.text("dyn " + ctx.params.section);\n`);
+  await put("routes/vault/_middleware.js", guard);
+  const t = await scanRoutes(dir);
+  const env = {
+    routeTable: async () => t,
+    importModule: async (file) => import(pathToFileURL(file).href),
+    ensureIslands: async () => {},
+    renderDocument: ({ body }) => body,
+    renderError: (err) => ({ status: 500, headers: {}, body: String(err?.stack ?? err) }),
+  };
+  const get = async (p, headers = {}) => {
+    const r = await handleRequest(env, { method: "GET", url: new URL("http://x" + p), headers, version: 1 });
+    let body = r.body ?? "";
+    if (r.stream) for await (const c of r.stream) body += typeof c === "string" ? c : new TextDecoder().decode(c);
+    return { status: r.status, body: String(body) };
+  };
+  eq(
+    t.middleware.map((m) => m.prefix).sort(),
+    ["/admin", "/api/admin", "/org/[org]", "/vault"],
+    "middleware prefixes keep the directory name",
+  );
+  eq(
+    t.middleware.map((m) => m.prefix.split("/").length).every((d, i, a) => i === 0 || a[i - 1] <= d),
+    true,
+    "middleware in root→leaf order",
+  );
+  eq(t.errorBoundaries.map((m) => m.prefix), ["/org/[org]"], "error boundary prefix keeps the directory name");
+  const denied = await get("/org/acme/settings");
+  eq([denied.status, denied.body], [401, "denied by middleware"], "middleware in a [param] dir runs");
+  const allowed = await get("/org/acme/settings", { cookie: "admin=1" });
+  eq(allowed.status, 200, "middleware in a [param] dir lets the request through");
+  eq(
+    /<div id="root"><div id="org-layout"><p>settings of acme<\/p><\/div><\/div>/.test(allowed.body),
+    true,
+    `layout in a [param] dir wraps its pages (${allowed.body.slice(0, 120)})`,
+  );
+  // /org/acme-public is under /org/[org] by URL, so the guard runs (middleware goes by URL),
+  // but the page file is outside [org]/, so it doesn't get that layout (layouts go by file).
+  eq((await get("/org/acme-public")).status, 401, "[param]-dir guard covers a URL a sibling page serves");
+  const pub = await get("/org/acme-public", { cookie: "admin=1" });
+  eq([pub.status, pub.body.includes("org-layout")], [200, false], "a sibling page outside [org]/ doesn't get its layout");
+  const enc = await get("/org/acme/settings%2", { cookie: "admin=1" });
+  eq(enc.status, 404, "a malformed percent-escape in the path is a 404");
+  eq((await get("/org/acme")).status, 401, "[param]-dir guard covers the directory's own URL");
+  const sib = await get("/org/acme", { cookie: "admin=1" });
+  eq(
+    [sib.status, sib.body.includes("org-layout"), sib.body.includes("org acme")],
+    [200, false, true],
+    "the sibling routes/org/[org].js is not inside routes/org/[org]/ (no layout, as layouts_for)",
+  );
+  // Literal guards apply by URL, whichever route serves it.
+  eq((await get("/admin/dash")).status, 401, "literal guard on a matched page inside its dir");
+  const dash = await get("/admin/dash", { cookie: "admin=1" });
+  eq([dash.status, dash.body.includes("admin-layout")], [200, true], "literal guard lets through; its layout wraps");
+  eq((await get("/admin/secret")).status, 401, "literal guard on a URL served by a dynamic route outside its dir");
+  const viaSlug = await get("/admin/secret", { cookie: "admin=1" });
+  eq([viaSlug.status, viaSlug.body.includes("admin-layout")], [200, false], "a route outside admin/ doesn't get admin's layout");
+  eq((await get("/%61dmin/secret")).status, 401, "literal guard compared percent-decoded");
+  eq((await get("/admin")).status, 401, "literal guard on the directory's own URL");
+  eq((await get("/vault/nothing-here")).status, 401, "literal guard on a 404 under it");
+  eq((await get("/vault/nothing-here", { cookie: "admin=1" })).status, 404, "past the guard, it is a 404");
+  eq((await get("/docs/a/b")).body.includes("doc a/b"), true, "unguarded catch-all still served");
+  eq((await get("/api/admin/users")).status, 401, "literal guard on an API route inside its dir");
+  const apiOther = await get("/api/admin/other");
+  eq([apiOther.status, apiOther.body], [401, "admin only"], "literal guard on an API URL served by api/[section]/[page]");
+  eq((await get("/api/admin/other", { cookie: "admin=1" })).body, "dyn admin", "API guard lets through");
+  eq((await get("/api/public/other")).body, "dyn public", "API guard doesn't apply outside its dir");
+  eq((await get("/org/acme/nope/deeper/x")).status, 401, "[param]-dir guard on a 404 under it");
+  eq((await get("/org/acme/nope/deeper/x", { cookie: "admin=1" })).status, 404, "past the [param]-dir guard, a 404");
+  const ck = await get("/api/me", { cookie: "_ga=50%; sid=a%20b" });
+  eq([ck.status, ck.body], [200, "sid:a b ga:50%"], "a malformed cookie keeps its raw value; others decode");
+  await rm(dir, { recursive: true, force: true });
+}
 
 console.log(failed ? `\nROUTER TEST FAILED (${failed})` : "\nROUTER TEST PASSED");
 process.exit(failed ? 1 : 0);

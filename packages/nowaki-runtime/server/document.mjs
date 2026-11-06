@@ -94,7 +94,7 @@ export function prodDocument(manifest, { mod, body, meta }, opts = {}) {
   // their own documents, so this one tells live.js to go straight to POST /__nowaki/live-event.
   const live =
     opts.live !== false && manifest.liveRuntime && body.includes("<nowaki-live")
-      ? `<script type="module" src="/_nowaki/${manifest.liveRuntime}" data-live-transport="post"></script>`
+      ? `<script id="nowaki-live" type="module" src="/_nowaki/${manifest.liveRuntime}" data-live-transport="post"></script>`
       : "";
 
   return `<!DOCTYPE html>
