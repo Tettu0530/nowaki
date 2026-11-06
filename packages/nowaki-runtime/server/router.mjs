@@ -10,6 +10,11 @@
 //   _500.tsx /_error.tsx  page for render failures
 //   loading.tsx     loading UI shown during client navigation (nestable)
 //   error.tsx       fallback UI when client navigation fails (nestable)
+// A convention file's prefix is its directory as written ("/org/[org]").
+//   _middleware: runs for every request whose URL is under the directory (underPrefix; a [param]
+//     directory matches any one segment), matched route or not: pages, API routes and 404s.
+//   _layout / error: apply to route files inside the directory (routeUnderPrefix), as
+//     nowaki-core's budget::layouts_for and route_css find layouts.
 
 import { readdir } from "node:fs/promises";
 import path from "node:path";
@@ -67,14 +72,11 @@ export async function scanRoutes(appRoot) {
     const segments = urlPath
       .split("/")
       .filter(Boolean)
-      .map((seg) => {
-        const rest = seg.match(/^\[\.\.\.(.+)\]$/); // [...slug] = catch-all
-        if (rest) return { param: rest[1], rest: true };
-        const m = seg.match(/^\[(.+)\]$/);
-        return m ? { param: m[1] } : { lit: seg };
-      });
+      .map(parseSegment);
     routes.push({
       file: abs,
+      // The file's directory as written ("/org/[org]"), for layout / error-boundary containment.
+      dir: dirPrefix,
       segments,
       isApi,
       specificity: segments.filter((s) => s.lit).length,
@@ -85,8 +87,9 @@ export async function scanRoutes(appRoot) {
   // static > dynamic > catch-all. Descending specificity (literal count); on ties, catch-all goes last.
   routes.sort((a, b) => b.specificity - a.specificity || (a.rest ? 1 : 0) - (b.rest ? 1 : 0));
   // root→leaf order (shorter prefixes first)
-  layouts.sort((a, b) => a.prefix.length - b.prefix.length);
-  middleware.sort((a, b) => a.prefix.length - b.prefix.length);
+  // (by segment count: "/[o]/x" is deeper than "/abcdefgh" though shorter as a string).
+  layouts.sort((a, b) => prefixDepth(a.prefix) - prefixDepth(b.prefix));
+  middleware.sort((a, b) => prefixDepth(a.prefix) - prefixDepth(b.prefix));
 
   return { routes, layouts, middleware, loadingBoundaries, errorBoundaries, notFound, errorRoute };
 }
@@ -107,7 +110,8 @@ export function matchRoute(routesOrTable, pathname) {
     const fixed = rest ? segs.length - 1 : segs.length;
     for (let i = 0; i < fixed; i++) {
       const seg = segs[i];
-      const part = decodeURIComponent(parts[i]);
+      const part = decodeSegment(parts[i]);
+      if (part === null) return null; // malformed percent-escape: no route (404), never a throw
       if (seg.lit !== undefined) {
         if (seg.lit !== part) continue outer;
       } else {
@@ -116,11 +120,69 @@ export function matchRoute(routesOrTable, pathname) {
     }
     if (rest) {
       // A catch-all param is an array of the remaining segments.
-      params[segs[segs.length - 1].param] = parts.slice(fixed).map((p) => decodeURIComponent(p));
+      const restParts = parts.slice(fixed).map(decodeSegment);
+      if (restParts.includes(null)) return null;
+      params[segs[segs.length - 1].param] = restParts;
     }
     return { file: route.file, params, isApi: route.isApi };
   }
   return null;
+}
+
+// One route segment, or one directory name of a convention-file prefix.
+function parseSegment(seg) {
+  const rest = seg.match(/^\[\.\.\.(.+)\]$/); // [...slug] = catch-all
+  if (rest) return { param: rest[1], rest: true };
+  const m = seg.match(/^\[(.+)\]$/);
+  return m ? { param: m[1] } : { lit: seg };
+}
+
+// A path segment, percent-decoded; null when its escapes are malformed ("50%", "%E0%A4").
+function decodeSegment(seg) {
+  try {
+    return decodeURIComponent(seg);
+  } catch {
+    return null;
+  }
+}
+
+/// Number of directories in a convention-file prefix ("" → 0, "/org/[org]" → 2).
+export function prefixDepth(prefix) {
+  return (prefix || "").split("/").filter(Boolean).length;
+}
+
+/// Does a request path fall under a convention file's directory prefix? `prefix` is the directory
+/// as written ("/org/[org]"), and each directory name is read the way a route segment is
+/// (parseSegment): a literal must equal the (percent-decoded) segment, [param] matches any one
+/// segment, [param].ext one that ends in .ext, and [...rest] the rest (one or more).
+/// prefix "" matches everything. Middleware uses this for every request, matched route or not.
+export function underPrefix(pathname, prefix) {
+  const want = (prefix || "").split("/").filter(Boolean);
+  if (want.length === 0) return true;
+  const parts = String(pathname).split("/").filter(Boolean);
+  for (let i = 0; i < want.length; i++) {
+    const seg = parseSegment(want[i]);
+    if (i >= parts.length) return false;
+    if (seg.rest) return true;
+    // Compare decoded, as matchRoute does: /%61dmin must not slip past routes/admin/_middleware.ts.
+    const part = decodeSegment(parts[i]);
+    if (part === null) return false;
+    if (seg.lit !== undefined) {
+      if (part !== seg.lit) return false;
+    }
+  }
+  return true;
+}
+
+/// Is a route file inside a convention file's directory? Plain directory containment on the file
+/// path, as nowaki-core's budget::layouts_for walks a file's parent directories:
+/// routes/org/[org]/_layout wraps routes/org/[org]/settings.tsx and routes/org/[org]/index.tsx,
+/// but not the sibling routes/org/[org].tsx nor routes/org/acme/settings.tsx.
+/// Used for layouts and error boundaries of a matched route.
+export function routeUnderPrefix(route, prefix) {
+  if (!prefix) return true;
+  const dir = route?.dir ?? "";
+  return dir === prefix || dir.startsWith(prefix + "/");
 }
 
 // "." → "" (root)

@@ -5,7 +5,7 @@ import { h } from "preact";
 import { renderToStringAsync } from "preact-render-to-string";
 import { renderToReadableStream } from "preact-render-to-string/stream";
 
-import { matchRoute } from "./router.mjs";
+import { matchRoute, prefixDepth, routeUnderPrefix, underPrefix } from "./router.mjs";
 import { makeContext } from "./context.mjs";
 import { dispatchServerFn, runWithContext, SERVER_FN_PATH } from "./functions.mjs";
 import { isCrossSite } from "./origin.mjs";
@@ -123,7 +123,9 @@ function finalize(ctx, result) {
   return { status, headers, body: result.body, stream: result.stream };
 }
 
-// table.middleware is in root→leaf order.
+// table.middleware is in root→leaf order. A middleware runs for every request whose URL is under
+// its directory, whichever route (if any) serves it: routes/admin/_middleware.ts guards
+// /admin/x even when routes/[...slug].tsx is the route that matched, and the 404 under /admin.
 async function runMiddleware(env, table, ctx, version) {
   for (const entry of table.middleware ?? []) {
     if (!underPrefix(ctx.url.pathname, entry.prefix)) continue;
@@ -187,7 +189,7 @@ async function renderRoute(env, table, match, mod, ctx, version) {
           if (ctx._redirect) throw ctx._redirect; // `return ctx.redirect(…)` from a loader
           return n;
         },
-        onError: (err) => earlyError(env, table, ctx, version, err),
+        onError: (err) => earlyError(env, table, ctx, version, err, match.file),
       }),
     };
   }
@@ -323,16 +325,17 @@ async function routeNode(env, table, match, mod, ctx, version) {
 
 // After an early shell, a redirect becomes a client-side `location.replace`, and an error renders
 // the nearest error boundary (`error.tsx`) in place of the page. The message is shown only in dev.
-async function earlyError(env, table, ctx, version, err) {
+async function earlyError(env, table, ctx, version, err, file) {
   const to = ctx._redirect?.headers?.location;
   if (to) {
     const url = JSON.stringify(String(to)).replace(/</g, "\\u003c");
     return `<script>location.replace(${url})</script>`;
   }
   console.error("[nowaki]", err);
+  const route = routeOf(table, file);
   const boundary = (table.errorBoundaries ?? [])
-    .filter((b) => underPrefix(ctx.url.pathname, b.prefix))
-    .sort((a, b) => b.prefix.length - a.prefix.length)[0];
+    .filter((b) => (route ? routeUnderPrefix(route, b.prefix) : underPrefix(ctx.url.pathname, b.prefix)))
+    .sort((a, b) => prefixDepth(b.prefix) - prefixDepth(a.prefix))[0];
   if (boundary) {
     try {
       const bmod = await env.importModule(boundary.file, version);
@@ -421,23 +424,17 @@ async function render500(env, table, ctx, version, err) {
 
 // Returns in root→leaf order.
 function layoutChain(table, file) {
+  const route = routeOf(table, file);
   const chain = [];
   for (const entry of table.layouts ?? []) {
-    if (underPrefix(routeUrlOf(table, file), entry.prefix)) chain.push(entry.file);
+    // A file that is not a route (the 404 page) gets only the root layouts.
+    if (route ? routeUnderPrefix(route, entry.prefix) : !entry.prefix) chain.push(entry.file);
   }
   return chain;
 }
 
-function routeUrlOf(table, file) {
-  const r = (table.routes ?? []).find((x) => x.file === file);
-  if (!r) return "/";
-  return "/" + r.segments.map((s) => (s.lit ?? `:${s.param}`)).join("/");
-}
-
-// prefix="" matches everything.
-function underPrefix(pathname, prefix) {
-  if (!prefix) return true;
-  return pathname === prefix || pathname.startsWith(prefix.endsWith("/") ? prefix : prefix + "/");
+function routeOf(table, file) {
+  return file === undefined ? undefined : (table.routes ?? []).find((x) => x.file === file);
 }
 
 // Returning null means the value is treated as data.

@@ -144,7 +144,13 @@ function parseCookies(header) {
     if (i < 0) continue;
     const k = part.slice(0, i).trim();
     if (!k) continue;
-    out[k] = decodeURIComponent(part.slice(i + 1).trim());
+    const raw = part.slice(i + 1).trim();
+    // One malformed cookie (a third party's `x=50%`) must not break every page that reads cookies.
+    try {
+      out[k] = decodeURIComponent(raw);
+    } catch {
+      out[k] = raw;
+    }
   }
   return out;
 }
