@@ -398,7 +398,7 @@ pub async fn handle(
                 last_seen = Instant::now(); // any received message (incl. pong) marks liveness
                 if let Message::Text(txt) = msg {
                     if let Err(nid) = receive(&mut islands, &mut page, &mut queue, txt.as_str()) {
-                        if !send_error(&mut socket, &nid, "busy").await {
+                        if !send_error(&mut socket, page, &nid, "busy").await {
                             break;
                         }
                     }
@@ -743,7 +743,7 @@ async fn apply_rendered(
         Ok(v) => v,
         Err(e) => {
             eprintln!("[nowaki live] {} re-render {}", r.name, e.reason());
-            return send_error(socket, &r.nid, e.reason()).await;
+            return send_error(socket, page, &r.nid, e.reason()).await;
         }
     };
     // Keep the new signature too so the next event can be verified.
@@ -757,7 +757,8 @@ async fn apply_rendered(
         return true;
     };
     // The client stores state+sig on the element so a re-join after a reconnect resumes here.
-    let patch = json!({ "type": "patch", "nid": r.nid, "html": html, "state": st, "sig": sig });
+    // `page` lets the client drop a patch that was sent before the server saw its replacing join.
+    let patch = json!({ "type": "patch", "page": page, "nid": r.nid, "html": html, "state": st, "sig": sig });
     socket
         .send(Message::Text(patch.to_string().into()))
         .await
@@ -771,8 +772,9 @@ fn still_joined(islands: &Islands, page: u64, r: &Rendered) -> bool {
     r.page == page && islands.get(&r.nid).is_some_and(|e| e.0 == r.name)
 }
 
-async fn send_error(socket: &mut WebSocket, nid: &str, reason: &str) -> bool {
-    let msg = json!({ "type": "error", "nid": nid, "reason": reason });
+/// `page` is the server's count of replacing joins on this socket, as in a patch.
+async fn send_error(socket: &mut WebSocket, page: u64, nid: &str, reason: &str) -> bool {
+    let msg = json!({ "type": "error", "page": page, "nid": nid, "reason": reason });
     socket
         .send(Message::Text(msg.to_string().into()))
         .await
