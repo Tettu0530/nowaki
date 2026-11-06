@@ -41,8 +41,21 @@ function internalAnchor(target) {
   return url;
 }
 
+// Resolves to null for a response that isn't a page (a download, JSON, a redirect to another
+// origin): the browser loads those itself.
 async function fetchPage(url) {
-  const res = await fetch(url, { headers: { "x-nowaki-nav": "1" } });
+  let res;
+  try {
+    res = await fetch(url, { headers: { "x-nowaki-nav": "1" } });
+  } catch (e) {
+    // A redirect to another origin fails CORS (x-nowaki-nav needs a preflight).
+    if ((await fetch(url, { redirect: "manual" })).type === "opaqueredirect") return null;
+    throw e;
+  }
+  const h = (n) => res.headers.get(n) || "";
+  const page = /html/.test(h("content-type")) && !/^attachment/i.test(h("content-disposition"));
+  // (A Response a fetch wrapper built itself has no url.)
+  if (!page || (res.url && new URL(res.url).origin !== location.origin)) return null;
   const html = await res.text();
   return {
     doc: new DOMParser().parseFromString(html, "text/html"),
@@ -66,7 +79,7 @@ function prefetch(url) {
   if (pageCache.has(key)) return;
   fetchPage(url)
     .then((r) => {
-      if (r.status === 200) pageCache.set(key, r);
+      if (r?.status === 200) pageCache.set(key, r);
     })
     .catch(() => {});
 }
@@ -82,10 +95,8 @@ async function navigate(url, { push = true } = {}) {
     return cached.finalUrl;
   }
 
-  const pending = fetchPage(url).then(
-    (r) => r,
-    () => null,
-  );
+  const body = document.body;
+  const pending = fetchPage(url).catch(() => 0);
 
   // Show loading after 150ms (no flicker on fast navigations).
   const timer = setTimeout(async () => {
@@ -99,8 +110,18 @@ async function navigate(url, { push = true } = {}) {
   clearTimeout(timer);
   if (token !== navToken) return; // superseded by a newer navigation
 
-  if (!result) {
+  if (result === 0) {
     await showError(url, "Failed to load the page");
+    return;
+  }
+  if (!result) {
+    // Not a page: put back the page a loading boundary replaced, and let the browser have it.
+    if (document.body !== body) {
+      document.body.replaceWith(body);
+      curDoc = location.pathname + location.search;
+    }
+    removeProgressBar();
+    location.assign(url.href);
     return;
   }
   if (result.status === 200) pageCache.set(key, result);

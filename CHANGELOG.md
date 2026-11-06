@@ -19,6 +19,11 @@ milestone's worth of work; the codename is noted per entry.
 - Client router: a link to `/page#fragment` lands on the element with that id
   (or `name`) instead of the top of the page. A fragment with no such element
   still lands at the top.
+- Client router: a link to a same-origin URL that answers with something other
+  than an HTML page (JSON, CSV, `content-disposition: attachment`) or redirects
+  to another origin is handed to the browser as a full navigation. Before, the
+  response text was swapped in as the page body, or a cross-origin redirect
+  showed the error page.
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 

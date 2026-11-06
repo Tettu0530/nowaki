@@ -22,6 +22,7 @@ class CDP {
     this.ws = new WebSocket(wsUrl);
     this.id = 0;
     this.pending = new Map();
+    this.events = []; // CDP events (method + params), for checks on requests the page made
     this.ready = new Promise((res, rej) => {
       this.ws.onopen = () => res();
       this.ws.onerror = (e) => rej(e);
@@ -32,6 +33,8 @@ class CDP {
         const { resolve, reject } = this.pending.get(msg.id);
         this.pending.delete(msg.id);
         msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result);
+      } else if (msg.method) {
+        this.events.push(msg);
       }
     };
   }
@@ -265,6 +268,45 @@ try {
   await cdp.evalAsync(`window.__nav('/anchors#missing'); return true;`);
   await sleep(800);
   check("client navigation to a missing fragment lands at the top", (await cdp.evalAsync(`return scrollY;`)) === 0);
+
+  // Responses that aren't a page are left to the browser (a full navigation): a download, JSON,
+  // and a redirect to another origin.
+  await cdp.send("Browser.setDownloadBehavior", { behavior: "deny" }).catch(() => {});
+  await cdp.evalAsync(`window.__nav('/about'); return true;`);
+  await sleep(500);
+  cdp.events.length = 0;
+  await cdp.evalAsync(`window.__nav('/api/export'); return true;`);
+  await sleep(1000);
+  const dl = await cdp.evalAsync(`return { path: location.pathname, h1: document.querySelector('h1')?.textContent ?? '' };`);
+  const dlNav = cdp.events.some((e) => e.method === "Network.requestWillBeSent" && e.params.type === "Document" &&
+    e.params.request.url.endsWith("/api/export"));
+  check(`an attachment response is a browser download, not swapped in (${JSON.stringify({ ...dl, dlNav })})`,
+    dl.path === "/about" && /About/.test(dl.h1) && dlNav);
+  // A slow one: the loading boundary that showed meanwhile gives the page back.
+  await cdp.evalAsync(`window.__nav('/api/export?ms=500'); return true;`);
+  await sleep(300);
+  const dlLoading = await cdp.evalAsync(`return !!document.querySelector('[data-testid="loading"]');`);
+  await sleep(1200);
+  const dlSlow = await cdp.evalAsync(`return { path: location.pathname, h1: document.querySelector('h1')?.textContent ?? '',
+    loading: !!document.querySelector('[data-testid="loading"]') };`);
+  check(`a slow download puts back the page the loading boundary replaced (${JSON.stringify({ dlLoading, ...dlSlow })})`,
+    dlLoading && dlSlow.path === "/about" && /About/.test(dlSlow.h1) && !dlSlow.loading);
+  await cdp.evalAsync(`window.__nav('/api/hello'); return true;`);
+  await sleep(1000);
+  const json = await cdp.evalAsync(`return { path: location.pathname, type: document.contentType };`);
+  check(`a JSON response is a full navigation (${JSON.stringify(json)})`, json.path === "/api/hello" && json.type === "application/json");
+  await cdp.send("Page.navigate", { url: BASE + "/" });
+  await sleep(800);
+  await cdp.evalAsync(`
+    window.__nav = (href) => { const a=document.createElement('a'); a.href=href; a.textContent=href; document.body.appendChild(a); a.click(); };
+    return true;`);
+  await cdp.evalAsync(`window.__nav('/api/away'); return true;`);
+  await sleep(1500);
+  const away = await cdp.evalAsync(`
+    return { origin: location.origin, path: location.pathname, h1: document.querySelector('h1')?.textContent ?? '',
+             error: !!document.querySelector('[data-testid="error"], [data-nowaki-reset]') };`);
+  check(`a cross-origin redirect is a full navigation (${JSON.stringify(away)})`,
+    away.origin !== new URL(BASE).origin && away.path === "/about" && /About/.test(away.h1) && !away.error);
 
   console.log(`\n${failures === 0 ? "BROWSER ROUTER TEST PASSED" : `BROWSER ROUTER TEST FAILED (${failures})`}`);
 } catch (err) {
