@@ -114,7 +114,121 @@ A static Astro site moves over with the migration guide.
   - On client navigation the SPA router loads the new page's scripts and then
     dispatches `nowaki:page-load` on `document`. A module runs once, so a
     script that sets up the DOM should also listen for that event.
+- **`<Image>` and `?image` imports** (v0.17).
+  `import hero from "./hero.jpg?image"` gives the image's size and generated
+  variants. `<Image src={hero} alt="…" />` from `@nowaki-dev/runtime/image`
+  renders a `<picture>` with them.
+  - Variants: AVIF, then the original format (JPEG / PNG / WebP) as the
+    fallback. Widths are 640, 960, 1280, and 1920 below the original, plus the
+    original (at most 2560); nothing is upscaled.
+    `?w=400,800&image` picks the widths, and `q=` the AVIF quality (default
+    60).
+  - `width` / `height` come from the file, so there is no layout shift.
+    `loading="lazy"` and `decoding="async"` are the defaults, and `sizes`
+    defaults to the rendered width.
+  - AVIF is encoded in pure Rust (ravif / rav1e without asm), so the release
+    builds stay free of C codecs. Lossy WebP isn't offered, since it would
+    need libwebp.
+  - Every variant is cached in `node_modules/.cache/nowaki/images`, so a
+    rebuild or a dev reload doesn't encode again. In dev, variants are encoded
+    on first request at `/__nowaki/image`.
+  - The image codecs are optimized in debug builds too
+    (`[profile.dev.package]`), since unoptimized AVIF takes tens of seconds
+    per image.
+- **Local images in Markdown** (v0.17). `![alt](./hero.jpg "title")` in a
+  content entry becomes the same `<picture>`, resolved relative to the entry.
+  A missing file fails the build. Root-relative (`/logo.svg`, from `public/`)
+  and remote URLs stay as written.
+- **SEO and metadata** (v0.17).
+  - `site` in nowaki.config (or `NOWAKI_SITE`, which wins) is the site's URL.
+    The build writes it to `dist/server/site.json`, so the adapters and the
+    edge have it too. Loaders, `meta()`, and file routes read it as
+    `ctx.site`.
+  - A typed `meta` writes the head tags: `description`, `canonical` (`true`
+    for this page), `robots`, `openGraph`, `twitter`, and `jsonLd`. Use
+    `export const meta = {...}`, or a `meta()` function of the loader data.
+    - Relative URLs resolve against the site, and Open Graph / Twitter fall
+      back to the page's title and description.
+    - JSON-LD can't close its `<script>`.
+    - A layout's `meta` object sets defaults for the pages under it;
+      `openGraph` and `twitter` merge one level deep.
+  - With a site, `sitemap.xml` (every page, including dynamic ones from
+    `staticPaths`) and `robots.txt` are generated, unless a route or a
+    `public/` file provides them. The static output writes both.
+    - `export const sitemap = false` leaves a page out, and so does a static
+      `meta.robots` of noindex.
+- **MDX** (v0.17). `.mdx` files are pages (`routes/guide.mdx`) and content
+  entries (`content/docs/x.mdx`): Markdown with JSX, `{expressions}`, and
+  `import` / `export`.
+  - They are parsed in Rust (markdown-rs: CommonMark, GFM, MDX) and compiled
+    to TSX before the usual transform. Imported components and islands work as
+    in TSX, in dev, the builds, and every adapter. No JavaScript runs to
+    compile them.
+  - Fenced code is highlighted like Markdown, local images go through
+    `?image` / `<Image>`, and heading ids match Markdown's. Each module exports
+    `headings`.
+  - A content entry's frontmatter is validated like a Markdown entry's.
+    `entry.render()` returns `{ Content, headings }`; render `<Content />`
+    where a Markdown entry uses `html`.
+  - YAML frontmatter in an `.mdx` page is ignored; pages use `export const`
+    (`title`, `meta`, …).
+- **Self-hosted fonts** (v0.17). `fonts` in nowaki.config, for example
+  `{ family: "Inter", provider: "google", weights: [400, 700], subsets: ["latin"] }`
+  or `{ family: "Brand", src: "./fonts/brand.ttf" }`, is built at build time.
+  - Google fonts are downloaded once and served from the site, so pages never
+    request a third-party host. There is one woff2 per subset with its
+    `unicode-range`, so a page loads only the subsets it uses. Downloads are
+    cached, so later builds work offline. Local fonts are copied as they are.
+  - Each face gets a hashed file and an `@font-face` (`font-display: swap` by
+    default).
+  - Each family gets a fallback face (local Arial / Times New Roman / Courier
+    New, chosen by `fallback`). Its `size-adjust` and ascent / descent /
+    line-gap overrides are computed from the font's own metrics, so text
+    doesn't shift when the font arrives.
+  - `--font-<family>` (or `variable`) holds the stack, as in
+    `font-family: var(--font-inter)`.
+  - Every page gets the stylesheet and `<link rel="preload">` for the latin,
+    upright faces. `preload: false` turns the preloads off for a family.
+  - In dev, fonts build in the background at startup and are served at
+    `/__nowaki/fonts/`.
+- **A migration guide from Astro**
+  ([docs/migrate-from-astro.md](docs/migrate-from-astro.md)). It was written
+  from porting a real portfolio site, whose static output matched the Astro
+  build. The port turned up the fixes listed under Fixed.
+
 ### Fixed
+- These came up while porting an Astro site.
+  - The server build compiles every app module that routes, islands, and
+    actions import, wherever it lives (`data/`, `sections/`, …). Before, only
+    the conventional folders were compiled. A page importing `../data/x.ts`
+    built, then failed at prerender with `ERR_MODULE_NOT_FOUND`.
+  - CSS `@import` is inlined (relative paths and packages, with
+    `@media` / `@layer` / `@supports` conditions). Before, it was emitted as
+    written and resolved against the served stylesheet's URL. Remote and
+    root-relative imports stay as imports.
+  - A layout's `export const head` goes into every page under it. Before, only
+    the route's was used.
+  - Fonts:
+    - A weight range (`weight: "100 900"`, for variable fonts) gave a file name
+      with a space and an unquoted `url()` the browser dropped. Font URLs are
+      now quoted.
+    - A family whose metrics can't be read (woff / woff2) no longer names a
+      fallback face that doesn't exist.
+  - `nowaki dev` adds the islands runtime, and with it the SPA router, only to
+    pages with islands, as production does. Before, links on island-free pages
+    were client-side navigations in dev and full loads in production.
+  - Prerendering fails the build when a page returns a server error. Before,
+    it printed "skipped" and left the page out of the static output.
+- Production errors behind a custom `_500` page are logged. Before, an app
+  with `routes/_500.tsx` rendered its error page and logged nothing, because
+  only the built-in error page logged.
+- The CI performance gate built head's Rust into base's target dir. Both had
+  the same crate versions, so Cargo reused base's binary, and Rust changes were
+  never measured (runtime changes were). Each side now has its own target dir,
+  and the job fails if the two binaries match while `crates/` changed.
+- Typed meta: `openGraph.image.type` (`og:image:type`, defaulting from the
+  image's extension) and `twitter:image:alt` (defaulting to the Open Graph
+  image's `alt`).
 - **Security:** a shared Jetstream refresh render (one render per `publish`,
   #114) was handed to every connection with the same island and state, without
   checking that connection's own signature. A client that knew a room id could
@@ -258,144 +372,6 @@ A static Astro site moves over with the migration guide.
     unique files in parallel. Building them inside the parallel read could
     deadlock a cold build: a worker waiting on a photo it was itself building
     picked up another entry that needed the same photo.
-  - Entries are read and rendered in parallel.
-  - On a 500-entry docs site (four photos, 1,500 code fences), a build with
-    the caches warm went from 2.3 s to 0.25 s. Before, about 86% of it was
-    decoding the same four JPEGs 500 times.
-- AVIF for `<Image>` / `?image` encodes at rav1e speed 9 (was 7). On photos this
-  is about 30% faster for the same or a slightly smaller file, which matters
-  for a cold build (variants are cached after it).
-- Static output: canonical URLs, the default `og:url`, and `sitemap.xml` give
-  page URLs a trailing slash (`/docs/a/`), matching the files the static
-  output writes (`docs/a/index.html`). A static host would otherwise redirect
-  each one. Servers (`nowaki start`, the adapters) keep the route's own path.
-- **Highlighted code is cached on disk** (`node_modules/.cache/nowaki/highlight`)
-  for Markdown entries and MDX alike. Syntect's grammars (TypeScript alone takes
-  about 150 ms to compile) load only on a cache miss, so a rebuild or a dev
-  reload of a docs site doesn't pay for them again. On the example app a
-  rebuild goes from about 0.5 s to 0.34 s.
-- **`<Image>` and `?image` imports** (v0.17).
-  `import hero from "./hero.jpg?image"` gives the image's size and generated
-  variants. `<Image src={hero} alt="…" />` from `@nowaki-dev/runtime/image`
-  renders a `<picture>` with them.
-  - Variants: AVIF, then the original format (JPEG / PNG / WebP) as the
-    fallback. Widths are 640, 960, 1280, and 1920 below the original, plus the
-    original (at most 2560); nothing is upscaled.
-    `?w=400,800&image` picks the widths, and `q=` the AVIF quality (default
-    60).
-  - `width` / `height` come from the file, so there is no layout shift.
-    `loading="lazy"` and `decoding="async"` are the defaults, and `sizes`
-    defaults to the rendered width.
-  - AVIF is encoded in pure Rust (ravif / rav1e without asm), so the release
-    builds stay free of C codecs. Lossy WebP isn't offered, since it would
-    need libwebp.
-  - Every variant is cached in `node_modules/.cache/nowaki/images`, so a
-    rebuild or a dev reload doesn't encode again. In dev, variants are encoded
-    on first request at `/__nowaki/image`.
-  - The image codecs are optimized in debug builds too
-    (`[profile.dev.package]`), since unoptimized AVIF takes tens of seconds
-    per image.
-- **Local images in Markdown** (v0.17). `![alt](./hero.jpg "title")` in a
-  content entry becomes the same `<picture>`, resolved relative to the entry.
-  A missing file fails the build. Root-relative (`/logo.svg`, from `public/`)
-  and remote URLs stay as written.
-- **SEO and metadata** (v0.17).
-  - `site` in nowaki.config (or `NOWAKI_SITE`, which wins) is the site's URL.
-    The build writes it to `dist/server/site.json`, so the adapters and the
-    edge have it too. Loaders, `meta()`, and file routes read it as
-    `ctx.site`.
-  - A typed `meta` writes the head tags: `description`, `canonical` (`true`
-    for this page), `robots`, `openGraph`, `twitter`, and `jsonLd`. Use
-    `export const meta = {...}`, or a `meta()` function of the loader data.
-    - Relative URLs resolve against the site, and Open Graph / Twitter fall
-      back to the page's title and description.
-    - JSON-LD can't close its `<script>`.
-    - A layout's `meta` object sets defaults for the pages under it;
-      `openGraph` and `twitter` merge one level deep.
-  - With a site, `sitemap.xml` (every page, including dynamic ones from
-    `staticPaths`) and `robots.txt` are generated, unless a route or a
-    `public/` file provides them. The static output writes both.
-    - `export const sitemap = false` leaves a page out, and so does a static
-      `meta.robots` of noindex.
-- **MDX** (v0.17). `.mdx` files are pages (`routes/guide.mdx`) and content
-  entries (`content/docs/x.mdx`): Markdown with JSX, `{expressions}`, and
-  `import` / `export`.
-  - They are parsed in Rust (markdown-rs: CommonMark, GFM, MDX) and compiled
-    to TSX before the usual transform. Imported components and islands work as
-    in TSX, in dev, the builds, and every adapter. No JavaScript runs to
-    compile them.
-  - Fenced code is highlighted like Markdown, local images go through
-    `?image` / `<Image>`, and heading ids match Markdown's. Each module exports
-    `headings`.
-  - A content entry's frontmatter is validated like a Markdown entry's.
-    `entry.render()` returns `{ Content, headings }`; render `<Content />`
-    where a Markdown entry uses `html`.
-  - YAML frontmatter in an `.mdx` page is ignored; pages use `export const`
-    (`title`, `meta`, …).
-- **Self-hosted fonts** (v0.17). `fonts` in nowaki.config, for example
-  `{ family: "Inter", provider: "google", weights: [400, 700], subsets: ["latin"] }`
-  or `{ family: "Brand", src: "./fonts/brand.ttf" }`, is built at build time.
-  - Google fonts are downloaded once and served from the site, so pages never
-    request a third-party host. There is one woff2 per subset with its
-    `unicode-range`, so a page loads only the subsets it uses. Downloads are
-    cached, so later builds work offline. Local fonts are copied as they are.
-  - Each face gets a hashed file and an `@font-face` (`font-display: swap` by
-    default).
-  - Each family gets a fallback face (local Arial / Times New Roman / Courier
-    New, chosen by `fallback`). Its `size-adjust` and ascent / descent /
-    line-gap overrides are computed from the font's own metrics, so text
-    doesn't shift when the font arrives.
-  - `--font-<family>` (or `variable`) holds the stack, as in
-    `font-family: var(--font-inter)`.
-  - Every page gets the stylesheet and `<link rel="preload">` for the latin,
-    upright faces. `preload: false` turns the preloads off for a family.
-  - In dev, fonts build in the background at startup and are served at
-    `/__nowaki/fonts/`.
-- **A migration guide from Astro**
-  ([docs/migrate-from-astro.md](docs/migrate-from-astro.md)). It was written
-  from porting a real portfolio site, whose static output matched the Astro
-  build. The port turned up the fixes listed under Fixed.
-
-### Fixed
-- These came up while porting an Astro site.
-  - The server build compiles every app module that routes, islands, and
-    actions import, wherever it lives (`data/`, `sections/`, …). Before, only
-    the conventional folders were compiled. A page importing `../data/x.ts`
-    built, then failed at prerender with `ERR_MODULE_NOT_FOUND`.
-  - CSS `@import` is inlined (relative paths and packages, with
-    `@media` / `@layer` / `@supports` conditions). Before, it was emitted as
-    written and resolved against the served stylesheet's URL. Remote and
-    root-relative imports stay as imports.
-  - A layout's `export const head` goes into every page under it. Before, only
-    the route's was used.
-  - Fonts:
-    - A weight range (`weight: "100 900"`, for variable fonts) gave a file name
-      with a space and an unquoted `url()` the browser dropped. Font URLs are
-      now quoted.
-    - A family whose metrics can't be read (woff / woff2) no longer names a
-      fallback face that doesn't exist.
-  - `nowaki dev` adds the islands runtime, and with it the SPA router, only to
-    pages with islands, as production does. Before, links on island-free pages
-    were client-side navigations in dev and full loads in production.
-  - Prerendering fails the build when a page returns a server error. Before,
-    it printed "skipped" and left the page out of the static output.
-- Production errors behind a custom `_500` page are logged. Before, an app
-  with `routes/_500.tsx` rendered its error page and logged nothing, because
-  only the built-in error page logged.
-- The CI performance gate built head's Rust into base's target dir. Both had
-  the same crate versions, so Cargo reused base's binary, and Rust changes were
-  never measured (runtime changes were). Each side now has its own target dir,
-  and the job fails if the two binaries match while `crates/` changed.
-- Typed meta: `openGraph.image.type` (`og:image:type`, defaulting from the
-  image's extension) and `twitter:image:alt` (defaulting to the Open Graph
-  image's `alt`).
-
-### Changed
-- **Content builds no longer decode every referenced image.**
-  - A Markdown image's size is read from the file's header, and the pixels
-    are decoded only when a variant isn't cached yet.
-  - Each file's image set is built once per build, however many entries
-    reference it.
   - Entries are read and rendered in parallel.
   - On a 500-entry docs site (four photos, 1,500 code fences), a build with
     the caches warm went from 2.3 s to 0.25 s. Before, about 86% of it was
