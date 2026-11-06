@@ -72,6 +72,9 @@ struct ModuleMeta {
     /// export name → local binding name (`export {a as b}` gives b→a)
     exports: Vec<(String, String)>,
     imports: Vec<ImportInfo>,
+    /// import local name → (source abs, imported name; `"default"` for a default import), so an
+    /// `export { x }` of an imported `x` (a barrel file) resolves to the binding it forwards
+    import_bindings: HashMap<String, (PathBuf, String)>,
     /// Global index used for the rename suffix
     idx: usize,
     /// Contains unsupported syntax, so fall back to standalone emit
@@ -116,11 +119,8 @@ pub fn hoist_chunk(
     let mut stack: HashSet<PathBuf> = HashSet::new();
     order_modules(entry, &metas, &mut order, &mut visited, &mut stack);
 
-    let renamed_export = |abs: &Path, export_name: &str| -> Option<String> {
-        let m = metas.get(abs)?;
-        let (_, local) = m.exports.iter().find(|(n, _)| n == export_name)?;
-        Some(format!("{local}${}", m.idx))
-    };
+    let renamed_export =
+        |abs: &Path, export_name: &str| resolve_export(&metas, abs, export_name, 0);
 
     let mut ext_imports = ExternalImports::default();
     let mut bodies: Vec<String> = Vec::new();
@@ -134,9 +134,11 @@ pub fn hoist_chunk(
                 match item {
                     ImportItem::Named { imported, local } => {
                         if internal_dep {
-                            if let Some(target) = renamed_export(&imp.source_abs, imported) {
-                                wiring.rename_local.insert(local.clone(), target);
-                            }
+                            // An unresolved name would be left dangling (a ReferenceError at
+                            // hydration), so give up and let the caller emit unbundled.
+                            let target = renamed_export(&imp.source_abs, imported)
+                                .ok_or_else(|| unresolved_import(abs, imported, &imp.source_abs))?;
+                            wiring.rename_local.insert(local.clone(), target);
                         } else {
                             let renamed = format!("{local}${}", meta.idx);
                             wiring.rename_local.insert(local.clone(), renamed.clone());
@@ -149,9 +151,11 @@ pub fn hoist_chunk(
                     }
                     ImportItem::Default { local } => {
                         if internal_dep {
-                            if let Some(target) = renamed_export(&imp.source_abs, "default") {
-                                wiring.rename_local.insert(local.clone(), target);
-                            }
+                            let target =
+                                renamed_export(&imp.source_abs, "default").ok_or_else(|| {
+                                    unresolved_import(abs, "default", &imp.source_abs)
+                                })?;
+                            wiring.rename_local.insert(local.clone(), target);
                         } else {
                             let renamed = format!("{local}${}", meta.idx);
                             wiring.rename_local.insert(local.clone(), renamed.clone());
@@ -184,6 +188,38 @@ pub fn hoist_chunk(
     }
     out.push_str(&format!("export{{{entry_default} as default}};\n"));
     Ok(out)
+}
+
+/// The chunk-wide name of `export_name` of the internal module `abs`. An export that forwards an
+/// import (`import { x } from "./a.ts"; export { x }`) resolves to the name render_body gives that
+/// import: the source module's binding when it is in the chunk, or our own suffixed alias of the
+/// external import. None when the module doesn't export the name.
+fn resolve_export(
+    metas: &HashMap<PathBuf, ModuleMeta>,
+    abs: &Path,
+    export_name: &str,
+    depth: usize,
+) -> Option<String> {
+    // A forwarding cycle (`a` re-exports `b`'s `x`, which re-exports `a`'s) has no binding.
+    if depth > metas.len() {
+        return None;
+    }
+    let m = metas.get(abs)?;
+    let (_, local) = m.exports.iter().find(|(n, _)| n == export_name)?;
+    if let Some((source, imported)) = m.import_bindings.get(local) {
+        if metas.contains_key(source) {
+            return resolve_export(metas, source, imported, depth + 1);
+        }
+    }
+    Some(format!("{local}${}", m.idx))
+}
+
+fn unresolved_import(importer: &Path, name: &str, source: &Path) -> anyhow::Error {
+    anyhow!(
+        "{}: `{name}` from {} does not resolve to a binding in the chunk",
+        importer.display(),
+        source.display()
+    )
 }
 
 #[derive(Default)]
@@ -274,6 +310,7 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
             deps: Vec::new(),
             exports: Vec::new(),
             imports: Vec::new(),
+            import_bindings: HashMap::new(),
             idx,
             fallback: true,
         });
@@ -288,6 +325,7 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
         deps: Vec::new(),
         exports: Vec::new(),
         imports: Vec::new(),
+        import_bindings: HashMap::new(),
         idx,
         fallback: false,
     };
@@ -305,15 +343,17 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
                     for s in specs {
                         match s {
                             ImportDeclarationSpecifier::ImportSpecifier(sp) => {
-                                items.push(ImportItem::Named {
-                                    imported: export_name_str(&sp.imported),
-                                    local: sp.local.name.to_string(),
-                                });
+                                let imported = export_name_str(&sp.imported);
+                                let local = sp.local.name.to_string();
+                                meta.import_bindings
+                                    .insert(local.clone(), (abs_src.clone(), imported.clone()));
+                                items.push(ImportItem::Named { imported, local });
                             }
                             ImportDeclarationSpecifier::ImportDefaultSpecifier(sp) => {
-                                items.push(ImportItem::Default {
-                                    local: sp.local.name.to_string(),
-                                });
+                                let local = sp.local.name.to_string();
+                                meta.import_bindings
+                                    .insert(local.clone(), (abs_src.clone(), "default".into()));
+                                items.push(ImportItem::Default { local });
                             }
                             ImportDeclarationSpecifier::ImportNamespaceSpecifier(_) => {
                                 meta.fallback = true; // `import * as` unsupported
@@ -333,8 +373,13 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
                     for name in decl_bound_names(decl) {
                         meta.exports.push((name.clone(), name));
                     }
-                } else if d.source.is_some() {
-                    meta.fallback = true; // `export {..} from` re-export unsupported
+                } else if let Some(src) = &d.source {
+                    // `export {..} from` re-export unsupported. Still a dependency: the graph
+                    // walks (sharing counts, budgets) must see it.
+                    meta.fallback = true;
+                    if let Some(abs_src) = resolve(core, dir, src.value.as_str()) {
+                        meta.deps.push((abs_src, src.value.to_string()));
+                    }
                 } else {
                     for sp in &d.specifiers {
                         let local = export_name_str(&sp.local);
@@ -362,8 +407,11 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
                 }
                 _ => meta.fallback = true, // expression default export unsupported
             },
-            Statement::ExportAllDeclaration(_) => {
+            Statement::ExportAllDeclaration(d) => {
                 meta.fallback = true; // `export *` unsupported
+                if let Some(abs_src) = resolve(core, dir, d.source.value.as_str()) {
+                    meta.deps.push((abs_src, d.source.value.to_string()));
+                }
             }
             _ => {}
         }
@@ -416,8 +464,16 @@ fn render_body(core: &NowakiCore, abs: &Path, idx: usize, wiring: &ImportWiring)
             Some(format!("{name}${idx}"))
         };
         if let Some(nn) = new_name {
+            let taken = scoping.get_binding(root, nn.as_str().into()).is_some();
             let nn = allocator.alloc_str(&nn);
-            scoping.rename_symbol(sym, root, nn.into());
+            if taken {
+                // Two imports of one binding (`import { a, a as b }`, or a name and a barrel's
+                // re-export of it) both print as that binding. Only the printed name changes;
+                // the imports are stripped, so no duplicate declaration is emitted.
+                scoping.set_symbol_name(sym, nn.into());
+            } else {
+                scoping.rename_symbol(sym, root, nn.into());
+            }
         }
     }
 
@@ -491,7 +547,9 @@ fn decl_bound_names(decl: &Declaration) -> Vec<String> {
         Declaration::VariableDeclaration(v) => v
             .declarations
             .iter()
-            .filter_map(|d| d.id.get_binding_identifier().map(|b| b.name.to_string()))
+            // Every name a destructuring pattern binds (`export const { a, b: c } = o`).
+            .flat_map(|d| d.id.get_binding_identifiers())
+            .map(|b| b.name.to_string())
             .collect(),
         Declaration::FunctionDeclaration(f) => {
             f.id.as_ref()
