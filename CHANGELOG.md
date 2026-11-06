@@ -316,7 +316,9 @@ A static Astro site moves over with the migration guide.
   JS hub): the old ones' rooms and topics go, their queued events and
   refreshes are dropped, and a render still in flight for the old page is
   discarded, even when the new page reuses its nid (a Router Cache revisit).
-  A page without live islands closes the socket.
+  A page without live islands closes the socket. Patches and errors carry the
+  server's count of replacing joins, and live.js drops one sent for the previous
+  page (a click just before navigating could otherwise land on the new page).
 - Node children no longer outlive a killed `nowaki`. That covers the dev and
   production sidecars, the prerender server, and the plugin host. When
   `nowaki` was stopped with SIGKILL (or crashed), it couldn't stop them, and
