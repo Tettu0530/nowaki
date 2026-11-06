@@ -221,7 +221,31 @@ const event = (nid = "L0", handler = "inc") => JSON.stringify({ type: "event", n
   c.onClose();
 }
 
-check("origin: absent → allowed", liveOriginOk(undefined, "a.test") && liveOriginOk(null, null));
+{
+  // A client navigation sends a replacing join: the previous page's islands go, and a render of
+  // one that was in flight is neither applied nor patched in.
+  const { render } = counterRender({ delay: (n) => (n === 1 ? 30 : 0) });
+  const hub = createLiveHub({ render });
+  const s = fakeSocket();
+  const c = hub.open(s);
+  c.onText(join(0, "L0"));
+  c.onText(join(0, "L1"));
+  c.onText(event("L0"));
+  await tick(5);
+  c.onText(JSON.stringify({ type: "join", replace: true, islands: [{ nid: "L2", name: "LiveCounter", state: { count: 7 }, sig: "sig:7" }] }));
+  c.onText(event("L1"));
+  await tick(50);
+  check("replacing join: the old page's in-flight render isn't patched in", s.of("patch").length === 0 && s.of("error").length === 0);
+  c.onText(event("L2"));
+  await tick();
+  check("replacing join: the new page's island works", s.of("patch").length === 1 && s.of("patch")[0].nid === "L2" && s.of("patch")[0].state.count === 8);
+  c.onText(event("L0"));
+  await tick();
+  check("replacing join: the old islands are gone", s.of("patch").length === 1);
+  c.onClose();
+}
+
+check("origin: absent → allowed",liveOriginOk(undefined, "a.test") && liveOriginOk(null, null));
 check("origin: same host → allowed", liveOriginOk("https://a.test", "a.test") && liveOriginOk("http://a.test:3000/", "a.test:3000"));
 check("origin: other host → rejected", !liveOriginOk("https://evil.test", "a.test"));
 check("origin: port mismatch → rejected", !liveOriginOk("http://a.test:4000", "a.test:3000"));

@@ -120,6 +120,7 @@ function applyDocument(entry, push, token) {
   }
   hydrateIslands(document);
   loadPageScripts(doc);
+  runBodyScripts();
   removeProgressBar();
   // Page scripts run once (they are modules); this is their cue to set up the new page's DOM.
   document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl } }));
@@ -137,6 +138,18 @@ function loadPageScripts(doc) {
     el.setAttribute("data-nowaki-script", "");
     if (window.__nowakiNonce) el.nonce = window.__nowakiNonce;
     document.head.appendChild(el);
+  }
+}
+
+// Scripts parsed by DOMParser never run, so the module scripts in the new <body> (the islands
+// runtime, live.js) are swapped for fresh elements that do. A module runs once per URL: one an
+// earlier page already loaded doesn't run again (live.js re-joins on nowaki:page-load instead).
+function runBodyScripts() {
+  for (const old of document.body.querySelectorAll('script[type="module"][src]')) {
+    const el = document.createElement("script");
+    for (const a of old.attributes) if (a.name !== "nonce") el.setAttribute(a.name, a.value);
+    if (window.__nowakiNonce) el.nonce = window.__nowakiNonce;
+    old.replaceWith(el);
   }
 }
 

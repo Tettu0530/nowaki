@@ -126,6 +126,15 @@ milestone's worth of work; the codename is noted per entry.
 - **A cookie with a malformed percent-escape (`_ga=50%`) no longer makes every
   page that reads `ctx.cookies` return 500.** Each cookie is decoded on its own;
   one that fails to decode keeps its raw value.
+- Jetstream islands now work on a page reached by client (SPA) navigation.
+  The router swapped in the new `<body>`, but scripts parsed that way never run,
+  so live.js didn't load when the previous page had no live islands. When it
+  had, the open socket never joined the new page's islands, so their buttons
+  did nothing. The router now runs the new body's module scripts, and live.js
+  re-syncs on `nowaki:page-load`. The new page's islands replace the old ones
+  on the socket (`join` with `replace: true`, in live.rs and the JS hub), so
+  the old ones' rooms and topics are dropped and a render still in flight for
+  one of them is discarded. A page without live islands closes the socket.
 - Node children no longer outlive a killed `nowaki`. That covers the dev and
   production sidecars, the prerender server, and the plugin host. When
   `nowaki` was stopped with SIGKILL (or crashed), it couldn't stop them, and

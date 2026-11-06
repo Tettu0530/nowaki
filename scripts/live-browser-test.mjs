@@ -10,7 +10,7 @@ const PAGE = process.env.PAGE || "/live";
 const CHROME =
   process.env.CHROME ||
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const PORT = 9224;
+const PORT = Number(process.env.CDP_PORT || 9224);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -63,7 +63,7 @@ try {
     `--remote-debugging-port=${PORT}`,
     "--no-first-run",
     "--no-default-browser-check",
-    "--user-data-dir=/tmp/nwk-chrome-live-test",
+    `--user-data-dir=/tmp/nwk-chrome-live-test-${PORT}`,
     "about:blank",
   ]);
   let page;
@@ -97,6 +97,27 @@ try {
     `return performance.getEntriesByType('resource').filter((e) => e.name.endsWith('/__nowaki/live-event')).length;`,
   );
   check(`events went over ${EXPECT} (${posts} POSTs)`, EXPECT === "post" ? posts === 3 : posts === 0);
+
+  // Reached by a client (SPA) navigation, the page's live islands must work too: the first visit
+  // from a page without live islands has to load live.js, the second has to join the new islands
+  // on the socket that's already open.
+  const spaNav = async (href) => {
+    await cdp.evalAsync(`const a = document.createElement('a'); a.href = ${JSON.stringify(href)}; a.textContent = 'go';
+      document.body.appendChild(a); a.click(); return true;`);
+    await sleep(1200);
+    return cdp.evalAsync("return { path: location.pathname, router: !!window.__nowakiRouter };");
+  };
+  await cdp.send("Page.navigate", { url: BASE + "/" });
+  await sleep(1000);
+  for (const visit of ["first", "second"]) {
+    const nav = await spaNav(PAGE);
+    check(`${visit} SPA visit to ${PAGE} went through the router`, nav.path === PAGE && nav.router);
+    const before = Number(await count());
+    await click("inc");
+    await sleep(800);
+    check(`${visit} SPA visit: + updates the island (${before} → ${await count()})`, Number(await count()) === before + 1);
+    await spaNav("/");
+  }
 
   // Form, input, and change events on /live-form, over the same transport.
   await cdp.send("Page.navigate", { url: BASE + "/live-form" });
@@ -144,6 +165,26 @@ try {
     const a = (t) => Number(/a:\s*(\d+)/.exec(t ?? "")?.[1]);
     check(`a vote in one tab shows up in the other (${before} → ${after})`, a(after) === a(before) + 1);
     await tab2.send("Page.close").catch(() => {});
+
+    // Leaving a live page by client navigation tears its islands down: the socket closes, so
+    // another tab sees the connection count drop (nowaki:presence without a room).
+    const third = await (await fetch(`http://127.0.0.1:${PORT}/json/new?${BASE}/live`, { method: "PUT" })).json();
+    const tab3 = new CDP(third.webSocketDebuggerUrl);
+    await tab3.ready;
+    await tab3.send("Runtime.enable");
+    await sleep(1500);
+    await tab3.evalAsync(`window.__online = null;
+      addEventListener('nowaki:presence', (e) => { if (e.detail.room === undefined) window.__online = e.detail.count; });
+      return true;`);
+    const online = () => tab3.evalAsync("return window.__online;");
+    await cdp.send("Page.navigate", { url: BASE + "/live" });
+    await sleep(1500);
+    const withBoth = await online();
+    const nav = await spaNav("/");
+    await sleep(500);
+    check(`SPA navigation away from /live leaves (presence ${withBoth} → ${await online()})`,
+      nav.router && typeof withBoth === "number" && (await online()) === withBoth - 1);
+    await tab3.send("Page.close").catch(() => {});
   }
 
   console.log(`\n${failures === 0 ? "LIVE BROWSER TEST PASSED" : `LIVE BROWSER TEST FAILED (${failures})`}`);

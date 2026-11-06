@@ -94,10 +94,14 @@ export function createLiveHub({
         const isl = islands.get(ev.nid);
         if (!isl) continue;
         inflight = true;
+        // A client navigation (a replacing join) may drop the island while it renders: then the
+        // result or error is dropped too, as in live.rs (still_joined).
+        const gone = () => islands.get(ev.nid)?.name !== isl.name;
         renderWithTimeout(isl.name, isl.state, isl.sig, ev, request).then(
           (r) => {
             inflight = false;
             if (closed) return;
+            if (gone()) return pump();
             // Keep the new signature too so the next event can be verified.
             if (r.state !== undefined) islands.set(ev.nid, { name: isl.name, state: r.state, sig: r.sig ?? "" });
             const cur = islands.get(ev.nid);
@@ -107,6 +111,7 @@ export function createLiveHub({
           (err) => {
             inflight = false;
             if (closed) return;
+            if (gone()) return pump();
             const reason =
               err?.message === "timeout"
                 ? "timeout"
@@ -133,6 +138,8 @@ export function createLiveHub({
       }
       if (v?.type === "join") {
         if (!Array.isArray(v.islands)) return;
+        // `replace`: the client lists every island on its page (after a client navigation too).
+        if (v.replace === true) islands.clear();
         for (const it of v.islands) {
           const nid = typeof it?.nid === "string" ? it.nid : "";
           if (!nid) continue;

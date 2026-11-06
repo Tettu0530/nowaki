@@ -490,6 +490,11 @@ fn handle_text(islands: &mut Islands, txt: &str) -> Option<PendingEvent> {
     let v = serde_json::from_str::<Value>(txt).ok()?;
     match v.get("type").and_then(|t| t.as_str()) {
         Some("join") => {
+            // `replace`: the client lists every island on its page (after a client navigation
+            // too), so the previous page's islands, topics and rooms go.
+            if v.get("replace").and_then(|r| r.as_bool()) == Some(true) {
+                islands.clear();
+            }
             if let Some(arr) = v.get("islands").and_then(|i| i.as_array()) {
                 for it in arr {
                     let nid = it.get("nid").and_then(|x| x.as_str()).unwrap_or("");
@@ -687,6 +692,11 @@ async fn render_once(
 /// Store the new state and push the patch, or tell the client the event failed.
 /// false when the socket is gone.
 async fn apply_rendered(socket: &mut WebSocket, islands: &mut Islands, r: Rendered) -> bool {
+    // The page navigated away while this rendered: the island is gone (or its nid is now another
+    // page's island), so the result or error is dropped rather than brought back.
+    if !still_joined(islands, &r) {
+        return true;
+    }
     let RenderOk {
         html,
         state: new_state,
@@ -716,6 +726,12 @@ async fn apply_rendered(socket: &mut WebSocket, islands: &mut Islands, r: Render
         .send(Message::Text(patch.to_string().into()))
         .await
         .is_ok()
+}
+
+/// Whether the island a render was for is still on the client's page. A client navigation sends a
+/// replacing join, which drops the previous page's islands while their renders may be in flight.
+fn still_joined(islands: &Islands, r: &Rendered) -> bool {
+    islands.get(&r.nid).is_some_and(|e| e.0 == r.name)
 }
 
 async fn send_error(socket: &mut WebSocket, nid: &str, reason: &str) -> bool {
@@ -987,5 +1003,45 @@ mod tests {
             1,
             "still one render per publish"
         );
+    }
+
+    #[test]
+    fn a_replacing_join_drops_the_previous_pages_islands() {
+        let hub = LiveHub::new();
+        let mut rooms = Default::default();
+        let mut islands = Islands::new();
+        let page1 = r#"{"type":"join","islands":[{"nid":"L0","name":"Poll","state":{"room":"p"},"sig":"s","topics":["room:p"]}]}"#;
+        handle_text(&mut islands, page1);
+        sync_rooms(&hub, &mut rooms, &islands);
+        assert_eq!(hub.room_count("p"), 1);
+
+        // A join without `replace` (a POST handing over new state) adds to what's there.
+        let more =
+            r#"{"type":"join","islands":[{"nid":"L1","name":"LiveCounter","state":{},"sig":"s"}]}"#;
+        handle_text(&mut islands, more);
+        assert_eq!(islands.len(), 2);
+
+        // A client navigation: the new page's islands replace the old ones, and their rooms go.
+        let page2 = r#"{"type":"join","replace":true,"islands":[{"nid":"L0","name":"LiveCounter","state":{"count":0},"sig":"s"}]}"#;
+        handle_text(&mut islands, page2);
+        sync_rooms(&hub, &mut rooms, &islands);
+        assert_eq!(islands.len(), 1);
+        assert_eq!(islands["L0"].0, "LiveCounter");
+        assert_eq!(hub.room_count("p"), 0);
+        assert!(handle_text(
+            &mut islands,
+            r#"{"type":"event","nid":"L1","handler":"inc"}"#
+        )
+        .is_none());
+
+        // A render for the old page's L0 (another island) or L1 (gone) is not applied.
+        let done = |nid: &str, name: &str| Rendered {
+            nid: nid.into(),
+            name: name.into(),
+            result: Err(RenderError::Stale),
+        };
+        assert!(!still_joined(&islands, &done("L0", "Poll")));
+        assert!(!still_joined(&islands, &done("L1", "LiveCounter")));
+        assert!(still_joined(&islands, &done("L0", "LiveCounter")));
     }
 }
