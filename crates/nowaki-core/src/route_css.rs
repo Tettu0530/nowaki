@@ -95,12 +95,14 @@ pub fn build_route_css(
                     let Some(sheet) = stylesheet(core, &css) else {
                         continue;
                     };
-                    let stem = css
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("style.css")
-                        .trim_end_matches(".css")
-                        .replace('.', "-");
+                    let file = css.file_name().map(|n| n.to_string_lossy());
+                    let stem = crate::build::sanitize_name(
+                        &file
+                            .as_deref()
+                            .unwrap_or("style.css")
+                            .trim_end_matches(".css")
+                            .replace('.', "-"),
+                    );
                     let name = format!("{stem}.{:08x}.css", xxh3_64(sheet.as_bytes()) as u32);
                     if names.insert(name.clone()) {
                         fs::write(client_dir.join(&name), &sheet)?;

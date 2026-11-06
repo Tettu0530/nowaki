@@ -23,6 +23,10 @@ milestone's worth of work; the codename is noted per entry.
   a string, an attribute selector or a comment was scoped too:
   `url(/img/bg.png)` became `url(/img/bg.png_<hash>)` and 404ed, and
   `[href$=".pdf"]` stopped matching.
+- Build output names in `dist/client` use only `[A-Za-z0-9._-]`: other
+  characters in the source file name become `_` (`logo@2x.svg` →
+  `logo_2x.<hash>.svg`). Before, the name kept the source stem as is, and
+  `nowaki start`, which serves only such names, answered 404.
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 

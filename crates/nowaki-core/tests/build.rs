@@ -254,3 +254,64 @@ fn hoisted_island_keeps_reexported_and_destructured_bindings() {
     );
     assert!(destr.contains("A1"), "alpha was dropped:\n{destr}");
 }
+
+/// `nowaki start` (start.rs `asset_name`) serves only `[A-Za-z0-9._-]` names that don't start
+/// with '.', so every file the build writes to dist/client must have such a name, whatever the
+/// source file is called.
+#[test]
+fn build_output_names_are_servable_for_any_source_name() {
+    let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"></svg>\n";
+    let root = temp_app(
+        "names",
+        &[
+            ("assets/logo@2x.svg", svg),
+            ("assets/my logo.svg", svg),
+            ("assets/.dot.svg", svg),
+            ("assets/ロゴ.svg", svg),
+            ("assets/server+only.svg", svg),
+            ("lib/my util.ts", "export const u = \"u\";\n"),
+            ("islands/card+x.module.css", ".card { color: red }\n"),
+            ("styles/page@wide.css", "body { margin: 0 }\n"),
+            (
+                "islands/Card.ts",
+                "import a from \"../assets/logo@2x.svg\";\nimport b from \"../assets/my logo.svg\";\nimport c from \"../assets/.dot.svg\";\nimport d from \"../assets/ロゴ.svg\";\nimport * as m from \"../lib/my util.ts\";\nimport s from \"./card+x.module.css\";\nexport default function Card() { return s.card + a + b + c + d + m.u; }\n",
+            ),
+            (
+                "routes/index.tsx",
+                "import \"../styles/page@wide.css\";\nimport e from \"../assets/server+only.svg\";\nimport Card from \"../islands/Card.ts\";\nexport default function I() { return <main><img src={e} /><Card /></main>; }\n",
+            ),
+        ],
+    );
+    NowakiCore::new(root.clone())
+        .build(&root.join("dist"))
+        .expect("build ok");
+    let names: Vec<String> = fs::read_dir(root.join("dist/client"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    let _ = fs::remove_dir_all(&root);
+
+    let bad: Vec<&String> = names
+        .iter()
+        .filter(|n| {
+            n.starts_with('.')
+                || !n
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        })
+        .collect();
+    assert!(bad.is_empty(), "unservable output names: {bad:?}");
+    for stem in [
+        "logo_2x.",
+        "my_logo.",
+        "server_only.",
+        "card_x.module.css.",
+        "page_wide.",
+    ] {
+        assert!(
+            names.iter().any(|n| n.starts_with(stem)),
+            "no {stem}* in {names:?}"
+        );
+    }
+}
