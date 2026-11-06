@@ -278,6 +278,8 @@ pub fn write_variant(
     ext: &str,
     bytes: &[u8],
 ) -> Result<String> {
+    // Every caller gets a name `nowaki start` serves (Markdown content images included).
+    let stem = crate::build::sanitize_name(stem);
     let name = format!("{stem}-{width}.{:08x}.{ext}", xxh3_64(bytes) as u32);
     std::fs::create_dir_all(out_dir)?;
     let path = out_dir.join(&name);
@@ -704,5 +706,13 @@ mod tests {
         let (bytes, _) = dev_variant(dir.path(), &file, 20, false, None).unwrap();
         let out = image::load_from_memory(&bytes).unwrap();
         assert_eq!((out.width(), out.height()), (20, 40));
+    }
+
+    #[test]
+    fn variant_names_are_servable() {
+        let dir = std::env::temp_dir().join(format!("nowaki-variant-{}", std::process::id()));
+        let url = write_variant(&dir, "photo@2x b", 320, "avif", b"x").unwrap();
+        assert!(url.contains("photo_2x_b-320."), "{url}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
