@@ -27,7 +27,7 @@ comrak = { version = "0.59.0", default-features = false, features = ["syntect-fa
 two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
 # MDX: markdown-rs parses .mdx (CommonMark + GFM + MDX) into mdast, which mdx.rs turns into TSX.
 markdown = "1.0.0"
-oxc = { version = "0.135.0", features = ["transformer", "codegen", "minifier", "semantic", "ast_visit"] }
+oxc = { version = "0.146.0", features = ["transformer", "codegen", "minifier", "semantic", "ast_visit"] }
 oxc_resolver = "11.21.0"
 rayon = "1.11.0"
 # Reads the client manifest back for route budgets (page scripts).
