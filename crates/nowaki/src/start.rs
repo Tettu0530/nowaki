@@ -254,7 +254,8 @@ async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     }
     // Rust serves static assets directly (high-volume hot path).
-    if req.method() == Method::GET && path.starts_with("/_nowaki/") {
+    // HEAD mirrors GET everywhere below; axum drops the body.
+    if matches!(*req.method(), Method::GET | Method::HEAD) && path.starts_with("/_nowaki/") {
         return serve_static(&state, &path, req.headers()).await;
     }
     // public/ files win over routes at the same path (a file is an exact match).

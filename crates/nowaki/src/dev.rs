@@ -552,7 +552,11 @@ async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Res
         let abs = state.core.root.join(path.trim_start_matches('/'));
         return transform_response(state, abs, Mode::Browser).await;
     }
-    if req.method() == axum::http::Method::GET && path != "/" {
+    let read = matches!(
+        *req.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD
+    );
+    if read && path != "/" {
         let candidate = state.core.root.join(path.trim_start_matches('/'));
         if candidate.is_file() {
             // Check the real path hasn't escaped the root via `..`/symlinks, and never serve sensitive paths

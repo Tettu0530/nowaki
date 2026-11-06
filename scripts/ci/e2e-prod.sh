@@ -48,6 +48,12 @@ curl -s -o /dev/null -D - -H 'Accept-Encoding: gzip' "$ASSET" | grep -qi '^conte
 ! curl -s -o /dev/null -D - "$ASSET" | grep -qi '^content-encoding'
 ETAG=$(curl -s -o /dev/null -D - "$ASSET" | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]: //p')
 test "$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $ETAG" "$ASSET")" = 304
+# HEAD mirrors GET (status and headers, no body): assets, public/ files, pages
+test "$(curl -s -I -o /dev/null -w '%{http_code}' "$ASSET")" = 200
+curl -s -I "$ASSET" | grep -qi '^content-type: text/javascript'
+test "$(curl -s -I "$ASSET" -o /dev/null -w '%{size_download}')" = 0
+test "$(curl -s -I -o /dev/null -w '%{http_code}' http://127.0.0.1:3300/raw.css)" = 200
+test "$(curl -s -I -o /dev/null -w '%{http_code}' http://127.0.0.1:3300/about)" = 200
 curl -sf http://127.0.0.1:3300/ | grep -q '<code>a→b</code>'
 # CSS Modules: prod SSR must use the same scoped class names as dev (css_scope_id).
 PROD_BADGE=$(curl -sf http://127.0.0.1:3300/ | grep -oE 'badge_[0-9a-f]{8}' | head -1)

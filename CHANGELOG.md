@@ -20,6 +20,8 @@ milestone's worth of work; the codename is noted per entry.
   constant ETag while each response carried a new nonce, so a 304 paired the
   cached body with a different policy. Those files are now sent without an ETag
   (#150).
+- `HEAD` now mirrors `GET` for `/_nowaki/*` assets on `nowaki start` (it was a
+  404) and for app files on `nowaki dev` (#150).
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 

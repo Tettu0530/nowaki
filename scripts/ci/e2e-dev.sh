@@ -31,6 +31,9 @@ echo "$BADGE_CLASS" > /tmp/nowaki-css-module-badge-class
 ! curl -sf $B/ | grep -qE '/Users/|/home/[^/]+/'
 curl -sf $B/ | grep -q 'data-router=.*client/router.js'
 curl -sf "$B/islands/Counter.tsx" | grep -q "jsx-runtime"
+# HEAD mirrors GET for app files
+test "$(curl -s -I -o /dev/null -w '%{http_code}' "$B/islands/Counter.tsx")" = 200
+curl -s -I "$B/islands/Counter.tsx" | grep -qi '^content-type: text/javascript'
 
 # layouts (root + nested) and dynamic param
 curl -sf $B/ | grep -q 'href="/todos"'
