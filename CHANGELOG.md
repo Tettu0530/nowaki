@@ -35,6 +35,9 @@ milestone's worth of work; the codename is noted per entry.
   `npm link`), so no island hydrated. Files inside that package's own real
   directory are now served; other symlinks and its nested `node_modules` are
   still refused (#150).
+- Dev SSR now picks up edits to the app's plain `.js` / `.mjs` modules (such as
+  `lib/msg.js`); they were served stale until a restart. Files in
+  `node_modules` and outside the app root still load once (#150).
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 

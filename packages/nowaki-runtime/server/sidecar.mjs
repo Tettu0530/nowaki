@@ -15,7 +15,7 @@ import { requestOrigin } from "./origin.mjs";
 loadEnv();
 
 // from here on, dynamically imported .tsx/.ts go through Rust's transform endpoint
-register(new URL("./loader-hooks.mjs", import.meta.url));
+register(new URL("./loader-hooks.mjs", import.meta.url), { data: { root: process.cwd() } });
 register(new URL("./react-alias-hooks.mjs", import.meta.url));
 
 const { scanRoutes } = await import("./router.mjs");
