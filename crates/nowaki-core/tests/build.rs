@@ -175,3 +175,82 @@ fn a_symlinked_root_still_hoists() {
         "cycle modules were not hoisted through a symlinked root:\n{code}"
     );
 }
+
+/// Names the chunk reads but never declares or imports. These fixtures use no globals, so
+/// anything listed would throw a ReferenceError at hydration.
+fn unresolved_names(code: &str) -> Vec<String> {
+    use oxc::allocator::Allocator;
+    use oxc::parser::Parser;
+    use oxc::semantic::SemanticBuilder;
+    use oxc::span::SourceType;
+    let allocator = Allocator::default();
+    let parsed = Parser::new(&allocator, code, SourceType::mjs()).parse();
+    assert!(parsed.errors.is_empty(), "chunk does not parse:\n{code}");
+    let semantic = SemanticBuilder::new().build(&parsed.program).semantic;
+    let mut names: Vec<String> = semantic
+        .scoping()
+        .root_unresolved_references()
+        .keys()
+        .map(|k| k.to_string())
+        .collect();
+    names.sort();
+    names
+}
+
+/// A binding re-exported with `export { x }` / `export { x as y }` (a barrel file), or exported
+/// through a destructuring declaration, must stay defined in the hoisted island chunk.
+#[test]
+fn hoisted_island_keeps_reexported_and_destructured_bindings() {
+    let root = temp_app(
+        "reexport",
+        &[
+            (
+                "lib/barrel/x.ts",
+                "export function greet() { return \"hi-from-x\"; }\nexport const two = 2;\n",
+            ),
+            (
+                "lib/barrel/index.ts",
+                "import { greet, two } from \"./x.ts\";\nexport { greet, two as deux };\n",
+            ),
+            (
+                "lib/outer.ts",
+                "import { greet } from \"./barrel/index.ts\";\nexport { greet as hello };\n",
+            ),
+            (
+                "lib/destr.ts",
+                "export const { alpha, beta: b2, ...rest } = { alpha: \"A1\", beta: \"B1\", c: 1 };\nexport const [first, , third] = [1, 2, 3];\n",
+            ),
+            (
+                "islands/Barrel.ts",
+                "import { greet, deux } from \"../lib/barrel/index.ts\";\nimport { hello } from \"../lib/outer.ts\";\nexport default function Barrel() { return greet() + deux + hello(); }\n",
+            ),
+            (
+                "islands/Destr.ts",
+                "import { alpha, b2, rest, first, third } from \"../lib/destr.ts\";\nexport default function Destr() { return alpha + b2 + rest.c + first + third; }\n",
+            ),
+        ],
+    );
+    let core = NowakiCore::new(root.clone());
+    build_client(&core, &root.join("dist")).expect("build ok");
+    let barrel = island_chunk(&root, "Barrel");
+    let destr = island_chunk(&root, "Destr");
+    let _ = fs::remove_dir_all(&root);
+
+    assert_eq!(
+        unresolved_names(&barrel),
+        Vec::<String>::new(),
+        "barrel island reads undefined names:\n{barrel}"
+    );
+    assert!(barrel.contains("hi-from-x"), "greet was dropped:\n{barrel}");
+    // Hoisted, not the unbundled fallback: the lib modules live inside the chunk.
+    assert!(
+        !barrel.contains("import") && !destr.contains("import"),
+        "lib modules were not hoisted:\n{barrel}\n{destr}"
+    );
+    assert_eq!(
+        unresolved_names(&destr),
+        Vec::<String>::new(),
+        "destructuring island reads undefined names:\n{destr}"
+    );
+    assert!(destr.contains("A1"), "alpha was dropped:\n{destr}");
+}

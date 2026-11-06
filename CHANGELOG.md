@@ -80,6 +80,20 @@ milestone's worth of work; the codename is noted per entry.
   `content: "→"`, emoji and comments in a `*.module.css` came out as mojibake
   in dev, `nowaki start`, adapters and static output. Text outside class
   selectors is now copied through unchanged.
+- Production island chunks no longer read undefined names when an island
+  imports a binding that a module forwards with `export { x }` /
+  `export { x as y }` (a barrel file), or one exported through destructuring
+  (`export const { a, b } = obj`). Scope hoisting now follows the forwarded
+  import to its binding and records every name a destructuring pattern binds.
+  When an import still can't be resolved, the island is emitted unbundled
+  instead of hoisted. Before, the build passed and hydration threw a
+  ReferenceError.
+- `nowaki build` now writes every app module the server can load to
+  `dist/server`, including ones reached only through a `"use server"` module,
+  `export … from`, or a string-literal `import()`. Such modules (an action's
+  `../utils/` import, for example) were missing, so `nowaki start` returned 500
+  with `ERR_MODULE_NOT_FOUND` where dev worked. String-literal `import()`
+  specifiers in server output are also rewritten to `.js`, like static imports.
 - Node children no longer outlive a killed `nowaki`. That covers the dev and
   production sidecars, the prerender server, and the plugin host. When
   `nowaki` was stopped with SIGKILL (or crashed), it couldn't stop them, and

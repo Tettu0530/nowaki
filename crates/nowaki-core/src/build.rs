@@ -11,7 +11,8 @@ use std::sync::Mutex;
 
 use anyhow::{anyhow, Context, Result};
 use oxc::allocator::Allocator;
-use oxc::ast::ast::Statement;
+use oxc::ast::ast::{Expression, ImportExpression, Statement};
+use oxc::ast_visit::{walk_mut, VisitMut};
 use oxc::codegen::{Codegen, CodegenOptions};
 use oxc::minifier::{Minifier, MinifierOptions};
 use xxhash_rust::xxh3::xxh3_64;
@@ -338,10 +339,12 @@ pub fn build_server(
         let mut seen: HashSet<PathBuf> = files.iter().cloned().collect();
         let mut stack: Vec<PathBuf> = files.clone();
         while let Some(m) = stack.pop() {
-            let Ok(deps) = crate::chunk::module_deps(core, &m) else {
+            // The server graph, not the client one: it goes through `"use server"` modules (a
+            // client boundary) and follows `export … from` and string-literal `import()` too.
+            let Ok(imports) = crate::graph::module_imports(core, &m) else {
                 continue; // the transform below reports it
             };
-            for d in deps {
+            for d in imports.into_iter().filter_map(|i| i.resolved) {
                 if crate::chunk::is_app_module(core, &d) && seen.insert(d.clone()) {
                     files.push(d.clone());
                     stack.push(d);
@@ -570,6 +573,11 @@ fn transform_for_server(
             lit.raw = None;
         }
     }
+    // `import("./x.ts")` must load the emitted `./x.js` too (build_server emits its target).
+    DynamicImportSpecs {
+        allocator: &allocator,
+    }
+    .visit_program(&mut program);
 
     // SSR isn't minified, so the inline source map is exact (for node --enable-source-maps).
     // Don't expose absolute paths of out-of-root deps (dist/server isn't served, but kept consistent).
@@ -587,6 +595,29 @@ fn transform_for_server(
         code.push('\n');
     }
     Ok(code)
+}
+
+/// Rewrites string-literal `import()` specifiers the way static imports are (React packages →
+/// preact/compat, TS extension → .js).
+struct DynamicImportSpecs<'a> {
+    allocator: &'a Allocator,
+}
+
+impl<'a> VisitMut<'a> for DynamicImportSpecs<'a> {
+    fn visit_import_expression(&mut self, it: &mut ImportExpression<'a>) {
+        if let Expression::StringLiteral(lit) = &mut it.source {
+            let spec = lit.value.as_str();
+            let rewritten = match crate::resolve::alias_specifier(spec) {
+                Some(aliased) => Some(aliased.to_string()),
+                None => rewrite_server_spec(spec),
+            };
+            if let Some(rewritten) = rewritten {
+                lit.value = self.allocator.alloc_str(&rewritten).into();
+                lit.raw = None;
+            }
+        }
+        walk_mut::walk_import_expression(self, it);
+    }
 }
 
 /// Rewrites TS extensions in relative local imports to .js. Leaves bare/absolute/.js alone.
