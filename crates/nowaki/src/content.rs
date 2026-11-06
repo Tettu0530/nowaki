@@ -505,14 +505,9 @@ pub fn render_markdown_with(md: &str, image: &mut ImageHtml) -> Result<(String, 
             NodeValue::Heading(h) => h.level,
             _ => continue,
         };
-        let mut text = String::new();
-        for d in node.descendants() {
-            match &d.data.borrow().value {
-                NodeValue::Text(t) => text.push_str(t),
-                NodeValue::Code(c) => text.push_str(&c.literal),
-                _ => {}
-            }
-        }
+        // The text comrak anchorizes for the HTML id (a soft / hard break counts as a space), so
+        // the two ids agree.
+        let text = node.collect_text();
         let id = anchorizer.anchorize(&text);
         headings.push(Heading { depth, text, id });
     }
@@ -721,5 +716,23 @@ mod tests {
         std::fs::write(r.join("content/blog/x.md"), "---\ntitle: [oops\n---\n").unwrap();
         let err = collect(r, &Images::Dev).unwrap_err().to_string();
         assert!(err.contains("content/blog/x.md: frontmatter"), "{err}");
+    }
+
+    #[test]
+    fn multi_line_heading_ids_match_the_html_anchors() {
+        // A setext heading over two lines (soft break) and one with a hard break.
+        let (html, headings) =
+            render_markdown("Setext\nline two\n========\n\nHard  \nbreak `code`\n--------\n");
+        assert_eq!(headings.len(), 2);
+        for h in &headings {
+            assert!(
+                html.contains(&format!("id=\"{}\"", h.id)),
+                "{} in {html}",
+                h.id
+            );
+        }
+        assert_eq!(headings[0].id, "setext-line-two");
+        assert_eq!(headings[0].text, "Setext line two");
+        assert_eq!(headings[1].id, "hard-break-code");
     }
 }

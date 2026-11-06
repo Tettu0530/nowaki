@@ -4,7 +4,7 @@ use std::process::Stdio;
 use anyhow::{anyhow, Context, Result};
 use futures_util::StreamExt;
 use nowaki_core::NowakiCore;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
 /// Pages requested from the temporary prod server at once.
@@ -12,6 +12,8 @@ const PRERENDER_JOBS: usize = 8;
 
 /// Static site generation: build → start a temporary prod server → render each static route to HTML → write out.
 pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
+    // Checked before building: the build writes dist/, and clearing `out` must never reach it.
+    let clear_out = check_out(&root, &out)?;
     let _plugin_host = crate::plugins::start(&root)?;
     let mut core = NowakiCore::new(root.clone());
     if let Some(host) = &_plugin_host {
@@ -53,18 +55,39 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         .context("failed to start node")?;
 
     let stdout = child.stdout.take().expect("piped stdout");
-    let mut lines = BufReader::new(stdout).lines();
-    let ready = async {
-        while let Some(line) = lines.next_line().await? {
-            if let Some(rest) = line.strip_prefix("NOWAKI_START_READY ") {
-                return rest.trim().parse::<u16>().context("failed to parse port");
+    let ready = async move {
+        let mut reader = BufReader::new(stdout);
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            if reader.read_until(b'\n', &mut line).await? == 0 {
+                return Err(anyhow!("prod server exited without reporting READY"));
             }
+            let text = String::from_utf8_lossy(&line);
+            if let Some(rest) = text.trim_end().strip_prefix("NOWAKI_START_READY ") {
+                let port = rest.trim().parse::<u16>().context("failed to parse port")?;
+                return Ok((port, reader));
+            }
+            print!("{text}"); // the app's own logs
         }
-        Err(anyhow!("prod server exited without reporting READY"))
     };
     // Both are Node processes that only read dist/; starting them together hides one Node startup.
-    let (port, dynamic_pages) = tokio::join!(ready, static_paths(&root));
-    let port = port?;
+    let (ready, dynamic_pages) = tokio::join!(ready, static_paths(&root));
+    let (port, mut server_out) = ready?;
+    // Keep draining the server's stdout for the whole run: Node writes to a pipe synchronously
+    // on Linux, so once app logs fill it (~64 KiB) the renderer would block and every request
+    // would hang. (stderr is inherited, so it's never a pipe of ours.)
+    let mut drain = tokio::spawn(async move {
+        let mut buf = vec![0u8; 16 * 1024];
+        let mut stdout = tokio::io::stdout();
+        let mut forward = true;
+        // Read to the end even if our own stdout goes away: the reading is what matters.
+        while let Ok(n @ 1..) = server_out.read(&mut buf).await {
+            if forward {
+                forward = stdout.write_all(&buf[..n]).await.is_ok();
+            }
+        }
+    });
 
     let mut pages: Vec<(String, PathBuf)> =
         nowaki_core::routes::enumerate_static_prerender_urls(&root.join("dist/server/routes"))?
@@ -86,7 +109,7 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
     // Output under dist/ (the static adapter) is ours to replace; a user-chosen `--out` is not.
-    if out.starts_with(root.join("dist")) {
+    if clear_out {
         nowaki_core::build::clear_dir(&out)?;
     }
     std::fs::create_dir_all(&out)?;
@@ -215,9 +238,78 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         ),
     )?;
 
+    // Closing stdin ends the server (exit-with-parent.mjs); its last logs then reach EOF here.
+    // Killed on drop if it doesn't exit in time.
+    let grace = std::time::Duration::from_secs(5);
+    drop(child.stdin.take());
+    let _ = tokio::time::timeout(grace, child.wait()).await;
+    if tokio::time::timeout(grace, &mut drain).await.is_err() {
+        drain.abort();
+    }
     drop(child);
     println!("[nowaki] prerender done: {count} pages → {}", out.display());
     Ok(())
+}
+
+/// Refuses an `--out` that is, contains, or sits inside a part of the build it renders from
+/// (`dist/`, `dist/client`, `dist/server`, `dist/public`): clearing or writing it would delete the
+/// build mid-render. Returns whether `out` is a strict subdirectory of `dist/` of our own (like the
+/// default `dist/static`), which is cleared before writing.
+fn check_out(root: &Path, out: &Path) -> Result<bool> {
+    let dist = normalize(&root.join("dist"));
+    let out = normalize(out);
+    if dist.starts_with(&out) {
+        return Err(anyhow!(
+            "--out {} is or contains the build directory {}; prerender reads the build from there. Choose another directory, such as dist/static",
+            out.display(),
+            dist.display()
+        ));
+    }
+    for part in ["client", "server", "public"] {
+        if out.starts_with(dist.join(part)) {
+            return Err(anyhow!(
+                "--out {} is inside the build ({}); choose another directory, such as dist/static",
+                out.display(),
+                dist.join(part).display()
+            ));
+        }
+    }
+    Ok(out.starts_with(&dist))
+}
+
+/// `p` without `.` / `..` segments, resolved through symlinks for the part that exists, so
+/// `dist/`, `./dist` and `x/../dist` compare equal.
+fn normalize(p: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut lexical = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                lexical.pop();
+            }
+            other => lexical.push(other),
+        }
+    }
+    // Canonicalize the longest existing prefix, then re-append the rest.
+    let mut rest = Vec::new();
+    let mut base = lexical.clone();
+    loop {
+        if let Ok(real) = dunce::canonicalize(&base) {
+            let mut out = real;
+            for part in rest.iter().rev() {
+                out.push(part);
+            }
+            return out;
+        }
+        match (base.file_name().map(|n| n.to_os_string()), base.parent()) {
+            (Some(name), Some(parent)) => {
+                rest.push(name);
+                base = parent.to_path_buf();
+            }
+            _ => return lexical,
+        }
+    }
 }
 
 /// Runs the runtime's static-paths.mjs, which evaluates `export const staticPaths` in Node
@@ -300,4 +392,33 @@ fn copy_dir(from: &Path, to: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn out_may_not_be_or_contain_the_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("dist/server")).unwrap();
+        for bad in [
+            "dist",
+            "dist/",
+            "./dist",
+            "dist/static/..",
+            ".",
+            "dist/server",
+            "dist/client/x",
+            "dist/public",
+        ] {
+            assert!(check_out(&root, &root.join(bad)).is_err(), "{bad}");
+        }
+        assert!(check_out(&root, &root.join("..")).is_err());
+        assert!(check_out(&root, &root.join("dist/static")).unwrap());
+        assert!(check_out(&root, &root.join("./dist/site")).unwrap());
+        assert!(!check_out(&root, &root.join("public-site")).unwrap());
+        assert!(!check_out(&root, &root.join("distro")).unwrap());
+    }
 }

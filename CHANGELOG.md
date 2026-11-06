@@ -73,6 +73,32 @@ milestone's worth of work; the codename is noted per entry.
 - Dev SSR now picks up edits to the app's plain `.js` / `.mjs` modules (such as
   `lib/msg.js`); they were served stale until a restart. Files in
   `node_modules` and outside the app root still load once (#150).
+### Fixed
+- `?image` applies the EXIF orientation: a portrait phone photo (stored
+  landscape with Orientation 6) is emitted upright, with width and height
+  swapped to match, in build, dev, and the header-only size read. Image asset
+  queries (`?w=`, `?format=`) apply it too. (#150)
+- Google CJK fonts no longer preload every `unicode-range` slice on every page
+  (121 preloads / 3.1 MB for Noto Sans JP). The numbered slices, which carry
+  no subset name, are preloaded only when one covers basic Latin; the
+  `@font-face` rules stay, so the browser fetches the slices a page uses.
+  (#150)
+- MDX footnote ids keep each label distinct: they are built like a Markdown
+  entry's (lowercased, non-URL-safe bytes percent-encoded) instead of turning
+  every non-ASCII character into `-`, so `[^あ]` and `[^い]` no longer share
+  `fn--`. (#150)
+- A content entry's `headings` ids match the HTML anchors for multi-line
+  headings (a setext heading over two lines, or one with a hard break): the
+  text is taken the way comrak anchorizes it, with a break as a space. MDX
+  `headings` ids now agree with Markdown's for such headings too. (#150)
+- `nowaki prerender --out dist` (or any `--out` that is, contains, or is
+  inside `dist/client`, `dist/server`, or `dist/public`) is refused before
+  building, instead of deleting the build it renders from. Paths like `dist/`
+  and `./dist` are normalized first. (#150)
+- Prerender keeps reading the temporary server's stdout for the whole run, and
+  passes the app's logs through. It used to stop at READY, so on Linux (where
+  Node writes to pipes synchronously) an app that logged more than ~64 KiB
+  hung every pending render. (#150)
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 
