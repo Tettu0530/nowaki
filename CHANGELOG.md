@@ -10,11 +10,168 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-11-06 · "Mistral": content sites
+
+Packages: `nowaki` / `nowaki-core` 0.17.0 (crates.io, npm), `@nowaki-dev/runtime`
+0.16.0, `create-nowaki` / `create-nowaki-app` 0.18.0. New apps start on Preact 11.
+
+Content sites: typed content collections in Markdown and MDX, build-time code
+highlighting, responsive images (AVIF), SEO metadata with a generated sitemap,
+self-hosted fonts, `public/`, file routes, page scripts, and `<html>` attributes.
+A static Astro site moves over with the migration guide.
+
 ### Added
-- **A migration guide from Astro**
-  ([docs/migrate-from-astro.md](docs/migrate-from-astro.md)). It was written
-  from porting a real portfolio site, whose static output matched the Astro
-  build. The port turned up the fixes listed under Fixed.
+- **Content collections** (v0.17). Each directory under `content/` is a
+  collection, declared in `content/config.ts` with
+  `defineCollection({ schema })`. Any Standard Schema library works.
+  - Entries are Markdown files with YAML frontmatter, or `.json` / `.yaml`
+    data files (`type: "data"`).
+  - Loaders and `staticPaths` read them with `getCollection(name, filter?)`
+    and `getEntry(name, slug)` from `@nowaki-dev/runtime/content`.
+  - **Markdown is rendered at build time, in Rust** (comrak): GFM tables,
+    task lists, strikethrough, footnotes, autolinks. Every heading gets an
+    anchor id, and `headings` lists them for a table of contents.
+  - Frontmatter is checked against the schema when the app is built and
+    when the server starts. An invalid entry fails the build, listing each
+    problem as `content/blog/x.md: title: …`. In `nowaki dev`, a change
+    under `content/` re-renders on the next request, and errors show in the
+    error overlay instead of stopping the server.
+  - Typegen adds the collections to `.nowaki/types.d.ts`, so entries are
+    typed by their schema's output.
+  - Works on `nowaki start`, the node / bun / deno / vercel adapters,
+    `nowaki prerender` (`staticPaths` can call `getCollection`), and
+    Cloudflare, where the content is inlined into the worker.
+  - `examples/hello` has a `docs` collection with `/docs` and
+    `/docs/[slug]`.
+
+  Images in Markdown, MDX, and TOML frontmatter come later in v0.17.
+- **Code highlighting in Markdown, at build time.** Fenced code blocks with
+  a language (` ```tsx `) are highlighted in Rust with syntect when the
+  content is built. The colors are inline styles, so no client JS or theme
+  CSS is needed, and an enforced CSP allows them.
+  - Syntaxes come from two-face (bat's set), which adds TypeScript / TSX,
+    Vue, Svelte, TOML, and more to syntect's defaults.
+  - The theme is `InspiredGitHub` (light). A theme setting is a follow-up.
+  - A block without a language, or with an unknown one, stays plain
+    escaped text.
+  - The regexes are pure Rust (no Oniguruma C library). The `nowaki`
+    binary grows by about 4.8 MB with the syntax and theme data.
+- **`public/`** (v0.17). Files in `public/` are served as-is at their own
+  path: `public/robots.txt` → `/robots.txt`, `public/fonts/a.woff2` →
+  `/fonts/a.woff2`. There is no transform: a `.css` or `.ts` there is sent as
+  that file.
+  - `nowaki dev` reads `public/` directly, so new files work without a
+    restart. `nowaki build` copies it to `dist/public/`.
+  - Served by `nowaki start` and the node / bun / deno adapters, with
+    `cache-control: public, no-cache` and an ETag (304 when unchanged), since
+    the names aren't hashed.
+  - The Vercel and Cloudflare adapters and the static output serve them as
+    static files. On Cloudflare the Assets directory is now
+    `dist/worker/assets`, with `dist/client` under `_nowaki/`. A `public/_headers`
+    is placed ahead of the generated rules in the static output's `_headers`.
+  - A public file wins over a route at the same path. Dotfiles and
+    dot-directories are left out, except `.well-known/`. A file under
+    `public/_nowaki/` or `public/__nowaki/` is a build error.
+- **Attributes on `<html>` and `<body>`** (v0.17). A route or layout can
+  `export const htmlAttrs` / `bodyAttrs`, and `meta()` can return them too:
+  `export const htmlAttrs = { "data-theme": "paper" }`.
+  - Layouts apply first (root to leaf), then the route, then `meta()`. A later
+    value wins, `false` / `null` removes one set earlier, and `class` values
+    are joined. `true` renders a bare attribute.
+  - Values are escaped. Event-handler attributes (`on*`) are ignored.
+  - `export const lang` still sets `lang`, and `htmlAttrs.lang` is used when
+    there is none.
+  - The SPA router swaps these attributes on client navigation. It changes
+    only the ones the server set (listed in `data-nowaki-attrs`), so
+    attributes that client code added stay.
+- **File routes** (v0.17). A route whose last segment has an extension returns
+  a file instead of a page: `routes/feed.xml.ts` → `/feed.xml`, and
+  `routes/og/[card].png.ts` → `/og/intro.png` (a param followed by a fixed
+  extension).
+  - Like an API route, it exports `GET` (or a default handler). A returned
+    string or `Uint8Array` is the body, with the Content-Type of the extension.
+    A `Response` is sent as it is, and objects are JSON.
+  - `nowaki build --adapter static` writes file routes to their own path,
+    binary included. Static ones are always written. Dynamic ones are written
+    from `export const staticPaths`. `export const prerender = false` skips
+    one.
+  - File routes get no typegen entry, page budget, or route CSS. The SPA
+    router leaves links that end in a file name (`/feed.xml`, `/robots.txt`)
+    to the browser.
+  - A page file's name can't end in a dot followed by letters or digits
+    (`v1.2.tsx`); name such a page `v1.2/index.tsx` instead.
+- **Page scripts** (v0.17). A route or layout can ship plain browser modules
+  with no island, like Astro's `<script>`:
+  `export const scripts = ["../scripts/hero.ts"]`.
+  - Each listed module is bundled like an island, npm imports included, and
+    loaded as `<script type="module">`, with preloads for its chunks. The
+    module never runs on the server.
+  - The list is read at build time, so it must be an array of string literals
+    (relative paths or package names). An unreadable list or a missing module
+    fails the build.
+  - Layouts' scripts come first, and duplicates load once. Scripts count in
+    the route's first-load JS and `budget`.
+  - On client navigation the SPA router loads the new page's scripts and then
+    dispatches `nowaki:page-load` on `document`. A module runs once, so a
+    script that sets up the DOM should also listen for that event.
+- **`<Image>` and `?image` imports** (v0.17).
+  `import hero from "./hero.jpg?image"` gives the image's size and generated
+  variants. `<Image src={hero} alt="…" />` from `@nowaki-dev/runtime/image`
+  renders a `<picture>` with them.
+  - Variants: AVIF, then the original format (JPEG / PNG / WebP) as the
+    fallback. Widths are 640, 960, 1280, and 1920 below the original, plus the
+    original (at most 2560); nothing is upscaled.
+    `?w=400,800&image` picks the widths, and `q=` the AVIF quality (default
+    60).
+  - `width` / `height` come from the file, so there is no layout shift.
+    `loading="lazy"` and `decoding="async"` are the defaults, and `sizes`
+    defaults to the rendered width.
+  - AVIF is encoded in pure Rust (ravif / rav1e without asm), so the release
+    builds stay free of C codecs. Lossy WebP isn't offered, since it would
+    need libwebp.
+  - Every variant is cached in `node_modules/.cache/nowaki/images`, so a
+    rebuild or a dev reload doesn't encode again. In dev, variants are encoded
+    on first request at `/__nowaki/image`.
+  - The image codecs are optimized in debug builds too
+    (`[profile.dev.package]`), since unoptimized AVIF takes tens of seconds
+    per image.
+- **Local images in Markdown** (v0.17). `![alt](./hero.jpg "title")` in a
+  content entry becomes the same `<picture>`, resolved relative to the entry.
+  A missing file fails the build. Root-relative (`/logo.svg`, from `public/`)
+  and remote URLs stay as written.
+- **SEO and metadata** (v0.17).
+  - `site` in nowaki.config (or `NOWAKI_SITE`, which wins) is the site's URL.
+    The build writes it to `dist/server/site.json`, so the adapters and the
+    edge have it too. Loaders, `meta()`, and file routes read it as
+    `ctx.site`.
+  - A typed `meta` writes the head tags: `description`, `canonical` (`true`
+    for this page), `robots`, `openGraph`, `twitter`, and `jsonLd`. Use
+    `export const meta = {...}`, or a `meta()` function of the loader data.
+    - Relative URLs resolve against the site, and Open Graph / Twitter fall
+      back to the page's title and description.
+    - JSON-LD can't close its `<script>`.
+    - A layout's `meta` object sets defaults for the pages under it;
+      `openGraph` and `twitter` merge one level deep.
+  - With a site, `sitemap.xml` (every page, including dynamic ones from
+    `staticPaths`) and `robots.txt` are generated, unless a route or a
+    `public/` file provides them. The static output writes both.
+    - `export const sitemap = false` leaves a page out, and so does a static
+      `meta.robots` of noindex.
+- **MDX** (v0.17). `.mdx` files are pages (`routes/guide.mdx`) and content
+  entries (`content/docs/x.mdx`): Markdown with JSX, `{expressions}`, and
+  `import` / `export`.
+  - They are parsed in Rust (markdown-rs: CommonMark, GFM, MDX) and compiled
+    to TSX before the usual transform. Imported components and islands work as
+    in TSX, in dev, the builds, and every adapter. No JavaScript runs to
+    compile them.
+  - Fenced code is highlighted like Markdown, local images go through
+    `?image` / `<Image>`, and heading ids match Markdown's. Each module exports
+    `headings`.
+  - A content entry's frontmatter is validated like a Markdown entry's.
+    `entry.render()` returns `{ Content, headings }`; render `<Content />`
+    where a Markdown entry uses `html`.
+  - YAML frontmatter in an `.mdx` page is ignored; pages use `export const`
+    (`title`, `meta`, …).
 - **Self-hosted fonts** (v0.17). `fonts` in nowaki.config, for example
   `{ family: "Inter", provider: "google", weights: [400, 700], subsets: ["latin"] }`
   or `{ family: "Brand", src: "./fonts/brand.ttf" }`, is built at build time.
@@ -34,23 +191,44 @@ milestone's worth of work; the codename is noted per entry.
     upright faces. `preload: false` turns the preloads off for a family.
   - In dev, fonts build in the background at startup and are served at
     `/__nowaki/fonts/`.
-- **MDX** (v0.17). `.mdx` files are pages (`routes/guide.mdx`) and content
-  entries (`content/docs/x.mdx`): Markdown with JSX, `{expressions}`, and
-  `import` / `export`.
-  - They are parsed in Rust (markdown-rs: CommonMark, GFM, MDX) and compiled
-    to TSX before the usual transform. Imported components and islands work as
-    in TSX, in dev, the builds, and every adapter. No JavaScript runs to
-    compile them.
-  - Fenced code is highlighted like Markdown, local images go through
-    `?image` / `<Image>`, and heading ids match Markdown's. Each module exports
-    `headings`.
-  - A content entry's frontmatter is validated like a Markdown entry's.
-    `entry.render()` returns `{ Content, headings }`; render `<Content />`
-    where a Markdown entry uses `html`.
-  - YAML frontmatter in an `.mdx` page is ignored; pages use `export const`
-    (`title`, `meta`, …).
+- **A migration guide from Astro**
+  ([docs/migrate-from-astro.md](docs/migrate-from-astro.md)). It was written
+  from porting a real portfolio site, whose static output matched the Astro
+  build. The port turned up the fixes listed under Fixed.
 
 ### Fixed
+- These came up while porting an Astro site.
+  - The server build compiles every app module that routes, islands, and
+    actions import, wherever it lives (`data/`, `sections/`, …). Before, only
+    the conventional folders were compiled. A page importing `../data/x.ts`
+    built, then failed at prerender with `ERR_MODULE_NOT_FOUND`.
+  - CSS `@import` is inlined (relative paths and packages, with
+    `@media` / `@layer` / `@supports` conditions). Before, it was emitted as
+    written and resolved against the served stylesheet's URL. Remote and
+    root-relative imports stay as imports.
+  - A layout's `export const head` goes into every page under it. Before, only
+    the route's was used.
+  - Fonts:
+    - A weight range (`weight: "100 900"`, for variable fonts) gave a file name
+      with a space and an unquoted `url()` the browser dropped. Font URLs are
+      now quoted.
+    - A family whose metrics can't be read (woff / woff2) no longer names a
+      fallback face that doesn't exist.
+  - `nowaki dev` adds the islands runtime, and with it the SPA router, only to
+    pages with islands, as production does. Before, links on island-free pages
+    were client-side navigations in dev and full loads in production.
+  - Prerendering fails the build when a page returns a server error. Before,
+    it printed "skipped" and left the page out of the static output.
+- Production errors behind a custom `_500` page are logged. Before, an app
+  with `routes/_500.tsx` rendered its error page and logged nothing, because
+  only the built-in error page logged.
+- The CI performance gate built head's Rust into base's target dir. Both had
+  the same crate versions, so Cargo reused base's binary, and Rust changes were
+  never measured (runtime changes were). Each side now has its own target dir,
+  and the job fails if the two binaries match while `crates/` changed.
+- Typed meta: `openGraph.image.type` (`og:image:type`, defaulting from the
+  image's extension) and `twitter:image:alt` (defaulting to the Open Graph
+  image's `alt`).
 - **Security:** a shared Jetstream refresh render (one render per `publish`,
   #114) was handed to every connection with the same island and state, without
   checking that connection's own signature. A client that knew a room id could
@@ -138,7 +316,9 @@ milestone's worth of work; the codename is noted per entry.
   JS hub): the old ones' rooms and topics go, their queued events and
   refreshes are dropped, and a render still in flight for the old page is
   discarded, even when the new page reuses its nid (a Router Cache revisit).
-  A page without live islands closes the socket.
+  A page without live islands closes the socket. Patches and errors carry the
+  server's count of replacing joins, and live.js drops one sent for the previous
+  page (a click just before navigating could otherwise land on the new page).
 - Node children no longer outlive a killed `nowaki`. That covers the dev and
   production sidecars, the prerender server, and the plugin host. When
   `nowaki` was stopped with SIGKILL (or crashed), it couldn't stop them, and
@@ -210,144 +390,6 @@ milestone's worth of work; the codename is noted per entry.
   about 150 ms to compile) load only on a cache miss, so a rebuild or a dev
   reload of a docs site doesn't pay for them again. On the example app a
   rebuild goes from about 0.5 s to 0.34 s.
-- **`<Image>` and `?image` imports** (v0.17).
-  `import hero from "./hero.jpg?image"` gives the image's size and generated
-  variants. `<Image src={hero} alt="…" />` from `@nowaki-dev/runtime/image`
-  renders a `<picture>` with them.
-  - Variants: AVIF, then the original format (JPEG / PNG / WebP) as the
-    fallback. Widths are 640, 960, 1280, and 1920 below the original, plus the
-    original (at most 2560); nothing is upscaled.
-    `?w=400,800&image` picks the widths, and `q=` the AVIF quality (default
-    60).
-  - `width` / `height` come from the file, so there is no layout shift.
-    `loading="lazy"` and `decoding="async"` are the defaults, and `sizes`
-    defaults to the rendered width.
-  - AVIF is encoded in pure Rust (ravif / rav1e without asm), so the release
-    builds stay free of C codecs. Lossy WebP isn't offered, since it would
-    need libwebp.
-  - Every variant is cached in `node_modules/.cache/nowaki/images`, so a
-    rebuild or a dev reload doesn't encode again. In dev, variants are encoded
-    on first request at `/__nowaki/image`.
-  - The image codecs are optimized in debug builds too
-    (`[profile.dev.package]`), since unoptimized AVIF takes tens of seconds
-    per image.
-- **Local images in Markdown** (v0.17). `![alt](./hero.jpg "title")` in a
-  content entry becomes the same `<picture>`, resolved relative to the entry.
-  A missing file fails the build. Root-relative (`/logo.svg`, from `public/`)
-  and remote URLs stay as written.
-- **SEO and metadata** (v0.17).
-  - `site` in nowaki.config (or `NOWAKI_SITE`, which wins) is the site's URL.
-    The build writes it to `dist/server/site.json`, so the adapters and the
-    edge have it too. Loaders, `meta()`, and file routes read it as
-    `ctx.site`.
-  - A typed `meta` writes the head tags: `description`, `canonical` (`true`
-    for this page), `robots`, `openGraph`, `twitter`, and `jsonLd`. Use
-    `export const meta = {...}`, or a `meta()` function of the loader data.
-    - Relative URLs resolve against the site, and Open Graph / Twitter fall
-      back to the page's title and description.
-    - JSON-LD can't close its `<script>`.
-    - A layout's `meta` object sets defaults for the pages under it;
-      `openGraph` and `twitter` merge one level deep.
-  - With a site, `sitemap.xml` (every page, including dynamic ones from
-    `staticPaths`) and `robots.txt` are generated, unless a route or a
-    `public/` file provides them. The static output writes both.
-    - `export const sitemap = false` leaves a page out, and so does a static
-      `meta.robots` of noindex.
-- **Page scripts** (v0.17). A route or layout can ship plain browser modules
-  with no island, like Astro's `<script>`:
-  `export const scripts = ["../scripts/hero.ts"]`.
-  - Each listed module is bundled like an island, npm imports included, and
-    loaded as `<script type="module">`, with preloads for its chunks. The
-    module never runs on the server.
-  - The list is read at build time, so it must be an array of string literals
-    (relative paths or package names). An unreadable list or a missing module
-    fails the build.
-  - Layouts' scripts come first, and duplicates load once. Scripts count in
-    the route's first-load JS and `budget`.
-  - On client navigation the SPA router loads the new page's scripts and then
-    dispatches `nowaki:page-load` on `document`. A module runs once, so a
-    script that sets up the DOM should also listen for that event.
-- **File routes** (v0.17). A route whose last segment has an extension returns
-  a file instead of a page: `routes/feed.xml.ts` → `/feed.xml`, and
-  `routes/og/[card].png.ts` → `/og/intro.png` (a param followed by a fixed
-  extension).
-  - Like an API route, it exports `GET` (or a default handler). A returned
-    string or `Uint8Array` is the body, with the Content-Type of the extension.
-    A `Response` is sent as it is, and objects are JSON.
-  - `nowaki build --adapter static` writes file routes to their own path,
-    binary included. Static ones are always written. Dynamic ones are written
-    from `export const staticPaths`. `export const prerender = false` skips
-    one.
-  - File routes get no typegen entry, page budget, or route CSS. The SPA
-    router leaves links that end in a file name (`/feed.xml`, `/robots.txt`)
-    to the browser.
-  - A page file's name can't end in a dot followed by letters or digits
-    (`v1.2.tsx`); name such a page `v1.2/index.tsx` instead.
-- **Attributes on `<html>` and `<body>`** (v0.17). A route or layout can
-  `export const htmlAttrs` / `bodyAttrs`, and `meta()` can return them too:
-  `export const htmlAttrs = { "data-theme": "paper" }`.
-  - Layouts apply first (root to leaf), then the route, then `meta()`. A later
-    value wins, `false` / `null` removes one set earlier, and `class` values
-    are joined. `true` renders a bare attribute.
-  - Values are escaped. Event-handler attributes (`on*`) are ignored.
-  - `export const lang` still sets `lang`, and `htmlAttrs.lang` is used when
-    there is none.
-  - The SPA router swaps these attributes on client navigation. It changes
-    only the ones the server set (listed in `data-nowaki-attrs`), so
-    attributes that client code added stay.
-- **`public/`** (v0.17). Files in `public/` are served as-is at their own
-  path: `public/robots.txt` → `/robots.txt`, `public/fonts/a.woff2` →
-  `/fonts/a.woff2`. There is no transform: a `.css` or `.ts` there is sent as
-  that file.
-  - `nowaki dev` reads `public/` directly, so new files work without a
-    restart. `nowaki build` copies it to `dist/public/`.
-  - Served by `nowaki start` and the node / bun / deno adapters, with
-    `cache-control: public, no-cache` and an ETag (304 when unchanged), since
-    the names aren't hashed.
-  - The Vercel and Cloudflare adapters and the static output serve them as
-    static files. On Cloudflare the Assets directory is now
-    `dist/worker/assets`, with `dist/client` under `_nowaki/`. A `public/_headers`
-    is placed ahead of the generated rules in the static output's `_headers`.
-  - A public file wins over a route at the same path. Dotfiles and
-    dot-directories are left out, except `.well-known/`. A file under
-    `public/_nowaki/` or `public/__nowaki/` is a build error.
-- **Content collections** (v0.17). Each directory under `content/` is a
-  collection, declared in `content/config.ts` with
-  `defineCollection({ schema })`. Any Standard Schema library works.
-  - Entries are Markdown files with YAML frontmatter, or `.json` / `.yaml`
-    data files (`type: "data"`).
-  - Loaders and `staticPaths` read them with `getCollection(name, filter?)`
-    and `getEntry(name, slug)` from `@nowaki-dev/runtime/content`.
-  - **Markdown is rendered at build time, in Rust** (comrak): GFM tables,
-    task lists, strikethrough, footnotes, autolinks. Every heading gets an
-    anchor id, and `headings` lists them for a table of contents.
-  - Frontmatter is checked against the schema when the app is built and
-    when the server starts. An invalid entry fails the build, listing each
-    problem as `content/blog/x.md: title: …`. In `nowaki dev`, a change
-    under `content/` re-renders on the next request, and errors show in the
-    error overlay instead of stopping the server.
-  - Typegen adds the collections to `.nowaki/types.d.ts`, so entries are
-    typed by their schema's output.
-  - Works on `nowaki start`, the node / bun / deno / vercel adapters,
-    `nowaki prerender` (`staticPaths` can call `getCollection`), and
-    Cloudflare, where the content is inlined into the worker.
-  - `examples/hello` has a `docs` collection with `/docs` and
-    `/docs/[slug]`.
-
-  Images in Markdown, MDX, and TOML frontmatter come later in v0.17.
-- **Code highlighting in Markdown, at build time.** Fenced code blocks with
-  a language (` ```tsx `) are highlighted in Rust with syntect when the
-  content is built. The colors are inline styles, so no client JS or theme
-  CSS is needed, and an enforced CSP allows them.
-  - Syntaxes come from two-face (bat's set), which adds TypeScript / TSX,
-    Vue, Svelte, TOML, and more to syntect's defaults.
-  - The theme is `InspiredGitHub` (light). A theme setting is a follow-up.
-  - A block without a language, or with an unknown one, stays plain
-    escaped text.
-  - The regexes are pure Rust (no Oniguruma C library). The `nowaki`
-    binary grows by about 4.8 MB with the syntax and theme data.
-
-### Changed
 - **Less client JS on every page with an island.**
   - **No `preact/jsx-runtime` chunk.** Client builds resolve it to a
     227-byte wrapper around Preact's `createElement` (in
@@ -374,6 +416,47 @@ milestone's worth of work; the codename is noted per entry.
   absolute allowance. An A/A run of the same build on one machine stayed
   within 5%. `node benchmarks/ci-perf.mjs --base <dir> --head <dir>` runs it
   locally.
+
+## [0.16.3] — 2026-11-06 · security patch
+
+Packages: `nowaki` / `nowaki-core` 0.16.3 (crates.io, npm), `@nowaki-dev/runtime`
+0.15.3, `create-nowaki` / `create-nowaki-app` 0.17.3. Update both `nowaki` and
+`@nowaki-dev/runtime`: the fixes are split between the binary and the runtime.
+
+These come from a bug hunt on the v0.17 branch; each finding was confirmed by an
+independent check before it was fixed.
+
+### Security
+- **A forged Jetstream signature could receive a shared room refresh.** When a
+  publish refreshed several connections showing the same island and state, only
+  the first connection's signature was checked. Another connection with a forged
+  signature got the room's HTML and a valid signature, and could then send
+  events. An expired signature was refreshed instead of answering `stale`. Now
+  every connection's signature is checked (a verify-only call, no extra render)
+  before it shares the result.
+- **The `nowaki start` ISR cache could store a personal page under the
+  anonymous key.** The key used only the first value of a varied header, and
+  mapped non-ASCII values to empty. A request with `Cookie:` and a second
+  `Cookie: user=…` header was cached as anonymous and served to everyone. Now
+  the key uses every value, and a request whose varied header repeats or isn't
+  visible ASCII skips the cache.
+- **`_middleware` in a dynamic directory never ran.** `routes/[org]/_middleware.ts`
+  (and `_layout`, `loading`, `error` there) didn't apply, so an auth check in
+  it was bypassed. Middleware now matches the request URL against its
+  directory, with `[param]` matching any segment and literal segments compared
+  decoded (`/%61dmin` is still under `routes/admin/`). Layouts and boundaries
+  apply to route files inside their directory.
+  - Behavior change: a page file next to a same-named directory
+    (`routes/admin.tsx` beside `routes/admin/_layout.tsx`) is no longer wrapped
+    by that directory's layout, matching the CSS the build already gave it.
+    Middleware still covers its URL.
+
+### Fixed
+- A state with an `undefined`-valued key or a `Date` no longer fails the
+  Jetstream signature check on the next event.
+- A malformed percent-escape in the path gives 404, and one in a cookie keeps
+  that cookie's raw value, instead of a 500 on every page reading `ctx.cookies`.
+
 ## [0.16.2] — 2026-11-05 · security patch
 
 Packages: `nowaki` / `nowaki-core` 0.16.2 (crates.io, npm), `@nowaki-dev/runtime`
@@ -1125,7 +1208,8 @@ and the runtime at 0.9.0.
 - Published to crates.io (`nowaki-core`, `nowaki`) and npm (`@nowaki-dev/runtime`,
   `create-nowaki`, `create-nowaki-app`).
 
-[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.16.2...HEAD
+[Unreleased]: https://github.com/Tettu0530/nowaki/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.17.0
 [0.16.2]: https://github.com/Tettu0530/nowaki/releases/tag/v0.16.2
 [0.16.1]: https://github.com/Tettu0530/nowaki/releases/tag/v0.16.1
 [0.16.0]: https://github.com/Tettu0530/nowaki/releases/tag/v0.16.0
