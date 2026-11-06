@@ -607,7 +607,7 @@ mod tests {
         let all = collect(dir.path(), &Images::Build(client.clone())).unwrap();
         let html = all["docs"][0].html.clone().unwrap();
         assert!(
-            html.contains("<picture><source type=\"image/avif\" srcset=\"/_nowaki/a b-640."),
+            html.contains("<picture><source type=\"image/avif\" srcset=\"/_nowaki/a_b-640."),
             "{html}"
         );
         assert!(
