@@ -270,14 +270,14 @@ fn build_output_names_are_servable_for_any_source_name() {
             ("assets/logo@2x.svg", svg),
             ("assets/my logo.svg", svg),
             ("assets/.dot.svg", svg),
-            ("assets/ロゴ.svg", svg),
+            ("assets/\u{30ed}\u{30b4}.svg", svg),
             ("assets/server+only.svg", svg),
             ("lib/my util.ts", "export const u = \"u\";\n"),
             ("islands/card+x.module.css", ".card { color: red }\n"),
             ("styles/page@wide.css", "body { margin: 0 }\n"),
             (
                 "islands/Card.ts",
-                "import a from \"../assets/logo@2x.svg\";\nimport b from \"../assets/my logo.svg\";\nimport c from \"../assets/.dot.svg\";\nimport d from \"../assets/ロゴ.svg\";\nimport * as m from \"../lib/my util.ts\";\nimport s from \"./card+x.module.css\";\nexport default function Card() { return s.card + a + b + c + d + m.u; }\n",
+                "import a from \"../assets/logo@2x.svg\";\nimport b from \"../assets/my logo.svg\";\nimport c from \"../assets/.dot.svg\";\nimport d from \"../assets/\u{30ed}\u{30b4}.svg\";\nimport * as m from \"../lib/my util.ts\";\nimport s from \"./card+x.module.css\";\nexport default function Card() { return s.card + a + b + c + d + m.u; }\n",
             ),
             (
                 "routes/index.tsx",

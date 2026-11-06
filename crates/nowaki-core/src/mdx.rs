@@ -410,8 +410,8 @@ fn is_local(url: &str) -> bool {
 }
 
 /// The id part of a footnote's `fn-` / `fnref-` ids, as a Markdown entry (comrak) writes it: the
-/// label lowercased, with bytes outside comrak's URL-safe set percent-encoded (`[^あ]` →
-/// `%E3%81%82`). Distinct labels get distinct ids: `%`, `&` and `'` are encoded too.
+/// label lowercased, with bytes outside comrak's URL-safe set percent-encoded (`[^é]` →
+/// `%C3%A9`). Distinct labels get distinct ids: `%`, `&` and `'` are encoded too.
 fn footnote_id(identifier: &str) -> String {
     let mut out = String::new();
     for b in identifier.to_lowercase().bytes() {
@@ -565,7 +565,7 @@ mod tests {
     #[test]
     fn footnote_ids_are_distinct_for_distinct_labels() {
         let tsx = to_tsx(
-            "A[^あ] B[^い] C[^a.b] D[^a-b] E[^Note] F[^a&b]\n\n[^あ]: one\n\n[^い]: two\n\n[^a.b]: three\n\n[^a-b]: four\n\n[^note]: five\n\n[^a&b]: six\n",
+            "A[^\u{3042}] B[^\u{3044}] C[^a.b] D[^a-b] E[^Note] F[^a&b]\n\n[^\u{3042}]: one\n\n[^\u{3044}]: two\n\n[^a.b]: three\n\n[^a-b]: four\n\n[^note]: five\n\n[^a&b]: six\n",
         )
         .unwrap();
         // The same ids a Markdown entry (comrak) gives these labels.

@@ -84,7 +84,7 @@ milestone's worth of work; the codename is noted per entry.
   (#150)
 - MDX footnote ids keep each label distinct: they are built like a Markdown
   entry's (lowercased, non-URL-safe bytes percent-encoded) instead of turning
-  every non-ASCII character into `-`, so `[^あ]` and `[^い]` no longer share
+  every non-ASCII character into `-`, so `[^é]` and `[^ü]` no longer share
   `fn--`. (#150)
 - A content entry's `headings` ids match the HTML anchors for multi-line
   headings (a setext heading over two lines, or one with a hard break): the
