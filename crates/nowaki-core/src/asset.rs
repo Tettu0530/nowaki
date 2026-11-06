@@ -107,7 +107,8 @@ fn try_optimize(bytes: &[u8], ext: &str, t: &Transform) -> Result<Option<(Vec<u8
     }
     let out_fmt = t.format.unwrap_or(in_fmt);
 
-    let mut img = image::load_from_memory_with_format(bytes, in_fmt.image_format())?;
+    // Upright pixels: the EXIF orientation is applied here, since re-encoding drops it.
+    let mut img = crate::image::decode_oriented(bytes, Some(in_fmt.image_format()))?;
     if t.width.is_some() || t.height.is_some() {
         img = resize(&img, t.width, t.height);
     }

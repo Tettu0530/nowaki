@@ -10,6 +10,12 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Fixed
+- `?image` applies the EXIF orientation: a portrait phone photo (stored
+  landscape with Orientation 6) is emitted upright, with width and height
+  swapped to match, in build, dev, and the header-only size read. Image asset
+  queries (`?w=`, `?format=`) apply it too. (#150)
+
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 
 Packages: `nowaki` / `nowaki-core` 0.17.0 (crates.io, npm), `@nowaki-dev/runtime`
