@@ -46,7 +46,7 @@ async function fetchPage(url) {
   const html = await res.text();
   return {
     doc: new DOMParser().parseFromString(html, "text/html"),
-    finalUrl: res.redirected ? res.url : url.toString(),
+    finalUrl: res.redirected ? res.url : url.href.split("#")[0],
     status: res.status,
   };
 }
@@ -62,7 +62,7 @@ function loadBoundaries() {
 }
 
 function prefetch(url) {
-  const key = url.toString();
+  const key = url.href.split("#")[0];
   if (pageCache.has(key)) return;
   fetchPage(url)
     .then((r) => {
@@ -72,13 +72,13 @@ function prefetch(url) {
 }
 
 async function navigate(url, { push = true } = {}) {
-  const key = url.toString();
+  const key = url.href.split("#")[0];
   const token = ++navToken;
 
   // Immediate Router Cache hit (no loading shown).
   const cached = pageCache.get(key);
   if (cached) {
-    applyDocument(cached, push, token);
+    applyDocument(cached, push, token, url.hash);
     return cached.finalUrl;
   }
 
@@ -104,19 +104,20 @@ async function navigate(url, { push = true } = {}) {
     return;
   }
   if (result.status === 200) pageCache.set(key, result);
-  applyDocument(result, push, token);
+  applyDocument(result, push, token, url.hash);
   return result.finalUrl;
 }
 
 // Apply a cached/fetched document to the live DOM (clones body to keep the cache intact).
-function applyDocument(entry, push, token) {
+// Pages are cached without the #hash, and the link's own goes on the pushed URL.
+function applyDocument(entry, push, token, hash = "") {
   if (token !== undefined && token !== navToken) return;
   const { doc, finalUrl } = entry;
   if (push) scrollPos.set(curKey, window.scrollY);
   document.title = doc.title;
   syncHead(doc);
   document.body.replaceWith(stampNonce(doc.body.cloneNode(true)));
-  if (push) history.pushState({ nowaki: (curKey = newKey()) }, "", finalUrl);
+  if (push) history.pushState({ nowaki: (curKey = newKey()) }, "", finalUrl + hash);
   curDoc = location.pathname + location.search;
   hydrateIslands(document);
   loadPageScripts(doc);
@@ -334,7 +335,7 @@ export function installRouter() {
       return; // leave same-page (hash etc.) to the browser
     }
     e.preventDefault();
-    navigate(url, { push: true }).then((final) => final && window.scrollTo(0, 0));
+    navigate(url, { push: true }).then((final) => final && scrollToHash(url.hash));
   });
 
   const onHover = (e) => {

@@ -16,6 +16,9 @@ milestone's worth of work; the codename is noted per entry.
 - Client router: a same-page `#hash` link, and back/forward between such
   entries, no longer re-fetches and re-renders the page (which reset island
   state). It scrolls to the fragment, or to the position saved for that entry.
+- Client router: a link to `/page#fragment` lands on the element with that id
+  (or `name`) instead of the top of the page. A fragment with no such element
+  still lands at the top.
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 

@@ -244,6 +244,28 @@ try {
     hashFwd.url === "/anchors#three" && hashFwd.keep === "1" && Math.abs(threeTop2) <= 1);
   check("hash-only history moves don't fetch the page", (await anchorFetches()) === fetches0);
 
+  // Fragments on client navigation: /anchors#two lands on #two (an <a name> counts too, and a
+  // fragment with no target lands at the top).
+  await cdp.evalAsync(`window.__nav('/about'); return true;`);
+  await sleep(500);
+  await cdp.evalAsync(`window.__nav('/anchors#two'); return true;`);
+  await sleep(800);
+  const two = await cdp.evalAsync(`return { url: location.pathname + location.hash, y: scrollY };`);
+  const twoTop = await cdp.evalAsync(targetTop("#two"));
+  check(`client navigation to /anchors#two scrolls to #two (${JSON.stringify({ ...two, twoTop })})`,
+    two.url === "/anchors#two" && two.y > 0 && Math.abs(twoTop) <= 1);
+  await cdp.evalAsync(`window.__nav('/about'); return true;`);
+  await sleep(500);
+  await cdp.evalAsync(`window.__nav('/anchors#named'); return true;`);
+  await sleep(800);
+  const namedTop = await cdp.evalAsync(targetTop('a[name="named"]'));
+  check(`client navigation to /anchors#named scrolls to <a name="named"> (${namedTop})`, Math.abs(namedTop) <= 1);
+  await cdp.evalAsync(`window.__nav('/about'); return true;`);
+  await sleep(500);
+  await cdp.evalAsync(`window.__nav('/anchors#missing'); return true;`);
+  await sleep(800);
+  check("client navigation to a missing fragment lands at the top", (await cdp.evalAsync(`return scrollY;`)) === 0);
+
   console.log(`\n${failures === 0 ? "BROWSER ROUTER TEST PASSED" : `BROWSER ROUTER TEST FAILED (${failures})`}`);
 } catch (err) {
   console.error("harness error:", err);
