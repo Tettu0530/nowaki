@@ -293,7 +293,9 @@ fn rewrite_ssr_imports<'a>(
         if spec.ends_with(".module.css") {
             if let Ok(resolution) = resolver.resolve(dir, spec) {
                 let full = resolution.full_path();
-                if let Ok(css) = std::fs::read_to_string(&full) {
+                // `@import`s inlined, as the browser's stylesheet has them (else the map lacks
+                // the imported classes).
+                if let Some(css) = read_css_inlined(resolver, &full) {
                     let id = crate::css::css_scope_id(root, &full);
                     let (_scoped, map) = crate::css::scope_css(&id, &css);
                     let body = format!("export default {}", crate::css::mapping_object(&map));
@@ -331,6 +333,16 @@ fn rewrite_ssr_imports<'a>(
             }
         }
     }
+}
+
+/// A stylesheet with its `@import`s inlined, like `NowakiCore::read_css`.
+fn read_css_inlined(resolver: &Resolver, abs: &Path) -> Option<String> {
+    let css = std::fs::read_to_string(abs).ok()?;
+    if !css.contains("@import") {
+        return Some(css);
+    }
+    let resolve = |dir: &Path, spec: &str| resolver.resolve(dir, spec).ok().map(|r| r.full_path());
+    Some(crate::css::inline_imports(abs, &css, &resolve))
 }
 
 /// The data: module an asset import becomes in dev, for the browser and SSR alike: its URL, or for

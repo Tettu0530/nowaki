@@ -15,6 +15,10 @@ milestone's worth of work; the codename is noted per entry.
   writes, and copies JSON the server imports (`import site from
   "../data/site.json" with { type: "json" }`) into `dist/server`. Before,
   `nowaki start` failed with `ERR_MODULE_NOT_FOUND` where `nowaki dev` worked.
+- A CSS Module that uses `@import` has the same class map in SSR as on the
+  client. Before, SSR (dev and the server build) scoped the file without its
+  imports, so classes from the imported file were `undefined` in the
+  server-rendered HTML.
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 

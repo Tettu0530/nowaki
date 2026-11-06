@@ -530,7 +530,8 @@ fn transform_for_server(
         if spec.ends_with(".module.css") {
             if let Ok(resolution) = core.resolver.resolve(dir, spec) {
                 let full = resolution.full_path();
-                if let Ok(css) = fs::read_to_string(&full) {
+                // `read_css` inlines `@import`s, as the client stylesheet does.
+                if let Ok(css) = core.read_css(&full) {
                     // Scope with the same id as the client so class names match.
                     let id = crate::css::css_scope_id(&core.root, &full);
                     let (_scoped, map) = crate::css::scope_css(&id, &css);
