@@ -367,8 +367,8 @@ fn isr_warm_enabled() -> bool {
 /// Renders every ISR page once in the background right after startup (`NOWAKI_ISR_WARM=0` turns
 /// it off), so the first visitor already gets a cached page from Rust. Each page goes through the
 /// normal request path with no cookies, so it is stored exactly as an anonymous visit would be:
-/// pages that vary on a header are keyed by that header's (empty) value and never serve someone
-/// with a different one. Two at a time, to leave the renderer free for real traffic.
+/// pages that vary on a header are keyed by that header's absence (an anonymous visitor), never
+/// serving someone who sends it. Two at a time, to leave the renderer free for real traffic.
 async fn warm_isr(state: Arc<ProdState>, host: String) {
     use futures_util::StreamExt;
     let started = Instant::now();
