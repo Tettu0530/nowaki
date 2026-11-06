@@ -231,10 +231,10 @@ fn is_streaming(path: &Path, source: &str) -> bool {
         return false;
     };
     program.body.iter().any(|stmt| {
-        let Statement::ExportNamedDeclaration(d) = stmt else {
+        let Statement::ExportDeclaration(d) = stmt else {
             return false;
         };
-        let Some(Declaration::VariableDeclaration(var)) = &d.declaration else {
+        let Declaration::VariableDeclaration(var) = &d.declaration else {
             return false;
         };
         var.declarations.iter().any(|decl| {
@@ -260,10 +260,10 @@ pub fn parse_budget(path: &Path, source: &str) -> Result<Option<f64>> {
     let source_type = crate::transform::source_type_for_path(path);
     let program = crate::transform::parse_program(&allocator, path, source, source_type)?;
     for stmt in &program.body {
-        let Statement::ExportNamedDeclaration(d) = stmt else {
+        let Statement::ExportDeclaration(d) = stmt else {
             continue;
         };
-        let Some(Declaration::VariableDeclaration(var)) = &d.declaration else {
+        let Declaration::VariableDeclaration(var) = &d.declaration else {
             continue;
         };
         for decl in &var.declarations {

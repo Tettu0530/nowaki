@@ -185,7 +185,10 @@ fn unresolved_names(code: &str) -> Vec<String> {
     use oxc::span::SourceType;
     let allocator = Allocator::default();
     let parsed = Parser::new(&allocator, code, SourceType::mjs()).parse();
-    assert!(parsed.errors.is_empty(), "chunk does not parse:\n{code}");
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "chunk does not parse:\n{code}"
+    );
     let semantic = SemanticBuilder::new().build(&parsed.program).semantic;
     let mut names: Vec<String> = semantic
         .scoping()

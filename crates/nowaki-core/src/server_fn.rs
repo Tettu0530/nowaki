@@ -114,13 +114,10 @@ pub fn collect_exports(abs: &Path, source: &str) -> Result<Vec<String>> {
     let mut out: Vec<String> = Vec::new();
     for stmt in &program.body {
         match stmt {
+            Statement::ExportDeclaration(d) => out.extend(decl_bound_names(&d.declaration)),
             Statement::ExportNamedDeclaration(d) => {
-                if let Some(decl) = &d.declaration {
-                    out.extend(decl_bound_names(decl));
-                } else if d.source.is_none() {
-                    for sp in &d.specifiers {
-                        out.push(export_name_str(&sp.exported));
-                    }
+                for sp in &d.specifiers {
+                    out.push(export_name_str(&sp.exported));
                 }
             }
             Statement::ExportDefaultDeclaration(_) => out.push("default".to_string()),
@@ -146,13 +143,13 @@ pub fn unvalidated_exports(abs: &Path, source: &str) -> Result<Vec<String>> {
     let mut out = Vec::new();
     for stmt in &program.body {
         match stmt {
-            Statement::ExportNamedDeclaration(d) => match &d.declaration {
-                Some(Declaration::FunctionDeclaration(f)) if !f.params.is_empty() => {
+            Statement::ExportDeclaration(d) => match &d.declaration {
+                Declaration::FunctionDeclaration(f) if !f.params.is_empty() => {
                     if let Some(id) = &f.id {
                         out.push(id.name.to_string());
                     }
                 }
-                Some(Declaration::VariableDeclaration(v)) => {
+                Declaration::VariableDeclaration(v) => {
                     for decl in &v.declarations {
                         let takes_input = match &decl.init {
                             Some(Expression::CallExpression(c)) => !matches!(
@@ -412,8 +409,10 @@ export async function addTodo(t){}\n\
 export const listTodos = async () => [];\n\
 function helper(){}\n\
 export { helper };\n\
+export { shared } from \"./shared.ts\";\n\
 export default async function(){}\n";
         let names = collect_exports(Path::new("/app/actions/todos.ts"), src).unwrap();
+        assert!(!names.contains(&"shared".to_string()));
         assert!(names.contains(&"addTodo".to_string()));
         assert!(names.contains(&"listTodos".to_string()));
         assert!(names.contains(&"helper".to_string()));

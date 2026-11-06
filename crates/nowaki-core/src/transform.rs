@@ -87,7 +87,7 @@ fn rewrite_imports<'a>(
     for stmt in program.body.iter_mut() {
         let source = match stmt {
             Statement::ImportDeclaration(decl) => Some(&mut decl.source),
-            Statement::ExportNamedDeclaration(decl) => decl.source.as_mut(),
+            Statement::ExportFromDeclaration(decl) => Some(&mut decl.source),
             Statement::ExportAllDeclaration(decl) => Some(&mut decl.source),
             _ => None,
         };
@@ -144,10 +144,10 @@ pub(crate) fn parse_program<'a>(
     source_type: SourceType,
 ) -> Result<Program<'a>> {
     let parsed = Parser::new(allocator, source, source_type).parse();
-    if !parsed.errors.is_empty() {
+    if !parsed.diagnostics.is_empty() {
         return Err(anyhow!(
             "parse error\n{}",
-            render_diagnostics(path, source, &parsed.errors)
+            render_diagnostics(path, source, &parsed.diagnostics)
         ));
     }
     Ok(parsed.program)
@@ -170,10 +170,10 @@ pub(crate) fn run_preact_transform<'a>(
 ) -> Result<Scoping> {
     let ret = Transformer::new(allocator, path, &preact_transform_options())
         .build_with_scoping(scoping, program);
-    if !ret.errors.is_empty() {
+    if !ret.diagnostics.is_empty() {
         return Err(anyhow!(
             "transform error\n{}",
-            render_diagnostics(path, source, &ret.errors)
+            render_diagnostics(path, source, &ret.diagnostics)
         ));
     }
     Ok(ret.scoping)
@@ -270,7 +270,7 @@ fn rewrite_ssr_imports<'a>(
     for stmt in program.body.iter_mut() {
         let source = match stmt {
             Statement::ImportDeclaration(decl) => Some(&mut decl.source),
-            Statement::ExportNamedDeclaration(decl) => decl.source.as_mut(),
+            Statement::ExportFromDeclaration(decl) => Some(&mut decl.source),
             Statement::ExportAllDeclaration(decl) => Some(&mut decl.source),
             _ => None,
         };
@@ -368,8 +368,8 @@ mod tests {
         let source = "export default () => <;\n";
         let allocator = Allocator::default();
         let parsed = Parser::new(&allocator, source, SourceType::tsx()).parse();
-        assert!(!parsed.errors.is_empty());
-        let out = render_diagnostics(path, source, &parsed.errors);
+        assert!(!parsed.diagnostics.is_empty());
+        let out = render_diagnostics(path, source, &parsed.diagnostics);
         assert!(
             out.contains("Broken.tsx") || out.contains('╭') || out.contains('|'),
             "expected a code frame, got: {out}"

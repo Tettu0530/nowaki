@@ -368,24 +368,24 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
                     items,
                 });
             }
+            Statement::ExportDeclaration(d) => {
+                for name in decl_bound_names(&d.declaration) {
+                    meta.exports.push((name.clone(), name));
+                }
+            }
+            Statement::ExportFromDeclaration(d) => {
+                // `export {..} from` re-export unsupported. Still a dependency: the graph
+                // walks (sharing counts, budgets) must see it.
+                meta.fallback = true;
+                if let Some(abs_src) = resolve(core, dir, d.source.value.as_str()) {
+                    meta.deps.push((abs_src, d.source.value.to_string()));
+                }
+            }
             Statement::ExportNamedDeclaration(d) => {
-                if let Some(decl) = &d.declaration {
-                    for name in decl_bound_names(decl) {
-                        meta.exports.push((name.clone(), name));
-                    }
-                } else if let Some(src) = &d.source {
-                    // `export {..} from` re-export unsupported. Still a dependency: the graph
-                    // walks (sharing counts, budgets) must see it.
-                    meta.fallback = true;
-                    if let Some(abs_src) = resolve(core, dir, src.value.as_str()) {
-                        meta.deps.push((abs_src, src.value.to_string()));
-                    }
-                } else {
-                    for sp in &d.specifiers {
-                        let local = export_name_str(&sp.local);
-                        let exported = export_name_str(&sp.exported);
-                        meta.exports.push((exported, local));
-                    }
+                for sp in &d.specifiers {
+                    let local = export_name_str(&sp.local);
+                    let exported = export_name_str(&sp.exported);
+                    meta.exports.push((exported, local));
                 }
             }
             Statement::ExportDefaultDeclaration(d) => match &d.declaration {
@@ -478,17 +478,15 @@ fn render_body(core: &NowakiCore, abs: &Path, idx: usize, wiring: &ImportWiring)
     }
 
     // Strip imports and turn exports into bare declarations.
-    let mut new_body = oxc::allocator::Vec::new_in(&allocator);
+    let mut new_body = oxc::allocator::Vec::new_in(&&allocator);
     for stmt in program.body.drain(..) {
         match stmt {
             Statement::ImportDeclaration(_) => { /* removed */ }
-            Statement::ExportNamedDeclaration(d) => {
-                let d = d.unbox();
-                if let Some(decl) = d.declaration {
-                    new_body.push(Statement::from(decl));
-                }
-                // Specifiers only (`export {a}`): the binding already exists, so drop it
+            Statement::ExportDeclaration(d) => {
+                new_body.push(Statement::from(d.unbox().declaration))
             }
+            // Specifiers only (`export {a}`): the binding already exists, so drop it
+            Statement::ExportNamedDeclaration(_) | Statement::ExportFromDeclaration(_) => {}
             Statement::ExportDefaultDeclaration(d) => {
                 let d = d.unbox();
                 match d.declaration {
