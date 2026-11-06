@@ -245,7 +245,29 @@ const event = (nid = "L0", handler = "inc") => JSON.stringify({ type: "event", n
   c.onClose();
 }
 
-check("origin: absent → allowed",liveOriginOk(undefined, "a.test") && liveOriginOk(null, null));
+{
+  // The same page again (Router Cache revisit: same nid, same island): the old page's queued
+  // events are dropped and its in-flight render isn't patched in, so only the new page's run.
+  const { render, calls } = counterRender({ delay: (n) => (n === 1 ? 30 : 0) });
+  const hub = createLiveHub({ render });
+  const s = fakeSocket();
+  const c = hub.open(s);
+  c.onText(join(0, "L0"));
+  c.onText(event("L0"));
+  c.onText(event("L0"));
+  c.onText(event("L0"));
+  await tick(5);
+  c.onText(JSON.stringify({ type: "join", replace: true, islands: [{ nid: "L0", name: "LiveCounter", state: { count: 0 }, sig: "sig:0" }] }));
+  await tick(50);
+  check("replacing join (same nid): the old page's queued events don't run", calls.length === 1);
+  check("replacing join (same nid): the old page's in-flight render isn't patched in", s.of("patch").length === 0 && s.of("error").length === 0);
+  c.onText(event("L0"));
+  await tick();
+  check("replacing join (same nid): the new page's event starts from its own state", s.of("patch").length === 1 && s.of("patch")[0].state.count === 1);
+  c.onClose();
+}
+
+check("origin: absent → allowed", liveOriginOk(undefined, "a.test") && liveOriginOk(null, null));
 check("origin: same host → allowed", liveOriginOk("https://a.test", "a.test") && liveOriginOk("http://a.test:3000/", "a.test:3000"));
 check("origin: other host → rejected", !liveOriginOk("https://evil.test", "a.test"));
 check("origin: port mismatch → rejected", !liveOriginOk("http://a.test:4000", "a.test:3000"));

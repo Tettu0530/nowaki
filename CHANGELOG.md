@@ -130,11 +130,15 @@ milestone's worth of work; the codename is noted per entry.
   The router swapped in the new `<body>`, but scripts parsed that way never run,
   so live.js didn't load when the previous page had no live islands. When it
   had, the open socket never joined the new page's islands, so their buttons
-  did nothing. The router now runs the new body's module scripts, and live.js
-  re-syncs on `nowaki:page-load`. The new page's islands replace the old ones
-  on the socket (`join` with `replace: true`, in live.rs and the JS hub), so
-  the old ones' rooms and topics are dropped and a render still in flight for
-  one of them is discarded. A page without live islands closes the socket.
+  did nothing. The router still runs none of the fetched body's scripts (so
+  nothing else in the page's HTML runs or picks up the CSP nonce). It loads
+  live.js (`id="nowaki-live"`, same origin only) if it isn't running yet, and
+  otherwise calls `window.__nowakiLive.sync()`. The new page's islands replace
+  the old ones on the socket (`join` with `replace: true`, in live.rs and the
+  JS hub): the old ones' rooms and topics go, their queued events and
+  refreshes are dropped, and a render still in flight for the old page is
+  discarded, even when the new page reuses its nid (a Router Cache revisit).
+  A page without live islands closes the socket.
 - Node children no longer outlive a killed `nowaki`. That covers the dev and
   production sidecars, the prerender server, and the plugin host. When
   `nowaki` was stopped with SIGKILL (or crashed), it couldn't stop them, and

@@ -87,6 +87,9 @@ export function createLiveHub({
     const queue = [];
     let inflight = false;
     let closed = false;
+    // Bumped by each replacing join (a client navigation): work queued or in flight for an
+    // earlier page is dropped, even where the new page reuses its nids (as in live.rs).
+    let page = 0;
 
     const pump = () => {
       while (!inflight && !closed && queue.length) {
@@ -96,7 +99,8 @@ export function createLiveHub({
         inflight = true;
         // A client navigation (a replacing join) may drop the island while it renders: then the
         // result or error is dropped too, as in live.rs (still_joined).
-        const gone = () => islands.get(ev.nid)?.name !== isl.name;
+        const started = page;
+        const gone = () => started !== page || islands.get(ev.nid)?.name !== isl.name;
         renderWithTimeout(isl.name, isl.state, isl.sig, ev, request).then(
           (r) => {
             inflight = false;
@@ -139,7 +143,12 @@ export function createLiveHub({
       if (v?.type === "join") {
         if (!Array.isArray(v.islands)) return;
         // `replace`: the client lists every island on its page (after a client navigation too).
-        if (v.replace === true) islands.clear();
+        // The old page's queued events and refreshes go with it.
+        if (v.replace === true) {
+          islands.clear();
+          queue.length = 0;
+          page++;
+        }
         for (const it of v.islands) {
           const nid = typeof it?.nid === "string" ? it.nid : "";
           if (!nid) continue;
