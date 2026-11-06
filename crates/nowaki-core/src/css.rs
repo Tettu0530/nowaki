@@ -336,13 +336,13 @@ mod tests {
 
     #[test]
     fn scope_css_keeps_non_ascii_text_intact() {
-        let css = "/* 見出し */\n.t { font-family: \"游ゴシック\"; }\n.t::before { content: \"→ 🎉\"; }\n.é { color: red }";
+        let css = "/* \u{898b}\u{51fa}\u{3057} */\n.t { font-family: \"\u{6e38}\u{30b4}\u{30b7}\u{30c3}\u{30af}\"; }\n.t::before { content: \"\u{2192} \u{1f389}\"; }\n.\u{e9} { color: red }";
         let (scoped, map) = scope_css("routes/jp/jp.module.css", css);
         let suffix = &map[0].1["t_".len()..];
         assert_eq!(
             scoped,
             format!(
-                "/* 見出し */\n.t_{suffix} {{ font-family: \"游ゴシック\"; }}\n.t_{suffix}::before {{ content: \"→ 🎉\"; }}\n.é {{ color: red }}"
+                "/* \u{898b}\u{51fa}\u{3057} */\n.t_{suffix} {{ font-family: \"\u{6e38}\u{30b4}\u{30b7}\u{30c3}\u{30af}\"; }}\n.t_{suffix}::before {{ content: \"\u{2192} \u{1f389}\"; }}\n.\u{e9} {{ color: red }}"
             )
         );
         assert_eq!(map.len(), 1);
@@ -359,7 +359,10 @@ mod tests {
         );
         let (_, mb) = scope_css("id-b", css);
         let (_, ma) = scope_css("id-a", css);
-        assert_ne!(ma[0].1, mb[0].1, "different id → different scoped name");
+        assert_ne!(
+            ma[0].1, mb[0].1,
+            "different id \u{2192} different scoped name"
+        );
     }
 
     #[test]
