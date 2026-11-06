@@ -74,10 +74,8 @@ fn import_specifiers(abs: &Path, source: &str) -> Result<Vec<(String, bool)>> {
             Statement::ImportDeclaration(d) if !d.import_kind.is_type() => {
                 out.push((d.source.value.to_string(), false));
             }
-            Statement::ExportNamedDeclaration(d) if !d.export_kind.is_type() => {
-                if let Some(src) = &d.source {
-                    out.push((src.value.to_string(), false));
-                }
+            Statement::ExportFromDeclaration(d) if !d.export_kind.is_type() => {
+                out.push((d.source.value.to_string(), false));
             }
             Statement::ExportAllDeclaration(d) if !d.export_kind.is_type() => {
                 out.push((d.source.value.to_string(), false));

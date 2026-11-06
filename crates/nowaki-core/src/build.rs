@@ -487,7 +487,7 @@ fn transform_for_server(
     for stmt in program.body.iter_mut() {
         let source_lit = match stmt {
             Statement::ImportDeclaration(d) => Some(&mut d.source),
-            Statement::ExportNamedDeclaration(d) => d.source.as_mut(),
+            Statement::ExportFromDeclaration(d) => Some(&mut d.source),
             Statement::ExportAllDeclaration(d) => Some(&mut d.source),
             _ => None,
         };
@@ -960,7 +960,7 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
     for stmt in program.body.iter_mut() {
         let source_lit = match stmt {
             Statement::ImportDeclaration(d) => Some(&mut d.source),
-            Statement::ExportNamedDeclaration(d) => d.source.as_mut(),
+            Statement::ExportFromDeclaration(d) => Some(&mut d.source),
             Statement::ExportAllDeclaration(d) => Some(&mut d.source),
             _ => None,
         };

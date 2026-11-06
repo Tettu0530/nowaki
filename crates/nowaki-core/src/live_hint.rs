@@ -11,8 +11,8 @@ use std::path::Path;
 
 use oxc::allocator::Allocator;
 use oxc::ast::ast::{
-    CallExpression, Declaration, Expression, IdentifierReference, JSXAttribute, JSXAttributeName,
-    Statement,
+    CallExpression, Declaration, ExportSpecifier, Expression, IdentifierReference, JSXAttribute,
+    JSXAttributeName, Statement,
 };
 use oxc::ast_visit::{walk, Visit};
 
@@ -28,31 +28,31 @@ pub fn exports_live(path: &Path, source: &str) -> bool {
     let Ok(program) = crate::transform::parse_program(&allocator, path, source, source_type) else {
         return false;
     };
-    program.body.iter().any(|stmt| {
-        let Statement::ExportNamedDeclaration(d) = stmt else {
-            return false;
-        };
-        if d.export_kind.is_type() {
-            return false;
-        }
-        let declared = match &d.declaration {
-            Some(Declaration::VariableDeclaration(v)) => v.declarations.iter().any(|decl| {
+    let names_live = |specifiers: &[ExportSpecifier<'_>]| {
+        specifiers
+            .iter()
+            .any(|s| !s.export_kind.is_type() && s.exported.name() == "live")
+    };
+    program.body.iter().any(|stmt| match stmt {
+        Statement::ExportDeclaration(d) if !d.export_kind().is_type() => match &d.declaration {
+            Declaration::VariableDeclaration(v) => v.declarations.iter().any(|decl| {
                 decl.id
                     .get_binding_identifier()
                     .is_some_and(|id| id.name == "live")
             }),
-            Some(Declaration::FunctionDeclaration(f)) => {
+            Declaration::FunctionDeclaration(f) => {
                 f.id.as_ref().is_some_and(|id| id.name == "live")
             }
-            Some(Declaration::ClassDeclaration(c)) => {
-                c.id.as_ref().is_some_and(|id| id.name == "live")
-            }
+            Declaration::ClassDeclaration(c) => c.id.as_ref().is_some_and(|id| id.name == "live"),
             _ => false,
-        };
-        declared
-            || d.specifiers
-                .iter()
-                .any(|s| !s.export_kind.is_type() && s.exported.name() == "live")
+        },
+        Statement::ExportNamedDeclaration(d) if !d.export_kind.is_type() => {
+            names_live(&d.specifiers)
+        }
+        Statement::ExportFromDeclaration(d) if !d.export_kind.is_type() => {
+            names_live(&d.specifiers)
+        }
+        _ => false,
     })
 }
 

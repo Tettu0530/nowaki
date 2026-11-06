@@ -10,6 +10,15 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Changed
+- Dependencies: `oxc` 0.135 → 0.146 and `oxc_resolver` 11.21 → 11.24.3, with
+  `nowaki-core` moved to oxc's split export AST (`ExportDeclaration` /
+  `ExportNamedDeclaration` / `ExportFromDeclaration`) and its `diagnostics`
+  field. Output is unchanged apart from the minifier: it now keeps
+  `a.b || (a.b = c)` unless `a` provably can't change (an upstream correctness
+  fix), so first-load JS grows by about 20 bytes gzip. `serde-saphyr` 2.1.0
+  (yanked) → 2.1.1.
+
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 
 Packages: `nowaki` / `nowaki-core` 0.17.0 (crates.io, npm), `@nowaki-dev/runtime`
