@@ -383,10 +383,13 @@ impl Gen {
 }
 
 /// The text of a node and its descendants (for heading ids and anchors).
+/// A line ending (soft break) or a hard break is a space, as in comrak's `collect_text`, so a
+/// multi-line heading gets the id a Markdown entry would give it.
 fn plain_text(node: &Node) -> String {
     match node {
-        Node::Text(t) => t.value.clone(),
+        Node::Text(t) => t.value.replace("\r\n", " ").replace(['\n', '\r'], " "),
         Node::InlineCode(c) => c.value.clone(),
+        Node::Break(_) => " ".to_string(),
         other => other
             .children()
             .map(|c| c.iter().map(plain_text).collect::<String>())
@@ -582,5 +585,17 @@ mod tests {
             );
         }
         assert_eq!(tsx.matches("id={\"fn-").count(), 6, "{tsx}");
+    }
+
+    #[test]
+    fn multi_line_heading_ids_match_markdown_anchors() {
+        let src = "Setext\nline two\n========\n\nHard  \nbreak `code`\n--------\n";
+        let h = headings(src).unwrap();
+        let ids: Vec<&str> = h.iter().map(|x| x.id.as_str()).collect();
+        assert_eq!(ids, ["setext-line-two", "hard-break-code"]);
+        assert_eq!(h[0].text, "Setext line two");
+        let tsx = to_tsx(src).unwrap();
+        assert!(tsx.contains("<h1 id={\"setext-line-two\"}>"), "{tsx}");
+        assert!(tsx.contains("<h2 id={\"hard-break-code\"}>"), "{tsx}");
     }
 }

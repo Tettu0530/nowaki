@@ -24,6 +24,10 @@ milestone's worth of work; the codename is noted per entry.
   entry's (lowercased, non-URL-safe bytes percent-encoded) instead of turning
   every non-ASCII character into `-`, so `[^あ]` and `[^い]` no longer share
   `fn--`. (#150)
+- A content entry's `headings` ids match the HTML anchors for multi-line
+  headings (a setext heading over two lines, or one with a hard break): the
+  text is taken the way comrak anchorizes it, with a break as a space. MDX
+  `headings` ids now agree with Markdown's for such headings too. (#150)
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 
