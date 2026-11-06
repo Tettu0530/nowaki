@@ -9,6 +9,7 @@ const hydrateIslands = (root) => window.__nowakiHydrateIslands?.(root);
 
 const pageCache = createPageCache({ ttlMs: readCacheTtl(), max: 32 });
 const scrollPos = new Map(); // history key -> scrollY
+let curKey; // history key of the entry on screen (history.state has already moved on popstate)
 let boundariesPromise = null; // result of /__nowaki/boundaries (fetched once)
 let navToken = 0; // token guarding against racing navigations
 
@@ -109,15 +110,12 @@ async function navigate(url, { push = true } = {}) {
 // Apply a cached/fetched document to the live DOM (clones body to keep the cache intact).
 function applyDocument(entry, push, token) {
   if (token !== undefined && token !== navToken) return;
-  scrollPos.set(historyKey(), window.scrollY);
   const { doc, finalUrl } = entry;
+  if (push) scrollPos.set(curKey, window.scrollY);
   document.title = doc.title;
   syncHead(doc);
   document.body.replaceWith(stampNonce(doc.body.cloneNode(true)));
-  if (push) {
-    const k = String(Date.now()) + Math.round(performance.now());
-    history.pushState({ nowaki: k }, "", finalUrl);
-  }
+  if (push) history.pushState({ nowaki: (curKey = newKey()) }, "", finalUrl);
   hydrateIslands(document);
   loadPageScripts(doc);
   syncLive();
@@ -293,9 +291,12 @@ function syncAttrs(cur, next, always) {
   }
 }
 
+const newKey = () => Math.random().toString(36).slice(2);
+
+// The current entry's key. Entries the browser added (a #hash link) get one on first sight.
 function historyKey() {
   if (!history.state?.nowaki) {
-    history.replaceState({ ...(history.state ?? {}), nowaki: "init" }, "");
+    history.replaceState({ ...(history.state ?? {}), nowaki: newKey() }, "");
   }
   return history.state.nowaki;
 }
@@ -304,7 +305,7 @@ export function installRouter() {
   if (typeof window === "undefined" || typeof document === "undefined") return;
   if (window.__nowakiRouter) return;
   window.__nowakiRouter = true;
-  historyKey();
+  curKey = historyKey();
   loadBoundaries();
 
   document.addEventListener("click", (e) => {
@@ -317,10 +318,7 @@ export function installRouter() {
       return; // leave same-page (hash etc.) to the browser
     }
     e.preventDefault();
-    navigate(url, { push: true }).then((final) => {
-      window.scrollTo(0, 0);
-      if (final) scrollPos.set(historyKey(), 0);
-    });
+    navigate(url, { push: true }).then((final) => final && window.scrollTo(0, 0));
   });
 
   const onHover = (e) => {
@@ -331,11 +329,12 @@ export function installRouter() {
   document.addEventListener("touchstart", onHover, { passive: true });
 
   window.addEventListener("popstate", () => {
-    const url = new URL(location.href);
-    navigate(url, { push: false }).then(() => {
-      const y = scrollPos.get(historyKey()) ?? 0;
-      window.scrollTo(0, y);
-    });
+    // The entry left is curKey: history.state is already the one returned to.
+    scrollPos.set(curKey, window.scrollY);
+    const key = (curKey = historyKey());
+    navigate(new URL(location.href), { push: false }).then(
+      (final) => final && key === curKey && window.scrollTo(0, scrollPos.get(key) ?? 0),
+    );
   });
 
   // disable the browser's default scroll restoration (we manage it)

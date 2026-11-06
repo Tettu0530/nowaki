@@ -202,6 +202,19 @@ try {
   check(`coming back re-runs it through nowaki:page-load, loading it once (${JSON.stringify(stamp2)})`,
     stamp2.text === "page script ran" && stamp2.tags === 1);
 
+  // Back/forward restores the scroll of the page returned to, not of the page left.
+  const targetTop = (sel) => `return Math.round(document.querySelector(${JSON.stringify(sel)})?.getBoundingClientRect().top ?? -1);`;
+  await cdp.evalAsync(`window.__nav('/anchors'); return true;`);
+  await sleep(800);
+  await cdp.evalAsync(`scrollTo(0, 1234); return true;`);
+  await sleep(100);
+  await cdp.evalAsync(`window.__nav('/about'); return true;`);
+  await sleep(500);
+  await cdp.evalAsync(`history.back(); return true;`);
+  await sleep(600);
+  const backY = await cdp.evalAsync(`return { path: location.pathname, y: scrollY };`);
+  check(`back restores the scroll of the page returned to (${JSON.stringify(backY)})`, backY.path === "/anchors" && backY.y === 1234);
+
   console.log(`\n${failures === 0 ? "BROWSER ROUTER TEST PASSED" : `BROWSER ROUTER TEST FAILED (${failures})`}`);
 } catch (err) {
   console.error("harness error:", err);

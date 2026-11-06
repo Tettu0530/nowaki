@@ -10,6 +10,10 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Fixed
+- Client router: back/forward restores the scroll position of the page you
+  return to. It used to restore the position of the page you left.
+
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 
 Packages: `nowaki` / `nowaki-core` 0.17.0 (crates.io, npm), `@nowaki-dev/runtime`
