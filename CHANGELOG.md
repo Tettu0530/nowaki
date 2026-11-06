@@ -75,6 +75,11 @@ milestone's worth of work; the codename is noted per entry.
   stored under the no-cookie key. Requests where a varied header repeats or
   has bytes outside visible ASCII now skip the cache (no lookup, no store). An
   empty header and a missing one now get separate keys.
+- CSS Modules no longer corrupt non-ASCII text. The class scoper copied the
+  file one byte at a time as Latin-1 characters, so Japanese font names,
+  `content: "→"`, emoji and comments in a `*.module.css` came out as mojibake
+  in dev, `nowaki start`, adapters and static output. Text outside class
+  selectors is now copied through unchanged.
 - Node children no longer outlive a killed `nowaki`. That covers the dev and
   production sidecars, the prerender server, and the plugin host. When
   `nowaki` was stopped with SIGKILL (or crashed), it couldn't stop them, and

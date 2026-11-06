@@ -180,11 +180,16 @@ pub fn scope_css(id: &str, css: &str) -> (String, Vec<(String, String)>) {
     let bytes = css.as_bytes();
     let mut out = String::with_capacity(css.len() + 64);
     let mut map: Vec<(String, String)> = Vec::new();
+    // Bytes in `css[copied..i]` are copied through unchanged as one slice. Every split point
+    // sits on an ASCII byte ('.' or an ident char), so the slices stay on UTF-8 char
+    // boundaries and non-ASCII text (comments, `content`, font names) is never re-encoded.
+    let mut copied = 0;
     let mut i = 0;
     while i < bytes.len() {
         let c = bytes[i];
         // Class selector start: '.' followed by an ident-start (a-zA-Z_ or -<letter>)
         if c == b'.' && i + 1 < bytes.len() && is_ident_start(bytes[i + 1]) {
+            out.push_str(&css[copied..i]);
             let start = i + 1;
             let mut j = start;
             while j < bytes.len() && is_ident_char(bytes[j]) {
@@ -198,11 +203,12 @@ pub fn scope_css(id: &str, css: &str) -> (String, Vec<(String, String)>) {
                 map.push((name.to_string(), scoped));
             }
             i = j;
+            copied = j;
             continue;
         }
-        out.push(c as char);
         i += 1;
     }
+    out.push_str(&css[copied..]);
     (out, map)
 }
 
@@ -326,6 +332,20 @@ mod tests {
         assert_eq!(map[0].0, "badge");
         assert!(map[0].1.starts_with("badge_"));
         assert_eq!(map[0].1.len(), "badge".len() + 1 + 8); // name_ + 8 hex
+    }
+
+    #[test]
+    fn scope_css_keeps_non_ascii_text_intact() {
+        let css = "/* 見出し */\n.t { font-family: \"游ゴシック\"; }\n.t::before { content: \"→ 🎉\"; }\n.é { color: red }";
+        let (scoped, map) = scope_css("routes/jp/jp.module.css", css);
+        let suffix = &map[0].1["t_".len()..];
+        assert_eq!(
+            scoped,
+            format!(
+                "/* 見出し */\n.t_{suffix} {{ font-family: \"游ゴシック\"; }}\n.t_{suffix}::before {{ content: \"→ 🎉\"; }}\n.é {{ color: red }}"
+            )
+        );
+        assert_eq!(map.len(), 1);
     }
 
     #[test]
