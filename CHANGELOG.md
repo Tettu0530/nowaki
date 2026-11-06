@@ -18,6 +18,7 @@ milestone's worth of work; the codename is noted per entry.
   `a.b || (a.b = c)` unless `a` provably can't change (an upstream correctness
   fix), so first-load JS grows by about 20 bytes gzip. `serde-saphyr` 2.1.0
   (yanked) → 2.1.1.
+
 ### Fixed
 - The server build rewrites imports of `.mjs` modules to the `.js` file it
   writes, and copies JSON the server imports (`import site from
@@ -45,7 +46,6 @@ milestone's worth of work; the codename is noted per entry.
   the directories above it), `package.json` and `tsconfig.json`. Before, after
   an install that moved a dependency, `nowaki dev` kept serving import URLs
   that pointed at the old location.
-### Fixed
 - `nowaki start` and `nowaki dev` gave `ctx.url` (and canonical / `og:url` on an
   app without `site`) the sidecar's loopback origin, `http://127.0.0.1:<port>`.
   It is now the browser's `Host`, with `https` and `X-Forwarded-Host` taken from
@@ -73,7 +73,6 @@ milestone's worth of work; the codename is noted per entry.
 - Dev SSR now picks up edits to the app's plain `.js` / `.mjs` modules (such as
   `lib/msg.js`); they were served stale until a restart. Files in
   `node_modules` and outside the app root still load once (#150).
-### Fixed
 - `?image` applies the EXIF orientation: a portrait phone photo (stored
   landscape with Orientation 6) is emitted upright, with width and height
   swapped to match, in build, dev, and the header-only size read. Image asset
@@ -99,7 +98,6 @@ milestone's worth of work; the codename is noted per entry.
   passes the app's logs through. It used to stop at READY, so on Linux (where
   Node writes to pipes synchronously) an app that logged more than ~64 KiB
   hung every pending render. (#150)
-### Fixed
 - Client router: back/forward restores the scroll position of the page you
   return to. It used to restore the position of the page you left.
 - Client router: a same-page `#hash` link, and back/forward between such
