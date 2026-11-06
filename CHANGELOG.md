@@ -107,6 +107,25 @@ milestone's worth of work; the codename is noted per entry.
   The host now sends plugin console output to stderr, Rust keeps reading its
   stdout, and a failed hook (the host is down, a plugin threw, `.tsrx` has
   compile errors) is reported as an error in dev and fails the build.
+- **`_middleware`, `_layout` and `error.tsx` inside a `[param]` directory now
+  apply.** Their prefix kept the directory name (`/org/[org]`) and was compared
+  as a plain string with the request path, so `routes/org/[org]/_middleware.ts`
+  never ran (an auth guard there was skipped) and the layout never wrapped the
+  pages. A prefix is now matched segment by segment: a `[param]` directory
+  matches any one path segment, `[...rest]` the rest, and a literal directory
+  the percent-decoded segment (so `/%61dmin/x` no longer skips
+  `routes/admin/_middleware.ts`). Middleware still goes by the URL, for every
+  request under its directory: pages, API routes and 404s, whichever route
+  serves them. Layouts and `error.tsx` go by where the route file is, like the
+  build's layout CSS: `routes/org/[org]/_layout.tsx` wraps the files inside
+  `routes/org/[org]/`, not the sibling `routes/org/[org].tsx`. The same holds
+  for literal names: `routes/admin.tsx` is no longer wrapped by
+  `routes/admin/_layout.tsx`, whose CSS the build never gave it.
+- **A malformed percent-escape in the path is a 404**, not a `URIError` thrown
+  out of the request handler.
+- **A cookie with a malformed percent-escape (`_ga=50%`) no longer makes every
+  page that reads `ctx.cookies` return 500.** Each cookie is decoded on its own;
+  one that fails to decode keeps its raw value.
 - Node children no longer outlive a killed `nowaki`. That covers the dev and
   production sidecars, the prerender server, and the plugin host. When
   `nowaki` was stopped with SIGKILL (or crashed), it couldn't stop them, and
