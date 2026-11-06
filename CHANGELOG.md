@@ -10,6 +10,12 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Fixed
+- The server build rewrites imports of `.mjs` modules to the `.js` file it
+  writes, and copies JSON the server imports (`import site from
+  "../data/site.json" with { type: "json" }`) into `dist/server`. Before,
+  `nowaki start` failed with `ERR_MODULE_NOT_FOUND` where `nowaki dev` worked.
+
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 
 Packages: `nowaki` / `nowaki-core` 0.17.0 (crates.io, npm), `@nowaki-dev/runtime`

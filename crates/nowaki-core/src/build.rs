@@ -335,6 +335,9 @@ pub fn build_server(
     // Plus every app module those import from anywhere else in the app (`data/`, `sections/`,
     // `utils/`, …): the conventional folders are entry points, not the whole server graph.
     // One walk over the whole graph: every module is parsed once, however many entries reach it.
+    // JSON the server graph imports (`import site from "../data/site.json" with { type: "json" }`)
+    // is loaded by Node as is, so it's copied next to the emitted modules.
+    let mut json_files: HashSet<PathBuf> = HashSet::new();
     {
         let mut seen: HashSet<PathBuf> = files.iter().cloned().collect();
         let mut stack: Vec<PathBuf> = files.clone();
@@ -345,6 +348,9 @@ pub fn build_server(
                 continue; // the transform below reports it
             };
             for d in imports.into_iter().filter_map(|i| i.resolved) {
+                if is_app_json(core, &d) {
+                    json_files.insert(d.clone());
+                }
                 if crate::chunk::is_app_module(core, &d) && seen.insert(d.clone()) {
                     files.push(d.clone());
                     stack.push(d);
@@ -380,6 +386,13 @@ pub fn build_server(
         fs::write(&out_path, code)?;
         count += 1;
     }
+    for json in &json_files {
+        let out_path = server_dir.join(json.strip_prefix(&core.root)?);
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(json, &out_path).with_context(|| format!("failed to copy: {}", json.display()))?;
+    }
 
     // Write the server function (`"use server"`) allowlist to dist/server/functions.json.
     // The runtime dispatches via this id→{module,export} (the client can't call arbitrary exports).
@@ -387,6 +400,13 @@ pub fn build_server(
     write_server_functions(core, &server_dir)?;
 
     Ok(count)
+}
+
+/// A `.json` file of the app (under the root, outside node_modules).
+fn is_app_json(core: &NowakiCore, abs: &Path) -> bool {
+    abs.extension().is_some_and(|e| e == "json")
+        && abs.starts_with(&core.root)
+        && !abs.components().any(|c| c.as_os_str() == "node_modules")
 }
 
 /// Generates dist/server/functions.json. module is a .js path relative to serverDir.
@@ -620,7 +640,8 @@ impl<'a> VisitMut<'a> for DynamicImportSpecs<'a> {
     }
 }
 
-/// Rewrites TS extensions in relative local imports to .js. Leaves bare/absolute/.js alone.
+/// Rewrites TS extensions (and `.mjs`, also emitted as `.js`) in relative local imports to .js.
+/// Leaves bare/absolute/.js alone.
 fn rewrite_server_spec(spec: &str) -> Option<String> {
     if !spec.starts_with('.') {
         return None;
@@ -629,7 +650,7 @@ fn rewrite_server_spec(spec: &str) -> Option<String> {
         // CSS is client-only
         return Some(crate::css::CSS_NOOP_SPECIFIER.to_string());
     }
-    for ext in [".tsx", ".jsx", ".ts", ".tsrx", ".mdx"] {
+    for ext in [".tsx", ".jsx", ".ts", ".tsrx", ".mdx", ".mjs"] {
         if let Some(stem) = spec.strip_suffix(ext) {
             return Some(format!("{stem}.js"));
         }
