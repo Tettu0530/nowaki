@@ -67,6 +67,14 @@ milestone's worth of work; the codename is noted per entry.
   client and the Rust session send back, so the next event failed with a
   signature error (403 on `POST /__nowaki/live-event`) and the island stopped
   working.
+- One request could fill the `nowaki start` ISR cache entry that anonymous
+  visitors get. The cache key read only the first value of each header the
+  page varies on, and read a value with non-ASCII bytes as empty. The renderer
+  sees every value, though. So `Cookie:` followed by `Cookie: user=attacker`,
+  or `Cookie: user=` with a `\xff` byte in it, was rendered for that user and
+  stored under the no-cookie key. Requests where a varied header repeats or
+  has bytes outside visible ASCII now skip the cache (no lookup, no store). An
+  empty header and a missing one now get separate keys.
 - Node children no longer outlive a killed `nowaki`. That covers the dev and
   production sidecars, the prerender server, and the plugin host. When
   `nowaki` was stopped with SIGKILL (or crashed), it couldn't stop them, and
