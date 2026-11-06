@@ -85,6 +85,19 @@ milestone's worth of work; the codename is noted per entry.
   image's `alt`).
 
 ### Changed
+- **A module cache hit no longer asks the plugin host.**
+  - The module cache used to be keyed by the source after the plugins ran,
+    so every load, hits included, first made a round trip to the Node
+    plugin host (and compiled MDX).
+  - It's now keyed by the file's own text plus a hash of nowaki.config, so a
+    hit returns before any plugin runs. The plugins' output is also kept per
+    version of a file, so the graph, chunking, and budgets reading a module
+    again don't run them again.
+  - On the example app (two plugins, `.tsrx`) a warm build went from about
+    0.35 s to 0.25 s, and dev's first render of a page got faster too.
+  - This assumes plugins depend on the file and nowaki.config. A plugin
+    reading other files or the environment should be reflected in one of
+    them, or its cached output can go stale.
 - **Content builds no longer decode every referenced image.**
   - A Markdown image's size is read from the file's header, and the pixels
     are decoded only when a variant isn't cached yet.
