@@ -32,6 +32,11 @@ milestone's worth of work; the codename is noted per entry.
   `@import`s), plain CSS text in SSR, and `?image` sizes. Before, editing one
   of those kept serving the old class names or sizes until the importing file
   changed, even across restarts.
+- The persistent dev transform cache is keyed on what import resolution
+  depends on too: lockfiles and package-manager install state (in the app and
+  the directories above it), `package.json` and `tsconfig.json`. Before, after
+  an install that moved a dependency, `nowaki dev` kept serving import URLs
+  that pointed at the old location.
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 

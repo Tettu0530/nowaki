@@ -72,11 +72,17 @@ pub struct DiskCache {
 
 impl DiskCache {
     /// The salt mixes in the nowaki version + a hash of client_defines
-    /// (so upgrades and env changes invalidate the cache automatically).
+    /// (so upgrades and env changes invalidate the cache automatically), and here
+    /// [`resolution_fingerprint`] (so does an install that changes where imports resolve).
     pub fn new(root: &Path, salt: u64) -> Self {
         let dir = root.join("node_modules/.cache/nowaki");
         let dir = std::fs::create_dir_all(&dir).ok().map(|_| dir);
-        Self { dir, salt }
+        let mut buf = salt.to_le_bytes().to_vec();
+        buf.extend_from_slice(&resolution_fingerprint(root).to_le_bytes());
+        Self {
+            dir,
+            salt: xxh3_64(&buf),
+        }
     }
 
     /// Builds a cache key from (absolute path, mode, source hash).
@@ -130,5 +136,41 @@ fn entry_key(key: u64, inputs: &[PathBuf]) -> u64 {
     }
     let mut buf = key.to_le_bytes().to_vec();
     buf.extend_from_slice(&inputs_hash(inputs).to_le_bytes());
+    xxh3_64(&buf)
+}
+
+/// Lockfiles and the state files package managers write into node_modules on every install.
+const INSTALL_FILES: &[&str] = &[
+    "pnpm-lock.yaml",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "yarn.lock",
+    "bun.lock",
+    "bun.lockb",
+    "node_modules/.modules.yaml",
+    "node_modules/.package-lock.json",
+    "node_modules/.yarn-state.yml",
+];
+
+/// A hash of what import resolution depends on beyond the importing file: the app's
+/// `package.json` (`imports`) and `tsconfig.json` (`paths`), and the lockfiles / install state
+/// in the root and every directory above it (a workspace keeps its lockfile at the top). Browser
+/// output holds resolved URLs (`/node_modules/.pnpm/pkg@1.0.0/…`), so an install that moves a
+/// dependency must not reuse entries from before it.
+pub fn resolution_fingerprint(root: &Path) -> u64 {
+    let mut buf = Vec::new();
+    let mut add = |p: &Path| {
+        if let Ok(bytes) = std::fs::read(p) {
+            buf.extend_from_slice(p.to_string_lossy().as_bytes());
+            buf.extend_from_slice(&xxh3_64(&bytes).to_le_bytes());
+        }
+    };
+    add(&root.join("package.json"));
+    add(&root.join("tsconfig.json"));
+    for dir in root.ancestors() {
+        for name in INSTALL_FILES {
+            add(&dir.join(name));
+        }
+    }
     xxh3_64(&buf)
 }

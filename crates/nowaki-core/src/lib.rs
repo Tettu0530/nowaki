@@ -587,4 +587,39 @@ mod tests {
             "stale class map from the disk cache:\n{restarted}"
         );
     }
+
+    /// Browser output holds resolved import URLs, so after an install changes the dependency
+    /// layout (lockfile and node_modules), a restart must not serve the old URLs from disk.
+    #[test]
+    fn the_disk_cache_is_dropped_when_dependencies_are_reinstalled() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        let file = root.join("a.ts");
+        std::fs::write(&file, "import { v } from \"pkg\";\nexport const x = v;\n").unwrap();
+        let pkg = root.join("node_modules/pkg");
+        std::fs::create_dir_all(&pkg).unwrap();
+        let install = |main: &str, lock: &str| {
+            std::fs::write(
+                pkg.join("package.json"),
+                format!("{{\"name\":\"pkg\",\"main\":\"{main}\"}}"),
+            )
+            .unwrap();
+            std::fs::write(pkg.join(main), "export const v = 1;\n").unwrap();
+            std::fs::write(root.join("package-lock.json"), lock).unwrap();
+        };
+        install("one.js", "{\"lockfileVersion\":3,\"v\":1}");
+        let first = NowakiCore::new(root.clone())
+            .load_module(&file, Mode::Browser)
+            .unwrap();
+        assert!(first.contains("/node_modules/pkg/one.js"), "{first}");
+
+        install("two.js", "{\"lockfileVersion\":3,\"v\":2}");
+        let after = NowakiCore::new(root.clone())
+            .load_module(&file, Mode::Browser)
+            .unwrap();
+        assert!(
+            after.contains("/node_modules/pkg/two.js"),
+            "stale import URL from the disk cache:\n{after}"
+        );
+    }
 }
