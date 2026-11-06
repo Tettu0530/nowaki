@@ -1,0 +1,593 @@
+{
+  "measured": "2026-11-06",
+  "machine": "Apple M2, 8 cores, 16 GB, darwin 25.6.0, node v24.14.0",
+  "frameworks": {
+    "nowaki": {
+      "label": "Nowaki",
+      "version": "0.16.2",
+      "sizes": {
+        "20": {
+          "cold": {
+            "n": 5,
+            "median": 2201,
+            "p25": 2168,
+            "p75": 2279,
+            "runs": [
+              2201,
+              2284,
+              2168,
+              2279,
+              2104
+            ]
+          },
+          "warm": {
+            "n": 5,
+            "median": 233,
+            "p25": 233,
+            "p75": 239,
+            "runs": [
+              233,
+              233,
+              245,
+              239,
+              233
+            ]
+          },
+          "output": {
+            "html": {
+              "files": 22,
+              "KB": 169.7
+            },
+            "images": {
+              "files": 32,
+              "KB": 966.1
+            },
+            "avif": {
+              "files": 16,
+              "KB": 54.1
+            },
+            "webp": {
+              "files": 0,
+              "KB": 0
+            },
+            "jpg": {
+              "files": 16,
+              "KB": 912
+            },
+            "css": {
+              "files": 1,
+              "KB": 1.4
+            },
+            "js": {
+              "files": 4,
+              "KB": 22
+            },
+            "total": {
+              "files": 76,
+              "KB": 1245.2
+            },
+            "sitemapUrls": 22
+          },
+          "pages": {
+            "md": {
+              "jsKB": 0,
+              "totalKB": 5.37,
+              "byTypeKB": {
+                "document": 2.03,
+                "stylesheet": 0.6,
+                "image": 2.74
+              },
+              "requests": 3
+            },
+            "mdx": {
+              "jsKB": 0,
+              "totalKB": 5.36,
+              "byTypeKB": {
+                "document": 2.02,
+                "stylesheet": 0.6,
+                "image": 2.74
+              },
+              "requests": 3
+            },
+            "list": {
+              "jsKB": 0,
+              "totalKB": 1.7,
+              "byTypeKB": {
+                "document": 1.09,
+                "stylesheet": 0.6
+              },
+              "requests": 2
+            }
+          },
+          "version": "0.16.2",
+          "commit": "6b66c81"
+        },
+        "100": {
+          "cold": {
+            "n": 5,
+            "median": 4677,
+            "p25": 4399,
+            "p75": 5009,
+            "runs": [
+              5009,
+              4121,
+              8445,
+              4677,
+              4399
+            ]
+          },
+          "warm": {
+            "n": 5,
+            "median": 287,
+            "p25": 273,
+            "p75": 317,
+            "runs": [
+              317,
+              339,
+              287,
+              270,
+              273
+            ]
+          },
+          "output": {
+            "html": {
+              "files": 102,
+              "KB": 838.2
+            },
+            "images": {
+              "files": 32,
+              "KB": 966.1
+            },
+            "avif": {
+              "files": 16,
+              "KB": 54.1
+            },
+            "webp": {
+              "files": 0,
+              "KB": 0
+            },
+            "jpg": {
+              "files": 16,
+              "KB": 912
+            },
+            "css": {
+              "files": 1,
+              "KB": 1.4
+            },
+            "js": {
+              "files": 4,
+              "KB": 22
+            },
+            "total": {
+              "files": 156,
+              "KB": 1918.7
+            },
+            "sitemapUrls": 102
+          },
+          "pages": {
+            "md": {
+              "jsKB": 0,
+              "totalKB": 5.37,
+              "byTypeKB": {
+                "document": 2.03,
+                "stylesheet": 0.6,
+                "image": 2.74
+              },
+              "requests": 3
+            },
+            "mdx": {
+              "jsKB": 0,
+              "totalKB": 5.36,
+              "byTypeKB": {
+                "document": 2.02,
+                "stylesheet": 0.6,
+                "image": 2.74
+              },
+              "requests": 3
+            },
+            "list": {
+              "jsKB": 0,
+              "totalKB": 3.98,
+              "byTypeKB": {
+                "document": 3.38,
+                "stylesheet": 0.6
+              },
+              "requests": 2
+            }
+          },
+          "version": "0.16.2",
+          "commit": "6b66c81"
+        },
+        "500": {
+          "cold": {
+            "n": 5,
+            "median": 5254,
+            "p25": 4856,
+            "p75": 5330,
+            "runs": [
+              4856,
+              5254,
+              5964,
+              5330,
+              4652
+            ]
+          },
+          "warm": {
+            "n": 5,
+            "median": 490,
+            "p25": 489,
+            "p75": 492,
+            "runs": [
+              490,
+              485,
+              489,
+              492,
+              493
+            ]
+          },
+          "output": {
+            "html": {
+              "files": 502,
+              "KB": 4178
+            },
+            "images": {
+              "files": 32,
+              "KB": 966.1
+            },
+            "avif": {
+              "files": 16,
+              "KB": 54.1
+            },
+            "webp": {
+              "files": 0,
+              "KB": 0
+            },
+            "jpg": {
+              "files": 16,
+              "KB": 912
+            },
+            "css": {
+              "files": 1,
+              "KB": 1.4
+            },
+            "js": {
+              "files": 4,
+              "KB": 22
+            },
+            "total": {
+              "files": 556,
+              "KB": 5283.4
+            },
+            "sitemapUrls": 502
+          },
+          "pages": {
+            "md": {
+              "jsKB": 0,
+              "totalKB": 5.37,
+              "byTypeKB": {
+                "document": 2.03,
+                "stylesheet": 0.6,
+                "image": 2.74
+              },
+              "requests": 3
+            },
+            "mdx": {
+              "jsKB": 0,
+              "totalKB": 5.36,
+              "byTypeKB": {
+                "document": 2.02,
+                "stylesheet": 0.6,
+                "image": 2.74
+              },
+              "requests": 3
+            },
+            "list": {
+              "jsKB": 0,
+              "totalKB": 14.01,
+              "byTypeKB": {
+                "document": 13.41,
+                "stylesheet": 0.6
+              },
+              "requests": 2
+            }
+          },
+          "version": "0.16.2",
+          "commit": "6b66c81"
+        }
+      },
+      "coldFit": {
+        "fixedMs": 3057,
+        "perEntryMs": 4.77
+      }
+    },
+    "astro": {
+      "label": "Astro",
+      "version": "7.4.5",
+      "sizes": {
+        "20": {
+          "cold": {
+            "n": 5,
+            "median": 1644,
+            "p25": 1638,
+            "p75": 1680,
+            "runs": [
+              1680,
+              1703,
+              1638,
+              1644,
+              1636
+            ]
+          },
+          "warm": {
+            "n": 5,
+            "median": 1022,
+            "p25": 1017,
+            "p75": 1025,
+            "runs": [
+              1022,
+              1025,
+              1050,
+              1017,
+              1012
+            ]
+          },
+          "output": {
+            "html": {
+              "files": 22,
+              "KB": 186.2
+            },
+            "images": {
+              "files": 48,
+              "KB": 296.7
+            },
+            "avif": {
+              "files": 0,
+              "KB": 0
+            },
+            "webp": {
+              "files": 48,
+              "KB": 296.7
+            },
+            "jpg": {
+              "files": 0,
+              "KB": 0
+            },
+            "css": {
+              "files": 0,
+              "KB": 0
+            },
+            "js": {
+              "files": 0,
+              "KB": 0
+            },
+            "total": {
+              "files": 72,
+              "KB": 484.7
+            },
+            "sitemapUrls": 22
+          },
+          "pages": {
+            "md": {
+              "jsKB": 0,
+              "totalKB": 6.42,
+              "byTypeKB": {
+                "document": 2.46,
+                "image": 3.96
+              },
+              "requests": 2
+            },
+            "mdx": {
+              "jsKB": 0,
+              "totalKB": 6.5,
+              "byTypeKB": {
+                "document": 2.54,
+                "image": 3.96
+              },
+              "requests": 2
+            },
+            "list": {
+              "jsKB": 0,
+              "totalKB": 1.61,
+              "byTypeKB": {
+                "document": 1.61
+              },
+              "requests": 1
+            }
+          },
+          "version": "7.4.5",
+          "commit": "6b66c81"
+        },
+        "100": {
+          "cold": {
+            "n": 5,
+            "median": 1878,
+            "p25": 1869,
+            "p75": 1896,
+            "runs": [
+              1878,
+              1869,
+              1899,
+              1896,
+              1867
+            ]
+          },
+          "warm": {
+            "n": 5,
+            "median": 1167,
+            "p25": 1162,
+            "p75": 1168,
+            "runs": [
+              1170,
+              1160,
+              1162,
+              1167,
+              1168
+            ]
+          },
+          "output": {
+            "html": {
+              "files": 102,
+              "KB": 911.9
+            },
+            "images": {
+              "files": 48,
+              "KB": 296.7
+            },
+            "avif": {
+              "files": 0,
+              "KB": 0
+            },
+            "webp": {
+              "files": 48,
+              "KB": 296.7
+            },
+            "jpg": {
+              "files": 0,
+              "KB": 0
+            },
+            "css": {
+              "files": 0,
+              "KB": 0
+            },
+            "js": {
+              "files": 0,
+              "KB": 0
+            },
+            "total": {
+              "files": 152,
+              "KB": 1215.2
+            },
+            "sitemapUrls": 102
+          },
+          "pages": {
+            "md": {
+              "jsKB": 0,
+              "totalKB": 6.42,
+              "byTypeKB": {
+                "document": 2.46,
+                "image": 3.96
+              },
+              "requests": 2
+            },
+            "mdx": {
+              "jsKB": 0,
+              "totalKB": 6.5,
+              "byTypeKB": {
+                "document": 2.54,
+                "image": 3.96
+              },
+              "requests": 2
+            },
+            "list": {
+              "jsKB": 0,
+              "totalKB": 3.94,
+              "byTypeKB": {
+                "document": 3.94
+              },
+              "requests": 1
+            }
+          },
+          "version": "7.4.5",
+          "commit": "6b66c81"
+        },
+        "500": {
+          "cold": {
+            "n": 5,
+            "median": 2873,
+            "p25": 2866,
+            "p75": 2878,
+            "runs": [
+              2886,
+              2854,
+              2873,
+              2878,
+              2866
+            ]
+          },
+          "warm": {
+            "n": 5,
+            "median": 1877,
+            "p25": 1849,
+            "p75": 1878,
+            "runs": [
+              1877,
+              1849,
+              1841,
+              1926,
+              1878
+            ]
+          },
+          "output": {
+            "html": {
+              "files": 502,
+              "KB": 4539.6
+            },
+            "images": {
+              "files": 48,
+              "KB": 296.7
+            },
+            "avif": {
+              "files": 0,
+              "KB": 0
+            },
+            "webp": {
+              "files": 48,
+              "KB": 296.7
+            },
+            "jpg": {
+              "files": 0,
+              "KB": 0
+            },
+            "css": {
+              "files": 0,
+              "KB": 0
+            },
+            "js": {
+              "files": 0,
+              "KB": 0
+            },
+            "total": {
+              "files": 552,
+              "KB": 4866.8
+            },
+            "sitemapUrls": 502
+          },
+          "pages": {
+            "md": {
+              "jsKB": 0,
+              "totalKB": 6.42,
+              "byTypeKB": {
+                "document": 2.46,
+                "image": 3.96
+              },
+              "requests": 2
+            },
+            "mdx": {
+              "jsKB": 0,
+              "totalKB": 6.5,
+              "byTypeKB": {
+                "document": 2.54,
+                "image": 3.96
+              },
+              "requests": 2
+            },
+            "list": {
+              "jsKB": 0,
+              "totalKB": 14.04,
+              "byTypeKB": {
+                "document": 14.04
+              },
+              "requests": 1
+            }
+          },
+          "version": "7.4.5",
+          "commit": "6b66c81"
+        }
+      },
+      "coldFit": {
+        "fixedMs": 1607,
+        "perEntryMs": 2.54
+      }
+    }
+  }
+}

@@ -173,6 +173,48 @@ ulimit -n 8192
 node benchmarks/live-fanout.mjs http://127.0.0.1:8250 --conns 1000 --rounds 50 --scenario both
 ```
 
+## Docs site — Nowaki vs Astro
+
+[`benchmarks/docs-site`](./benchmarks/docs-site/README.md) builds the same docs site in both:
+a typed content collection of Markdown and MDX entries (every 5th is MDX and renders a
+`<Callout>`), three highlighted code fences per entry, one of four local photos per entry
+(1600×1000 JPEG, about 250 KB each), a generated sitemap, and static output. Nowaki uses only
+its built-ins (a hand-written Standard Schema, no third-party Markdown or image code); Astro
+uses `@astrojs/mdx`, `@astrojs/sitemap`, `astro:assets` (`image.layout: "constrained"`) and
+Shiki. *Cold* deletes the output and every framework cache first; *warm* keeps the caches and
+deletes only the output. Median [p25–p75] of 5 runs after a warm-up:
+
+| entries | Nowaki cold | Nowaki warm | Astro cold | Astro warm |
+|---|---|---|---|---|
+| 20 | 2,201 [2,168–2,279] ms | **233** [233–239] ms | **1,644** [1,638–1,680] ms | 1,022 [1,017–1,025] ms |
+| 100 | 4,677 [4,399–5,009] ms | **287** [273–317] ms | **1,878** [1,869–1,896] ms | 1,167 [1,162–1,168] ms |
+| 500 | 5,254 [4,856–5,330] ms | **490** [489–492] ms | **2,873** [2,866–2,878] ms | 1,877 [1,849–1,878] ms |
+
+Without a cache Nowaki is slower: AVIF takes much longer to encode than WebP, and Nowaki uses no
+C codecs, so it cannot use sharp / libwebp. With its cache it is faster at every size (3.8–4.4×).
+
+The first measurement of this benchmark (`1fcc2ae`) had a higher cost per entry: the warm build
+at 500 entries took 2,603 ms (now 490 ms), and the cold medians fit 11.1 ms per entry (now
+4.8 ms; Astro 2.5 ms). The cause was that every Markdown image reference decoded the whole JPEG
+to read its size, so the four photos were decoded 500 times; #146 reads the size from the file
+header and processes each image once per build (#147 fixed a deadlock in that change).
+
+| output (100 entries) | Nowaki | Astro |
+|---|---|---|
+| images | 966 KB: AVIF 54 KB (16 files) + JPEG fallback 912 KB (16 files); `<picture>`, 4 widths | 297 KB: WebP (48 files); `<img srcset>`, 6 widths |
+| HTML (all pages) | 838 KB | 912 KB |
+| CSS / JS files | 1.4 KB / 22.0 KB ¹ | 0 / 0 (CSS inlined) |
+| sitemap URLs | 102 | 102 |
+| first-load JS: Markdown entry / MDX entry / `/docs/` | 0 / 0 / 0 KB | 0 / 0 / 0 KB |
+
+¹ Includes chunks no page loads (the client router and island runtime are emitted even when no
+page has an island).
+
+Browsers that take AVIF get the 54 KB set; the JPEG files are the fallback for the rest. Astro
+inlines its small CSS into each page (`<style>`), so it has no CSS file. Measured 2026-11-06
+(UTC) on an Apple M2, Node 24.14.0: Nowaki built from `main` at `70f9e0a` (after 0.16.2),
+Astro 7.4.5. Raw runs: `benchmarks/docs-site/results/`.
+
 ## Methodology
 
 - **Machine/run dependent.** Numbers are representative of one machine; treat
