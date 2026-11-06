@@ -180,11 +180,16 @@ pub fn scope_css(id: &str, css: &str) -> (String, Vec<(String, String)>) {
     let bytes = css.as_bytes();
     let mut out = String::with_capacity(css.len() + 64);
     let mut map: Vec<(String, String)> = Vec::new();
+    // Bytes in `css[copied..i]` are copied through unchanged as one slice. Every split point
+    // sits on an ASCII byte ('.' or an ident char), so the slices stay on UTF-8 char
+    // boundaries and non-ASCII text (comments, `content`, font names) is never re-encoded.
+    let mut copied = 0;
     let mut i = 0;
     while i < bytes.len() {
         let c = bytes[i];
         // Class selector start: '.' followed by an ident-start (a-zA-Z_ or -<letter>)
         if c == b'.' && i + 1 < bytes.len() && is_ident_start(bytes[i + 1]) {
+            out.push_str(&css[copied..i]);
             let start = i + 1;
             let mut j = start;
             while j < bytes.len() && is_ident_char(bytes[j]) {
@@ -198,11 +203,12 @@ pub fn scope_css(id: &str, css: &str) -> (String, Vec<(String, String)>) {
                 map.push((name.to_string(), scoped));
             }
             i = j;
+            copied = j;
             continue;
         }
-        out.push(c as char);
         i += 1;
     }
+    out.push_str(&css[copied..]);
     (out, map)
 }
 
@@ -329,6 +335,20 @@ mod tests {
     }
 
     #[test]
+    fn scope_css_keeps_non_ascii_text_intact() {
+        let css = "/* \u{898b}\u{51fa}\u{3057} */\n.t { font-family: \"\u{6e38}\u{30b4}\u{30b7}\u{30c3}\u{30af}\"; }\n.t::before { content: \"\u{2192} \u{1f389}\"; }\n.\u{e9} { color: red }";
+        let (scoped, map) = scope_css("routes/jp/jp.module.css", css);
+        let suffix = &map[0].1["t_".len()..];
+        assert_eq!(
+            scoped,
+            format!(
+                "/* \u{898b}\u{51fa}\u{3057} */\n.t_{suffix} {{ font-family: \"\u{6e38}\u{30b4}\u{30b7}\u{30c3}\u{30af}\"; }}\n.t_{suffix}::before {{ content: \"\u{2192} \u{1f389}\"; }}\n.\u{e9} {{ color: red }}"
+            )
+        );
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
     fn scope_css_is_deterministic_and_id_scoped() {
         let css = ".x { color: blue }";
         let (a, _) = scope_css("id-a", css);
@@ -339,7 +359,10 @@ mod tests {
         );
         let (_, mb) = scope_css("id-b", css);
         let (_, ma) = scope_css("id-a", css);
-        assert_ne!(ma[0].1, mb[0].1, "different id → different scoped name");
+        assert_ne!(
+            ma[0].1, mb[0].1,
+            "different id \u{2192} different scoped name"
+        );
     }
 
     #[test]

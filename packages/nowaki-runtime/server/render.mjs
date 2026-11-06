@@ -113,7 +113,7 @@ function devScripts({ islands, live: hasLive }) {
     ? '<script id="nowaki-runtime" type="module" src="/node_modules/@nowaki-dev/runtime/client/islands.js" data-router="/node_modules/@nowaki-dev/runtime/client/router.js"></script>\n'
     : "";
   const live = hasLive
-    ? '<script type="module" src="/node_modules/@nowaki-dev/runtime/client/live.js"></script>\n'
+    ? '<script id="nowaki-live" type="module" src="/node_modules/@nowaki-dev/runtime/client/live.js"></script>\n'
     : "";
   const hmr =
     '<script type="module" src="/node_modules/@nowaki-dev/runtime/client/hmr.js"></script>';

@@ -130,6 +130,10 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         .arg(&entry)
         .current_dir(&root)
         .env("NOWAKI_PUBLISH_TOKEN", crate::live::publish_token())
+        // The pipe stays in `child`; when this process ends (even by SIGKILL) it closes and the
+        // sidecar exits (server/exit-with-parent.mjs) instead of lingering.
+        .env("NOWAKI_EXIT_WITH_PARENT", "1")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .kill_on_drop(true)
@@ -271,9 +275,10 @@ async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
             .cloned()
             .unwrap_or_default();
         if !spec.no_cache {
-            let key = isr_key(&pathname, query.as_deref(), req.headers(), &spec);
-            if let Some(resp) = isr_lookup(&state, &key, req.headers()) {
-                return resp;
+            if let Some(key) = isr_key(&pathname, query.as_deref(), req.headers(), &spec) {
+                if let Some(resp) = isr_lookup(&state, &key, req.headers()) {
+                    return resp;
+                }
             }
         }
         return proxy(state, req, true).await;
@@ -281,13 +286,18 @@ async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
     proxy(state, req, false).await
 }
 
-/// Header values are folded in the BTreeSet's stable order.
+/// Header values are folded in the BTreeSet's stable order. `None` means the request must bypass
+/// the cache (no lookup, no store): a varied header that repeats, or whose value isn't visible
+/// ASCII (plus SP/HTAB), can't be keyed faithfully. The sidecar sees every value (Node joins
+/// repeats and keeps obs-text bytes), so keying on a lossy view of them would store one visitor's
+/// render under another visitor's key. An absent header and an empty one get different keys, since
+/// a loader can tell them apart.
 fn isr_key(
     pathname: &str,
     query: Option<&str>,
     headers: &axum::http::HeaderMap,
     spec: &VarySpec,
-) -> String {
+) -> Option<String> {
     let mut k = String::from(pathname);
     if spec.query {
         if let Some(q) = query {
@@ -296,16 +306,19 @@ fn isr_key(
         }
     }
     for name in &spec.headers {
-        let val = headers
-            .get(name.as_str())
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        k.push('\u{1f}'); // Unit Separator: header boundary (a control char that never appears in values)
+        k.push('\u{1f}'); // Unit Separator: header boundary (to_str() rejects control chars in values)
         k.push_str(name);
+        let mut values = headers.get_all(name.as_str()).iter();
+        let Some(first) = values.next() else {
+            continue; // absent: name only, no '='
+        };
+        if values.next().is_some() {
+            return None;
+        }
         k.push('=');
-        k.push_str(val);
+        k.push_str(first.to_str().ok()?);
     }
-    k
+    Some(k)
 }
 
 fn isr_lookup(state: &Arc<ProdState>, key: &str, req: &axum::http::HeaderMap) -> Option<Response> {
@@ -354,8 +367,8 @@ fn isr_warm_enabled() -> bool {
 /// Renders every ISR page once in the background right after startup (`NOWAKI_ISR_WARM=0` turns
 /// it off), so the first visitor already gets a cached page from Rust. Each page goes through the
 /// normal request path with no cookies, so it is stored exactly as an anonymous visit would be:
-/// pages that vary on a header are keyed by that header's (empty) value and never serve someone
-/// with a different one. Two at a time, to leave the renderer free for real traffic.
+/// pages that vary on a header are keyed by that header's absence (an anonymous visitor), never
+/// serving someone who sends it. Two at a time, to leave the renderer free for real traffic.
 async fn warm_isr(state: Arc<ProdState>, host: String) {
     use futures_util::StreamExt;
     let started = Instant::now();
@@ -535,7 +548,10 @@ fn maybe_store(
         spec.clone()
     };
 
-    let key = isr_key(pathname, query, req_headers, &spec);
+    // A varied header that repeats or isn't visible ASCII: this render can't be keyed, don't store it.
+    let Some(key) = isr_key(pathname, query, req_headers, &spec) else {
+        return;
+    };
     let refetch_path = if spec.query {
         match query {
             Some(q) => format!("{pathname}?{q}"),
@@ -544,6 +560,8 @@ fn maybe_store(
     } else {
         pathname.to_string()
     };
+    // isr_key returned Some, so each varied header is absent or a single visible-ASCII value:
+    // replaying these reproduces exactly the request the key describes.
     let refetch_headers: Vec<(String, String)> = spec
         .headers
         .iter()
@@ -904,7 +922,9 @@ fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
     };
     let live_script = if meta.body.contains("<nowaki-live") {
         match &manifest.live_runtime {
-            Some(f) => format!("<script type=\"module\" src=\"/_nowaki/{f}\"></script>"),
+            Some(f) => {
+                format!("<script id=\"nowaki-live\" type=\"module\" src=\"/_nowaki/{f}\"></script>")
+            }
             None => String::new(),
         }
     } else {
@@ -1019,5 +1039,66 @@ mod tests {
         ] {
             assert_eq!(asset_name(path), None, "{path} must be rejected");
         }
+    }
+
+    fn vary_on(names: &[&str]) -> VarySpec {
+        VarySpec {
+            headers: names.iter().map(|n| n.to_string()).collect(),
+            ..VarySpec::default()
+        }
+    }
+
+    fn header_map(pairs: &[(&str, &[u8])]) -> axum::http::HeaderMap {
+        let mut h = axum::http::HeaderMap::new();
+        for (n, v) in pairs {
+            h.append(
+                axum::http::HeaderName::from_bytes(n.as_bytes()).unwrap(),
+                axum::http::HeaderValue::from_bytes(v).unwrap(),
+            );
+        }
+        h
+    }
+
+    #[test]
+    fn isr_key_bypasses_repeated_varied_headers() {
+        let spec = vary_on(&["accept-language", "cookie"]);
+        let anon = isr_key("/p", None, &header_map(&[]), &spec);
+        assert!(anon.is_some());
+        // `Cookie:` + `Cookie: user=attacker` renders for user=attacker; it used to share the
+        // key of an anonymous visitor. It must not be cached at all.
+        let dup = header_map(&[("cookie", b""), ("cookie", b"user=attacker")]);
+        assert_eq!(isr_key("/p", None, &dup, &spec), None);
+        let dup_lang = header_map(&[("accept-language", b""), ("accept-language", b"xx-EVIL")]);
+        assert_eq!(isr_key("/p", None, &dup_lang, &spec), None);
+        // A repeated header the page does not vary on doesn't matter.
+        let other = header_map(&[("x-a", b"1"), ("x-a", b"2")]);
+        assert_eq!(isr_key("/p", None, &other, &spec), anon);
+    }
+
+    #[test]
+    fn isr_key_bypasses_non_visible_ascii_values() {
+        let spec = vary_on(&["cookie"]);
+        let obs = header_map(&[("cookie", b"user=obs\xff\xfe")]);
+        assert_eq!(isr_key("/p", None, &obs, &spec), None);
+        let anon = isr_key("/p", None, &header_map(&[]), &spec);
+        assert!(anon.is_some());
+        // Absent and empty differ (a loader can tell `undefined` from `""`).
+        let empty = header_map(&[("cookie", b"")]);
+        assert_ne!(isr_key("/p", None, &empty, &spec), anon);
+    }
+
+    #[test]
+    fn isr_key_keeps_users_apart() {
+        let spec = vary_on(&["cookie"]);
+        let a = isr_key("/p", None, &header_map(&[("cookie", b"user=a")]), &spec);
+        let b = isr_key("/p", None, &header_map(&[("cookie", b"user=b")]), &spec);
+        let anon = isr_key("/p", None, &header_map(&[]), &spec);
+        assert!(a.is_some() && b.is_some());
+        assert_ne!(a, b);
+        assert_ne!(a, anon);
+        assert_eq!(
+            isr_key("/p", None, &header_map(&[("cookie", b"user=a")]), &spec),
+            a
+        );
     }
 }

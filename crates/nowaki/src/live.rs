@@ -110,6 +110,10 @@ impl EventQueue {
         self.items.pop_front()
     }
 
+    fn clear(&mut self) {
+        self.items.clear();
+    }
+
     /// A refresh already waiting for this island covers another publish.
     fn has_load(&self, nid: &str) -> bool {
         self.items.iter().any(|e| e.load.is_some() && e.nid == nid)
@@ -148,13 +152,16 @@ struct RenderOk {
     shareable: bool,
 }
 
-/// One publish refresh, rendered once and handed to every connection waiting on the same key.
-/// `None` once rendered means the render wasn't shareable (or failed): each waiter renders its own.
-type SharedRender = Arc<tokio::sync::OnceCell<Option<RenderOk>>>;
+/// One publish refresh, rendered once and handed to every connection waiting on the same key,
+/// with the signature the renderer's state carried (the sidecar verified it). `None` once rendered
+/// means the render wasn't shareable (or failed): each waiter renders its own.
+type SharedRender = Arc<tokio::sync::OnceCell<Option<(String, RenderOk)>>>;
 
 struct Rendered {
     nid: String,
     name: String,
+    /// The page (see `handle_text`) the render was started for.
+    page: u64,
     result: Result<RenderOk, RenderError>,
 }
 
@@ -367,6 +374,9 @@ pub async fn handle(
         .await;
 
     let mut islands: Islands = HashMap::new();
+    // Bumped by each replacing join (a client navigation): work queued or in flight for an
+    // earlier page is dropped, even where the new page reuses its nids.
+    let mut page: u64 = 0;
     let mut queue = EventQueue::new(MAX_QUEUED);
     let mut inflight: Option<tokio::task::JoinHandle<Rendered>> = None;
     let ctx = RenderCtx {
@@ -387,7 +397,7 @@ pub async fn handle(
                 let Some(Ok(msg)) = incoming else { break };
                 last_seen = Instant::now(); // any received message (incl. pong) marks liveness
                 if let Message::Text(txt) = msg {
-                    if let Some(Err(nid)) = handle_text(&mut islands, txt.as_str()).map(|ev| queue.push(ev)) {
+                    if let Err(nid) = receive(&mut islands, &mut page, &mut queue, txt.as_str()) {
                         if !send_error(&mut socket, &nid, "busy").await {
                             break;
                         }
@@ -399,7 +409,7 @@ pub async fn handle(
             done = async { inflight.as_mut().unwrap().await }, if inflight.is_some() => {
                 inflight = None;
                 let Ok(r) = done else { continue };
-                if !apply_rendered(&mut socket, &mut islands, r).await {
+                if !apply_rendered(&mut socket, &mut islands, page, r).await {
                     break;
                 }
                 sync_rooms(&hub, &mut my_rooms, &islands);
@@ -458,7 +468,7 @@ pub async fn handle(
         if inflight.is_none() {
             while let Some(ev) = queue.pop() {
                 if let Some((name, st, sig, _)) = islands.get(&ev.nid).cloned() {
-                    inflight = Some(tokio::spawn(render(ctx.clone(), ev, name, st, sig)));
+                    inflight = Some(tokio::spawn(render(ctx.clone(), ev, page, name, st, sig)));
                     break;
                 }
             }
@@ -484,11 +494,35 @@ struct RenderCtx {
     request: Arc<Value>,
 }
 
+/// Handle a Text message and queue its event. Err(nid) when the queue is full. A replacing join
+/// (a new page) empties the queue: the old page's events and refreshes must not reach the new
+/// page's island with the same nid.
+fn receive(
+    islands: &mut Islands,
+    page: &mut u64,
+    queue: &mut EventQueue,
+    txt: &str,
+) -> Result<(), String> {
+    let was = *page;
+    let ev = handle_text(islands, page, txt);
+    if *page != was {
+        queue.clear();
+    }
+    ev.map_or(Ok(()), |ev| queue.push(ev))
+}
+
 /// Handle a Text message: `join` registers islands; `event` returns the event to queue.
-fn handle_text(islands: &mut Islands, txt: &str) -> Option<PendingEvent> {
+/// A replacing join (a new page) bumps `page`; the caller then drops the queued events.
+fn handle_text(islands: &mut Islands, page: &mut u64, txt: &str) -> Option<PendingEvent> {
     let v = serde_json::from_str::<Value>(txt).ok()?;
     match v.get("type").and_then(|t| t.as_str()) {
         Some("join") => {
+            // `replace`: the client lists every island on its page (after a client navigation
+            // too), so the previous page's islands, topics and rooms go.
+            if v.get("replace").and_then(|r| r.as_bool()) == Some(true) {
+                islands.clear();
+                *page += 1;
+            }
             if let Some(arr) = v.get("islands").and_then(|i| i.as_array()) {
                 for it in arr {
                     let nid = it.get("nid").and_then(|x| x.as_str()).unwrap_or("");
@@ -532,6 +566,7 @@ fn handle_text(islands: &mut Islands, txt: &str) -> Option<PendingEvent> {
 async fn render(
     ctx: RenderCtx,
     ev: PendingEvent,
+    page: u64,
     name: String,
     st: Value,
     sig: String,
@@ -551,18 +586,23 @@ async fn render(
                 let r = render_once(&ctx, &ev, &name, &st, &sig).await;
                 let share = r.as_ref().ok().filter(|ok| ok.shareable).cloned();
                 mine = Some(r);
-                share
+                share.map(|ok| (sig.clone(), ok))
             })
             .await
             .clone();
         let result = match (mine, shared) {
-            (Some(r), _) => r,          // this connection rendered it
-            (None, Some(ok)) => Ok(ok), // another one did, and it is shareable
+            (Some(r), _) => r, // this connection rendered it
+            // Another one did, and it is shareable. The key has no signature in it, so this
+            // connection's own one still has to be genuine before it gets the HTML and a fresh sig.
+            (None, Some((verified, ok))) => verify_own_sig(&ctx, &name, &st, &sig, &verified)
+                .await
+                .map(|()| ok),
             (None, None) => render_once(&ctx, &ev, &name, &st, &sig).await,
         };
         return Rendered {
             nid: ev.nid,
             name,
+            page,
             result,
         };
     }
@@ -570,7 +610,52 @@ async fn render(
     Rendered {
         nid: ev.nid,
         name,
+        page,
         result,
+    }
+}
+
+/// Whether a connection waiting on a shared refresh holds a genuine signature for its state. The
+/// same signature string the renderer had is already verified (it binds name and state, which the
+/// key matched), so steady-state refreshes cost nothing; any other one is checked by the sidecar
+/// without rendering.
+async fn verify_own_sig(
+    ctx: &RenderCtx,
+    name: &str,
+    st: &Value,
+    sig: &str,
+    verified: &str,
+) -> Result<(), RenderError> {
+    if sig == verified {
+        return Ok(());
+    }
+    let body = json!({ "verifyOnly": true, "name": name, "state": st, "sig": sig });
+    let url = format!("http://127.0.0.1:{}/__nowaki/live-render", ctx.sidecar_port);
+    let call = async {
+        let r = ctx
+            .http
+            .post(&url)
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .send()
+            .await
+            .map_err(|_| RenderError::Failed)?;
+        let rv: Value = serde_json::from_str(&r.text().await.map_err(|_| RenderError::Failed)?)
+            .map_err(|_| RenderError::Failed)?;
+        sig_status(&rv)
+    };
+    match tokio::time::timeout(ctx.timeout, call).await {
+        Ok(r) => r,
+        Err(_) => Err(RenderError::Timeout),
+    }
+}
+
+/// The sidecar's `verifyOnly` answer: only "ok" passes; "expired" reloads the page like a render would.
+fn sig_status(rv: &Value) -> Result<(), RenderError> {
+    match rv.get("verified").and_then(|v| v.as_str()) {
+        Some("ok") => Ok(()),
+        Some("expired") => Err(RenderError::Stale),
+        _ => Err(RenderError::Failed),
     }
 }
 
@@ -637,7 +722,17 @@ async fn render_once(
 
 /// Store the new state and push the patch, or tell the client the event failed.
 /// false when the socket is gone.
-async fn apply_rendered(socket: &mut WebSocket, islands: &mut Islands, r: Rendered) -> bool {
+async fn apply_rendered(
+    socket: &mut WebSocket,
+    islands: &mut Islands,
+    page: u64,
+    r: Rendered,
+) -> bool {
+    // The page navigated away while this rendered: the island is gone (or its nid is now another
+    // page's island), so the result or error is dropped rather than brought back.
+    if !still_joined(islands, page, &r) {
+        return true;
+    }
     let RenderOk {
         html,
         state: new_state,
@@ -667,6 +762,13 @@ async fn apply_rendered(socket: &mut WebSocket, islands: &mut Islands, r: Render
         .send(Message::Text(patch.to_string().into()))
         .await
         .is_ok()
+}
+
+/// Whether the island a render was for is still on the client's page. A client navigation sends a
+/// replacing join, which drops the previous page's islands while their renders may be in flight;
+/// the new page may reuse the nid (and island name), so the page counter decides.
+fn still_joined(islands: &Islands, page: u64, r: &Rendered) -> bool {
+    r.page == page && islands.get(&r.nid).is_some_and(|e| e.0 == r.name)
 }
 
 async fn send_error(socket: &mut WebSocket, nid: &str, reason: &str) -> bool {
@@ -704,13 +806,15 @@ mod tests {
     #[test]
     fn join_registers_and_event_needs_a_known_island() {
         let mut islands = Islands::new();
+        let mut page = 0;
         let join = r#"{"type":"join","islands":[{"nid":"L0","name":"LiveCounter","state":{"count":1},"sig":"s"},{"nid":"","name":"x"}]}"#;
-        assert!(handle_text(&mut islands, join).is_none());
+        assert!(handle_text(&mut islands, &mut page, join).is_none());
         assert_eq!(islands.len(), 1);
         assert_eq!(islands["L0"].1, json!({"count": 1}));
 
         let e = handle_text(
             &mut islands,
+            &mut page,
             r#"{"type":"event","nid":"L0","handler":"inc"}"#,
         )
         .unwrap();
@@ -718,10 +822,11 @@ mod tests {
         assert_eq!(e.handler, json!("inc"));
         assert!(handle_text(
             &mut islands,
+            &mut page,
             r#"{"type":"event","nid":"L9","handler":"inc"}"#
         )
         .is_none());
-        assert!(handle_text(&mut islands, "not json").is_none());
+        assert!(handle_text(&mut islands, &mut page, "not json").is_none());
     }
 
     #[test]
@@ -825,5 +930,191 @@ mod tests {
         sync_rooms(&hub, &mut b, &Islands::new());
         assert_eq!(hub.room_count("p"), 1);
         assert!(!b.contains("p") && a.contains("p"));
+    }
+
+    /// A stand-in sidecar: signatures starting with "good" are genuine, "old" is expired, anything
+    /// else is forged. Counts full renders and verify-only calls.
+    async fn fake_sidecar() -> (u16, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+        let renders = Arc::new(AtomicUsize::new(0));
+        let verifies = Arc::new(AtomicUsize::new(0));
+        let (r, v) = (renders.clone(), verifies.clone());
+        let app = axum::Router::new().route(
+            "/__nowaki/live-render",
+            axum::routing::post(move |body: String| {
+                let (r, v) = (r.clone(), v.clone());
+                async move {
+                    let b: Value = serde_json::from_str(&body).unwrap();
+                    let sig = b["sig"].as_str().unwrap_or("");
+                    let status = if sig.starts_with("good") {
+                        "ok"
+                    } else if sig == "old" {
+                        "expired"
+                    } else {
+                        "invalid"
+                    };
+                    if b["verifyOnly"] == json!(true) {
+                        v.fetch_add(1, Ordering::SeqCst);
+                        return (
+                            axum::http::StatusCode::OK,
+                            json!({ "verified": status }).to_string(),
+                        );
+                    }
+                    r.fetch_add(1, Ordering::SeqCst);
+                    match status {
+                        "ok" => (
+                            axum::http::StatusCode::OK,
+                            json!({ "html": "<p>room data</p>", "state": b["state"], "sig": "good-fresh", "shareable": true }).to_string(),
+                        ),
+                        "expired" => (axum::http::StatusCode::CONFLICT, "{}".into()),
+                        _ => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "{}".into()),
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (port, renders, verifies)
+    }
+
+    #[tokio::test]
+    async fn a_shared_refresh_goes_only_to_connections_with_a_genuine_signature() {
+        let (port, renders, verifies) = fake_sidecar().await;
+        let hub = LiveHub::new();
+        hub.publish("room:r-secret");
+        let ctx = RenderCtx {
+            hub,
+            http: reqwest::Client::new(),
+            sidecar_port: port,
+            version: "v".into(),
+            timeout: Duration::from_secs(5),
+            request: Arc::new(json!({ "headers": {} })),
+        };
+        let st = json!({ "room": "r-secret" });
+        let refresh = |nid: &str| PendingEvent {
+            nid: nid.into(),
+            handler: Value::Null,
+            payload: Value::Null,
+            load: Some("room:r-secret".into()),
+        };
+        let go = |nid: &str, sig: &str| {
+            render(
+                ctx.clone(),
+                refresh(nid),
+                0,
+                "Room".into(),
+                st.clone(),
+                sig.into(),
+            )
+        };
+
+        let first = go("A", "good-1").await.result.expect("the renderer");
+        assert_eq!(first.html, "<p>room data</p>");
+        assert_eq!(renders.load(Ordering::SeqCst), 1);
+
+        assert_eq!(
+            go("B", "v1.0.forged").await.result.err(),
+            Some(RenderError::Failed),
+            "a forged signature gets neither the room's HTML nor a fresh signature"
+        );
+        assert_eq!(
+            go("C", "old").await.result.err(),
+            Some(RenderError::Stale),
+            "an expired signature reloads instead of being refreshed"
+        );
+
+        let same = go("D", "good-1")
+            .await
+            .result
+            .expect("same signature as the renderer");
+        assert_eq!(same.sig, "good-fresh");
+        assert_eq!(
+            verifies.load(Ordering::SeqCst),
+            2,
+            "the renderer's own sig needs no check"
+        );
+        let other = go("E", "good-2")
+            .await
+            .result
+            .expect("another genuine signature");
+        assert_eq!(other.html, "<p>room data</p>");
+        assert_eq!(verifies.load(Ordering::SeqCst), 3);
+        assert_eq!(
+            renders.load(Ordering::SeqCst),
+            1,
+            "still one render per publish"
+        );
+    }
+
+    #[test]
+    fn a_replacing_join_drops_the_previous_pages_islands() {
+        let hub = LiveHub::new();
+        let mut rooms = Default::default();
+        let mut islands = Islands::new();
+        let mut page = 0;
+        let page1 = r#"{"type":"join","islands":[{"nid":"L0","name":"Poll","state":{"room":"p"},"sig":"s","topics":["room:p"]}]}"#;
+        handle_text(&mut islands, &mut page, page1);
+        sync_rooms(&hub, &mut rooms, &islands);
+        assert_eq!(hub.room_count("p"), 1);
+
+        // A join without `replace` (a POST handing over new state) adds to what's there.
+        let more =
+            r#"{"type":"join","islands":[{"nid":"L1","name":"LiveCounter","state":{},"sig":"s"}]}"#;
+        handle_text(&mut islands, &mut page, more);
+        assert_eq!(islands.len(), 2);
+        assert_eq!(page, 0);
+
+        // A client navigation: the new page's islands replace the old ones, and their rooms go.
+        let page2 = r#"{"type":"join","replace":true,"islands":[{"nid":"L0","name":"LiveCounter","state":{"count":0},"sig":"s"}]}"#;
+        handle_text(&mut islands, &mut page, page2);
+        sync_rooms(&hub, &mut rooms, &islands);
+        assert_eq!(page, 1);
+        assert_eq!(islands.len(), 1);
+        assert_eq!(islands["L0"].0, "LiveCounter");
+        assert_eq!(hub.room_count("p"), 0);
+        assert!(handle_text(
+            &mut islands,
+            &mut page,
+            r#"{"type":"event","nid":"L1","handler":"inc"}"#
+        )
+        .is_none());
+
+        // A render started for the old page is not applied: L0 is another island now, L1 is
+        // gone, and a reused nid and name (the same page revisited) is still the old page's.
+        let done = |nid: &str, name: &str, page: u64| Rendered {
+            nid: nid.into(),
+            name: name.into(),
+            page,
+            result: Err(RenderError::Stale),
+        };
+        assert!(!still_joined(&islands, page, &done("L0", "Poll", 0)));
+        assert!(!still_joined(&islands, page, &done("L1", "LiveCounter", 0)));
+        assert!(!still_joined(&islands, page, &done("L0", "LiveCounter", 0)));
+        assert!(still_joined(&islands, page, &done("L0", "LiveCounter", 1)));
+    }
+
+    #[test]
+    fn a_replacing_join_drops_the_old_pages_queued_events() {
+        let mut islands = Islands::new();
+        let mut page = 0;
+        let mut q = EventQueue::new(MAX_QUEUED);
+        let join = |replace: bool| {
+            format!(
+                r#"{{"type":"join","replace":{replace},"islands":[{{"nid":"L0","name":"LiveCounter","state":{{"count":0}},"sig":"s"}}]}}"#
+            )
+        };
+        let event = r#"{"type":"event","nid":"L0","handler":"inc"}"#;
+        receive(&mut islands, &mut page, &mut q, &join(true)).unwrap();
+        receive(&mut islands, &mut page, &mut q, event).unwrap();
+        receive(&mut islands, &mut page, &mut q, event).unwrap();
+        // A join that only hands over state keeps the queue.
+        receive(&mut islands, &mut page, &mut q, &join(false)).unwrap();
+        assert_eq!(q.items.len(), 2);
+
+        // The same page again (same nid and island): the old page's events go, the new one's stay.
+        receive(&mut islands, &mut page, &mut q, &join(true)).unwrap();
+        assert!(q.pop().is_none());
+        receive(&mut islands, &mut page, &mut q, event).unwrap();
+        assert_eq!(q.pop().map(|e| e.nid), Some("L0".into()));
     }
 }

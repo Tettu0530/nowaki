@@ -267,3 +267,11 @@ for i in $(seq 1 20); do curl -sf http://127.0.0.1:3303/ >/dev/null && break; sl
 node scripts/livetest.mjs http://127.0.0.1:3303 --expect-stale 3
 kill $STALE_PID
 bash scripts/ci/assert-no-orphans.sh $STALE_PID
+
+# SIGKILL can't stop the children, so they exit when their stdin pipe closes (exit-with-parent.mjs):
+# nothing may linger with PID 1 as its parent.
+./target/debug/nowaki start examples/hello --port 3305 &
+KILL_PID=$!
+for i in $(seq 1 20); do curl -sf http://127.0.0.1:3305/ >/dev/null && break; sleep 1; done
+kill -9 $KILL_PID
+bash scripts/ci/assert-no-orphans.sh $KILL_PID

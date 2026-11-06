@@ -37,11 +37,18 @@ export function warnIfEphemeralLiveKey() {
 }
 
 // Key-order-independent stable serialization (still matches if serde_json re-serialization reorders keys).
+// The state is signed as JSON will carry it: the client and Rust only ever see JSON.stringify(state),
+// which drops undefined-valued keys and turns a Date (any toJSON) into its JSON form. Signing the raw
+// object instead would make `{ ...state, error: undefined }` fail verification on the next event.
 function canonical(v) {
-  if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
-  if (Array.isArray(v)) return "[" + v.map(canonical).join(",") + "]";
+  return stable(JSON.parse(JSON.stringify(v) ?? "null"));
+}
+
+function stable(v) {
+  if (v === null || typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return "[" + v.map(stable).join(",") + "]";
   const keys = Object.keys(v).sort();
-  return "{" + keys.map((k) => JSON.stringify(k) + ":" + canonical(v[k])).join(",") + "}";
+  return "{" + keys.map((k) => JSON.stringify(k) + ":" + stable(v[k])).join(",") + "}";
 }
 
 const nowS = () => Math.floor(Date.now() / 1000);

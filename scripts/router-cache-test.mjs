@@ -21,6 +21,20 @@ ok("/blog boundary matches /blog itself", matchBoundary(boundaries, "/blog").htm
 ok("/blog boundary matches a child", matchBoundary(boundaries, "/blog/hello").html === "blog");
 ok("deeper boundary wins (most specific)", matchBoundary(boundaries, "/blog/admin/x").html === "admin");
 ok("/blogger does NOT match /blog prefix", matchBoundary(boundaries, "/blogger").html === "root");
+// A boundary in a [param] directory: the prefix is the directory as written.
+const dyn = [
+  { prefix: "", html: "root" },
+  { prefix: "/org/[org]", html: "org" },
+  { prefix: "/abcdefgh", html: "long" },
+  { prefix: "/abcdefgh/[x]/y", html: "deep" },
+];
+ok("[param] boundary matches a real segment", matchBoundary(dyn, "/org/acme/settings").html === "org");
+ok("[param] boundary needs its segment", matchBoundary(dyn, "/org").html === "root");
+ok("deeper wins by segments, not string length", matchBoundary(dyn, "/abcdefgh/z/y").html === "deep");
+ok("literal prefix compared percent-decoded", matchBoundary([{ prefix: "/admin", html: "a" }], "/%61dmin/x")?.html === "a");
+ok("malformed escape doesn't throw", matchBoundary([{ prefix: "/admin", html: "a" }], "/50%/x") === null);
+ok("suffixed [id].v2 boundary needs the suffix", matchBoundary([{ prefix: "/r/[id].v2", html: "v2" }], "/r/7/x") === null);
+ok("suffixed [id].v2 boundary matches with it", matchBoundary([{ prefix: "/r/[id].v2", html: "v2" }], "/r/7.v2/x")?.html === "v2");
 ok("no boundaries → null", matchBoundary([], "/x") === null);
 ok("no root boundary and no match → null", matchBoundary([{ prefix: "/p" }], "/q") === null);
 ok(

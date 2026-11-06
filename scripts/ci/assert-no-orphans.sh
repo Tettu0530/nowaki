@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# CI: after a nowaki server got SIGTERM, its Node children (sidecar, plugin host) must be gone.
+# CI: after a nowaki server got SIGTERM (or SIGKILL), its Node children (sidecar, plugin host)
+# must be gone. On SIGKILL they go by themselves when their stdin pipe closes.
 # Usage: scripts/ci/assert-no-orphans.sh <pid-of-nowaki>
 set -e
 pid=$1
@@ -12,9 +13,12 @@ if kill -0 "$pid" 2>/dev/null; then
   echo "nowaki ($pid) still running after SIGTERM" >&2
   exit 1
 fi
-sleep 0.5
 # Only this checkout's example app, so other Nowaki apps running on the machine don't count.
 pattern="$(cd "$(dirname "$0")/../.." && pwd)/examples/hello/node_modules/@nowaki-dev/runtime/server/"
+for _ in $(seq 1 12); do
+  pgrep -f "$pattern" >/dev/null || break
+  sleep 0.25
+done
 if pgrep -f "$pattern" >/dev/null; then
   echo "orphaned Node children after SIGTERM:" >&2
   pgrep -fl "$pattern" >&2

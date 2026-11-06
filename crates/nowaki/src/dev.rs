@@ -95,6 +95,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         .route(crate::mcp::PATH, axum::routing::any(crate::mcp::handle))
         .fallback(serve_or_proxy)
         .with_state(state)
+        .layer(axum::middleware::from_fn_with_state(expose, host_guard))
         .layer(axum::middleware::from_fn(crate::csp::layer))
         .layer(axum::middleware::map_response(crate::security_headers::add));
 
@@ -772,6 +773,44 @@ pub(crate) fn is_loopback_host(host: &str) -> bool {
     matches!(h, "localhost" | "127.0.0.1" | "::1")
 }
 
+/// DNS-rebinding guard for every dev route. On the default bind (127.0.0.1) a page on another
+/// domain can rebind its name to 127.0.0.1 and read dev responses same-origin: server-only source
+/// with its source map, `/@fs/` files, `.npmrc`. The browser still sends the attacker's name as
+/// `Host`, so only `localhost` / `127.0.0.1` / `[::1]` are accepted. `--host` exposes the server on
+/// purpose and accepts any Host. A request without Host (no browser sends one) is let through.
+pub(crate) fn dev_host_allowed(headers: &axum::http::HeaderMap, expose: bool) -> bool {
+    if expose {
+        return true;
+    }
+    match headers.get(header::HOST) {
+        None => true,
+        Some(v) => v.to_str().is_ok_and(is_loopback_host),
+    }
+}
+
+async fn host_guard(
+    State(expose): State<bool>,
+    req: Request,
+    next: axum::middleware::Next,
+) -> Response {
+    if dev_host_allowed(req.headers(), expose) {
+        return next.run(req).await;
+    }
+    let host = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("?");
+    (
+        StatusCode::FORBIDDEN,
+        format!(
+            "Blocked request: Host \"{host}\" is not allowed by the dev server. \
+             Open it at localhost, or start `nowaki dev --host` to accept other hosts.\n"
+        ),
+    )
+        .into_response()
+}
+
 /// Validate the WebSocket upgrade Origin (CSWSH guard). No Origin (non-browser) is allowed;
 /// same-origin is allowed, but on the default bind Host must be loopback to defeat DNS rebinding.
 fn ws_origin_ok(headers: &axum::http::HeaderMap, expose: bool) -> bool {
@@ -925,5 +964,60 @@ mod tests {
         assert!(is_loopback_host("::1"));
         assert!(!is_loopback_host("192.168.1.10:3000"));
         assert!(!is_loopback_host("evil.com"));
+    }
+
+    #[test]
+    fn dev_host_guard_defeats_dns_rebinding() {
+        for ok in [
+            "localhost:3000",
+            "127.0.0.1:3000",
+            "[::1]:3000",
+            "localhost",
+        ] {
+            assert!(dev_host_allowed(&hdrs(&[("host", ok)]), false), "{ok}");
+        }
+        for bad in [
+            "attacker.test:3000",
+            "192.168.1.10:3000",
+            "localhost.evil.com",
+        ] {
+            assert!(!dev_host_allowed(&hdrs(&[("host", bad)]), false), "{bad}");
+            // --host exposes the server on purpose (LAN IPs, custom names).
+            assert!(dev_host_allowed(&hdrs(&[("host", bad)]), true), "{bad}");
+        }
+        assert!(dev_host_allowed(&hdrs(&[]), false));
+    }
+
+    /// The guard is a layer, so it covers the fallback (app files) and every `/__nowaki/*` route.
+    #[tokio::test]
+    async fn dev_host_guard_layer_refuses_a_rebound_host() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let app = Router::new()
+            .route("/@fs/{*path}", get(|| async { "file" }))
+            .fallback(|| async { "secret" })
+            .layer(axum::middleware::from_fn_with_state(false, host_guard));
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+
+        let get = |path: &'static str, host: String| async move {
+            let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let req = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+            s.write_all(req.as_bytes()).await.unwrap();
+            let mut out = String::new();
+            s.read_to_string(&mut out).await.unwrap();
+            out
+        };
+        let port = addr.port();
+        for path in ["/lib/secret.server.ts", "/@fs/etc/x", "/.npmrc"] {
+            let r = get(path, format!("attacker.test:{port}")).await;
+            assert!(r.starts_with("HTTP/1.1 403"), "{path}: {r}");
+            assert!(!r.contains("secret\r") && !r.ends_with("secret"), "{r}");
+            let r = get(path, format!("localhost:{port}")).await;
+            assert!(r.starts_with("HTTP/1.1 200"), "{path}: {r}");
+        }
+        server.abort();
     }
 }
