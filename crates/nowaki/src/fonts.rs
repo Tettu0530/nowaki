@@ -17,7 +17,9 @@
 //!   own metrics, so text doesn't shift when the font arrives.
 //! - `--font-<family>` (or `variable`) holds the stack: `"Inter", "Inter Fallback", sans-serif`.
 //! - Pages get the stylesheet and `<link rel="preload">` for the latin, upright faces of the
-//!   families with `preload` (the default).
+//!   families with `preload` (the default). Google's CJK families come as ~120 numbered
+//!   `unicode-range` slices with no subset name. Those aren't preloaded (unless one covers basic
+//!   Latin and `subsets` includes latin); the browser fetches the slices a page uses.
 //!
 //! `nowaki build` writes `dist/client/fonts.<hash>.css`, the faces, and `dist/server/fonts.json`
 //! (the runtime reads it); `nowaki dev` writes the same under `.nowaki/fonts/`.
@@ -53,6 +55,8 @@ struct Family {
     variable: String,
     display: String,
     preload: bool,
+    /// `subsets` includes latin (local families: always).
+    latin: bool,
 }
 
 /// `nowaki build` / `prerender`: faces and stylesheet into `dist/client`, `dist/server/fonts.json`.
@@ -91,11 +95,16 @@ fn build(root: &Path, config: &Value, out_dir: &Path, prefix: &str) -> Result<Op
         return Ok(None);
     }
     let families = resolve(root, specs)?;
+    emit(&families, out_dir, prefix).map(Some)
+}
+
+/// Writes the faces and the stylesheet for `families`; returns the `fonts.json` value.
+fn emit(families: &[Family], out_dir: &Path, prefix: &str) -> Result<Value> {
     std::fs::create_dir_all(out_dir)?;
     let mut css = String::new();
     let mut preload = Vec::new();
     let mut variables = serde_json::Map::new();
-    for fam in &families {
+    for fam in families {
         let fam_slug = slug(&fam.family);
         for face in &fam.faces {
             let bytes = std::fs::read(&face.file).with_context(|| {
@@ -141,8 +150,7 @@ fn build(root: &Path, config: &Value, out_dir: &Path, prefix: &str) -> Result<Op
                 css.push_str(&format!("  unicode-range: {r};\n"));
             }
             css.push_str("}\n");
-            let latin = face.subset.as_deref().is_none_or(|s| s == "latin");
-            if fam.preload && latin && face.style == "normal" {
+            if fam.preload && preloadable(face, fam.latin) && face.style == "normal" {
                 preload.push(json!({ "href": url, "type": format!("font/{}", if format == "opentype" { "otf" } else if format == "truetype" { "ttf" } else { format }) }));
             }
         }
@@ -187,9 +195,36 @@ fn build(root: &Path, config: &Value, out_dir: &Path, prefix: &str) -> Result<Op
     css.push_str("}\n");
     let css_name = format!("fonts.{:08x}.css", xxh3_64(css.as_bytes()) as u32);
     std::fs::write(out_dir.join(&css_name), &css)?;
-    Ok(Some(
-        json!({ "css": format!("{prefix}{css_name}"), "preload": preload, "variables": variables }),
-    ))
+    Ok(json!({ "css": format!("{prefix}{css_name}"), "preload": preload, "variables": variables }))
+}
+
+/// Whether a face is a latin one worth a preload: a `latin` subset, a whole local file, or (for
+/// Google's unnamed CJK slices) the slice whose `unicode-range` covers basic Latin.
+fn preloadable(face: &Face, latin: bool) -> bool {
+    match (face.subset.as_deref(), face.unicode_range.as_deref()) {
+        (Some(s), _) => s == "latin",
+        (None, None) => true,
+        (None, Some(range)) => latin && range_covers(range, 'A' as u32),
+    }
+}
+
+/// Whether a CSS `unicode-range` (`U+0-FF, U+131, U+4??`) includes `cp`.
+fn range_covers(range: &str, cp: u32) -> bool {
+    range.split(',').any(|part| {
+        let part = part.trim();
+        let Some(spec) = part.strip_prefix("U+").or_else(|| part.strip_prefix("u+")) else {
+            return false;
+        };
+        let hex = |s: &str| u32::from_str_radix(s, 16).ok();
+        let (lo, hi) = if let Some((a, b)) = spec.split_once('-') {
+            (hex(a), hex(b))
+        } else if spec.contains('?') {
+            (hex(&spec.replace('?', "0")), hex(&spec.replace('?', "F")))
+        } else {
+            (hex(spec), hex(spec))
+        };
+        matches!((lo, hi), (Some(lo), Some(hi)) if lo <= cp && cp <= hi)
+    })
 }
 
 fn resolve(root: &Path, specs: &[Value]) -> Result<Vec<Family>> {
@@ -211,6 +246,11 @@ fn resolve(root: &Path, specs: &[Value]) -> Result<Vec<Family>> {
             variable: str_of("variable").unwrap_or_else(|| format!("--font-{}", slug(&family))),
             display: str_of("display").unwrap_or_else(|| "swap".into()),
             preload: spec.get("preload").and_then(Value::as_bool).unwrap_or(true),
+            latin: spec
+                .get("subsets")
+                .and_then(Value::as_array)
+                .filter(|a| !a.is_empty())
+                .is_none_or(|a| a.iter().any(|s| s.as_str() == Some("latin"))),
             family: family.clone(),
             faces: Vec::new(),
             metrics: None,
@@ -497,5 +537,89 @@ mod tests {
     fn slugs() {
         assert_eq!(slug("Atkinson Hyperlegible"), "atkinson-hyperlegible");
         assert_eq!(slug(" Noto  Sans JP!"), "noto-sans-jp");
+    }
+
+    /// Google's CSS for a CJK family (Noto Sans JP, as served in 2026-11): ~120 numbered slices
+    /// with a `unicode-range` and no subset comment, then `/* latin */` and friends.
+    fn cjk_family(dir: &Path, slices: &[(Option<&str>, &str)], subsets_latin: bool) -> Family {
+        let faces = slices
+            .iter()
+            .enumerate()
+            .map(|(i, (subset, range))| {
+                let file = dir.join(format!("{i}.woff2"));
+                std::fs::write(&file, format!("slice {i}")).unwrap();
+                Face {
+                    weight: "400".into(),
+                    style: "normal".into(),
+                    subset: subset.map(str::to_string),
+                    unicode_range: Some(range.to_string()),
+                    file,
+                }
+            })
+            .collect();
+        Family {
+            family: "Noto Sans JP".into(),
+            faces,
+            metrics: None,
+            fallback: "sans-serif".into(),
+            variable: "--font-noto".into(),
+            display: "swap".into(),
+            preload: true,
+            latin: subsets_latin,
+        }
+    }
+
+    #[test]
+    fn cjk_slices_preload_only_the_latin_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let out_dir = dir.path().join("out");
+        let cjk = [
+            (None, "U+25ee8, U+25f23, U+4e00-4e3f"),
+            (None, "U+3000-303f, U+3041-3096"),
+            (None, "U+ff??"),
+        ];
+        let mut with_latin = cjk.to_vec();
+        with_latin.push((Some("latin"), "U+0000-00FF, U+0131, U+0152-0153"));
+        let fam = cjk_family(dir.path(), &with_latin, true);
+        let out = emit(&[fam], &out_dir, "/_nowaki/").unwrap();
+        let pre = out["preload"].as_array().unwrap();
+        assert_eq!(pre.len(), 1, "{pre:?}");
+        assert!(pre[0]["href"].as_str().unwrap().contains("-normal-latin."));
+        // Every slice keeps its @font-face, so the browser still fetches what a page uses.
+        let css = std::fs::read_to_string(
+            out_dir.join(out["css"].as_str().unwrap().trim_start_matches("/_nowaki/")),
+        )
+        .unwrap();
+        assert_eq!(css.matches("unicode-range:").count(), 4, "{css}");
+        // Unnamed slices only: the one that covers basic Latin.
+        let mut unnamed = cjk.to_vec();
+        unnamed.push((None, "U+0-ff, U+131"));
+        let out = emit(
+            &[cjk_family(dir.path(), &unnamed, true)],
+            &out_dir,
+            "/_nowaki/",
+        )
+        .unwrap();
+        assert_eq!(out["preload"].as_array().unwrap().len(), 1);
+        // `subsets` without latin (fonts-fetch drops the labelled latin face): nothing.
+        let out = emit(
+            &[cjk_family(dir.path(), &unnamed, false)],
+            &out_dir,
+            "/_nowaki/",
+        )
+        .unwrap();
+        assert_eq!(out["preload"].as_array().unwrap().len(), 0);
+        let out = emit(&[cjk_family(dir.path(), &cjk, true)], &out_dir, "/_nowaki/").unwrap();
+        assert_eq!(out["preload"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn unicode_ranges() {
+        assert!(range_covers("U+0-FF", 0x41));
+        assert!(range_covers("U+0000-00FF, U+0131", 0x131));
+        assert!(range_covers("U+00??", 0x41));
+        assert!(!range_covers("U+4??", 0x41));
+        assert!(!range_covers("U+3000-303F", 0x41));
+        assert!(!range_covers("garbage", 0x41));
     }
 }

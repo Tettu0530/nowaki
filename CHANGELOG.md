@@ -15,6 +15,11 @@ milestone's worth of work; the codename is noted per entry.
   landscape with Orientation 6) is emitted upright, with width and height
   swapped to match, in build, dev, and the header-only size read. Image asset
   queries (`?w=`, `?format=`) apply it too. (#150)
+- Google CJK fonts no longer preload every `unicode-range` slice on every page
+  (121 preloads / 3.1 MB for Noto Sans JP). The numbered slices, which carry
+  no subset name, are preloaded only when one covers basic Latin; the
+  `@font-face` rules stay, so the browser fetches the slices a page uses.
+  (#150)
 
 ## [0.17.0] — 2026-11-06 · "Mistral": content sites
 
