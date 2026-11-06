@@ -8,6 +8,7 @@
 //     ],
 //   };
 
+import "./exit-with-parent.mjs";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";

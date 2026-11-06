@@ -89,6 +89,9 @@ pub fn start(root: &Path) -> Result<Option<PluginHost>> {
     let mut child = Command::new("node")
         .arg(&script)
         .current_dir(root)
+        // Exits with this process, however it ends (server/exit-with-parent.mjs).
+        .env("NOWAKI_EXIT_WITH_PARENT", "1")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()

@@ -32,6 +32,9 @@ pub async fn spawn(
         .current_dir(root)
         .env("NOWAKI_RUST_PORT", rust_port.to_string())
         .env("NOWAKI_PUBLISH_TOKEN", crate::live::publish_token())
+        // Exits with this process, however it ends (server/exit-with-parent.mjs).
+        .env("NOWAKI_EXIT_WITH_PARENT", "1")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .kill_on_drop(true)

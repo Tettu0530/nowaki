@@ -246,3 +246,10 @@ node scripts/mcp-e2e.mjs "$B"
 
 kill $SERVER_PID
 bash scripts/ci/assert-no-orphans.sh $SERVER_PID
+
+# SIGKILL: the dev sidecar and plugin host exit when their stdin pipe closes (exit-with-parent.mjs).
+./target/debug/nowaki dev examples/hello --port "$((PORT + 7))" &
+KILL_PID=$!
+for i in $(seq 1 30); do curl -sf "http://127.0.0.1:$((PORT + 7))/" >/dev/null && break; sleep 1; done
+kill -9 $KILL_PID
+bash scripts/ci/assert-no-orphans.sh $KILL_PID

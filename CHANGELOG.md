@@ -51,6 +51,13 @@ milestone's worth of work; the codename is noted per entry.
     (`title`, `meta`, …).
 
 ### Fixed
+- Node children no longer outlive a killed `nowaki`. That covers the dev and
+  production sidecars, the prerender server, and the plugin host. When
+  `nowaki` was stopped with SIGKILL (or crashed), it couldn't stop them, and
+  they lingered with PID 1 as their parent. Fifty-one such sidecars had piled
+  up over four days on one machine. Each child now gets a stdin pipe and exits
+  when it closes, which happens however the parent ends. Run on their own (an
+  adapter's `node index.mjs`), the scripts behave as before.
 - These came up while porting an Astro site.
   - The server build compiles every app module that routes, islands, and
     actions import, wherever it lives (`data/`, `sections/`, …). Before, only
