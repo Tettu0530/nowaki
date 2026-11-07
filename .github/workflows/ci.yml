@@ -325,31 +325,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           install: "false"
-      - name: Assemble host package + resolve through JS shim
-        run: |
-          node scripts/build-npm.mjs linux-x64-gnu
-          # Build a layout equivalent to a real install (real files), then --version via the wrapper shim
-          ROOT=$(mktemp -d)
-          mkdir -p "$ROOT/node_modules/nowaki" "$ROOT/node_modules/@nowaki-dev"
-          cp packages/nowaki-cli/package.json "$ROOT/node_modules/nowaki/"
-          cp -R packages/nowaki-cli/bin packages/nowaki-cli/lib "$ROOT/node_modules/nowaki/"
-          cp -R packages/nowaki-cli/npm/linux-x64-gnu "$ROOT/node_modules/@nowaki-dev/cli-linux-x64-gnu"
-          VER=$(node -p "require('./packages/nowaki-cli/package.json').version")
-          OUT=$(node "$ROOT/node_modules/nowaki/bin/nowaki.js" --version)
-          echo "shim output: '$OUT' (expected 'nowaki $VER')"
-          test "$OUT" = "nowaki $VER"
-          # the exit code comes through (clap exits 2 on an unknown flag)
-          set +e; node "$ROOT/node_modules/nowaki/bin/nowaki.js" --no-such-flag 2>/dev/null; CODE=$?; set -e
-          test "$CODE" = 2
-          # the shim's own process becomes the binary (process.execve; no resident Node, #91):
-          # a stand-in binary that prints its PID must print the PID node was started with
-          BIN="$ROOT/node_modules/@nowaki-dev/cli-linux-x64-gnu/bin/nowaki"
-          test -f "$BIN"
-          printf '#!/bin/sh\necho $$\n' > "$BIN"
-          node "$ROOT/node_modules/nowaki/bin/nowaki.js" > "$ROOT/pid.txt" &
-          NODE_PID=$!; wait $NODE_PID
-          echo "node pid $NODE_PID, binary pid $(cat "$ROOT/pid.txt")"
-          test "$(cat "$ROOT/pid.txt")" = "$NODE_PID"
+      - run: node scripts/npm-cli-shim-test.mjs
 
   docs:
     name: Docs (links, typos, English-only)
