@@ -32,6 +32,9 @@ const DEFAULT_AVIF_QUALITY: u8 = 60;
 /// rav1e speed (1 slowest … 10 fastest). 9 was ~30% faster than 7 on photos at the same or a
 /// smaller size; 10 grew the files by ~60%.
 const AVIF_SPEED: u8 = 9;
+/// Alpha is encoded near-losslessly: at the colour quality, fully transparent or opaque edges
+/// came back off by up to 38 levels. Opaque images carry no alpha plane, so this costs them nothing.
+const AVIF_ALPHA_QUALITY: f32 = 100.0;
 
 /// `?image` and its options.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -232,6 +235,7 @@ pub fn build_set(
                 quality,
                 source_hash,
                 cache.as_deref(),
+                true,
             )
         })
         .collect();
@@ -378,6 +382,7 @@ pub fn dev_variant(
         quality.unwrap_or(DEFAULT_AVIF_QUALITY),
         xxh3_64(&raw),
         cache_dir(root).as_deref(),
+        false, // one image per request in dev: let the encoder use the cores
     )?;
     Ok((bytes, mime_of(out_ext)))
 }
@@ -484,6 +489,9 @@ fn variant<'a>(
     quality: u8,
     source_hash: u64,
     cache: Option<&Path>,
+    // One encoder thread per image when the variants of a build already run in parallel: rav1e's
+    // own threading only adds tiles, which cost bytes (1-28% at the same quality) for no speed.
+    single_thread: bool,
 ) -> Result<Variant> {
     let out_ext: &'static str = if avif {
         "avif"
@@ -496,8 +504,9 @@ fn variant<'a>(
     };
     let key = xxh3_64(
         format!(
-            "{}|{source_hash:x}|{width}|{out_ext}|{quality}|{AVIF_SPEED}|oriented",
-            env!("CARGO_PKG_VERSION")
+            "{}|{source_hash:x}|{width}|{out_ext}|{quality}|{AVIF_SPEED}|a{AVIF_ALPHA_QUALITY}|t{}|oriented",
+            env!("CARGO_PKG_VERSION"),
+            if avif && single_thread { "1" } else { "n" }
         )
         .as_bytes(),
     );
@@ -512,7 +521,7 @@ fn variant<'a>(
         img.clone()
     };
     let bytes = if avif {
-        encode_avif(&scaled, quality)?
+        encode_avif(&scaled, quality, single_thread)?
     } else {
         // JPEG fallback at a fixed quality; PNG / WebP stay lossless.
         let q = (out_ext == "jpg").then_some(82);
@@ -526,7 +535,7 @@ fn variant<'a>(
     Ok((width, out_ext, bytes))
 }
 
-fn encode_avif(img: &DynamicImage, quality: u8) -> Result<Vec<u8>> {
+fn encode_avif(img: &DynamicImage, quality: u8, single_thread: bool) -> Result<Vec<u8>> {
     let rgba = img.to_rgba8();
     let (w, h) = (rgba.width() as usize, rgba.height() as usize);
     let pixels: Vec<ravif::RGBA8> = rgba
@@ -538,8 +547,9 @@ fn encode_avif(img: &DynamicImage, quality: u8) -> Result<Vec<u8>> {
         .collect();
     let out = ravif::Encoder::new()
         .with_quality(quality as f32)
-        .with_alpha_quality(quality as f32)
+        .with_alpha_quality(AVIF_ALPHA_QUALITY)
         .with_speed(AVIF_SPEED)
+        .with_num_threads(single_thread.then_some(1))
         .encode_rgba(ravif::Img::new(pixels.as_slice(), w, h))
         .map_err(|e| anyhow::anyhow!("AVIF encode failed: {e}"))?;
     Ok(out.avif_file)
