@@ -43,7 +43,13 @@ export async function handleRequest(env, info) {
   const match = matchRoute(table.routes, url.pathname);
   const ctx = makeContext({ ...info, params: match?.params ?? {} });
   // The site's URL (NOWAKI_SITE / nowaki.config `site`), for absolute links in feeds and the like.
-  ctx.site = env.site ? new URL(env.site) : undefined;
+  // Parsed on first read: most requests never look at it.
+  let site;
+  Object.defineProperty(ctx, "site", {
+    get: () => (env.site ? (site ??= new URL(env.site)) : undefined),
+    configurable: true,
+    enumerable: true,
+  });
 
   // Handle server function RPC before routing.
   if (env.serverFunctions && url.pathname === SERVER_FN_PATH) {
@@ -563,13 +569,22 @@ async function render500(env, table, ctx, version, err) {
   return env.renderError(err);
 }
 
-// Returns in root→leaf order.
+// Returns in root→leaf order. A page asks for it several times per request (layouts, SEO, page
+// scripts, document attributes), so it is computed once per route table and file. A rescan in dev
+// makes a new table, which starts a new cache.
+const chains = new WeakMap();
 function layoutChain(table, file) {
-  const route = routeOf(table, file);
-  const chain = [];
-  for (const entry of table.layouts ?? []) {
-    // A file that is not a route (the 404 page) gets only the root layouts.
-    if (route ? routeUnderPrefix(route, entry.prefix) : !entry.prefix) chain.push(entry.file);
+  let byFile = chains.get(table);
+  if (!byFile) chains.set(table, (byFile = new Map()));
+  let chain = byFile.get(file);
+  if (!chain) {
+    const route = routeOf(table, file);
+    chain = [];
+    for (const entry of table.layouts ?? []) {
+      // A file that is not a route (the 404 page) gets only the root layouts.
+      if (route ? routeUnderPrefix(route, entry.prefix) : !entry.prefix) chain.push(entry.file);
+    }
+    byFile.set(file, chain);
   }
   return chain;
 }

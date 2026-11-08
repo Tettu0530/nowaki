@@ -160,6 +160,16 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
     }
     return p;
   };
+  const byPath = new Map();
+  // The manifest and the modules don't change in production, so per-file lookups are computed once.
+  const scriptsByFile = new Map();
+  const cssByFile = new Map();
+  const memo = (cache, key, make) => {
+    let v = cache.get(key);
+    if (v === undefined) cache.set(key, (v = make()));
+    return v;
+  };
+  const moduleKey = (file) => path.relative(serverDir, file).split(path.sep).join("/");
   const serverFunctions = Object.keys(serverFnTable).length
     ? {
         lookup: (id) => serverFnTable[id] ?? null,
@@ -182,7 +192,17 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
     site: resolveSite(builtSite),
     fonts,
     routeTable: () => routeTable,
-    importModule: (file) => importOnce(pathToFileURL(file).href),
+    // Keyed by the path, so the URL conversion runs once per module, not on every call (a page
+    // imports its layouts several times per request).
+    importModule: (file) => {
+      let p = byPath.get(file);
+      if (!p) {
+        p = importOnce(pathToFileURL(file).href);
+        byPath.set(file, p);
+        p.catch(() => byPath.delete(file));
+      }
+      return p;
+    },
     ensureIslands: () => {},
     serverFunctions,
     live: liveByName.size
@@ -194,13 +214,14 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
     renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta),
     // Page scripts from the build (manifest.routeScripts per route / layout module).
     routeScripts: (file) =>
-      (manifest.routeScripts?.[path.relative(serverDir, file).split(path.sep).join("/")] ?? []).map((f) => ({
-        src: `/_nowaki/${f}`,
-        preload: (manifest.scriptPreload?.[f] ?? []).map((d) => `/_nowaki/${d}`),
-      })),
+      memo(scriptsByFile, file, () =>
+        (manifest.routeScripts?.[moduleKey(file)] ?? []).map((f) => ({
+          src: `/_nowaki/${f}`,
+          preload: (manifest.scriptPreload?.[f] ?? []).map((d) => `/_nowaki/${d}`),
+        })),
+      ),
     // Route / layout CSS from the build (manifest.routeCss, keyed by server module).
-    routeCss: (file) =>
-      (manifest.routeCss?.[path.relative(serverDir, file).split(path.sep).join("/")] ?? []).map((f) => `/_nowaki/${f}`),
+    routeCss: (file) => memo(cssByFile, file, () => (manifest.routeCss?.[moduleKey(file)] ?? []).map((f) => `/_nowaki/${f}`)),
     // render500 has already logged it.
     renderError: () => {
       return {
