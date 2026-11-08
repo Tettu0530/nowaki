@@ -41,6 +41,9 @@ grep -q "Couldn't display this page" /tmp/nowaki-early-fail.html
 ! grep -q 'the data source is down' /tmp/nowaki-early-fail.html   # no message in production
 curl -s 'http://127.0.0.1:3310/stream-early?go=1' | grep -q 'location.replace("/about")'
 curl -sf http://127.0.0.1:3310/api/hello | grep -q '"hello":"nowaki"'
+# typed env on the node adapter: env.ts validated at startup, read by the loader
+curl -sf http://127.0.0.1:3310/env | grep -q 'token length 15'
+curl -sf http://127.0.0.1:3310/env | grep -q 'id="env-badge">Hello from env.ts x4<'
 # file routes: feed.xml.ts (static) and og/[card].png.ts (a param with a fixed extension, bytes)
 curl -s -D - -o /dev/null http://127.0.0.1:3310/feed.xml | grep -qi '^content-type: application/xml'
 curl -sf http://127.0.0.1:3310/feed.xml | grep -q '<rss version="2.0">'

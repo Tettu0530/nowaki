@@ -6,6 +6,7 @@
     "@nowaki-dev/runtime": "workspace:*",
     "@tsrx/preact": "^0.3.5",
     "preact": "^11.1.1",
-    "preact-render-to-string": "^6.8.2"
+    "preact-render-to-string": "^6.8.2",
+    "zod": "^4.6.7"
   }
 }

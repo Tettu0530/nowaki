@@ -133,6 +133,7 @@ pub fn build_client_with_info(
                 .and_then(|s| s.to_str())
                 .unwrap_or("island")
                 .to_string();
+            ctx.entry = Some(island.clone());
             let out = emit_island(core, island, set, &app_count, &client_dir, &mut ctx)?;
             islands.push((name, out));
         }
@@ -291,6 +292,7 @@ fn build_route_scripts(
             let Some(abs) = core.resolve_spec(dir, &spec) else {
                 anyhow::bail!("routes/{rel}: page script \"{spec}\" not found");
             };
+            ctx.entry = Some(abs.clone());
             let name = emit(core, &abs, client_dir, ctx)?;
             if !files.contains(&name) {
                 files.push(name);
@@ -331,6 +333,10 @@ pub fn build_server(
                 files.push(path);
             }
         }
+    }
+    // env.ts at the app root: the server validates it at startup (dist/server/env.js).
+    if let Some(env_file) = crate::env::env_file(&core.root) {
+        files.push(env_file);
     }
     // Plus every app module those import from anywhere else in the app (`data/`, `sections/`,
     // `utils/`, …): the conventional folders are entry points, not the whole server graph.
@@ -398,6 +404,14 @@ pub fn build_server(
     // The runtime dispatches via this id→{module,export} (the client can't call arbitrary exports).
     // Kept out of the client manifest (so the server's file layout isn't exposed).
     write_server_functions(core, &server_dir)?;
+    // With env.ts the server validates only its server variables at startup; the public ones are
+    // the values this build inlined, so server and client agree.
+    if crate::env::env_file(&core.root).is_some() {
+        fs::write(
+            server_dir.join("env-public.json"),
+            crate::env::public_values_json(&core.client_defines),
+        )?;
+    }
 
     Ok(count)
 }
@@ -691,6 +705,8 @@ struct EmitCtx {
     deps: HashMap<String, Vec<String>>,
     asset_in: u64,
     asset_out: u64,
+    /// The client entry being emitted (island or page script), for import-chain errors.
+    entry: Option<PathBuf>,
 }
 
 /// Name to put in the source map's `sources`. Made root-relative so the client .map doesn't
@@ -713,6 +729,11 @@ fn client_source_name(root: &Path, path: &Path) -> PathBuf {
 fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Result<String> {
     if let Some(name) = ctx.emitted.get(abs) {
         return Ok(name.clone());
+    }
+    if crate::env::is_server_env_module(abs) {
+        let from = ctx.entry.clone().unwrap_or_else(|| abs.to_path_buf());
+        let chain = client_import_chain(core, &from, abs);
+        anyhow::bail!(crate::env::server_env_import_error(&core.root, &chain));
     }
     // `./hero.jpg?image`: AVIF + fallback variants and a module exporting the set (image.rs).
     let (file, query) = crate::image::split_query(abs);
@@ -836,6 +857,39 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
     ctx.deps.insert(filename.clone(), dep_names);
     ctx.emitted.insert(abs.to_path_buf(), filename.clone());
     Ok(filename)
+}
+
+/// The client import path from `from` to `target` (both included), found again only for an error
+/// message. Stops at `"use server"` modules, which the client gets as proxies.
+fn client_import_chain(core: &NowakiCore, from: &Path, target: &Path) -> Vec<PathBuf> {
+    let mut parent: HashMap<PathBuf, PathBuf> = HashMap::new();
+    let mut queue = std::collections::VecDeque::from([from.to_path_buf()]);
+    let mut seen: HashSet<PathBuf> = HashSet::from([from.to_path_buf()]);
+    while let Some(m) = queue.pop_front() {
+        if m == target {
+            let mut chain = vec![m.clone()];
+            let mut cur = m;
+            while let Some(p) = parent.get(&cur) {
+                chain.push(p.clone());
+                cur = p.clone();
+            }
+            chain.reverse();
+            return chain;
+        }
+        let use_server = core
+            .read_source(&m)
+            .is_ok_and(|s| crate::server_fn::has_use_server(&s));
+        if use_server || !crate::is_transformable(&m) {
+            continue;
+        }
+        for d in crate::chunk::module_deps(core, &m).unwrap_or_default() {
+            if seen.insert(d.clone()) {
+                parent.insert(d.clone(), m.clone());
+                queue.push_back(d);
+            }
+        }
+    }
+    vec![from.to_path_buf(), target.to_path_buf()]
 }
 
 /// Scope-hoists an island into one chunk. Concatenated: the island itself + concatenable

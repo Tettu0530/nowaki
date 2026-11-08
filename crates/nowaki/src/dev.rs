@@ -59,6 +59,9 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
     if let Some(ph) = &plugin_host {
         core.set_plugins(ph.bridge.clone());
     }
+    // env.ts: validated at startup (a change to it or to .env needs a restart); its public values
+    // are what the browser modules inline.
+    crate::env_schema::check(&root, &mut core)?;
 
     let (hmr_tx, _) = broadcast::channel(64);
     let state = Arc::new(DevState {

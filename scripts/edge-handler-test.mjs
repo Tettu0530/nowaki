@@ -39,6 +39,10 @@ check("live-event forged signature rejected (403)", (await liveEv({ ...ev, sig: 
 const doc = await req("/docs/intro");
 const docHtml = await doc.text();
 check("content collection page renders on the edge (inlined content)", doc.status === 200 && docHtml.includes('id="why-content-collections"'));
+const envPage = await req("/env");
+const envHtml = await envPage.text();
+check("env.ts is validated on the edge and env/server reads it", envPage.status === 200 && envHtml.includes("token length 15"));
+check("public env value renders on the edge", envHtml.includes('id="env-badge">Hello from env.ts x4<'));
 const styled = await (await req("/styled")).text();
 check("route CSS is linked on the edge", /<link rel="stylesheet" href="\/_nowaki\/styled\.[0-9a-f]+\.css"/.test(styled));
 const ck = await req("/isr-cookie", { headers: { cookie: "user=alice" } });

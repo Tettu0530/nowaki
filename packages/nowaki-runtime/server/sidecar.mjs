@@ -53,6 +53,30 @@ async function ensureContent(version) {
     setContent({ collections: {}, errors: [`content/config: ${err?.message ?? err}`] });
   }
 }
+// env.ts in dev: `nowaki dev` validated it before starting; the renderer imports it (through the
+// Rust transform, so on the first request, once that server is up) and fills env/server.
+const { initServerEnv } = await import("./env-schema.mjs");
+const { setServerEnv } = await import("./env-server.mjs");
+const envFile = ["env.ts", "env.mts", "env.js", "env.mjs"].map((f) => path.join(appRoot, f)).find((f) => existsSync(f));
+let envReady = envFile ? null : true;
+if (!envFile) setServerEnv(null);
+function ensureEnv(version) {
+  if (envReady === true) return;
+  envReady ??= env
+    .importModule(envFile, version)
+    .then((mod) => initServerEnv(mod, process.env))
+    .then(
+      () => {
+        envReady = true;
+      },
+      (err) => {
+        envReady = null;
+        throw err;
+      },
+    );
+  return envReady;
+}
+
 const RUST = `http://127.0.0.1:${process.env.NOWAKI_RUST_PORT ?? "3000"}`;
 
 // dev doesn't build, so Rust discovers the server function allowlist. Cached per HMR generation.
@@ -264,6 +288,7 @@ const server = createServer(async (req, res) => {
         res.end(JSON.stringify({ verified: liveSigStatus(name, state, sig) }));
         return;
       }
+      if (envReady !== true) await ensureEnv(String(version ?? "0"));
       const reg = await loadIslandRegistry(appRoot, String(version ?? "0"));
       const entry = [...reg.values()].find((e) => e.name === name);
       if (!entry?.live) {
@@ -299,6 +324,7 @@ const server = createServer(async (req, res) => {
   }
   try {
     const version = String(req.headers["x-nowaki-ssr-version"] ?? "0");
+    if (envReady !== true) await ensureEnv(version);
     await ensureContent(version);
     const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
     const result = await handleRequest(env, {

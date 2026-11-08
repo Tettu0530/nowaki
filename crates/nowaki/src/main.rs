@@ -3,6 +3,7 @@ mod content;
 mod csp;
 mod dev;
 mod encoding;
+mod env_schema;
 mod fonts;
 mod forward;
 mod live;
@@ -129,6 +130,8 @@ fn main() -> anyhow::Result<()> {
             if let Some(host) = &plugin_host {
                 core.set_plugins(host.bridge.clone());
             }
+            // env.ts: validated before the build, which inlines its public values.
+            env_schema::check(&root, &mut core)?;
             let started = std::time::Instant::now();
             let (report, client) = core.build_with_client(&dist)?;
             let client_js_kb = ui::dir_js_kb(&report.out_dir);

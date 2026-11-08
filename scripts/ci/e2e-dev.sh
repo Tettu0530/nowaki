@@ -39,6 +39,13 @@ done
 test "$(curl -s -I -o /dev/null -w '%{http_code}' "$B/islands/Counter.tsx")" = 200
 curl -s -I "$B/islands/Counter.tsx" | grep -qi '^content-type: text/javascript'
 
+# typed env (env.ts): env/server in a loader, public values inlined in the browser module, and
+# env/server itself is an error module for the browser
+curl -sf $B/env | grep -q 'token length 15'
+curl -sf $B/env | grep -q 'id="env-badge">Hello from env.ts x4<'
+curl -sf "$B/islands/EnvBadge.tsx" | grep -q 'Hello from env.ts'
+curl -sf "$B/node_modules/@nowaki-dev/runtime/server/env-server.mjs" | grep -q 'throw new Error(.*server-only'
+
 # layouts (root + nested) and dynamic param
 curl -sf $B/ | grep -q 'href="/todos"'
 curl -sf $B/blog/hello | grep -q "blog section"

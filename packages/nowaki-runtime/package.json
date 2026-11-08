@@ -30,7 +30,10 @@
     "content.js",
     "content.d.ts",
     "image.js",
-    "image.d.ts"
+    "image.d.ts",
+    "env.js",
+    "env.d.ts",
+    "env-server.d.ts"
   ],
   "exports": {
     ".": {
@@ -48,6 +51,14 @@
     "./image": {
       "types": "./image.d.ts",
       "default": "./image.js"
+    },
+    "./env": {
+      "types": "./env.d.ts",
+      "default": "./env.js"
+    },
+    "./env/server": {
+      "types": "./env-server.d.ts",
+      "default": "./server/env-server.mjs"
     },
     "./client/*": "./client/*",
     "./server/*": "./server/*"

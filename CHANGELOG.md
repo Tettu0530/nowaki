@@ -10,6 +10,24 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **Typed environment variables (`env.ts`).** Declare them at the app root with
+  `defineEnv({ server, public })` from `@nowaki-dev/runtime/env`, each with a
+  Standard Schema (Zod, Valibot, ArkType, ...). `nowaki build` / `dev` /
+  `prerender` validate the environment (`.env`, `.env.local`, and the process
+  environment) first and fail on a missing or invalid variable, naming it but
+  never printing its value. Server code reads `env.X` from
+  `@nowaki-dev/runtime/env/server`; `PUBLIC_*` values are inlined as
+  `import.meta.env.PUBLIC_*` (replacing the `.env`-only values when env.ts
+  exists). `nowaki start`, the node / bun / deno / vercel adapters, and the dev
+  renderer validate again at startup and refuse to start; the Cloudflare worker
+  validates its vars and secrets before the first request and answers 500 until
+  they are fixed. Client code that imports `@nowaki-dev/runtime/env/server` fails
+  the build with the import chain (dev serves an error module). `nowaki typegen`
+  types `env` and `import.meta.env` from the schemas. Public names must start
+  with `PUBLIC_` and server names must not. New core API:
+  `NowakiCore::set_public_env`.
+
 ## [0.17.3] — 2026-11-09 · patch
 
 Packages: `nowaki` / `nowaki-core` 0.17.3 (crates.io, npm), `@nowaki-dev/runtime`

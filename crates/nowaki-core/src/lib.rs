@@ -140,13 +140,7 @@ impl NowakiCore {
         // paths in their normal form. A root that doesn't exist yet is kept as given.
         let root = dunce::canonicalize(&root).unwrap_or(root);
         let client_defines = env::load_client_defines(&root);
-        // salt = nowaki version + defines. Upgrades/env changes invalidate the disk cache.
-        let mut salt_buf = env!("CARGO_PKG_VERSION").as_bytes().to_vec();
-        for (k, v) in &client_defines {
-            salt_buf.extend_from_slice(k.as_bytes());
-            salt_buf.extend_from_slice(v.as_bytes());
-        }
-        let disk_cache = cache::DiskCache::new(&root, xxh3_64(&salt_buf));
+        let disk_cache = cache::DiskCache::new(&root, defines_salt(&client_defines));
         highlight::set_cache_root(&root);
         Self {
             root,
@@ -191,6 +185,21 @@ impl NowakiCore {
             return None;
         }
         self.virtual_ids.lock().unwrap().get(abs).cloned()
+    }
+
+    /// Replaces the `import.meta.env.PUBLIC_*` values read from `.env` with the public values an
+    /// app's `env.ts` validated (the CLI's env check). Each pair is `(name, literal)`: the name is
+    /// `PUBLIC_` + letters, digits, `_`; the literal is a JSON string, number, boolean, or null,
+    /// or `undefined`. Anything else is an error and changes nothing. Call it before building or
+    /// serving modules: it resets the transform caches.
+    pub fn set_public_env(&mut self, vars: &[(String, String)]) -> Result<()> {
+        let mut defines = self.client_defines.clone();
+        env::replace_public_defines(&mut defines, vars)?;
+        self.disk_cache = cache::DiskCache::new(&self.root, defines_salt(&defines));
+        self.client_defines = defines;
+        self.cache.clear();
+        self.inputs.clear();
+        Ok(())
     }
 
     /// Sets the plugin transform bridge (called by the CLI when it detects nowaki.config).
@@ -391,6 +400,17 @@ impl NowakiCore {
         let src = self.read_source(&p).ok()?;
         Some(transform::data_module(&src))
     }
+}
+
+/// Disk cache salt: the nowaki version + the client defines, so upgrades and env changes
+/// invalidate it.
+fn defines_salt(defines: &[(String, String)]) -> u64 {
+    let mut buf = env!("CARGO_PKG_VERSION").as_bytes().to_vec();
+    for (k, v) in defines {
+        buf.extend_from_slice(k.as_bytes());
+        buf.extend_from_slice(v.as_bytes());
+    }
+    xxh3_64(&buf)
 }
 
 impl transform::VirtualResolve for NowakiCore {
