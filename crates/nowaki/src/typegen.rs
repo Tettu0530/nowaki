@@ -57,6 +57,30 @@ fn render_content(root: &Path) -> String {
     s
 }
 
+/// env.ts: `ServerEnv` (`@nowaki-dev/runtime/env/server`) and `ImportMetaEnv` (the public values)
+/// typed by the output of each variable's schema.
+fn render_env(root: &Path) -> String {
+    let Some(file) = nowaki_core::env::env_file(root) else {
+        return String::new();
+    };
+    let name = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("env.ts");
+    let mut s = String::new();
+    s.push_str("\n// Environment from env.ts (@nowaki-dev/runtime/env/server, import.meta.env).\n");
+    s.push_str("import type { PublicEnvOf, ServerEnvOf } from \"@nowaki-dev/runtime/env\";\n");
+    s.push_str(&format!(
+        "type NowakiEnvDefinition = typeof import(\"../{name}\").default;\n\n"
+    ));
+    s.push_str("declare module \"@nowaki-dev/runtime/env/server\" {\n");
+    s.push_str("  interface ServerEnv extends ServerEnvOf<NowakiEnvDefinition> {}\n}\n\n");
+    s.push_str("declare global {\n");
+    s.push_str("  interface ImportMetaEnv extends PublicEnvOf<NowakiEnvDefinition> {}\n");
+    s.push_str("  interface ImportMeta {\n    readonly env: ImportMetaEnv;\n  }\n}\n");
+    s
+}
+
 /// Skip the write if unchanged (avoids needlessly triggering the dev file watcher).
 pub fn write(root: &Path) -> Result<()> {
     let routes_dir = root.join("routes");
@@ -67,7 +91,7 @@ pub fn write(root: &Path) -> Result<()> {
     let out_dir = root.join(".nowaki");
     std::fs::create_dir_all(&out_dir)
         .with_context(|| format!("failed to create: {}", out_dir.display()))?;
-    let content = render(&routes) + &render_content(root);
+    let content = render(&routes) + &render_content(root) + &render_env(root);
     let path = out_dir.join("types.d.ts");
     if std::fs::read_to_string(&path).ok().as_deref() != Some(content.as_str()) {
         std::fs::write(&path, &content)
@@ -103,5 +127,18 @@ mod tests {
         assert!(out.contains("declare module \"@nowaki-dev/runtime/navigation\""));
         assert!(out.contains("\"/\": {};"));
         assert!(out.contains("\"/blog/[slug]\": { slug: string };"));
+    }
+
+    #[test]
+    fn render_env_types_server_and_public_values() {
+        let dir = std::env::temp_dir().join(format!("nowaki-typegen-env-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(super::render_env(&dir), "");
+        std::fs::write(dir.join("env.ts"), "").unwrap();
+        let out = super::render_env(&dir);
+        assert!(out.contains("typeof import(\"../env.ts\").default"));
+        assert!(out.contains("interface ServerEnv extends ServerEnvOf<NowakiEnvDefinition> {}"));
+        assert!(out.contains("interface ImportMetaEnv extends PublicEnvOf<NowakiEnvDefinition> {}"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

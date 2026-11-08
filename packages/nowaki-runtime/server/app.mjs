@@ -3,7 +3,7 @@
 
 import { createServer } from "node:http";
 import { register } from "node:module";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { h, options } from "preact";
@@ -16,6 +16,7 @@ import { applyCsp } from "./csp.mjs";
 import { prodDocument, prodShell } from "./document.mjs";
 import { liveInitialState, liveRender, liveTopics, liveView } from "./live.mjs";
 import { loadContent } from "./content-load.mjs";
+import { initServerEnv } from "./env-schema.mjs";
 import { liveProps, warnIfEphemeralLiveKey } from "./live-sign.mjs";
 import { indexPublic, lookupPublic } from "./public-files.mjs";
 import { resolveSite } from "./seo.mjs";
@@ -80,6 +81,14 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
     throw new Error("createApp requires clientDir and serverDir");
   }
   if (loadDotenv) loadEnv();
+  // env.ts, validated before any app module loads (one may read env at its top level). Invalid →
+  // createApp throws, so the server never listens.
+  const envFile = path.join(serverDir, "env.js");
+  const envModule = await access(envFile).then(() => import(pathToFileURL(envFile).href), () => null);
+  const envPublic = envModule
+    ? await readFile(path.join(serverDir, "env-public.json"), "utf8").then(JSON.parse, () => undefined)
+    : undefined;
+  await initServerEnv(envModule, process.env, envPublic);
 
   const manifest = JSON.parse(await readFile(path.join(clientDir, "manifest.json"), "utf8"));
 

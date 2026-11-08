@@ -74,6 +74,12 @@ test -f examples/hello/dist/server/functions.json
 grep -q '"export": "addTodo"' examples/hello/dist/server/functions.json
 ! grep -rl 'nowaki-server-only-secret' examples/hello/dist/client >/dev/null 2>&1
 curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-rpc: 1' -d '{"id":"6c90d7dc921a9a3f","args":[]}' http://127.0.0.1:3300/__nowaki/fn | grep -q 'learn nowaki'
+# typed env (env.ts): server values through env/server, public ones inlined (the server ones never)
+test -f examples/hello/dist/server/env.js
+curl -sf http://127.0.0.1:3300/env | grep -q 'token length 15'
+curl -sf http://127.0.0.1:3300/env | grep -q 'id="env-badge">Hello from env.ts x4<'
+grep -q 'Hello from env.ts' examples/hello/dist/client/EnvBadge.*.js
+! grep -rl 'hello-dev-token' examples/hello/dist/client >/dev/null 2>&1
 # v0.9 virtual modules: SSR inlines the plugin-generated module (data:)
 curl -sf http://127.0.0.1:3300/virtual | grep -q 'VIRTUAL_OK · nowaki-plugin'
 # ISR (export const revalidate=2): the Rust front caches assembled HTML and

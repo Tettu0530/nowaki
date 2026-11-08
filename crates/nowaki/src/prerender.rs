@@ -20,6 +20,8 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     if let Some(host) = &_plugin_host {
         core.set_plugins(host.bridge.clone());
     }
+    // env.ts: validated before the build, which inlines its public values.
+    crate::env_schema::check(&root, &mut core)?;
     let (report, client) = core.build_with_client(&root.join("dist"))?;
     println!(
         "[nowaki] build: client {} / server {} modules",

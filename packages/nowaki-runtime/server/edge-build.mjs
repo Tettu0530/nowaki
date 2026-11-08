@@ -25,6 +25,9 @@ const fontsJson = await readFile(path.join(serverDir, "fonts.json"), "utf8").cat
 // Content collections (written by `nowaki build`), inlined: an edge worker has no file system.
 const contentRaw = await readFile(path.join(serverDir, "content/index.json"), "utf8").catch(() => null);
 const table = await scanRoutes(serverDir);
+// env.ts, compiled by the build; the worker validates it before its first request.
+const hasEnv = await readFile(path.join(serverDir, "env.js")).then(() => true, () => false);
+const envPublicJson = hasEnv ? await readFile(path.join(serverDir, "env-public.json"), "utf8").catch(() => null) : null;
 
 const keyOf = (abs) => path.relative(serverDir, abs).split(path.sep).join("/");
 // specifiers relative to dist/worker/index.js
@@ -109,7 +112,7 @@ import { withSecurityHeaders } from "@nowaki-dev/runtime/server/security-headers
 ${moduleImports.join("\n")}
 ${islandImports.join("\n")}
 ${liveImports.join("\n")}
-${contentRaw ? `import * as contentConfig from ${JSON.stringify(specOf("content/config.js"))};\n` : ""}
+${contentRaw ? `import * as contentConfig from ${JSON.stringify(specOf("content/config.js"))};\n` : ""}${hasEnv ? `import * as envModule from ${JSON.stringify(specOf("env.js"))};\n` : ""}
 const manifest = ${JSON.stringify(manifest)};
 const modules = {
 ${moduleEntries.join("\n")}
@@ -129,7 +132,7 @@ const handler = createFetchHandler({
   islandComponents,
   liveIslands,
   routeTable,
-  serverFunctions,${site ? `\n  site: ${JSON.stringify(site)},` : ""}${fontsJson ? `\n  fonts: ${fontsJson.trim()},` : ""}${contentRaw ? "\n  content," : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}
+  serverFunctions,${site ? `\n  site: ${JSON.stringify(site)},` : ""}${fontsJson ? `\n  fonts: ${fontsJson.trim()},` : ""}${contentRaw ? "\n  content," : ""}${hasEnv ? "\n  envModule," : ""}${envPublicJson ? `\n  envPublic: ${envPublicJson.trim()},` : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}
 });
 
 // public/ files by decoded URL path; they win over routes at the same path.
@@ -151,7 +154,7 @@ export default {
     if (env.ASSETS && (url.pathname.startsWith("/_nowaki/") || ((request.method === "GET" || request.method === "HEAD") && isPublic(url.pathname)))) {
       return withSecurityHeaders(await env.ASSETS.fetch(request));
     }
-    return handler(request);
+    return handler(request, env);
   },
 };
 `;

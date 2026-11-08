@@ -78,6 +78,10 @@ the expanded attack surface).
 
 - Only `import.meta.env.PUBLIC_*` and `MODE` are inlined into client bundles.
   Other `.env` values stay on the server. `.env*` files are gitignored.
+- With an `env.ts`, only its declared `public` variables (all `PUBLIC_*`) are
+  inlined. `@nowaki-dev/runtime/env/server` holds the server values; a client
+  import of it fails the build, and validation errors name a variable without
+  printing its value.
 - Server function errors return **`error.message` only**, not stacks
   (`packages/nowaki-runtime/server/functions.mjs`).
 
@@ -165,6 +169,7 @@ tests when you change a default defense.
 | Jetstream state signature | Forged live state used in render/handlers; replaying a captured state indefinitely | `server/live-sign.mjs` (`v1.<iat>.<mac>`: HMAC over name, issue time, and state; rejected after `NOWAKI_LIVE_MAX_AGE`, default 24 h); `server/live.mjs` (verify before each render/handler); `crates/nowaki/src/live.rs` (holds state per session) | `scripts/security-e2e.mjs` (dev + prod), `scripts/live-sign-test.mjs` |
 | ISR cache key + `Vary` learning | Cross-user HTML cache bleed | `server/context.mjs` (`__vary()`), `server/handler.mjs` (`x-nowaki-vary`; a response with `Set-Cookie` gets `private, no-cache` instead of a shared `Cache-Control`); `crates/nowaki/src/start.rs` (`isr_key`, folding in the public host; `Set-Cookie` responses are never stored); e.g. `examples/hello/routes/vary.tsx`, `isr-sets-cookie.tsx` | `scripts/security-e2e.mjs` (prod), `scripts/ci/e2e-prod.sh`, `scripts/ci/e2e-adapters.sh`, `scripts/edge-handler-test.mjs` |
 | ISR query folding | Cache flood via distinct query strings | `crates/nowaki/src/start.rs` | `scripts/security-e2e.mjs` (prod) |
+| Server env stays out of client code (`env.ts`) | Server variables reaching the browser; a `PUBLIC_*` secret by mistake; secrets in build logs | `defineEnv` (`server/env-schema.mjs`) refuses public names without `PUBLIC_` and server names with it; `nowaki-core` `build.rs` `emit` fails the client build when an island or page script reaches `@nowaki-dev/runtime/env/server` (`env::is_server_env_module`), and the dev browser transform answers it with a module that throws; validation errors name the variable, never its value | `scripts/env-schema-test.mjs`, `scripts/ci/e2e-dev.sh` |
 | Static client assets by basename | Path traversal on `/_nowaki/*` | `crates/nowaki/src/start.rs` | `scripts/security-e2e.mjs` (prod) |
 | Generic production 500s | Stack traces (file paths, code) reaching clients | `server/app.mjs`, `server/web.mjs`, `server/prod-sidecar.mjs` (`renderError` and top-level catches) | `scripts/security-e2e.mjs` (prod) |
 | Dependency advisories | Known-vulnerable crates/packages | `.github/workflows/ci.yml` | `cargo audit`, `cargo-deny`, `pnpm audit` jobs |
