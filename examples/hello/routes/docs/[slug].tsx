@@ -8,9 +8,9 @@ export const staticPaths = async () => (await getCollection("docs")).map((d) => 
 export const loader = async (ctx: LoaderContext) => {
   const doc = await getEntry("docs", String(ctx.params.slug));
   if (!doc) return ctx.redirect("/docs");
-  // MDX entries render as a component (with their islands); Markdown entries as HTML.
-  const mdx = doc.render ? await doc.render() : null;
-  return { title: doc.data.title, html: doc.html ?? "", headings: doc.headings ?? [], Content: mdx?.Content };
+  // MDX and Markdoc entries render as a component (with their islands); Markdown entries as HTML.
+  const mod = doc.render ? await doc.render() : null;
+  return { title: doc.data.title, html: doc.html ?? "", headings: mod?.headings ?? doc.headings ?? [], Content: mod?.Content };
 };
 
 // Typed metadata: description, canonical, Open Graph (its image is the og/[card].png file route),

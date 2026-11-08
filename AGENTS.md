@@ -192,6 +192,11 @@ code locations and CI coverage.
   pass-through, `headings`, images via `?image`, code via `highlight.rs`); applied in
   `NowakiCore::read_source`, so `.mdx` is an ordinary transformable module (routes, graph, dev,
   builds). Content entries: `content.rs` (`module`), `render()` in `server/content-store.mjs`.
+- **Markdoc** — `packages/nowaki-markdoc` (`@nowaki-dev/markdoc`): a plugin whose `transform`
+  compiles `.mdoc` in the plugin host (parse / validate / transform with `@markdoc/markdoc`) into a
+  TSX module holding the tree as data; `render.js` renders it with Preact. Core only marks `.mdoc`
+  transformable and errors when no plugin compiled it (`lib.rs` `compile_source`). Content
+  entries: `content.rs` (`module`). Tests: `node --test "packages/nowaki-markdoc/test/*.test.mjs"`.
 - **SEO** — `packages/nowaki-runtime/server/seo.mjs` (site URL, meta tags, sitemap, robots);
   `handler.mjs` `withSeo` (layout + route meta) and the generated `/sitemap.xml` / `/robots.txt`;
   page URLs from `server/isr-urls.mjs` `pageUrls`. The site comes from `crates/nowaki/src/site.rs`
