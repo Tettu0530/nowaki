@@ -30,7 +30,8 @@ markdown = "1.0.0"
 oxc = { version = "0.146.0", features = ["transformer", "codegen", "minifier", "semantic", "ast_visit"] }
 oxc_resolver = "11.24.3"
 rayon = "1.11.0"
-# Reads the client manifest back for route budgets (page scripts).
+# Routing config (rules.rs) and the client manifest read back for route budgets (page scripts).
+serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 

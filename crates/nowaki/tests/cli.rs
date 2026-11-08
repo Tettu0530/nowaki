@@ -353,6 +353,91 @@ export const posts = defineCollection({ schema: post });
 }
 
 #[test]
+fn build_writes_routing_json_and_rejects_an_invalid_config_first() {
+    let root = example_root();
+    if !deps_installed(&root) {
+        eprintln!("skip: examples/hello deps not installed");
+        return;
+    }
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    let app = budget_app("{ js: 100 }");
+    let config = app.path().join("nowaki.config.mjs");
+    std::fs::write(
+        &config,
+        r#"export default {
+  basePath: "/app/",
+  redirects: async () => [{ source: "/old/[...rest]", destination: "/new/[...rest]", permanent: true }],
+  headers: [{ source: "/api/[...rest]", headers: { "Cache-Control": "no-store" } }],
+};
+"#,
+    )
+    .unwrap();
+    let ok = Command::new(bin)
+        .arg("build")
+        .arg(app.path())
+        .output()
+        .unwrap();
+    assert!(
+        ok.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+    let routing: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(app.path().join("dist/server/routing.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        routing,
+        serde_json::json!({
+            "basePath": "/app",
+            "redirects": [{ "source": "/old/[...rest]", "destination": "/new/[...rest]", "status": 308 }],
+            "headers": [{ "source": "/api/[...rest]", "headers": [{ "key": "cache-control", "value": "no-store" }] }]
+        })
+    );
+
+    std::fs::write(
+        &config,
+        r#"export default { redirects: [{ source: "/a", destination: "//evil.example" }] };
+"#,
+    )
+    .unwrap();
+    std::fs::remove_dir_all(app.path().join("dist")).unwrap();
+    let bad = Command::new(bin)
+        .arg("build")
+        .arg(app.path())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&bad.stderr);
+    assert!(
+        !bad.status.success(),
+        "an unsafe destination must fail the build"
+    );
+    assert!(stderr.contains("redirects[0].destination"), "{stderr}");
+    assert!(
+        !app.path().join("dist").exists(),
+        "the config is checked before anything is built"
+    );
+
+    // Without routing keys there's no routing.json, so servers skip the rules entirely.
+    std::fs::write(
+        &config,
+        "export default { site: \"https://example.com\" };\n",
+    )
+    .unwrap();
+    let plain = Command::new(bin)
+        .arg("build")
+        .arg(app.path())
+        .output()
+        .unwrap();
+    assert!(
+        plain.status.success(),
+        "{}",
+        String::from_utf8_lossy(&plain.stderr)
+    );
+    assert!(!app.path().join("dist/server/routing.json").exists());
+}
+
+#[test]
 fn prerender_refuses_an_out_that_is_the_build() {
     let root = example_root();
     if !deps_installed(&root) {

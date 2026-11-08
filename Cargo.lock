@@ -1698,6 +1698,7 @@ dependencies = [
  "oxc_resolver",
  "ravif",
  "rayon",
+ "serde",
  "serde_json",
  "tempfile",
  "two-face",
