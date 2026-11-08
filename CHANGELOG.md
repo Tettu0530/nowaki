@@ -10,6 +10,17 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **Routing config in nowaki.config** (v0.18, groundwork): `basePath`,
+  `trailingSlash` (`"never"` / `"always"` / `"ignore"`, default `"ignore"`),
+  `redirects`, `rewrites`, `headers` (arrays, or async functions called once at
+  build), `i18n`, and `images.remotePatterns` are validated at build, before
+  anything is built, and written to `dist/server/routing.json` (dev:
+  `.nowaki/routing.json`). A redirect or rewrite destination that could leave
+  the site (`//host`, `/\host`, a capture in an external host), a source or
+  destination under `/__nowaki/`, and CR / LF / NUL in a header value fail the
+  build. No server applies these rules yet.
+
 ## [0.17.3] — 2026-11-09 · patch
 
 Packages: `nowaki` / `nowaki-core` 0.17.3 (crates.io, npm), `@nowaki-dev/runtime`

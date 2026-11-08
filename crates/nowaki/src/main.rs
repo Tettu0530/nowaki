@@ -123,6 +123,8 @@ fn main() -> anyhow::Result<()> {
                     .block_on(prerender::run(root.clone(), out));
             }
             let dist = root.join("dist");
+            // Before the build: an invalid config fails before anything is built.
+            let config = site::config(&root)?;
             // Keep alive until the build finishes (drop kills the host).
             let plugin_host = plugins::start(&root)?;
             let mut core = nowaki_core::NowakiCore::new(root.clone());
@@ -143,7 +145,6 @@ fn main() -> anyhow::Result<()> {
                 report.asset_out,
             );
             content::build(&root, &dist)?;
-            let config = site::config(&root)?;
             site::write(&dist, &config)?;
             fonts::build_dist(&root, &dist, &config)?;
             check_route_budgets(&core, &report, &client)?;

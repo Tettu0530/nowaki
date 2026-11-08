@@ -197,6 +197,13 @@ code locations and CI coverage.
   page URLs from `server/isr-urls.mjs` `pageUrls`. The site comes from `crates/nowaki/src/site.rs`
   (`dist/server/site.json`, via `server/site-config.mjs`), `NOWAKI_SITE` winning. Unit checks:
   `scripts/seo-unit-test.mjs`.
+- **Routing config (`basePath`, `trailingSlash`, `redirects`, `rewrites`, `headers`)** —
+  normalized and validated by `server/site-config.mjs`, read by `site.rs` before the build and
+  written to `dist/server/routing.json` (dev: `.nowaki/routing.json`). The compiler / matcher
+  exists twice, `crates/nowaki-core/src/rules.rs` and `server/rules.mjs`, driven by one fixture
+  (`crates/nowaki-core/tests/fixtures/rules-cases.json`, run by `tests/rules.rs` and
+  `scripts/rules-test.mjs`); change both together. The segment grammar is shared with the router
+  through `server/segments.mjs`.
 - **Page scripts (`export const scripts`)** — read from the AST in
   `crates/nowaki-core/src/page_scripts.rs`, emitted as client entries by
   `build.rs` `build_route_scripts` (manifest `routeScripts` per module and

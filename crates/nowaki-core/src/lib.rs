@@ -16,6 +16,7 @@ pub mod public;
 pub mod resolve;
 pub mod route_css;
 pub mod routes;
+pub mod rules;
 pub mod server_fn;
 pub mod transform;
 

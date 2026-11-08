@@ -14,6 +14,7 @@ const PRERENDER_JOBS: usize = 8;
 pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     // Checked before building: the build writes dist/, and clearing `out` must never reach it.
     let clear_out = check_out(&root, &out)?;
+    let config = crate::site::config(&root)?;
     let _plugin_host = crate::plugins::start(&root)?;
     let mut core = NowakiCore::new(root.clone());
     if let Some(host) = &_plugin_host {
@@ -25,7 +26,6 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         report.modules, report.server_modules
     );
     crate::content::build(&root, &root.join("dist"))?;
-    let config = crate::site::config(&root)?;
     crate::site::write(&root.join("dist"), &config)?;
     crate::fonts::build_dist(&root, &root.join("dist"), &config)?;
     crate::check_route_budgets(&core, &report, &client)?;
