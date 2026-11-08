@@ -32,6 +32,9 @@ const DEFAULT_AVIF_QUALITY: u8 = 60;
 /// rav1e speed (1 slowest … 10 fastest). 9 was ~30% faster than 7 on photos at the same or a
 /// smaller size; 10 grew the files by ~60%.
 const AVIF_SPEED: u8 = 9;
+/// Alpha is encoded near-losslessly: at the colour quality, fully transparent or opaque edges
+/// came back off by up to 38 levels. Opaque images carry no alpha plane, so this costs them nothing.
+const AVIF_ALPHA_QUALITY: f32 = 100.0;
 
 /// `?image` and its options.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -496,7 +499,7 @@ fn variant<'a>(
     };
     let key = xxh3_64(
         format!(
-            "{}|{source_hash:x}|{width}|{out_ext}|{quality}|{AVIF_SPEED}|oriented",
+            "{}|{source_hash:x}|{width}|{out_ext}|{quality}|{AVIF_SPEED}|a{AVIF_ALPHA_QUALITY}|oriented",
             env!("CARGO_PKG_VERSION")
         )
         .as_bytes(),
@@ -538,7 +541,7 @@ fn encode_avif(img: &DynamicImage, quality: u8) -> Result<Vec<u8>> {
         .collect();
     let out = ravif::Encoder::new()
         .with_quality(quality as f32)
-        .with_alpha_quality(quality as f32)
+        .with_alpha_quality(AVIF_ALPHA_QUALITY)
         .with_speed(AVIF_SPEED)
         .encode_rgba(ravif::Img::new(pixels.as_slice(), w, h))
         .map_err(|e| anyhow::anyhow!("AVIF encode failed: {e}"))?;
