@@ -169,6 +169,17 @@ curl -sf http://127.0.0.1:3300/docs/components | grep -q 'client="visible"'
 curl -sf http://127.0.0.1:3300/docs/components | grep -q '<pre style="background-color:#ffffff;"><code class="language-ts"><span'
 curl -sf http://127.0.0.1:3300/docs/components | grep -q '<picture><source type="image/avif"'
 curl -sf http://127.0.0.1:3300/docs | grep -q 'Components in MDX'
+# Markdoc (@nowaki-dev/markdoc): a page importing a .mdoc (a custom tag, an island, frontmatter,
+# headings, raw HTML kept as text) and a .mdoc content entry
+curl -sf http://127.0.0.1:3300/markdoc | grep -q '<h1 id="a-markdoc-page">A Markdoc page</h1>'
+curl -sf http://127.0.0.1:3300/markdoc | grep -q 'Title from frontmatter: A Markdoc page.</p>'
+curl -sf http://127.0.0.1:3300/markdoc | grep -q '<aside data-testid="callout" class="callout callout-tip"><p>A <strong>custom tag</strong>'
+curl -sf http://127.0.0.1:3300/markdoc | grep -q '<nowaki-island name="Counter"'
+curl -sf http://127.0.0.1:3300/markdoc | grep -q '<a href="#escaping">Escaping</a>'
+curl -sf http://127.0.0.1:3300/markdoc | grep -q 'Raw HTML stays text: &lt;script>alert(1)&lt;/script>'
+curl -sf http://127.0.0.1:3300/docs/markdoc | grep -q '<a href="#callouts" style="margin-right:1rem">Callouts</a>'
+curl -sf http://127.0.0.1:3300/docs/markdoc | grep -q 'class="callout callout-warning"'
+curl -sf http://127.0.0.1:3300/docs | grep -q 'href="/docs/markdoc">Markdoc entry</a>'
 # ctx.url.origin is the browser's Host, not the sidecar's loopback address
 curl -sf -H 'Host: app.example' "http://127.0.0.1:3300/api/echo" | grep -q '"origin":"http://app.example"'
 # SEO: typed meta → head tags (absolute against nowaki.config `site`), generated sitemap.xml

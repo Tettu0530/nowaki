@@ -5,7 +5,7 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const RUST = `http://127.0.0.1:${process.env.NOWAKI_RUST_PORT ?? "3000"}`;
-const TS_RE = /\.(tsx|ts|jsx|tsrx|mdx)$/;
+const TS_RE = /\.(tsx|ts|jsx|tsrx|mdx|mdoc)$/;
 // The app's plain ES modules are loaded by Node as they are, but still need the generation, or an
 // edit to lib/x.js is never re-evaluated. Only files under the app root and outside node_modules:
 // a second copy of preact or of the runtime (a workspace symlink resolves outside the root) would

@@ -143,6 +143,8 @@ jobs:
         run: node scripts/handler-test.mjs
       - name: Live session hub (join/event, queue, timeout, cap, presence)
         run: node scripts/live-hub-test.mjs
+      - name: Markdoc plugin (compile, validation errors, escaping, frontmatter)
+        run: node --test "packages/nowaki-markdoc/test/*.test.mjs"
       - name: nowaki upgrade (command surface + non-app guard)
         run: bash scripts/ci/e2e-upgrade.sh
       - name: Typed routes (typegen)

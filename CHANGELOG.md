@@ -20,6 +20,13 @@ milestone's worth of work; the codename is noted per entry.
   the site (`//host`, `/\host`, a capture in an external host), a source or
   destination under `/__nowaki/`, and CR / LF / NUL in a header value fail the
   build. No server applies these rules yet.
+- **Markdoc** via the new `@nowaki-dev/markdoc` plugin. With
+  `markdoc({ components, tags, nodes })` in `plugins`, a `.mdoc` file compiles to a Preact module
+  at build and dev time. The module exports the rendered document, `frontmatter` and `headings`,
+  with the same heading ids as Markdown and MDX. Validation errors fail the build. Capitalized
+  tags render exports of the `components` module, islands included. `.mdoc` files can be content
+  entries (YAML or TOML frontmatter, `render()`). They are not routes. Without the plugin, a
+  `.mdoc` import fails with "add @nowaki-dev/markdoc to plugins".
 
 ## [0.17.3] — 2026-11-09 · patch
 

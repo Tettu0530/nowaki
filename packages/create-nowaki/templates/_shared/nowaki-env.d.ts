@@ -46,6 +46,15 @@ declare module "*.mdx" {
   export default MDXContent;
 }
 
+// Markdoc (@nowaki-dev/markdoc): the default export renders the file; `frontmatter` is its
+// frontmatter and `headings` lists its headings.
+declare module "*.mdoc" {
+  export const frontmatter: Record<string, any>;
+  export const headings: { depth: number; text: string; id: string }[];
+  const MarkdocContent: () => import("preact").JSX.Element;
+  export default MarkdocContent;
+}
+
 // Plugin virtual modules (resolveId/load in nowaki.config). Any export is allowed.
 declare module "virtual:*";
 

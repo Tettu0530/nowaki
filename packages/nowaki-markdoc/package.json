@@ -1,0 +1,42 @@
+{
+  "name": "@nowaki-dev/markdoc",
+  "version": "0.1.0",
+  "description": "Markdoc for Nowaki — compiles .mdoc files to Preact modules at build time",
+  "license": "MIT",
+  "author": "Tettu0530",
+  "homepage": "https://nowaki.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tettu0530/nowaki.git",
+    "directory": "packages/nowaki-markdoc"
+  },
+  "bugs": "https://github.com/Tettu0530/nowaki/issues",
+  "keywords": ["nowaki", "markdoc", "preact", "markdown"],
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "files": ["index.js", "index.d.ts", "render.js", "render.d.ts", "frontmatter.js", "README.md"],
+  "exports": {
+    ".": { "types": "./index.d.ts", "default": "./index.js" },
+    "./render": { "types": "./render.d.ts", "default": "./render.js" }
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "@markdoc/markdoc": "0.5.11"
+  },
+  "peerDependencies": {
+    "preact": "^10.25.0 || ^11.1.0"
+  },
+  "devDependencies": {
+    "preact": "^11.1.1",
+    "preact-render-to-string": "^6.8.2"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

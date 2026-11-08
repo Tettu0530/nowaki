@@ -1,0 +1,16 @@
+---
+title: A Markdoc page
+---
+# A Markdoc page
+
+Markdoc is Markdown with tags. Title from frontmatter: {% $frontmatter.title %}.
+
+{% callout type="tip" %}
+A **custom tag**, rendered by `Callout` from markdoc/components.tsx.
+{% /callout %}
+
+{% counter start=7 /%}
+
+## Escaping
+
+Raw HTML stays text: <script>alert(1)</script>

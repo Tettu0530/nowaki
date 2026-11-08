@@ -67,10 +67,20 @@ pub trait PluginBridge: Send + Sync {
 
 /// Extensions to transform. Anything else (css, images, etc.) is served as is.
 /// `.tsrx` is compiled to JSX by `@tsrx/preact` in the plugin host, then run through oxc.
+/// `.mdoc` (Markdoc) has no built-in compiler: a plugin (`@nowaki-dev/markdoc`) must turn it into
+/// a module.
 pub fn is_transformable(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()),
-        Some("ts" | "tsx" | "js" | "jsx" | "mjs" | "tsrx" | "mdx")
+        Some("ts" | "tsx" | "js" | "jsx" | "mjs" | "tsrx" | "mdx" | "mdoc")
+    )
+}
+
+/// The error for a `.mdoc` file no plugin compiled.
+fn no_markdoc_plugin(abs: &Path) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{}: no plugin compiled this Markdoc file; add @nowaki-dev/markdoc to plugins in nowaki.config.mjs",
+        abs.display()
     )
 }
 
@@ -261,7 +271,11 @@ impl NowakiCore {
         if abs.extension().and_then(|e| e.to_str()) == Some("mdx") {
             source = crate::mdx::to_tsx(&source).with_context(|| format!("{}", abs.display()))?;
         }
+        let is_mdoc = abs.extension().and_then(|e| e.to_str()) == Some("mdoc");
         let Some(bridge) = &self.plugins else {
+            if is_mdoc {
+                return Err(no_markdoc_plugin(abs));
+            }
             return Ok(source);
         };
         let id = abs.to_string_lossy();
@@ -279,6 +293,9 @@ impl NowakiCore {
             {
                 return Ok(code);
             }
+        }
+        if is_mdoc {
+            return Err(no_markdoc_plugin(abs));
         }
         Ok(source)
     }
@@ -409,7 +426,7 @@ mod tests {
 
     #[test]
     fn transformable_extensions() {
-        for ext in ["ts", "tsx", "js", "jsx", "mjs", "tsrx", "mdx"] {
+        for ext in ["ts", "tsx", "js", "jsx", "mjs", "tsrx", "mdx", "mdoc"] {
             assert!(is_transformable(Path::new(&format!("a.{ext}"))), "{ext}");
         }
         for ext in ["css", "json", "png", "txt", "md"] {
@@ -632,5 +649,36 @@ mod tests {
             after.contains("/node_modules/pkg/two.js"),
             "stale import URL from the disk cache:\n{after}"
         );
+    }
+
+    #[test]
+    fn an_mdoc_file_without_a_markdoc_plugin_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("page.mdoc");
+        std::fs::write(&file, "# Hello\n").unwrap();
+        let core = NowakiCore::new(dir.path().to_path_buf());
+        let err = core.read_source(&file).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("add @nowaki-dev/markdoc to plugins"),
+            "{err:#}"
+        );
+
+        // Plugins that leave it alone count as no plugin.
+        let mut core = NowakiCore::new(dir.path().to_path_buf());
+        core.set_plugins(Arc::new(MockBridge));
+        let err = core.load_module(&file, Mode::Ssr).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("add @nowaki-dev/markdoc to plugins"),
+            "{err:#}"
+        );
+
+        // A plugin's output is an ordinary module.
+        let mut core = NowakiCore::new(dir.path().to_path_buf());
+        core.set_plugins(Arc::new(CountingBridge(Default::default())));
+        std::fs::write(&file, "export const x = __MARK__;\n").unwrap();
+        assert!(core
+            .load_module(&file, Mode::Ssr)
+            .unwrap()
+            .contains("marked"));
     }
 }
