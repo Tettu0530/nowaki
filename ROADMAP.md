@@ -110,7 +110,7 @@ Make Nowaki a first-class choice for blogs, docs, and marketing sites: content, 
 
 **Status**: 0.17.0 ships every item below. The portfolio exit criterion was met by porting a real Astro site (static output matched, OG images byte-identical) after fixing what the port turned up. The docs-site build time and first-load JS against Astro are in BENCHMARKS.md. Markdoc and remote images moved to v0.18. Lossy WebP is not offered: there was no MIT-licensed pure-Rust encoder mature enough to ship; candidates are compared after 0.17.0.
 
-- [x] Content collections: `content/<name>/*` (declared in `content/config.ts`) with YAML frontmatter validated by a Standard Schema (the same as `serverFn`), `getCollection` / `getEntry`, generated types; TOML frontmatter (`+++`) as a follow-up
+- [x] Content collections: `content/<name>/*` (declared in `content/config.ts`) with YAML frontmatter validated by a Standard Schema (the same as `serverFn`), `getCollection` / `getEntry`, generated types; TOML frontmatter (`+++`, after 0.17.1)
 - [x] Built-in Markdown, rendered in Rust at build time: heading anchors and table of contents, code highlighting, and local images through the image pipeline
 - [x] MDX: components and islands inside `.mdx` pages and content entries, parsed in Rust (markdown-rs) and compiled to TSX, with the same highlighting, images, and heading ids as Markdown
 - [x] Image component: `srcset` / `sizes`, `width` / `height` from the file (no layout shift), lazy loading by default, AVIF (pure Rust) with the original format as the fallback

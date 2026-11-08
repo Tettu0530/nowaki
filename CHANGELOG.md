@@ -10,6 +10,14 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **TOML frontmatter** in content collections: a `.md` or `.mdx` entry whose
+  first line is exactly `+++` reads TOML up to the next `+++` line (Hugo
+  style). It is validated by the same schema as YAML, and values map the
+  same way. Datetimes become ISO 8601 strings, as YAML dates stay strings;
+  coerce them in the schema for `Date`s. A syntax error names the file and
+  line (`content/blog/x.md:3: frontmatter: …`).
+
 ## [0.17.1] — 2026-11-06 · patch
 
 Packages: `nowaki` / `nowaki-core` 0.17.1 (crates.io, npm), `@nowaki-dev/runtime`

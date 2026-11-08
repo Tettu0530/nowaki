@@ -19,7 +19,8 @@
 //!   remote ones stay `<img>`.
 //! - JSX elements and expressions are passed through, so imported components and islands
 //!   (`<Counter client:visible />`) work as in TSX.
-//! - YAML frontmatter is skipped here; content collections read it in Rust (`content.rs`).
+//! - Frontmatter (YAML `---` or TOML `+++`) is skipped here; content collections read it in Rust
+//!   (`content.rs`).
 
 use std::fmt::Write;
 
@@ -597,5 +598,19 @@ mod tests {
         let tsx = to_tsx(src).unwrap();
         assert!(tsx.contains("<h1 id={\"setext-line-two\"}>"), "{tsx}");
         assert!(tsx.contains("<h2 id={\"hard-break-code\"}>"), "{tsx}");
+    }
+
+    #[test]
+    fn toml_frontmatter_is_skipped_and_later_plus_lines_are_text() {
+        for src in [
+            "+++\ntitle = \"x\"\n+++\n# Hi\n\n+++\n",
+            "+++\r\ntitle = \"x\"\r\n+++\r\n# Hi\r\n\r\n+++\r\n",
+        ] {
+            let tsx = to_tsx(src).unwrap();
+            assert!(!tsx.contains("title"), "frontmatter is skipped: {tsx}");
+            assert!(tsx.contains("<h1 id={\"hi\"}>"), "{tsx}");
+            assert!(tsx.contains("<p>{\"+++\"}</p>"), "{tsx}");
+            assert_eq!(headings(src).unwrap()[0].id, "hi");
+        }
     }
 }

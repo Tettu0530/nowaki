@@ -1,7 +1,8 @@
 //! Content collections: `content/<name>/*.md` (and `*.json` / `*.yaml` data entries), compiled at
 //! build time into one JSON file per app that the runtime serves through `getCollection` /
-//! `getEntry`. Markdown is rendered here, in Rust; frontmatter is parsed here and validated in
-//! Node against the schemas in `content/config.ts` (the runtime's content-check.mjs).
+//! `getEntry`. Markdown is rendered here, in Rust; frontmatter (YAML between `---` lines, or TOML
+//! between `+++` lines) is parsed here and validated in Node against the schemas in
+//! `content/config.ts` (the runtime's content-check.mjs).
 //!
 //! Output (`<out>/index.json`):
 //! `{ "<name>": [ { "slug", "file", "data", "body"?, "html"?, "headings"? } ] }`, entries sorted
@@ -214,10 +215,7 @@ fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
         "md" | "markdown" => {
             let src = text()?;
             let (front, body) = split_frontmatter(&src);
-            let data = match front {
-                Some(y) => yaml_to_json(y).map_err(|e| anyhow!("{file}: frontmatter: {e}"))?,
-                None => Value::Object(Default::default()),
-            };
+            let data = frontmatter_data(&file, front)?;
             let dir = path.parent().unwrap_or(coll);
             // Images are only recorded here; `collect` builds each file once, after every entry
             // is read (building inside this parallel read could wait on itself, see collect).
@@ -249,10 +247,7 @@ fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
         "mdx" => {
             let src = text()?;
             let (front, body) = split_frontmatter(&src);
-            let data = match front {
-                Some(y) => yaml_to_json(y).map_err(|e| anyhow!("{file}: frontmatter: {e}"))?,
-                None => Value::Object(Default::default()),
-            };
+            let data = frontmatter_data(&file, front)?;
             let headings = nowaki_core::mdx::headings(body)
                 .map_err(|e| anyhow!("{file}: {e:#}"))?
                 .into_iter()
@@ -298,25 +293,58 @@ fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
     }))
 }
 
-/// `---\n<yaml>\n---\n<body>`. Without a leading `---` line, the whole file is the body.
-pub fn split_frontmatter(src: &str) -> (Option<&str>, &str) {
+/// A Markdown / MDX entry's frontmatter, by its fence.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Frontmatter<'a> {
+    /// `---` … `---`
+    Yaml(&'a str),
+    /// `+++` … `+++` (Hugo-style)
+    Toml(&'a str),
+}
+
+/// `---\n<yaml>\n---\n<body>` or `+++\n<toml>\n+++\n<body>`. Only a first line of exactly `---`
+/// or `+++` (a trailing `\r` is allowed) opens frontmatter, and the same line closes it; without
+/// one, or without the closing line, the whole file is the body.
+pub fn split_frontmatter(src: &str) -> (Option<Frontmatter<'_>>, &str) {
     let s = src.strip_prefix('\u{feff}').unwrap_or(src);
-    let Some(rest) = s
-        .strip_prefix("---\n")
-        .or_else(|| s.strip_prefix("---\r\n"))
-    else {
+    let Some((first, rest)) = s.split_once('\n') else {
         return (None, s);
     };
+    let fence = first.strip_suffix('\r').unwrap_or(first);
+    if fence != "---" && fence != "+++" {
+        return (None, s);
+    }
     let mut offset = 0;
     for line in rest.split_inclusive('\n') {
-        if line.trim_end_matches(['\r', '\n']) == "---" {
-            let yaml = &rest[..offset];
+        if line.trim_end_matches(['\r', '\n']) == fence {
+            let front = &rest[..offset];
             let body = &rest[offset + line.len()..];
-            return (Some(yaml), body);
+            let front = if fence == "---" {
+                Frontmatter::Yaml(front)
+            } else {
+                Frontmatter::Toml(front)
+            };
+            return (Some(front), body);
         }
         offset += line.len();
     }
     (None, s) // no closing fence: not frontmatter
+}
+
+/// An entry's frontmatter as JSON (an empty object without any). Errors name the file, and for
+/// TOML the line in the file (`content/blog/x.md:3: frontmatter: …`).
+fn frontmatter_data(file: &str, front: Option<Frontmatter<'_>>) -> Result<Value> {
+    match front {
+        None => Ok(Value::Object(Default::default())),
+        Some(Frontmatter::Yaml(y)) => {
+            yaml_to_json(y).map_err(|e| anyhow!("{file}: frontmatter: {e}"))
+        }
+        Some(Frontmatter::Toml(t)) => toml_to_json(t).map_err(|e| match e.line {
+            // The opening `+++` is line 1 of the file.
+            Some(line) => anyhow!("{file}:{}: frontmatter: {}", line + 1, e.message),
+            None => anyhow!("{file}: frontmatter: {}", e.message),
+        }),
+    }
 }
 
 /// YAML → JSON value. Dates stay strings (`2026-11-05`); a schema can coerce them.
@@ -330,6 +358,63 @@ pub fn yaml_to_json(y: &str) -> std::result::Result<Value, String> {
         Value::Null => Ok(Value::Object(Default::default())),
         _ => Err("frontmatter must be a mapping (key: value)".into()),
     }
+}
+
+/// A TOML frontmatter error, with its 1-based line within the TOML when known.
+#[derive(Debug)]
+pub struct TomlError {
+    pub line: Option<usize>,
+    pub message: String,
+}
+
+/// TOML → JSON value, mapped like YAML's: tables become objects (keys in written order), arrays
+/// arrays, and datetimes ISO 8601 / RFC 3339 strings, as YAML dates stay strings (`2026-11-05`,
+/// `2026-11-05T10:00:00Z`, `10:00:00`); a schema can coerce them (`z.coerce.date()`). A TOML
+/// datetime written with a space (`2026-11-05 10:00:00Z`) comes out with a `T`. NaN and infinity
+/// have no JSON form and are an error.
+pub fn toml_to_json(t: &str) -> std::result::Result<Value, TomlError> {
+    let table: toml::Table = toml::from_str(t).map_err(|e| TomlError {
+        line: e
+            .span()
+            .map(|s| t[..s.start.min(t.len())].matches('\n').count() + 1),
+        message: e.message().trim_end().to_string(),
+    })?;
+    toml_table(table, "").map_err(|message| TomlError {
+        line: None,
+        message,
+    })
+}
+
+fn toml_table(t: toml::Table, path: &str) -> std::result::Result<Value, String> {
+    let mut map = serde_json::Map::with_capacity(t.len());
+    for (k, v) in t {
+        let p = if path.is_empty() {
+            k.clone()
+        } else {
+            format!("{path}.{k}")
+        };
+        map.insert(k, toml_value(v, &p)?);
+    }
+    Ok(Value::Object(map))
+}
+
+fn toml_value(v: toml::Value, path: &str) -> std::result::Result<Value, String> {
+    Ok(match v {
+        toml::Value::String(s) => Value::String(s),
+        toml::Value::Integer(i) => Value::from(i),
+        toml::Value::Float(f) => serde_json::Number::from_f64(f)
+            .map(Value::Number)
+            .ok_or_else(|| format!("{path}: {f} has no JSON equivalent"))?,
+        toml::Value::Boolean(b) => Value::Bool(b),
+        toml::Value::Datetime(d) => Value::String(d.to_string()),
+        toml::Value::Array(a) => Value::Array(
+            a.into_iter()
+                .enumerate()
+                .map(|(i, v)| toml_value(v, &format!("{path}[{i}]")))
+                .collect::<std::result::Result<_, _>>()?,
+        ),
+        toml::Value::Table(t) => toml_table(t, path)?,
+    })
 }
 
 fn markdown_options() -> Options<'static> {
@@ -528,7 +613,7 @@ mod tests {
     #[test]
     fn splits_yaml_frontmatter() {
         let (f, b) = split_frontmatter("---\ntitle: Hi\n---\n# Body\n");
-        assert_eq!(f, Some("title: Hi\n"));
+        assert_eq!(f, Some(Frontmatter::Yaml("title: Hi\n")));
         assert_eq!(b, "# Body\n");
         let (f, b) = split_frontmatter("# No frontmatter\n");
         assert_eq!(f, None);
@@ -537,8 +622,138 @@ mod tests {
         assert_eq!(split_frontmatter("---\ntitle: x\n").0, None);
         // CRLF and a BOM.
         let (f, b) = split_frontmatter("\u{feff}---\r\ntitle: Hi\r\n---\r\nbody");
-        assert_eq!(f, Some("title: Hi\r\n"));
+        assert_eq!(f, Some(Frontmatter::Yaml("title: Hi\r\n")));
         assert_eq!(b, "body");
+    }
+
+    #[test]
+    fn splits_toml_frontmatter() {
+        let (f, b) = split_frontmatter("+++\ntitle = \"Hi\"\n+++\n# Body\n");
+        assert_eq!(f, Some(Frontmatter::Toml("title = \"Hi\"\n")));
+        assert_eq!(b, "# Body\n");
+        // CRLF and a BOM.
+        let (f, b) = split_frontmatter("\u{feff}+++\r\ntitle = \"Hi\"\r\n+++\r\nbody\r\n");
+        assert_eq!(f, Some(Frontmatter::Toml("title = \"Hi\"\r\n")));
+        assert_eq!(b, "body\r\n");
+        // `+++` later in the body is body text.
+        let src = "+++\na = 1\n+++\nText\n+++\nmore\n+++\n";
+        assert_eq!(
+            split_frontmatter(src),
+            (Some(Frontmatter::Toml("a = 1\n")), "Text\n+++\nmore\n+++\n")
+        );
+        let src = "# Title\n\n+++\na = 1\n+++\n";
+        assert_eq!(split_frontmatter(src), (None, src));
+        // Only an exact `+++` first line opens it, and only the same fence closes it.
+        for src in [
+            "++++\na = 1\n++++\n",
+            "+++ \na = 1\n+++\n",
+            " +++\na = 1\n+++\n",
+            "+++toml\na = 1\n+++\n",
+            "+++\na = 1\n---\n",
+            "---\na: 1\n+++\n",
+            "+++\na = 1\n", // unclosed
+        ] {
+            assert_eq!(split_frontmatter(src), (None, src), "{src:?}");
+        }
+    }
+
+    #[test]
+    fn toml_maps_like_yaml() {
+        let v = toml_to_json(
+            "title = \"Hello\"\ndate = 2026-11-05\ntags = [\"a\", \"b\"]\ndraft = false\norder = 2\nscore = 1.5\n[author]\nname = \"Tettu\"\n",
+        )
+        .unwrap();
+        let y = yaml_to_json(
+            "title: Hello\ndate: 2026-11-05\ntags: [a, b]\ndraft: false\norder: 2\nscore: 1.5\nauthor:\n  name: Tettu\n",
+        )
+        .unwrap();
+        assert_eq!(v, y);
+        // Keys keep the order they were written in, as YAML's do.
+        let keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
+        assert_eq!(
+            keys,
+            ["title", "date", "tags", "draft", "order", "score", "author"]
+        );
+        assert_eq!(toml_to_json("").unwrap(), serde_json::json!({}));
+        let nan = toml_to_json("[x]\ny = nan\n").unwrap_err();
+        assert_eq!(nan.message, "x.y: NaN has no JSON equivalent");
+    }
+
+    #[test]
+    fn toml_datetimes_become_iso_strings() {
+        let v = toml_to_json(
+            "d = 2026-11-05\nodt = 2026-11-05T10:30:00Z\noff = 2026-11-05 10:30:00.5+09:00\nldt = 2026-11-05T10:30:00\nt = 10:30:00\nlist = [2026-01-01]\n",
+        )
+        .unwrap();
+        assert_eq!(v["d"], "2026-11-05");
+        assert_eq!(v["odt"], "2026-11-05T10:30:00Z");
+        assert_eq!(v["off"], "2026-11-05T10:30:00.5+09:00");
+        assert_eq!(v["ldt"], "2026-11-05T10:30:00");
+        assert_eq!(v["t"], "10:30:00");
+        assert_eq!(v["list"][0], "2026-01-01");
+        // The same strings YAML gives for the same dates.
+        let y = yaml_to_json("d: 2026-11-05\nodt: 2026-11-05T10:30:00Z\n").unwrap();
+        assert_eq!((&v["d"], &v["odt"]), (&y["d"], &y["odt"]));
+    }
+
+    #[test]
+    fn a_toml_syntax_error_names_the_file_and_line() {
+        let err = frontmatter_data(
+            "content/blog/x.md",
+            Some(Frontmatter::Toml("title = \"ok\"\n\norder = = 1\n")),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.starts_with("content/blog/x.md:4: frontmatter: "),
+            "{err}"
+        );
+        // Through collect, from a CRLF file: the bad date is on line 3 (the fence is line 1).
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        std::fs::create_dir_all(r.join("content/blog")).unwrap();
+        std::fs::write(
+            r.join("content/blog/x.md"),
+            "+++\r\ntitle = \"x\"\r\ndate = 2026-13-45\r\n+++\r\nbody\r\n",
+        )
+        .unwrap();
+        let err = collect(r, &Images::Dev).unwrap_err().to_string();
+        assert!(err.contains("content/blog/x.md:3: frontmatter: "), "{err}");
+    }
+
+    #[test]
+    fn toml_entries_collect_like_yaml_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        std::fs::create_dir_all(r.join("content/blog")).unwrap();
+        std::fs::write(
+            r.join("content/blog/a.md"),
+            "+++\r\ntitle = \"A\"\r\ndate = 2026-11-05\r\n+++\r\n# A\r\n\r\n+++\r\nnot = \"frontmatter\"\r\n+++\r\n",
+        )
+        .unwrap();
+        std::fs::write(
+            r.join("content/blog/b.mdx"),
+            "+++\ntitle = \"B\"\n+++\n# B\n",
+        )
+        .unwrap();
+        let all = collect(r, &Images::Dev).unwrap();
+        let [a, b] = &all["blog"][..] else {
+            panic!("{:?}", all["blog"]);
+        };
+        assert_eq!(
+            a.data,
+            serde_json::json!({ "title": "A", "date": "2026-11-05" })
+        );
+        let body = a.body.as_deref().unwrap();
+        assert!(
+            body.contains("+++\r\nnot = \"frontmatter\"\r\n+++"),
+            "{body}"
+        );
+        assert!(!body.contains("title"), "{body}");
+        assert_eq!(a.headings.as_ref().unwrap()[0].id, "a");
+        assert_eq!(b.data, serde_json::json!({ "title": "B" }));
+        assert_eq!(b.headings.as_ref().unwrap()[0].text, "B");
+        assert_eq!(b.module.as_deref(), Some("content/blog/b.js"));
     }
 
     #[test]
