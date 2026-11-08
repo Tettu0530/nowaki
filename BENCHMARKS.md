@@ -25,7 +25,7 @@ since `nowaki build` alone writes no HTML.
 
 First-load JS is what a page fetches when it is opened, without touching it. Since 0.17, Nowaki
 loads its client router when a link is hovered or touched, not when the page goes idle, so the
-router (about 3 KB gzip) is no longer part of that figure; with 0.17.2 Nowaki's `/` is 8.67 KB
+router (about 3 KB gzip) is no longer part of that figure; with 0.17.3 Nowaki's `/` is 8.67 KB
 against Astro's 9.90 KB (10 pages, 1 counter island plus the theme toggle).
 
 ## Head-to-head: Nowaki vs Next.js vs Astro
@@ -109,27 +109,38 @@ request unless the row says ISR.
 
 | server | TTFB p50 | TTFB p99 | post pages req/s | `/` req/s | `/api/search` req/s | idle RSS |
 |---|---|---|---|---|---|---|
-| **Nowaki 0.17.2** | **0.23 ms** | **0.67 ms** | **7,602** | **12,837** | **28,308** | 307 MB |
-| Nowaki 0.17.2, `NOWAKI_CSP=enforce` | 0.23 ms | 0.59 ms | 8,014 | 12,699 | 24,655 | 308 MB |
+| **Nowaki 0.17.3** | **0.22 ms** | **0.99 ms** | **9,615** | **16,153** | **29,534** | 301 MB |
+| Nowaki 0.17.3, `NOWAKI_CSP=enforce` | 0.20 ms | 0.69 ms | 9,933 | 16,685 | 29,542 | 299 MB |
 | SvelteKit 3.1.1 | 0.23 ms | 0.91 ms | 6,348 | 4,623 | 20,963 | 333 MB |
 | Astro 7.4.5 | 0.31 ms | 1.39 ms | 5,390 | 7,176 | 13,346 | 343 MB |
 | Nuxt 4.6.4 | 0.65 ms | 4.93 ms | 1,877 | 2,055 | 30,937 | 335 MB |
 | Next.js 16.4.5 | 1.07 ms | 2.85 ms | 1,118 | 1,256 | 6,597 | 435 MB |
-| Nowaki 0.17.2, ISR on post pages | 0.07 ms | 0.20 ms | 133,580 | 13,010 ¹ | 29,072 ¹ | 130 MB |
+| Nowaki 0.17.3, ISR on post pages | 0.08 ms | 0.25 ms | 137,011 | 15,903 ¹ | 31,135 ¹ | 128 MB |
 | Nuxt 4.6.4, ISR (`swr`) | 0.11 ms | 0.32 ms | 18,239 | 2,114 ¹ | 32,883 ¹ | 272 MB |
 | Next.js 16.4.5, ISR | 0.29 ms | 1.15 ms | 5,026 | 1,322 ¹ | 6,758 ¹ | 396 MB |
 
 ¹ `/` and `/api/search` are rendered per request in the ISR runs too; only post pages are cached.
 
-Measured 2026-11-08, Apple M2, Node 24.14.0, `oha` 1.16.0 on the same machine (above roughly
-100k req/s the figure is likely bounded by `oha` and loopback). Nowaki is 0.17.2 / runtime 0.16.2
-from npm.
+Measured on an Apple M2, Node 24.14.0, `oha` 1.16.0 on the same machine (above roughly 100k
+req/s the figure is likely bounded by `oha` and loopback): Nowaki 0.17.3 / runtime 0.16.3 from npm
+on 2026-11-09, the other frameworks on 2026-11-08.
 
-Nowaki's uncached throughput is lower than 0.16.1's on this blog (9,830 post pages/s and 16,746
-for `/` on 2026-11-05). Measured back to back, 0.16.1 and 0.17.2 alternating, 3 runs each, twice:
-post pages 9,503–10,434 vs 8,110–8,601 req/s (about −17%), `/` 15,285–16,593 vs 12,787–13,740
-(about −18%), TTFB p50 0.19–0.21 vs 0.22–0.24 ms. The other frameworks' rows moved by 6% or less
-between the two dates. Which change between 0.16.1 and 0.17.2 causes it has not been measured.
+**A regression in 0.17.0–0.17.2, fixed in 0.17.3.** Uncached post pages fell from about 10,000
+req/s to about 8,300, measured back to back on this blog (`oha -c 50`, 3 interleaved rounds, one
+run per pairing per round):
+
+| CLI / runtime | post pages req/s | note |
+|---|---|---|
+| 0.16.3 / 0.15.3 | 9,988–10,284 | |
+| 0.17.0 / 0.16.0 | 8,093–8,290 | |
+| 0.17.1 / 0.16.1 | 8,113–8,433 | |
+| 0.17.2 / 0.16.2 | 8,410–8,448 | |
+| 0.17.2 / **0.15.3** | 10,208–10,350 | new CLI, old runtime: fast |
+| 0.16.3 / **0.16.2** | 8,386–9,043 | old CLI, new runtime: slow |
+
+So it came with runtime 0.16.0: from then on, each request rebuilt the page's layout chain,
+module URLs and asset lookups. #162 computes them once per file; 0.17.3 (runtime 0.16.3) serves
+9,615 post pages/s and 16,153 for `/`, back at 0.16.1's 9,830 and 16,746.
 
 On the earlier, counters-only blog, Nowaki 0.15.0 served 4,183 post pages/s at a TTFB p50 of
 0.41 ms and 0.16.0 served 10,424 at 0.20 ms; 0.16.0 includes #101, which stopped calling
@@ -223,7 +234,8 @@ page has an island).
 Browsers that take AVIF get the 54 KB set; the JPEG files are the fallback for the rest. Astro
 inlines its small CSS into each page (`<style>`), so it has no CSS file. Measured 2026-11-08
 (UTC) on an Apple M2, Node 24.14.0: Nowaki 0.17.2 built from the `v0.17.2` tag (`30e087c`),
-Astro 7.4.5. Raw runs: `benchmarks/docs-site/results/`.
+Astro 7.4.5. 0.17.3 changed only the runtime's request path, not the build. Raw runs:
+`benchmarks/docs-site/results/`.
 
 ## Methodology
 
