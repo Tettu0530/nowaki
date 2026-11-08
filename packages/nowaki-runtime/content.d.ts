@@ -8,7 +8,7 @@ export interface ContentHeading {
 }
 
 export interface CollectionDefinition<S extends StandardSchemaV1 = StandardSchemaV1> {
-  /** `"markdown"` (default): `.md` files with frontmatter. `"data"`: `.json` / `.yaml` files. */
+  /** `"markdown"` (default): `.md` / `.mdx` files with YAML (`---`) or TOML (`+++`) frontmatter. `"data"`: `.json` / `.yaml` files. */
   type?: "markdown" | "data";
   /** Validates the frontmatter (or the data file). Any Standard Schema library. */
   schema?: S;

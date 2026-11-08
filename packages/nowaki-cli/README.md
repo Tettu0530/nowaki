@@ -33,8 +33,9 @@ Scaffold a new app with `npm create nowaki@latest my-app`.
 
 ### Content collections
 
-Each directory under `content/` is a collection of Markdown files (YAML frontmatter) or JSON /
-YAML data files. Declare it with a schema (any Standard Schema library):
+Each directory under `content/` is a collection of Markdown / MDX files (YAML frontmatter
+between `---` lines, or TOML between `+++` lines) or JSON / YAML data files. Declare it with a
+schema (any Standard Schema library):
 
 ```ts
 // content/config.ts
@@ -54,8 +55,23 @@ export const loader = ({ params }) => getEntry("docs", params.slug);
 
 An entry has `slug`, `file`, `data` (the validated frontmatter), and, for Markdown, `html`
 (rendered at build time in Rust, with heading anchors) and `headings` (for a table of
-contents). An entry that fails its schema fails the build with the file and field. YAML dates
-arrive as strings; coerce them in the schema if you want `Date`s.
+contents). An entry that fails its schema fails the build with the file and field. Dates
+arrive as strings, YAML and TOML alike (`2026-11-05`, `2026-11-05T10:00:00Z`); coerce them in
+the schema if you want `Date`s.
+
+```md
++++
+title = "Hello"
+date = 2026-11-05
+tags = ["intro"]
++++
+
+# Hello
+```
+
+TOML frontmatter starts only on a first line of exactly `+++`. Its values map like YAML's:
+tables become objects and datetimes ISO 8601 strings (a space between date and time becomes
+`T`). A TOML syntax error fails the build with the file and line (`content/blog/x.md:3: …`).
 
 ### First-load JS per route
 

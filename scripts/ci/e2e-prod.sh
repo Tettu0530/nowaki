@@ -122,6 +122,11 @@ curl -sf http://127.0.0.1:3300/docs | grep -q 'href="/docs/intro">Introduction</
 curl -sf http://127.0.0.1:3300/docs/intro | grep -q '<h2 id="why-content-collections"'
 curl -sf http://127.0.0.1:3300/docs/intro | grep -q 'href="#next-steps"'
 curl -sf http://127.0.0.1:3300/docs/intro | grep -q '<title>Introduction — Nowaki docs</title>'
+# an entry with TOML frontmatter (+++), listed by its `order`; a later +++ line stays body text
+curl -sf http://127.0.0.1:3300/docs | grep -q 'href="/docs/toml">TOML frontmatter</a>'
+curl -sf http://127.0.0.1:3300/docs/toml | grep -q '<title>TOML frontmatter — Nowaki docs</title>'
+curl -sf http://127.0.0.1:3300/docs/toml | grep -q '<h2 id="plus-lines-in-the-body"'
+curl -sf http://127.0.0.1:3300/docs/toml | grep -q '<p>+++</p>'
 # fenced code is highlighted at build time (inline styles, no client JS)
 curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<pre style="background-color:#ffffff;">'
 curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<span style="font-weight:bold;color:#a71d5d;">export'

@@ -73,6 +73,19 @@ curl -s $B/docs/e2e-added | grep -q 'id="fresh-heading"'
 printf -- '---\norder: 9\n---\nno title\n' > examples/hello/content/docs/e2e-added.md
 for i in $(seq 1 20); do curl -s $B/docs | grep -q 'title: is required' && break; sleep 0.5; done
 curl -s $B/docs | grep -q 'content/docs/e2e-added.md: title: is required'
+# TOML frontmatter (+++): the same schema check, and a syntax error names the line (a parse
+# error keeps the last good output and goes to the overlay / MCP recent_errors)
+printf -- '+++\ntitle = "TOML in dev"\norder = 9\n+++\n\n## Toml heading\n' > examples/hello/content/docs/e2e-added.md
+for i in $(seq 1 20); do curl -s $B/docs/e2e-added | grep -q 'id="toml-heading"' && break; sleep 0.5; done
+curl -s $B/docs/e2e-added | grep -q '<title>TOML in dev — Nowaki docs</title>'
+printf -- '+++\norder = 9\n+++\nno title\n' > examples/hello/content/docs/e2e-added.md
+for i in $(seq 1 20); do curl -s $B/docs | grep -q 'title: is required' && break; sleep 0.5; done
+curl -s $B/docs | grep -q 'content/docs/e2e-added.md: title: is required'
+printf -- '+++\ntitle = "T"\norder = = 9\n+++\n' > examples/hello/content/docs/e2e-added.md
+MCP_ERRORS='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recent_errors","arguments":{"source":"build"}}}'
+mcp_errors() { curl -s -XPOST $B/__nowaki/mcp -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -H 'mcp-protocol-version: 2025-06-18' -d "$MCP_ERRORS"; }
+for i in $(seq 1 20); do mcp_errors | grep -q 'e2e-added.md:3: frontmatter' && break; sleep 0.5; done
+mcp_errors | grep -q 'content/docs/e2e-added.md:3: frontmatter'
 rm examples/hello/content/docs/e2e-added.md
 for i in $(seq 1 20); do curl -sf $B/docs >/dev/null && break; sleep 0.5; done
 curl -sf $B/docs | grep -q 'href="/docs/intro"'
