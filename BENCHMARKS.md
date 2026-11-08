@@ -23,6 +23,11 @@ cost and its cost per page and per island: dev first response, static and server
 first-load JS / total transfer in the browser. The static comparison times `nowaki prerender`,
 since `nowaki build` alone writes no HTML.
 
+First-load JS is what a page fetches when it is opened, without touching it. Since 0.17, Nowaki
+loads its client router when a link is hovered or touched, not when the page goes idle, so the
+router (about 3 KB gzip) is no longer part of that figure; with 0.17.3 Nowaki's `/` is 8.67 KB
+against Astro's 9.90 KB (10 pages, 1 counter island plus the theme toggle).
+
 ## Head-to-head: Nowaki vs Next.js vs Astro
 
 > **Known issues with this table.** Its build column times `nowaki build`, which writes no
@@ -104,23 +109,38 @@ request unless the row says ISR.
 
 | server | TTFB p50 | TTFB p99 | post pages req/s | `/` req/s | `/api/search` req/s | idle RSS |
 |---|---|---|---|---|---|---|
-| **Nowaki 0.16.1** | **0.20 ms** | **0.61 ms** | **9,830** | **16,746** | **32,910** | 299 MB |
-| Nowaki 0.16.1, `NOWAKI_CSP=enforce` | 0.21 ms | 0.56 ms | 9,442 | 16,245 | 30,676 | 300 MB |
-| SvelteKit 3.1.1 | 0.23 ms | 0.81 ms | 6,763 | 4,682 | 22,739 | 340 MB |
-| Astro 7.4.5 | 0.30 ms | 1.02 ms | 5,395 | 7,065 | 14,091 | 341 MB |
-| Nuxt 4.6.4 | 0.63 ms | 5.15 ms | 1,947 | 2,079 | 31,106 | 367 MB |
-| Next.js 16.4.5 | 1.02 ms | 2.43 ms | 1,197 | 1,385 | 6,925 | 438 MB |
-| Nowaki 0.16.1, ISR on post pages | 0.08 ms | 0.28 ms | 140,390 | 15,331 ¹ | 29,404 ¹ | 127 MB |
-| Nuxt 4.6.4, ISR (`swr`) | 0.11 ms | 0.33 ms | 18,179 | 2,044 ¹ | 33,358 ¹ | 280 MB |
-| Next.js 16.4.5, ISR | 0.29 ms | 1.22 ms | 4,824 | 1,245 ¹ | 6,665 ¹ | 375 MB |
+| **Nowaki 0.17.3** | **0.22 ms** | **0.99 ms** | **9,615** | **16,153** | **29,534** | 301 MB |
+| Nowaki 0.17.3, `NOWAKI_CSP=enforce` | 0.20 ms | 0.69 ms | 9,933 | 16,685 | 29,542 | 299 MB |
+| SvelteKit 3.1.1 | 0.23 ms | 0.91 ms | 6,348 | 4,623 | 20,963 | 333 MB |
+| Astro 7.4.5 | 0.31 ms | 1.39 ms | 5,390 | 7,176 | 13,346 | 343 MB |
+| Nuxt 4.6.4 | 0.65 ms | 4.93 ms | 1,877 | 2,055 | 30,937 | 335 MB |
+| Next.js 16.4.5 | 1.07 ms | 2.85 ms | 1,118 | 1,256 | 6,597 | 435 MB |
+| Nowaki 0.17.3, ISR on post pages | 0.08 ms | 0.25 ms | 137,011 | 15,903 ¹ | 31,135 ¹ | 128 MB |
+| Nuxt 4.6.4, ISR (`swr`) | 0.11 ms | 0.32 ms | 18,239 | 2,114 ¹ | 32,883 ¹ | 272 MB |
+| Next.js 16.4.5, ISR | 0.29 ms | 1.15 ms | 5,026 | 1,322 ¹ | 6,758 ¹ | 396 MB |
 
 ¹ `/` and `/api/search` are rendered per request in the ISR runs too; only post pages are cached.
 
-Measured 2026-11-05, Apple M2, Node 24.14.0, `oha` 1.16.0 on the same machine (above roughly
-100k req/s the figure is likely bounded by `oha` and loopback). Nowaki is 0.16.1 / runtime 0.15.1
-from npm. The Nowaki ISR row was measured again on its own: the first series had the uncached
-`/` and `/api/search` about a third below the uncached run, which did not reproduce (the run
-likely overlapped other load on the machine), and ISR does not change the uncached path.
+Measured on an Apple M2, Node 24.14.0, `oha` 1.16.0 on the same machine (above roughly 100k
+req/s the figure is likely bounded by `oha` and loopback): Nowaki 0.17.3 / runtime 0.16.3 from npm
+on 2026-11-09, the other frameworks on 2026-11-08.
+
+**A regression in 0.17.0–0.17.2, fixed in 0.17.3.** Uncached post pages fell from about 10,000
+req/s to about 8,300, measured back to back on this blog (`oha -c 50`, 3 interleaved rounds, one
+run per pairing per round):
+
+| CLI / runtime | post pages req/s | note |
+|---|---|---|
+| 0.16.3 / 0.15.3 | 9,988–10,284 | |
+| 0.17.0 / 0.16.0 | 8,093–8,290 | |
+| 0.17.1 / 0.16.1 | 8,113–8,433 | |
+| 0.17.2 / 0.16.2 | 8,410–8,448 | |
+| 0.17.2 / **0.15.3** | 10,208–10,350 | new CLI, old runtime: fast |
+| 0.16.3 / **0.16.2** | 8,386–9,043 | old CLI, new runtime: slow |
+
+So it came with runtime 0.16.0: from then on, each request rebuilt the page's layout chain,
+module URLs and asset lookups. #162 computes them once per file; 0.17.3 (runtime 0.16.3) serves
+9,615 post pages/s and 16,153 for `/`, back at 0.16.1's 9,830 and 16,746.
 
 On the earlier, counters-only blog, Nowaki 0.15.0 served 4,183 post pages/s at a TTFB p50 of
 0.41 ms and 0.16.0 served 10,424 at 0.20 ms; 0.16.0 includes #101, which stopped calling
@@ -186,16 +206,17 @@ deletes only the output. Median [p25–p75] of 5 runs after a warm-up:
 
 | entries | Nowaki cold | Nowaki warm | Astro cold | Astro warm |
 |---|---|---|---|---|
-| 20 | 2,201 [2,168–2,279] ms | **233** [233–239] ms | **1,644** [1,638–1,680] ms | 1,022 [1,017–1,025] ms |
-| 100 | 4,677 [4,399–5,009] ms | **287** [273–317] ms | **1,878** [1,869–1,896] ms | 1,167 [1,162–1,168] ms |
-| 500 | 5,254 [4,856–5,330] ms | **490** [489–492] ms | **2,873** [2,866–2,878] ms | 1,877 [1,849–1,878] ms |
+| 20 | 2,295 [2,285–2,307] ms | **239** [235–243] ms | **1,618** [1,616–1,620] ms | 1,004 [1,002–1,010] ms |
+| 100 | 4,032 [3,915–4,848] ms | **312** [306–317] ms | **1,860** [1,855–1,881] ms | 1,157 [1,155–1,181] ms |
+| 500 | 6,005 [5,626–6,553] ms | **502** [493–503] ms | **2,847** [2,842–2,848] ms | 1,852 [1,845–1,857] ms |
 
 Without a cache Nowaki is slower: AVIF takes much longer to encode than WebP, and Nowaki uses no
-C codecs, so it cannot use sharp / libwebp. With its cache it is faster at every size (3.8–4.4×).
+C codecs, so it cannot use sharp / libwebp. With its cache it is faster at every size (3.7–4.2×).
 
 The first measurement of this benchmark (`1fcc2ae`) had a higher cost per entry: the warm build
-at 500 entries took 2,603 ms (now 490 ms), and the cold medians fit 11.1 ms per entry (now
-4.8 ms; Astro 2.5 ms). The cause was that every Markdown image reference decoded the whole JPEG
+at 500 entries took 2,603 ms (now 502 ms), and the cold medians fit 11.1 ms per entry (4.8 ms
+on `70f9e0a`, 6.8 ms on 0.17.2, where the cold runs at 100 and 500 entries spread widely;
+Astro 2.5 ms). The cause was that every Markdown image reference decoded the whole JPEG
 to read its size, so the four photos were decoded 500 times; #146 reads the size from the file
 header and processes each image once per build (#147 fixed a deadlock in that change).
 
@@ -203,7 +224,7 @@ header and processes each image once per build (#147 fixed a deadlock in that ch
 |---|---|---|
 | images | 966 KB: AVIF 54 KB (16 files) + JPEG fallback 912 KB (16 files); `<picture>`, 4 widths | 297 KB: WebP (48 files); `<img srcset>`, 6 widths |
 | HTML (all pages) | 838 KB | 912 KB |
-| CSS / JS files | 1.4 KB / 22.0 KB ¹ | 0 / 0 (CSS inlined) |
+| CSS / JS files | 1.4 KB / 22.8 KB ¹ | 0 / 0 (CSS inlined) |
 | sitemap URLs | 102 | 102 |
 | first-load JS: Markdown entry / MDX entry / `/docs/` | 0 / 0 / 0 KB | 0 / 0 / 0 KB |
 
@@ -211,9 +232,10 @@ header and processes each image once per build (#147 fixed a deadlock in that ch
 page has an island).
 
 Browsers that take AVIF get the 54 KB set; the JPEG files are the fallback for the rest. Astro
-inlines its small CSS into each page (`<style>`), so it has no CSS file. Measured 2026-11-06
-(UTC) on an Apple M2, Node 24.14.0: Nowaki built from `main` at `70f9e0a` (after 0.16.2),
-Astro 7.4.5. Raw runs: `benchmarks/docs-site/results/`.
+inlines its small CSS into each page (`<style>`), so it has no CSS file. Measured 2026-11-08
+(UTC) on an Apple M2, Node 24.14.0: Nowaki 0.17.2 built from the `v0.17.2` tag (`30e087c`),
+Astro 7.4.5. 0.17.3 changed only the runtime's request path, not the build. Raw runs:
+`benchmarks/docs-site/results/`.
 
 ## Methodology
 
