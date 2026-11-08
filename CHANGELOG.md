@@ -10,6 +10,15 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Changed
+- **The CI performance regression gate also compares each PR with the latest
+  release**, failing beyond −10% req/s or +20% TTFB against it (the existing
+  limits against base stay the same). It also measures a second page,
+  `/posts/[slug]` in `benchmarks/ci-perf-app`, with nested layouts, a loader,
+  page `meta` and layout/route CSS. Together these would have caught the ~17%
+  throughput regression that runtime 0.16.0 shipped in small steps. The
+  release's binary is cached per tag.
+
 ## [0.17.3] — 2026-11-09 · patch
 
 Packages: `nowaki` / `nowaki-core` 0.17.3 (crates.io, npm), `@nowaki-dev/runtime`

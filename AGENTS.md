@@ -25,7 +25,8 @@ packages/nowaki-runtime/   JS the framework runs: server/ (SSR sidecar, handler,
 packages/create-nowaki, create-nowaki-app   scaffolders (npm create nowaki).
 packages/nowaki-cli   the `nowaki` npm wrapper (prebuilt binary shim).
 examples/hello/       kitchen-sink app used by CLI tests + e2e.
-benchmarks/           bench.mjs, head-to-head.mjs (Next/Astro), check-regression.mjs.
+benchmarks/           bench.mjs, head-to-head.mjs (Next/Astro), check-regression.mjs,
+                      ci-perf.mjs + ci-perf-app/ (CI perf gate: head vs base vs last release).
 ```
 
 ## Build, test, lint (run before you claim done)
