@@ -10,6 +10,11 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.17.2] — 2026-11-08 · patch
+
+Packages: `nowaki` / `nowaki-core` 0.17.2 (crates.io, npm), `@nowaki-dev/runtime`
+0.16.2, `create-nowaki` / `create-nowaki-app` 0.18.2.
+
 ### Added
 - **TOML frontmatter** in content collections: a `.md` or `.mdx` entry whose
   first line is exactly `+++` reads TOML up to the next `+++` line (Hugo
@@ -18,7 +23,16 @@ milestone's worth of work; the codename is noted per entry.
   coerce them in the schema for `Date`s. A syntax error names the file and
   line (`content/blog/x.md:3: frontmatter: …`).
 
-## [0.17.1] — 2026-11-06 · patch
+### Fixed
+- AVIF images with transparency keep their alpha exactly. The alpha plane was
+  encoded at the colour quality (60), so fully transparent and fully opaque
+  pixels near edges came back slightly off (about 0.5% of transparent pixels in
+  a test image were no longer fully transparent). Alpha is now encoded at
+  quality 100. That costs about 5% more bytes on an image with transparency and
+  nothing on an opaque one, which has no alpha plane.
+
+
+## [0.17.1] — 2026-11-07 · patch
 
 Packages: `nowaki` / `nowaki-core` 0.17.1 (crates.io, npm), `@nowaki-dev/runtime`
 0.16.1, `create-nowaki` / `create-nowaki-app` 0.18.1. Update both `nowaki` and
