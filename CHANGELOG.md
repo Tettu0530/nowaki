@@ -10,6 +10,24 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.17.3] — 2026-11-09 · patch
+
+Packages: `nowaki` / `nowaki-core` 0.17.3 (crates.io, npm), `@nowaki-dev/runtime`
+0.16.3, `create-nowaki` / `create-nowaki-app` 0.18.3. The fix is in the runtime:
+update `@nowaki-dev/runtime` to 0.16.3.
+
+### Fixed
+- **Server-rendered pages are fast again on `nowaki start` and the Node
+  adapter.** `@nowaki-dev/runtime` 0.16.0 (with 0.17.0) served about 17% fewer
+  requests per second than 0.15.x on uncached pages. A page asked for its layout
+  chain and its layout modules several times per request (layouts, SEO, page
+  scripts, document attributes), and each module import converted the file path
+  to a URL again, and each page-script / route-CSS lookup recomputed a relative
+  path. These are now computed once per file, and `ctx.site` is parsed only when
+  read. On the comparison app's post page (Apple M2, `oha -c 50`), runtime
+  0.15.3 served 9,993-10,208 req/s, 0.16.2 served 8,154-8,438, and 0.16.3 serves
+  10,136-11,970.
+
 ## [0.17.2] — 2026-11-08 · patch
 
 Packages: `nowaki` / `nowaki-core` 0.17.2 (crates.io, npm), `@nowaki-dev/runtime`
