@@ -5,7 +5,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { applyRules, compileRules, ruleHeaders } from "../packages/nowaki-runtime/server/rules.mjs";
+import { applyRules, browserPath, compileRules, ruleHeaders } from "../packages/nowaki-runtime/server/rules.mjs";
 import { normalizeConfig } from "../packages/nowaki-runtime/server/site-config.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -130,6 +130,14 @@ await rejects({ i18n: { locales: [], defaultLocale: "en" } }, /non-empty/, "no l
 await rejects({ images: { remotePatterns: [{ hostname: "*.evil*.com" }] } }, /hostname/, "wildcard in the middle of a host");
 await rejects({ images: { remotePatterns: [{ hostname: "a.com", protocol: "ftp" }] } }, /protocol/, "ftp remote pattern");
 await rejects({ images: { remotePatterns: [{ hostname: "a.com", pathname: "photos" }] } }, /pathname/, "relative pathname");
+
+{
+  const r = compileRules({ basePath: "/app", trailingSlash: "always" });
+  eq(browserPath(r, "/about", false), "/app/about/", "browserPath always adds a slash");
+  eq(browserPath(r, "/feed.xml", false), "/app/feed.xml", "browserPath skips file names");
+  const never = compileRules({ trailingSlash: "never" });
+  eq(browserPath(never, "/about", false), "/about", "browserPath never strips route paths");
+}
 
 console.log(failed ? `\nRULES TEST FAILED (${failed})` : "\nRULES TEST PASSED");
 process.exit(failed ? 1 : 0);

@@ -136,7 +136,7 @@ function decodeParts(p) {
 
 // A route path as the browser sees it: basePath in front, the trailing-slash policy applied
 // ("ignore" keeps what the destination wrote: `slash`).
-function browserPath(rules, path, slash) {
+export function browserPath(rules, path, slash) {
   const root = path === "/";
   let out = root ? rules.base || "/" : rules.base + path;
   const last = root ? "" : path.slice(path.lastIndexOf("/") + 1);

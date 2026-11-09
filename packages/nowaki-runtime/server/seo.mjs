@@ -1,4 +1,6 @@
 // SEO and metadata. Pure string work with no node deps, so it runs on the edge too.
+
+import { browserPath } from "./rules.mjs";
 //
 // - The site's URL: NOWAKI_SITE, else `site` in nowaki.config (written to dist/server/site.json
 //   at build). It makes canonical / Open Graph URLs absolute and feeds sitemap.xml / robots.txt.
@@ -67,11 +69,19 @@ export function staticPagePath(p) {
   return `${s}/`;
 }
 
+/// Route path or request pathname as the browser should link to it: `nowaki.config` trailingSlash
+/// (and basePath) when set, else the static `index.html` convention when prerendering.
+export function publicPagePath(rules, path, { staticOutput = false } = {}) {
+  if (rules?.trailing && rules.trailing !== "ignore") return browserPath(rules, path, false);
+  if (staticOutput) return staticPagePath(path);
+  return path;
+}
+
 /// `staticOutput`: the page is being prerendered (`nowaki build --adapter static`), so this page's
 /// own URL (canonical: true, the default og:url) gets the trailing slash its file implies.
-export function seoTags(meta, { title, pathname, origin, site, staticOutput = false }) {
+export function seoTags(meta, { title, pathname, origin, site, staticOutput = false, rules = null }) {
   if (!isObj(meta)) return "";
-  if (staticOutput) pathname = staticPagePath(pathname);
+  pathname = publicPagePath(rules, pathname, { staticOutput });
   const base = (site ?? origin ?? "http://localhost") + "/";
   const tags = [];
   const name = (n, c) => c !== undefined && c !== null && c !== "" && tags.push(`<meta name="${n}" content="${esc(c)}" />`);
@@ -136,8 +146,8 @@ function imageType(url) {
 }
 
 /// sitemap.xml for `urls` (paths), against the site.
-export function sitemapXml(site, urls, { staticOutput = false } = {}) {
-  const items = [...new Set(staticOutput ? urls.map(staticPagePath) : urls)]
+export function sitemapXml(site, urls, { staticOutput = false, rules = null } = {}) {
+  const items = [...new Set(urls.map((u) => publicPagePath(rules, u, { staticOutput })))]
     .sort()
     .map((u) => `  <url><loc>${esc(absolute(u, site + "/"))}</loc></url>`)
     .join("\n");

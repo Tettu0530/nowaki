@@ -1,5 +1,14 @@
 // Unit checks for server/seo.mjs (meta tags, sitemap, robots, site URL). No server needed.
-import { mergeMeta, normalizeSite, robotsTxt, seoTags, sitemapXml, staticPagePath } from "../packages/nowaki-runtime/server/seo.mjs";
+import { compileRules } from "../packages/nowaki-runtime/server/rules.mjs";
+import {
+  mergeMeta,
+  normalizeSite,
+  publicPagePath,
+  robotsTxt,
+  seoTags,
+  sitemapXml,
+  staticPagePath,
+} from "../packages/nowaki-runtime/server/seo.mjs";
 
 let failures = 0;
 const check = (name, ok) => {
@@ -49,6 +58,25 @@ check("static output: page URLs get the slash their index.html implies", staticP
 check("static output: canonical with a slash", seoTags({ canonical: true }, { pathname: "/docs/a", site: "https://e.x", staticOutput: true }).includes('href="https://e.x/docs/a/"'));
 check("static output: sitemap with slashes", sitemapXml("https://e.x", ["/", "/docs/a"], { staticOutput: true }).includes("<loc>https://e.x/docs/a/</loc>"));
 check("robots.txt points at the sitemap", robotsTxt("https://example.com") === "User-agent: *\nAllow: /\n\nSitemap: https://example.com/sitemap.xml\n");
+
+const always = compileRules({ trailingSlash: "always" });
+check(
+  "trailingSlash always: sitemap URLs",
+  sitemapXml("https://e.x", ["/docs/a"], { rules: always }).includes("<loc>https://e.x/docs/a/</loc>"),
+);
+check(
+  "trailingSlash always: canonical follows the policy, not staticPagePath alone",
+  seoTags({ canonical: true }, { pathname: "/docs/a", site: "https://e.x", staticOutput: true, rules: always }).includes(
+    'href="https://e.x/docs/a/"',
+  ),
+);
+check(
+  "trailingSlash never: sitemap has no trailing slash",
+  sitemapXml("https://e.x", ["/docs/a"], { rules: compileRules({ trailingSlash: "never" }) }).includes(
+    "<loc>https://e.x/docs/a</loc>",
+  ),
+);
+check("publicPagePath without rules still uses static output convention", publicPagePath(null, "/docs/a", { staticOutput: true }) === "/docs/a/");
 
 console.log(failures === 0 ? "\nSEO UNIT TEST PASSED" : `\nSEO UNIT TEST FAILED (${failures})`);
 process.exit(failures === 0 ? 0 : 1);

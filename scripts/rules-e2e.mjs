@@ -328,7 +328,13 @@ try {
       const outB = build(appB, "static");
       check("static B: pages requested under basePath", readFileSync(path.join(appB, "dist/static/about/index.html"), "utf8").includes("ABOUT url:/app/about"));
       check("static B: _redirects carries basePath", readFileSync(path.join(appB, "dist/static/_redirects"), "utf8").includes("/app/legacy /app/about 307\n"));
-      check("static B: warns about basePath and trailingSlash", /basePath/.test(outB) && /trailingSlash/.test(outB));
+      const redirectsB = readFileSync(path.join(appB, "dist/static/_redirects"), "utf8");
+      check("static B: basePath warning only (trailingSlash becomes _redirects)", /basePath/.test(outB) && !/trailingSlash isn't/.test(outB));
+      check(
+        "static B: trailingSlash never redirects",
+        redirectsB.includes("/app/about/ /app/about 308\n") || redirectsB.includes("/app/photo/1/ /app/photo/1 308\n"),
+        redirectsB,
+      );
     }
   }
 } catch (e) {

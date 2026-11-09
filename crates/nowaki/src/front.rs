@@ -16,14 +16,13 @@ use axum::extract::{Request, State};
 use axum::http::{header, HeaderName, HeaderValue, Method, StatusCode, Uri};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use nowaki_core::rules::{Outcome, RoutingConfig, Rules, TrailingSlash};
+use nowaki_core::rules::{Outcome, RoutingConfig, Rules};
 
 /// Internal request header: the path the sidecar routes by (`info.routePath`).
 pub const ROUTE_PATH_HEADER: &str = "x-nowaki-route-path";
 
 pub struct Front {
     rules: Rules,
-    trailing: TrailingSlash,
     has_headers: bool,
 }
 
@@ -49,7 +48,6 @@ pub fn load(file: &Path) -> Result<Option<Arc<Front>>> {
     }
     Ok(Some(Arc::new(Front {
         rules,
-        trailing: config.trailing_slash,
         has_headers: !config.headers.is_empty(),
     })))
 }
@@ -85,19 +83,7 @@ impl Front {
     /// The URL a browser uses for a route path: basePath in front, a trailing slash under
     /// `trailingSlash: "always"` (not after a file name). For requests the CLI makes itself.
     pub fn browser_path(&self, route: &str) -> String {
-        let base = self.rules.base_path();
-        let mut out = if route == "/" && !base.is_empty() {
-            base.to_string()
-        } else {
-            format!("{base}{route}")
-        };
-        if self.trailing == TrailingSlash::Always && !out.ends_with('/') {
-            let last = route.rsplit('/').next().unwrap_or("");
-            if route == "/" || !last.contains('.') {
-                out.push('/');
-            }
-        }
-        out
+        self.rules.browser_path(route, false)
     }
 
     /// Fills the config headers for the browser path `path` into a response, keeping any the

@@ -204,12 +204,23 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
   const fonts = await readFile(path.join(serverDir, "fonts.json"), "utf8")
     .then((t) => JSON.parse(t))
     .catch(() => null);
+  // nowaki.config routing (dist/server/routing.json, written only when there is one): null
+  // without it, so a request pays one check. An invalid file stops the server here.
+  const rules = await readFile(path.join(serverDir, "routing.json"), "utf8").then(
+    (t) => compileRules(JSON.parse(t)),
+    (e) => {
+      if (e.code === "ENOENT") return null;
+      throw e;
+    },
+  );
+
   const env = {
     dev: false,
     // Prerendering for static output: pages are files (`x/index.html`), so their URLs end in `/`.
     staticOutput: process.env.NOWAKI_PRERENDER === "1",
     site: resolveSite(builtSite),
     fonts,
+    routingRules: rules,
     routeTable: () => routeTable,
     // Keyed by the path, so the URL conversion runs once per module, not on every call (a page
     // imports its layouts several times per request).
@@ -254,15 +265,6 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
 
   // dist/public next to dist/client unless given.
   const publicFiles = await indexPublic(publicDir ?? path.join(clientDir, "..", "public"));
-  // nowaki.config routing (dist/server/routing.json, written only when there is one): null
-  // without it, so a request pays one check. An invalid file stops the server here.
-  const rules = await readFile(path.join(serverDir, "routing.json"), "utf8").then(
-    (t) => compileRules(JSON.parse(t)),
-    (e) => {
-      if (e.code === "ENOENT") return null;
-      throw e;
-    },
-  );
 
   const handle = async (req, res) => {
     // Set before the response's own headers, which override any of these by name.

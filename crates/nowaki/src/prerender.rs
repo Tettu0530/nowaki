@@ -440,11 +440,19 @@ fn static_host_rules(
             "basePath {base:?}: pages are written at the root of the output; deploy them under {base} (the rules below include it)"
         ));
     }
-    if config.trailing_slash != TrailingSlash::Ignore {
-        out.warnings.push(
-            "trailingSlash isn't applied by a static host; use the host's own trailing-slash setting"
-                .to_string(),
-        );
+    let Ok(rules) = nowaki_core::rules::Rules::compile(config) else {
+        return out;
+    };
+    if rules.trailing_slash() != TrailingSlash::Ignore {
+        let slash_rules = trailing_slash_static_redirects(&rules, rendered);
+        if slash_rules.is_empty() {
+            out.warnings.push(
+                "trailingSlash: no static _redirects rules were generated for the prerendered pages"
+                    .to_string(),
+            );
+        } else {
+            out.redirects = format!("{slash_rules}{}", out.redirects);
+        }
     }
     let internal = |d: &str| {
         if d.starts_with('/') {
@@ -519,6 +527,48 @@ fn static_host_rules(
             }
             out.headers
                 .push_str(&format!("  {}: {}\n", header.key, header.value));
+        }
+    }
+    out
+}
+
+/// 308 rules so a static host agrees with nowaki.config `trailingSlash` (Cloudflare / Netlify).
+fn trailing_slash_static_redirects(rules: &nowaki_core::rules::Rules, rendered: &[&str]) -> String {
+    use nowaki_core::rules::TrailingSlash;
+    let mut out = String::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for route in rendered {
+        let canonical = rules.browser_path(route, false);
+        let last = route.rsplit('/').next().unwrap_or("");
+        if last.contains('.') {
+            continue;
+        }
+        let pair = match rules.trailing_slash() {
+            TrailingSlash::Always => {
+                if !canonical.ends_with('/') || canonical == "/" {
+                    continue;
+                }
+                let from = canonical.trim_end_matches('/').to_string();
+                if from.is_empty() {
+                    continue;
+                }
+                (from, canonical)
+            }
+            TrailingSlash::Never => {
+                if canonical.ends_with('/') && canonical.len() > 1 {
+                    let to = canonical.trim_end_matches('/').to_string();
+                    (canonical.clone(), to)
+                } else if !canonical.ends_with('/') && *route != "/" {
+                    let from = format!("{canonical}/");
+                    (from, canonical)
+                } else {
+                    continue;
+                }
+            }
+            TrailingSlash::Ignore => continue,
+        };
+        if seen.insert((pair.0.clone(), pair.1.clone())) {
+            out.push_str(&format!("{} {} 308\n", pair.0, pair.1));
         }
     }
     out
@@ -671,9 +721,12 @@ mod tests {
             ),
             &["/home"],
         );
-        assert_eq!(host.redirects, "/app /app/home 307\n");
+        assert_eq!(
+            host.redirects,
+            "/app/home /app/home/ 308\n/app /app/home 307\n"
+        );
         assert!(host.warnings.iter().any(|w| w.contains("basePath")));
-        assert!(host.warnings.iter().any(|w| w.contains("trailingSlash")));
+        assert!(!host.warnings.iter().any(|w| w.contains("trailingSlash")));
         assert!(static_host_rules(&routing("{}"), &[]).redirects.is_empty());
         assert!(static_host_rules(&routing("{}"), &[]).warnings.is_empty());
     }

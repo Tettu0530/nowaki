@@ -95,6 +95,11 @@ milestone's worth of work; the codename is noted per entry.
   with `PUBLIC_` and server names must not. New core API:
   `NowakiCore::set_public_env`.
 ### Changed
+- **`trailingSlash` URLs stay consistent:** sitemap and canonical / Open Graph paths use the same
+  browser URL the front redirects to (`Rules::browser_path` / `browserPath`). On the static adapter,
+  `_redirects` includes 308 rules for each prerendered page when `trailingSlash` is `"always"` or
+  `"never"` (replacing the previous “configure it on the host” warning). The Rust `Front::browser_path`
+  helper now matches the rules engine for `"never"` as well as `"always"`.
 - An error while saving a request's session (a store failure, a cookie over 4 KB) now renders
   the 500 page instead of escaping the request handler.
 - **The CI performance regression gate also compares each PR with the latest

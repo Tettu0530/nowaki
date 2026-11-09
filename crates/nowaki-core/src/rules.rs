@@ -224,6 +224,16 @@ impl Rules {
         &self.base
     }
 
+    pub fn trailing_slash(&self) -> TrailingSlash {
+        self.trailing
+    }
+
+    /// The URL a browser uses for a route path: basePath in front and the trailing-slash policy
+    /// (`Ignore` keeps the destination's `slash` flag).
+    pub fn browser_path(&self, path: &str, slash: bool) -> String {
+        format_browser_path(self, path, slash)
+    }
+
     /// Applies basePath, the trailing-slash policy, then the first matching redirect, then the
     /// first matching rewrite. `path` is the raw (percent-encoded) request path.
     pub fn apply(&self, method: &str, path: &str) -> Outcome {
@@ -254,7 +264,7 @@ impl Rules {
                 };
                 return guard(Outcome::Redirect {
                     status: 308,
-                    location: self.browser_path(&canonical, false),
+                    location: format_browser_path(self, &canonical, false),
                 });
             }
         }
@@ -262,7 +272,11 @@ impl Rules {
             let dest = &rule.target.dest;
             let path = substitute(&dest.segs, &params);
             let location = if dest.origin.is_empty() {
-                format!("{}{}", self.browser_path(&path, dest.slash), dest.tail)
+                format!(
+                    "{}{}",
+                    format_browser_path(self, &path, dest.slash),
+                    dest.tail
+                )
             } else if dest.bare {
                 format!("{}{}", dest.origin, dest.tail)
             } else {
@@ -315,35 +329,35 @@ impl Rules {
         let rest = path.strip_prefix(self.base.as_str())?;
         rest.starts_with('/').then_some((rest, false))
     }
+}
 
-    /// A route path as the browser sees it: basePath in front, the trailing-slash policy applied
-    /// (`Ignore` keeps what the destination wrote: `slash`).
-    fn browser_path(&self, path: &str, slash: bool) -> String {
-        let root = path == "/";
-        let mut out = if root {
-            if self.base.is_empty() {
-                "/".to_string()
-            } else {
-                self.base.clone()
-            }
+/// A route path as the browser sees it: basePath in front, the trailing-slash policy applied
+/// (`Ignore` keeps what the destination wrote: `slash`).
+fn format_browser_path(rules: &Rules, path: &str, slash: bool) -> String {
+    let root = path == "/";
+    let mut out = if root {
+        if rules.base.is_empty() {
+            "/".to_string()
         } else {
-            format!("{}{path}", self.base)
-        };
-        let last = if root {
-            ""
-        } else {
-            &path[path.rfind('/').map_or(0, |i| i + 1)..]
-        };
-        let add = match self.trailing {
-            TrailingSlash::Always => !last.contains('.'),
-            TrailingSlash::Ignore => slash,
-            TrailingSlash::Never => false,
-        };
-        if add && !out.ends_with('/') {
-            out.push('/');
+            rules.base.clone()
         }
-        out
+    } else {
+        format!("{}{path}", rules.base)
+    };
+    let last = if root {
+        ""
+    } else {
+        &path[path.rfind('/').map_or(0, |i| i + 1)..]
+    };
+    let add = match rules.trailing {
+        TrailingSlash::Always => !last.contains('.'),
+        TrailingSlash::Ignore => slash,
+        TrailingSlash::Never => false,
+    };
+    if add && !out.ends_with('/') {
+        out.push('/');
     }
+    out
 }
 
 /// `encodeURIComponent`, with `.` and `..` escaped so a capture can't step up a directory.
@@ -806,5 +820,14 @@ mod tests {
                 location: "/p/b".into()
             }
         );
+    }
+
+    #[test]
+    fn browser_path_applies_base_path_and_trailing_policy() {
+        let r = rules(r#"{"basePath":"/app","trailingSlash":"always"}"#);
+        assert_eq!(r.browser_path("/about", false), "/app/about/");
+        assert_eq!(r.browser_path("/feed.xml", false), "/app/feed.xml");
+        let r = rules(r#"{"trailingSlash":"never"}"#);
+        assert_eq!(r.browser_path("/about", false), "/about");
     }
 }
