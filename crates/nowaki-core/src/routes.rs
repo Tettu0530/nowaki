@@ -77,6 +77,24 @@ pub fn strip_route_groups(stem: &str) -> String {
         .join("/")
 }
 
+/// Whether a path under `routes/` is inside a parallel-route slot (`@modal/photo/[id].tsx`): any
+/// segment starts with `@`. Slot files render inside their owner's `_layout`, never as pages.
+/// Matches router.mjs `scanRoutes`.
+pub fn is_slot_rel(rel: &str) -> bool {
+    rel.split(['/', '\\']).any(|s| s.starts_with('@'))
+}
+
+/// Whether a path segment marks an intercepting route (`(.)photo`, `(..)photo`, `(...)photo`).
+/// Matches router.mjs `isInterceptSegment`.
+pub fn is_intercept_segment(seg: &str) -> bool {
+    seg.starts_with("(.)") || seg.starts_with("(..)") || seg.starts_with("(...)")
+}
+
+/// Slot files and intercepting routes: neither is a page of its own.
+pub fn is_slot_or_intercept_rel(rel: &str) -> bool {
+    is_slot_rel(rel) || rel.split(['/', '\\']).any(is_intercept_segment)
+}
+
 pub fn is_api_route_rel(rel: &str) -> bool {
     let rel = strip_route_groups(&rel.replace('\\', "/"));
     rel == "api" || rel.starts_with("api/")
@@ -120,7 +138,7 @@ pub fn url_pattern_from_stem(stem: &str) -> String {
 pub fn typegen_entry(rel: &str) -> Option<(String, String)> {
     let stem = stem_from_rel(rel)?;
     let base = file_base_name(&stem);
-    if is_convention_source(base) || is_endpoint_rel(rel) {
+    if is_convention_source(base) || is_endpoint_rel(rel) || is_slot_or_intercept_rel(rel) {
         return None;
     }
 
@@ -166,6 +184,7 @@ pub fn is_static_prerender_stem(stem: &str) -> bool {
         && !stem.contains('[')
         && !is_file_route_stem(stem)
         && !is_convention_source(file_base_name(stem))
+        && !is_slot_or_intercept_rel(stem)
 }
 
 /// Static prerender URLs from compiled `dist/server/routes/**/*.js`.
@@ -203,13 +222,63 @@ pub fn page_url_patterns(routes_dir: &Path) -> Result<Vec<String>> {
             continue;
         };
         let base = file_base_name(&stem);
-        if is_convention_source(base) || is_endpoint_rel(&rel) {
+        if is_convention_source(base) || is_endpoint_rel(&rel) || is_slot_or_intercept_rel(&rel) {
             continue;
         }
         out.push(url_pattern_from_stem(&stem));
     }
     out.sort();
     out.dedup();
+    Ok(out)
+}
+
+/// The files of every parallel-route slot under `routes/`, as `"<owner dir>/@<name> <URL pattern>"`
+/// (`"/@modal /photo/[id]"`, owner dir `""` for `routes/`) or `"<owner dir>/@<name> default"`,
+/// sorted. A slot file's pattern is its owner directory's URL followed by its own path. Files
+/// starting with `_`, `loading` / `error`, nested slots, intercepting routes and nested
+/// `default`s are left out, as router.mjs `scanRoutes` leaves them out of a slot's routes.
+pub fn slot_route_patterns(routes_dir: &Path) -> Result<Vec<String>> {
+    let mut files = walk_routes_dir(routes_dir)?;
+    files.sort();
+    let mut out = Vec::new();
+    for abs in files {
+        let Some(rel) = rel_posix(&abs, routes_dir) else {
+            continue;
+        };
+        let Some(stem) = stem_from_rel(&rel) else {
+            continue;
+        };
+        let parts: Vec<&str> = stem.split('/').collect();
+        let Some(at) = parts.iter().position(|p| p.starts_with('@')) else {
+            continue;
+        };
+        let inner = &parts[at + 1..];
+        let base = file_base_name(&stem);
+        if parts[at].len() < 2
+            || inner.is_empty()
+            || inner
+                .iter()
+                .any(|p| p.starts_with('@') || is_intercept_segment(p))
+            || is_convention_source(base)
+            || is_file_route_stem(base)
+        {
+            continue;
+        }
+        let owner = parts[..at]
+            .iter()
+            .map(|p| format!("/{p}"))
+            .collect::<String>();
+        let slot = format!("{owner}/{}", parts[at]);
+        if base == "default" {
+            if inner.len() == 1 {
+                out.push(format!("{slot} default"));
+            }
+            continue;
+        }
+        let path: Vec<&str> = parts[..at].iter().chain(inner).copied().collect();
+        out.push(format!("{slot} {}", url_pattern_from_stem(&path.join("/"))));
+    }
+    out.sort();
     Ok(out)
 }
 
@@ -231,6 +300,7 @@ pub fn check_url_conflicts(routes_dir: &Path) -> Result<()> {
         };
         if file_base_name(&stem).starts_with('_')
             || matches!(file_base_name(&stem), "loading" | "error")
+            || is_slot_or_intercept_rel(&rel)
         {
             continue;
         }
@@ -496,5 +566,76 @@ mod tests {
             conflict(&["about.tsx", "about/index.tsx"]).is_none(),
             "duplicates without a group are left as they were"
         );
+        assert!(
+            conflict(&[
+                "photo/[id].tsx",
+                "@modal/(g)/photo/[id].tsx",
+                "@m/photo/[x].tsx"
+            ])
+            .is_none(),
+            "slot files serve no URL of their own"
+        );
+    }
+
+    #[test]
+    fn slots_and_intercepts_are_not_pages() {
+        assert!(is_slot_rel("@modal/default.tsx"));
+        assert!(is_slot_rel("photos/@modal/[id].tsx"));
+        assert!(is_slot_rel("a\\@m\\x.tsx"));
+        assert!(!is_slot_rel("photos/[id].tsx"));
+        assert!(!is_slot_rel("me@home.tsx"));
+        assert!(is_intercept_segment("(.)photo"));
+        assert!(is_intercept_segment("(..)photo"));
+        assert!(is_intercept_segment("(...)photo"));
+        assert!(is_intercept_segment("(..)(..)photo"));
+        assert!(!is_intercept_segment("(marketing)"));
+        assert!(!is_intercept_segment("photo"));
+        assert_eq!(entry("@modal/default.tsx"), None);
+        assert_eq!(entry("@modal/photo/[id].tsx"), None);
+        assert_eq!(entry("photos/@modal/index.tsx"), None);
+        assert_eq!(entry("feed/(..)photo/[id].tsx"), None);
+        assert!(!is_static_prerender_stem("@modal/default"));
+        assert!(!is_static_prerender_stem("photos/@modal/about"));
+        assert!(!is_static_prerender_stem("@modal/(.)photo/index"));
+    }
+
+    #[test]
+    fn slot_patterns_and_page_urls() {
+        let tmp = tempfile::tempdir().unwrap();
+        let routes = tmp.path().join("routes");
+        for f in [
+            "_layout.tsx",
+            "index.tsx",
+            "photo/[id].tsx",
+            "@modal/default.tsx",
+            "@modal/photo/[id].tsx",
+            "@modal/(.)photo/[id].tsx",
+            "@modal/_layout.tsx",
+            "@modal/sub/default.tsx",
+            "@modal/@inner/x.tsx",
+            "@modal/feed.xml.ts",
+            "(shop)/[org]/@cart/index.tsx",
+            "(shop)/[org]/@cart/(g)/items.tsx",
+            "@x.tsx",
+            "feed/(..)photo/[id].tsx",
+        ] {
+            let p = routes.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, "export default () => null;\n").unwrap();
+        }
+        assert_eq!(
+            page_url_patterns(&routes).unwrap(),
+            vec!["/".to_string(), "/photo/[id]".to_string()]
+        );
+        assert_eq!(
+            slot_route_patterns(&routes).unwrap(),
+            vec![
+                "/(shop)/[org]/@cart /[org]".to_string(),
+                "/(shop)/[org]/@cart /[org]/items".to_string(),
+                "/@modal /photo/[id]".to_string(),
+                "/@modal default".to_string(),
+            ]
+        );
+        check_url_conflicts(&routes).expect("no conflict");
     }
 }

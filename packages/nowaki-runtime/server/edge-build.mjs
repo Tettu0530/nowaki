@@ -74,6 +74,19 @@ const routeTable = {
     urlPrefix: b.urlPrefix,
     file: (addModule(b.file), keyOf(b.file)),
   })),
+  // Parallel-route slots. Intercepting routes are listed but not imported: nothing serves them yet.
+  slots: table.slots.map((s) => ({
+    ownerDir: s.ownerDir,
+    name: s.name,
+    routes: s.routes.map((r) => ({
+      file: (addModule(r.file), keyOf(r.file)),
+      segments: r.segments,
+      specificity: r.specificity,
+      rest: r.rest,
+    })),
+    default: s.default ? (addModule(s.default), keyOf(s.default)) : null,
+    intercepts: s.intercepts.map((i) => ({ file: keyOf(i.file), rel: i.rel })),
+  })),
   notFound: table.notFound ? (addModule(table.notFound), keyOf(table.notFound)) : null,
   errorRoute: table.errorRoute ? (addModule(table.errorRoute), keyOf(table.errorRoute)) : null,
 };
