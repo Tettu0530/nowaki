@@ -8,6 +8,8 @@ cd "$(dirname "$0")/../.."
 # seen, trace every command so the log shows where one stopped.
 curl() { command curl --max-time 30 "$@"; }
 if [ "${RUNNER_OS:-}" = Windows ]; then set -x; fi
+# ctx.session (routes/api/session.ts) needs a secret in production.
+export NOWAKI_SESSION_SECRET="${NOWAKI_SESSION_SECRET:-e2e-session-secret-0123456789abcdef}"
 
 # stdout stays in the log; stderr is captured for the unvalidated-server-function warning.
 { BUILD_ERR=$(./target/debug/nowaki build examples/hello 2>&1 1>&3 3>&-); } 3>&1
@@ -164,6 +166,13 @@ curl -sf http://127.0.0.1:3300/about | grep -q '<p id="greeting">Hello from data
 SC=$(curl -sf http://127.0.0.1:3300/about | grep -oE '/_nowaki/site\.[0-9a-f]+\.css' | head -1)
 curl -sf "http://127.0.0.1:3300$SC" | grep -q -- '--site-token: rgb(9, 8, 7)'
 ! curl -sf "http://127.0.0.1:3300$SC" | grep -q '@import'
+# route groups: routes/(marketing)/pricing.tsx at /pricing, with the group's layout and middleware
+curl -sf http://127.0.0.1:3300/pricing | grep -q '<div data-group="marketing"><main'
+curl -s -D - -o /dev/null http://127.0.0.1:3300/pricing | grep -qi '^x-route-group: marketing'
+! curl -sf http://127.0.0.1:3300/about | grep -q 'data-group="marketing"'
+! curl -s -D - -o /dev/null http://127.0.0.1:3300/about | grep -qi '^x-route-group'
+! curl -s -D - -o /dev/null http://127.0.0.1:3300/no-such-page | grep -qi '^x-route-group'
+test "$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3300/(marketing)/pricing')" = 404
 # MDX: a .mdx page (ESM exports, expressions, GFM, an island) and an .mdx content entry
 curl -sf http://127.0.0.1:3300/guide | grep -q '<title>Guide (MDX) — Nowaki</title>'
 curl -sf http://127.0.0.1:3300/guide | grep -q '<h1 id="an-mdx-page">An MDX page</h1>'
@@ -258,6 +267,9 @@ node scripts/route-js-e2e.mjs http://127.0.0.1:3300 examples/hello
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) sleep 3 ;; esac
 kill $START_PID
 bash scripts/ci/assert-no-orphans.sh $START_PID
+# nowaki.config redirects / rewrites / headers / basePath / trailingSlash at the Rust front
+# (a generated app; listens on 3306 and 3307)
+node scripts/rules-e2e.mjs start --port 3306
 # Rooms survive a restart: on SIGTERM the sidecar wrote them to .nowaki/live-rooms.json.
 ROOMS=examples/hello/.nowaki/live-rooms.json
 test -f "$ROOMS"

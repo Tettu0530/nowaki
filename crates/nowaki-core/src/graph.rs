@@ -64,7 +64,7 @@ pub fn importers(core: &NowakiCore, target: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn import_specifiers(abs: &Path, source: &str) -> Result<Vec<(String, bool)>> {
+pub(crate) fn import_specifiers(abs: &Path, source: &str) -> Result<Vec<(String, bool)>> {
     let allocator = Allocator::default();
     let source_type = crate::transform::source_type_for_path(abs);
     let program = crate::transform::parse_program(&allocator, abs, source, source_type)?;

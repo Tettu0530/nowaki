@@ -11,6 +11,40 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **Route groups.** A directory named `(name)` under `routes/` groups files
+  without adding a URL segment: `routes/(marketing)/about.tsx` serves `/about`.
+  The group's `_layout`, `loading` and `error` apply to the files inside it.
+  Its `_middleware` runs for the routes whose files are inside the group, not
+  by URL, so it doesn't run for 404s; middleware outside groups still matches
+  by URL. Two files serving the same URL because of groups
+  (`(a)/about.tsx` and `(b)/about.tsx`) fail the build and show an error in
+  dev. Names starting with `.` (`(.)`, `(..)`) are reserved. On client
+  navigation, a group's `loading` / `error` boundary is matched by its URL
+  prefix (the group left out), so it can also show for URLs outside the group;
+  a boundary outside any group wins at the same prefix.
+  The Cloudflare worker now also serves `loading` / `error` boundaries.
+- **Remote images in `<Image>`.** `import hero from "https://images.example.com/photos/a.jpg?image"`
+  is fetched at build time and optimized like a local `?image` import (AVIF + fallback widths,
+  intrinsic size), when a `images.remotePatterns` entry in nowaki.config allows the URL
+  (protocol, host with `*.` / `**.` prefixes, port, path glob; protocol defaults to https). Remote
+  images in MDX and in Markdown content entries are optimized the same way when allowed; others
+  stay a plain `<img>` with a warning. A disallowed `?image` import fails the build. Downloads are
+  cached under `node_modules/.cache/nowaki/images/remote` (a cached image never starts Node or
+  touches the network; `NOWAKI_IMAGES_REFRESH=1` fetches again) and refused for private,
+  loopback, and link-local addresses, redirects outside the patterns (at most 3), bodies over
+  20 MB, responses slower than 15 s, and anything but PNG, JPEG, WebP, or GIF. Nothing is fetched
+  at runtime. A plain remote string `src` on `<Image>` is unchanged (a bare `<img>`).
+- **Sessions: `ctx.session`** (also `getContext().session` in server functions).
+  `await ctx.session.get(key)`, `set(key, value)`, `delete(key)`, `regenerate()` (call it on
+  sign-in) and `destroy()` keep JSON values per visitor in an AES-256-GCM encrypted cookie
+  (`HttpOnly; SameSite=Lax`, `Secure` over https, 4 KB at most), or, with a `store` in the
+  optional app-root `session.ts` (`defineSession({ cookieName, maxAge, rolling, store })` from
+  `@nowaki-dev/runtime/session`), server-side behind a signed random id. Keys come from
+  `NOWAKI_SESSION_SECRET` (comma-separate several to rotate keys); production throws on the first
+  `ctx.session` without it, dev generates `.nowaki/session-secret`. A cross-site non-GET request
+  sees an empty, read-only session, and so do live renders (read-only). The session is created on
+  first access: requests that don't use it cost nothing extra. Works on every adapter
+  (WebCrypto only).
 - **Routing config in nowaki.config** (v0.18, groundwork): `basePath`,
   `trailingSlash` (`"never"` / `"always"` / `"ignore"`, default `"ignore"`),
   `redirects`, `rewrites`, `headers` (arrays, or async functions called once at
@@ -19,7 +53,24 @@ milestone's worth of work; the codename is noted per entry.
   `.nowaki/routing.json`). A redirect or rewrite destination that could leave
   the site (`//host`, `/\host`, a capture in an external host), a source or
   destination under `/__nowaki/`, and CR / LF / NUL in a header value fail the
-  build. No server applies these rules yet.
+  build.
+- **`redirects`, `rewrites`, `headers`, `basePath` and `trailingSlash` are
+  applied** by `nowaki start`, `nowaki dev`, the node / bun / deno / vercel
+  adapters and the Cloudflare worker, in this order: basePath, trailing slash
+  (GET / HEAD, 308), redirects, rewrites, then `/_nowaki/` assets, `public/`
+  files and routes. A redirect keeps the request's query and gets the security
+  headers. A rewrite is internal: the page renders the destination route while
+  `ctx.url` stays the URL the browser asked for. Config headers go on every
+  response (pages, ISR hits, assets, `public/` files, redirects, 404s) unless
+  the route set the same header; they replace the default security headers of
+  the same name. They don't apply to `/__nowaki/*` endpoints. On Vercel,
+  redirects and headers are also emitted as platform routes in `config.json`.
+  The static adapter writes `_redirects` (rewrites as 200 rules) and appends
+  the headers to `_headers`, warning about rules a static host can't express.
+  For now `basePath` only removes the prefix from requests (and 404s anything
+  outside it); asset URLs and links don't carry it yet, and `/_nowaki/*` and
+  `/__nowaki/*` stay at the root. Without a routing config nothing changes per
+  request.
 - **Markdoc** via the new `@nowaki-dev/markdoc` plugin. With
   `markdoc({ components, tags, nodes })` in `plugins`, a `.mdoc` file compiles to a Preact module
   at build and dev time. The module exports the rendered document, `frontmatter` and `headings`,
@@ -46,10 +97,15 @@ milestone's worth of work; the codename is noted per entry.
 ### Added
 - **`nowaki prerender --skip-build`:** render static HTML from an existing
   `nowaki build` output (`dist/`) without re-running the transform, content
-  index, or route JS budgets. `env.ts` is still validated; app source changes
-  require a new build.
+  index, or route JS budgets. Routing for requests and static `_redirects` /
+  `_headers` comes from the built `dist/server/routing.json`. With `env.ts`, the
+  check must pass and every `PUBLIC_*` value must match
+  `dist/server/env-public.json` (what the client bundle inlined); app source or
+  public env changes require a new build.
 
 ### Changed
+- An error while saving a request's session (a store failure, a cookie over 4 KB) now renders
+  the 500 page instead of escaping the request handler.
 - **The CI performance regression gate also compares each PR with the latest
   release**, failing beyond −10% req/s or +20% TTFB against it (the existing
   limits against base stay the same). Every metric (build, dev startup, req/s and

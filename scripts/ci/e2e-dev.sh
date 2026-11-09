@@ -121,6 +121,11 @@ curl -sf $B/about | grep -q '<p id="greeting">Hello from data/</p>'
 ! curl -sf $B/about | grep -q 'id="nowaki-runtime"'
 curl -sf "$B/__nowaki/css?f=styles/site.css" | grep -q -- '--site-token: rgb(9, 8, 7)'
 ! curl -sf "$B/__nowaki/css?f=styles/site.css" | grep -q '@import'
+# route groups: routes/(marketing)/pricing.tsx at /pricing, with the group's layout and middleware
+curl -sf $B/pricing | grep -q '<div data-group="marketing"><main'
+curl -s -D - -o /dev/null $B/pricing | grep -qi '^x-route-group: marketing'
+! curl -sf $B/about | grep -q 'data-group="marketing"'
+! curl -s -D - -o /dev/null $B/no-such-page | grep -qi '^x-route-group'
 # MDX: a .mdx page (ESM exports, expressions, GFM, an island) and an .mdx content entry
 curl -sf $B/guide | grep -q '<title>Guide (MDX) — Nowaki</title>'
 curl -sf $B/guide | grep -q '<h1 id="an-mdx-page">An MDX page</h1>'
@@ -279,6 +284,8 @@ curl -sf "$B/slow?ms=0" | grep -q 'data-testid="slow"'
 # denial without leaking; it is removed right after.
 printf 'DATABASE_URL=postgres://u:supersecretpw@db/prod\nSESSION_SECRET=ci-do-not-leak\n' > examples/hello/.env
 node scripts/security-e2e.mjs dev "$B" "$(pwd)/examples/hello"
+# without NOWAKI_SESSION_SECRET, dev generated one on the first ctx.session (security-e2e signed in)
+if [ -z "${NOWAKI_SESSION_SECRET:-}" ]; then test -s examples/hello/.nowaki/session-secret; fi
 rm -f examples/hello/.env
 
 # dev MCP endpoint (/__nowaki/mcp): tools + loopback/Host/Origin gate
@@ -286,6 +293,9 @@ node scripts/mcp-e2e.mjs "$B"
 
 kill $SERVER_PID
 bash scripts/ci/assert-no-orphans.sh $SERVER_PID
+
+# nowaki.config redirects / rewrites / headers / basePath / trailingSlash in dev (a generated app)
+node scripts/rules-e2e.mjs dev --port "$((PORT + 8))"
 
 # SIGKILL: the dev sidecar and plugin host exit when their stdin pipe closes (exit-with-parent.mjs).
 ./target/debug/nowaki dev examples/hello --port "$((PORT + 7))" &
