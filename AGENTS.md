@@ -185,7 +185,12 @@ code locations and CI coverage.
   + fallback, disk cache, `picture_html` for Markdown), emitted by `build.rs` `emit` (client) and
   `ServerAssets::image_module` (server); dev modules from `transform.rs` `dev_asset_module`,
   variants from `dev.rs` `dev_image` (`/__nowaki/image`). Component: `packages/nowaki-runtime/image.js`.
-  Markdown images: `content.rs` `local_image`.
+  Markdown images: `content.rs` `local_image`. Remote `?image` (`images.remotePatterns`):
+  `crates/nowaki-core/src/remote_image.rs` (allow-list, cache, `RemoteFetch` trait; resolved to the
+  cached file in `NowakiCore::resolve_remote_image`, so every transform mode reuses the local path),
+  downloads in `server/images-fetch.mjs` via `crates/nowaki/src/remote_images.rs`; the matcher
+  exists in both, driven by `crates/nowaki-core/tests/fixtures/remote-patterns-cases.json`
+  (`tests/remote_patterns.rs`, `scripts/images-fetch-test.mjs`).
 - **Fonts** — `crates/nowaki/src/fonts.rs` (faces, size-adjusted fallbacks from ttf-parser
   metrics, `dist/server/fonts.json`; dev: `.nowaki/fonts`), Google downloads in
   `server/fonts-fetch.mjs`, config via `site.rs` + `server/site-config.mjs`; the links go into

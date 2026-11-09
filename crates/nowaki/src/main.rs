@@ -10,6 +10,7 @@ mod live;
 mod mcp;
 mod plugins;
 mod prerender;
+mod remote_images;
 mod security_headers;
 mod shutdown;
 mod sidecar;
@@ -136,6 +137,7 @@ fn main() -> anyhow::Result<()> {
             }
             // env.ts: validated before the build, which inlines its public values.
             env_schema::finish(env_check, &mut core)?;
+            remote_images::configure(&mut core, &root, &config)?;
             let started = std::time::Instant::now();
             let (report, client) = core.build_with_client(&dist)?;
             let client_js_kb = ui::dir_js_kb(&report.out_dir);

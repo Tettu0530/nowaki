@@ -147,6 +147,8 @@ jobs:
         run: node --test "packages/nowaki-markdoc/test/*.test.mjs"
       - name: Typed env (env.ts schema, build / start / worker refusal, client import guard)
         run: node scripts/env-schema-test.mjs
+      - name: Remote images (allow-list fixture, SSRF limits, build + dev against a local server)
+        run: node scripts/images-fetch-test.mjs
       - name: nowaki upgrade (command surface + non-app guard)
         run: bash scripts/ci/e2e-upgrade.sh
       - name: Typed routes (typegen)

@@ -11,6 +11,17 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **Remote images in `<Image>`.** `import hero from "https://images.example.com/photos/a.jpg?image"`
+  is fetched at build time and optimized like a local `?image` import (AVIF + fallback widths,
+  intrinsic size), when a `images.remotePatterns` entry in nowaki.config allows the URL
+  (protocol, host with `*.` / `**.` prefixes, port, path glob; protocol defaults to https). Remote
+  images in MDX and in Markdown content entries are optimized the same way when allowed; others
+  stay a plain `<img>` with a warning. A disallowed `?image` import fails the build. Downloads are
+  cached under `node_modules/.cache/nowaki/images/remote` (a cached image never starts Node or
+  touches the network; `NOWAKI_IMAGES_REFRESH=1` fetches again) and refused for private,
+  loopback, and link-local addresses, redirects outside the patterns (at most 3), bodies over
+  20 MB, responses slower than 15 s, and anything but PNG, JPEG, WebP, or GIF. Nothing is fetched
+  at runtime. A plain remote string `src` on `<Image>` is unchanged (a bare `<img>`).
 - **Routing config in nowaki.config** (v0.18, groundwork): `basePath`,
   `trailingSlash` (`"never"` / `"always"` / `"ignore"`, default `"ignore"`),
   `redirects`, `rewrites`, `headers` (arrays, or async functions called once at

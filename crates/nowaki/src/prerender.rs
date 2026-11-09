@@ -23,6 +23,7 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     }
     // env.ts: validated before the build, which inlines its public values.
     crate::env_schema::finish(env_check, &mut core)?;
+    crate::remote_images::configure(&mut core, &root, &config)?;
     let (report, client) = core.build_with_client(&root.join("dist"))?;
     println!(
         "[nowaki] build: client {} / server {} modules",

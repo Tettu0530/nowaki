@@ -577,9 +577,17 @@ fn transform_for_server(
             continue;
         }
         // Assets: the hashed URL the client build emitted, or emit it now (server-only imports).
-        if !spec.starts_with('/') && !spec.contains("://") && !spec.starts_with("data:") {
-            if let Ok(resolution) = core.resolver.resolve(dir, spec) {
-                let full = resolution.full_path();
+        // A remote `?image` resolves to its cached download.
+        let remote = core
+            .resolve_remote_image(spec)
+            .transpose()
+            .with_context(|| path.display().to_string())?;
+        if remote.is_some()
+            || (!spec.starts_with('/') && !spec.contains("://") && !spec.starts_with("data:"))
+        {
+            if let Some(full) =
+                remote.or_else(|| core.resolver.resolve(dir, spec).ok().map(|r| r.full_path()))
+            {
                 // `./hero.jpg?image`: the image set module (see image.rs).
                 let (file, query) = crate::image::split_query(&full);
                 if let Some(q) = query.as_deref().and_then(crate::image::image_query) {
@@ -1072,10 +1080,17 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
             lit.raw = None;
         }
         let spec = lit.value.as_str();
-        if spec.starts_with('/') || spec.contains("://") || spec.starts_with("data:") {
+        let remote = core
+            .resolve_remote_image(spec)
+            .transpose()
+            .with_context(|| path.display().to_string())?;
+        if remote.is_none()
+            && (spec.starts_with('/') || spec.contains("://") || spec.starts_with("data:"))
+        {
             continue;
         }
-        let abs_path = crate::resolve::client_runtime_alias(&core.root, spec)
+        let abs_path = remote
+            .or_else(|| crate::resolve::client_runtime_alias(&core.root, spec))
             .or_else(|| core.resolve_spec(dir, spec))
             .ok_or_else(|| anyhow!("failed to resolve {spec} (from {})", dir.display()))?;
         let placeholder = format!("__NOWAKI_DEP_{}__", deps.len());

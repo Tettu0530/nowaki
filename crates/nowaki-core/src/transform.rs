@@ -22,6 +22,11 @@ pub trait VirtualResolve {
     fn virtual_browser(&self, dir: &Path, spec: &str) -> Option<PathBuf>;
     /// SSR: a data: module Node can import directly (self-contained ESM).
     fn virtual_ssr_module(&self, dir: &Path, spec: &str) -> Option<String>;
+    /// A remote image import (`https://…?image`): the cached download with its `?image` query
+    /// (see `NowakiCore::resolve_remote_image`). None for any other specifier.
+    fn remote_image(&self, _spec: &str) -> Option<Result<PathBuf>> {
+        None
+    }
 }
 
 /// Transforms one file: TS type stripping + JSX (automatic, preact) + import rewriting (Browser only).
@@ -253,6 +258,9 @@ fn map_specifier(
     vr: Option<&dyn VirtualResolve>,
     inputs: &mut Vec<PathBuf>,
 ) -> Option<String> {
+    if let Some(r) = vr.and_then(|v| v.remote_image(spec)) {
+        return Some(remote_image_module(root, spec, r, inputs));
+    }
     if spec.starts_with('/') || spec.contains("://") || spec.starts_with("data:") {
         return None;
     }
@@ -368,6 +376,12 @@ fn rewrite_ssr_imports<'a>(
             lit.raw = None;
             continue;
         }
+        if let Some(r) = vr.and_then(|v| v.remote_image(spec)) {
+            let data = remote_image_module(root, spec, r, inputs);
+            lit.value = allocator.alloc_str(&data).into();
+            lit.raw = None;
+            continue;
+        }
         if spec.starts_with('/') || spec.contains("://") || spec.starts_with("data:") {
             continue;
         }
@@ -393,6 +407,30 @@ fn read_css_inlined(resolver: &Resolver, abs: &Path, inputs: &mut Vec<PathBuf>) 
     let (css, inlined) = crate::css::inline_imports_with_files(abs, &css, &resolve);
     inputs.extend(inlined);
     Some(css)
+}
+
+/// The dev module for a remote image import: the image set of its cached download, or a module
+/// that throws why it isn't available (not allowed, the fetch failed). A failure lists the cache
+/// entry as an input, so the module is rebuilt once the download exists.
+fn remote_image_module(
+    root: &Path,
+    spec: &str,
+    resolved: Result<PathBuf>,
+    inputs: &mut Vec<PathBuf>,
+) -> String {
+    let err = match resolved {
+        Ok(full) => match dev_asset_module(root, &full, inputs) {
+            Some(data) => return data,
+            None => anyhow!("{spec}: not an image"),
+        },
+        Err(e) => e,
+    };
+    if let Some((url, _)) = crate::resolve::split_remote_spec(spec) {
+        inputs.push(crate::remote_image::meta_path(root, url));
+    }
+    let msg = format!("{err:#}");
+    eprintln!("[nowaki] {msg}");
+    data_module(&format!("throw new Error({msg:?});"))
 }
 
 /// The data: module an asset import becomes in dev, for the browser and SSR alike: its URL, or for
