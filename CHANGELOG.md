@@ -97,6 +97,11 @@ milestone's worth of work; the codename is noted per entry.
 ### Changed
 - An error while saving a request's session (a store failure, a cookie over 4 KB) now renders
   the 500 page instead of escaping the request handler.
+- **`nowaki prerender`:** above 256 pages (default), up to one Node render
+  worker per CPU receives pages round-robin; output order is unchanged. Override
+  the cutoff with `NOWAKI_PRERENDER_POOL_THRESHOLD` (`0` keeps a single worker).
+  Cap workers with `NOWAKI_PRERENDER_WORKERS` (each worker loads the full server
+  build and content collections in memory).
 - **The CI performance regression gate also compares each PR with the latest
   release**, failing beyond −10% req/s or +20% TTFB against it (the existing
   limits against base stay the same). Every metric (build, dev startup, req/s and
