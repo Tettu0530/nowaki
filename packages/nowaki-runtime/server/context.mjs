@@ -1,5 +1,8 @@
 // LoaderContext: shared context passed to loaders, actions, middleware, and API handlers.
 
+import { createSession } from "./session.mjs";
+import { withBase } from "./base-path.mjs";
+
 export function makeContext(info) {
   const { url, params = {}, method = "GET", req } = info;
   // Callers may inject headers / readBody (Node: from req; Edge: from the Web Request).
@@ -43,11 +46,14 @@ export function makeContext(info) {
   });
 
   let cookiesCache;
+  let session;
 
   const ctx = {
     url: urlProxy,
     params,
     method,
+    // The request's locale with i18n configured (handler.mjs `localizedRequest`), else undefined.
+    locale: info.locale,
     // Header/query access through raw req (Node IncomingMessage) can't be tracked, so
     // touching it counts as "depends on everything" and disables the ISR cache (prevents per-user leaks).
     get req() {
@@ -64,6 +70,14 @@ export function makeContext(info) {
       if (!cookiesCache) cookiesCache = parseCookies(reqHeaders["cookie"] ?? "");
       noteHeader("cookie");
       return cookiesCache;
+    },
+    // Created on first access, so a request that never touches it pays nothing. Reading it reads
+    // the cookie header (above), which makes an ISR page per-user. `__sessionMode` ("crossSite",
+    // set by handler.mjs before middleware; "live" for live renders) makes it read-only. The
+    // session sets `__commit` when it has a cookie to write (handler.mjs `finalize` awaits it).
+    // These internal fields are only added when used, keeping the common path's object unchanged.
+    get session() {
+      return (session ??= createSession(ctx, ctx.__sessionMode));
     },
     resHeaders,
     resStatus: undefined,
@@ -115,8 +129,12 @@ export function makeContext(info) {
       return setCookies;
     },
 
-    redirect(to, status = 302) {
-      const res = { __nowakiResult: true, status, headers: { location: to }, body: "" };
+    // A root-relative `to` gets basePath in front (unless it already starts with it);
+    // `{ basePath: false }` sends it as written.
+    redirect(to, status = 302, opts) {
+      if (typeof status === "object" && status !== null) [status, opts] = [302, status];
+      const location = opts?.basePath === false ? to : withBase(to);
+      const res = { __nowakiResult: true, status, headers: { location }, body: "" };
       ctx._redirect = res; // keep it so the throw path can pick it up
       return res;
     },
@@ -130,6 +148,7 @@ export function makeContext(info) {
       return result(init.status ?? 200, "text/plain; charset=utf-8", String(s), init.headers);
     },
   };
+  if (info.sessionMode) ctx.__sessionMode = info.sessionMode;
   return ctx;
 }
 

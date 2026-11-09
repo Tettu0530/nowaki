@@ -1,0 +1,41 @@
+{
+  "configs": {
+    "plain": { "locales": ["en", "ja", "pt-BR"], "defaultLocale": "en" },
+    "prefixed": { "locales": ["en", "ja"], "defaultLocale": "en", "prefixDefaultLocale": true },
+    "jaDefault": { "locales": ["en", "ja"], "defaultLocale": "ja" }
+  },
+  "localePath": [
+    { "config": "plain", "path": "/", "locale": "en", "expected": "/" },
+    { "config": "plain", "path": "/", "locale": "ja", "expected": "/ja" },
+    { "config": "plain", "path": "/about", "locale": "en", "expected": "/about" },
+    { "config": "plain", "path": "/about", "locale": "ja", "expected": "/ja/about" },
+    { "config": "plain", "path": "/about/", "locale": "ja", "expected": "/ja/about/" },
+    { "config": "plain", "path": "/blog/a%20b", "locale": "pt-BR", "expected": "/pt-BR/blog/a%20b" },
+    { "config": "plain", "path": "/feed.xml", "locale": "ja", "expected": "/ja/feed.xml" },
+    { "config": "prefixed", "path": "/", "locale": "en", "expected": "/en" },
+    { "config": "prefixed", "path": "/about", "locale": "en", "expected": "/en/about" },
+    { "config": "prefixed", "path": "/about", "locale": "ja", "expected": "/ja/about" },
+    { "config": "jaDefault", "path": "/about", "locale": "ja", "expected": "/about" },
+    { "config": "jaDefault", "path": "/about", "locale": "en", "expected": "/en/about" },
+    { "config": "plain", "path": "/ja/about", "locale": "en", "expected": "/about", "js": true },
+    { "config": "plain", "path": "/ja/about", "locale": "pt-BR", "expected": "/pt-BR/about", "js": true },
+    { "config": "plain", "path": "/ja", "locale": "en", "expected": "/", "js": true },
+    { "config": "plain", "path": "/about?x=1#top", "locale": "ja", "expected": "/ja/about?x=1#top", "js": true },
+    { "config": "plain", "path": "/about", "locale": "fr", "expected": "/about", "js": true },
+    { "config": "plain", "path": "https://example.com/about", "locale": "ja", "expected": "https://example.com/about", "js": true },
+    { "config": "plain", "path": "//evil.com/x", "locale": "ja", "expected": "//evil.com/x", "js": true },
+    { "config": "prefixed", "path": "/en/about", "locale": "ja", "expected": "/ja/about", "js": true }
+  ],
+  "split": [
+    { "config": "plain", "path": "/", "locale": "en", "rest": "/", "prefixed": false },
+    { "config": "plain", "path": "/about", "locale": "en", "rest": "/about", "prefixed": false },
+    { "config": "plain", "path": "/ja", "locale": "ja", "rest": "/", "prefixed": true },
+    { "config": "plain", "path": "/ja/", "locale": "ja", "rest": "/", "prefixed": true },
+    { "config": "plain", "path": "/ja/about/x", "locale": "ja", "rest": "/about/x", "prefixed": true },
+    { "config": "plain", "path": "/en/about", "locale": "en", "rest": "/about", "prefixed": true },
+    { "config": "plain", "path": "/pt-BR/a", "locale": "pt-BR", "rest": "/a", "prefixed": true },
+    { "config": "plain", "path": "/JA/about", "locale": "en", "rest": "/JA/about", "prefixed": false },
+    { "config": "plain", "path": "/jap/about", "locale": "en", "rest": "/jap/about", "prefixed": false },
+    { "config": "plain", "path": "/%6Aa/about", "locale": "en", "rest": "/%6Aa/about", "prefixed": false }
+  ]
+}

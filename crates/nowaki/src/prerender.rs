@@ -3,6 +3,7 @@ use std::process::Stdio;
 
 use anyhow::{anyhow, Context, Result};
 use futures_util::StreamExt;
+use nowaki_core::rules::{I18nConfig, TrailingSlash};
 use nowaki_core::NowakiCore;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -23,15 +24,30 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     }
     // env.ts: validated before the build, which inlines its public values.
     crate::env_schema::finish(env_check, &mut core)?;
+    crate::remote_images::configure(&mut core, &root, &config)?;
+    crate::site::configure(&mut core, &config)?;
     let (report, client) = core.build_with_client(&root.join("dist"))?;
     println!(
         "[nowaki] build: client {} / server {} modules",
         report.modules, report.server_modules
     );
-    crate::content::build(&root, &root.join("dist"))?;
+    crate::content::build(&root, &root.join("dist"), &config)?;
     crate::site::write(&root.join("dist"), &config)?;
     crate::fonts::build_dist(&root, &root.join("dist"), &config)?;
     crate::check_route_budgets(&core, &report, &client)?;
+    let routing_file = root.join("dist/server/routing.json");
+    let routing: nowaki_core::rules::RoutingConfig = match std::fs::read_to_string(&routing_file) {
+        Ok(text) => serde_json::from_str(&text)?,
+        Err(_) => nowaki_core::rules::RoutingConfig::default(),
+    };
+    let trailing = routing.trailing_slash;
+    // The temporary server applies nowaki.config routing, so pages are requested by the URL a
+    // browser uses (basePath, trailing slash).
+    let front = crate::front::load(&routing_file)?;
+    let request_path = |url: &str| match &front {
+        Some(f) => f.browser_path(url),
+        None => url.to_string(),
+    };
 
     let entry = root.join("node_modules/@nowaki-dev/runtime/server/start.mjs");
     if !entry.exists() {
@@ -92,15 +108,23 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         }
     });
 
-    let mut pages: Vec<(String, PathBuf)> =
-        nowaki_core::routes::enumerate_static_prerender_urls(&root.join("dist/server/routes"))?
-            .into_iter()
-            .map(|url| {
-                let file = out_file_for(&out, &url);
-                (url, file)
-            })
-            .collect();
-    for (url, file) in dynamic_pages? {
+    let i18n = read_i18n(&routing_file);
+    let mut pages: Vec<(String, PathBuf)> = locale_urls(
+        i18n.as_ref(),
+        nowaki_core::routes::enumerate_static_prerender_urls(&root.join("dist/server/routes"))?,
+    )
+    .into_iter()
+    .map(|url| {
+        let file = out_file_for(&out, &url, trailing);
+        (url, file)
+    })
+    .collect();
+    for (url, file, page) in dynamic_pages? {
+        let file = if page {
+            page_file(&file, trailing)
+        } else {
+            file
+        };
         pages.push((url, out.join(file)));
     }
     if pages.is_empty() {
@@ -122,9 +146,10 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     let mut rendered = futures_util::stream::iter(&pages)
         .map(|(url_path, file)| {
             let client = &client;
+            let request = request_path(url_path);
             async move {
                 let resp = client
-                    .get(format!("http://127.0.0.1:{port}{url_path}"))
+                    .get(format!("http://127.0.0.1:{port}{request}"))
                     .send()
                     .await?;
                 // A server error is a broken page, not one to leave out: the static deploy would
@@ -179,7 +204,7 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
             continue;
         }
         let resp = client
-            .get(format!("http://127.0.0.1:{port}{url}"))
+            .get(format!("http://127.0.0.1:{port}{}", request_path(url)))
             .send()
             .await?;
         if resp.status().is_success() {
@@ -192,11 +217,25 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     // Rendered for /404, since a static page can't know the path that was actually requested.
     if root.join("dist/server/routes/_404.js").exists() {
         let resp = client
-            .get(format!("http://127.0.0.1:{port}/404"))
+            .get(format!("http://127.0.0.1:{port}{}", request_path("/404")))
             .send()
             .await?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             std::fs::write(out.join("404.html"), resp.text().await?)?;
+        }
+        // i18n: one per locale directory, rendered in that locale.
+        for (url, file) in locale_404s(i18n.as_ref()) {
+            let resp = client
+                .get(format!("http://127.0.0.1:{port}{}", request_path(&url)))
+                .send()
+                .await?;
+            if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                let file = out.join(file);
+                if let Some(parent) = file.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(file, resp.text().await?)?;
+            }
         }
     }
 
@@ -219,11 +258,17 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     // public/ files at their own path, last, so they win over a page at the same path (as on a
     // server). A `_headers` of the app's own comes first in the generated one.
     let mut own_headers = String::new();
+    let mut own_redirects = String::new();
     for (url, src) in nowaki_core::public::list(&root.join("dist/public"))? {
-        if url == "/_headers" {
-            own_headers = std::fs::read_to_string(&src)?;
-            if !own_headers.ends_with('\n') {
-                own_headers.push('\n');
+        if url == "/_headers" || url == "/_redirects" {
+            let mut text = std::fs::read_to_string(&src)?;
+            if !text.is_empty() && !text.ends_with('\n') {
+                text.push('\n');
+            }
+            if url == "/_headers" {
+                own_headers = text;
+            } else {
+                own_redirects = text;
             }
             continue;
         }
@@ -233,11 +278,28 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         }
         std::fs::copy(&src, &to)?;
     }
+    // nowaki.config routing for static hosts (Cloudflare Pages / Netlify syntax): redirects and
+    // rewrites in `_redirects` after the app's own, config headers at the end of `_headers`.
+    let rendered_urls: Vec<&str> = pages.iter().map(|(u, _)| u.as_str()).collect();
+    let host = static_host_rules(&routing, &rendered_urls);
+    for w in &host.warnings {
+        eprintln!("[nowaki] static output: {w}");
+    }
+    let locale_redirects = locale_redirects(routing.i18n.as_ref(), &routing.base_path);
+    if !own_redirects.is_empty() || !host.redirects.is_empty() || !locale_redirects.is_empty() {
+        std::fs::write(
+            out.join("_redirects"),
+            format!("{own_redirects}{}{locale_redirects}", host.redirects),
+        )?;
+    }
+    // The host serves the output at basePath, so its paths carry it.
+    let base = routing.base_path.as_str();
     std::fs::write(
         out.join("_headers"),
         format!(
-            "{own_headers}/*\n{}/_nowaki/*\n  Cache-Control: public, max-age=31536000, immutable\n/__nowaki/boundaries\n  Content-Type: application/json\n",
-            static_security_headers()
+            "{own_headers}/*\n{}{base}/_nowaki/*\n  Cache-Control: public, max-age=31536000, immutable\n{base}/__nowaki/boundaries\n  Content-Type: application/json\n{}",
+            static_security_headers(),
+            host.headers
         ),
     )?;
 
@@ -316,8 +378,9 @@ fn normalize(p: &Path) -> PathBuf {
 }
 
 /// Runs the runtime's static-paths.mjs, which evaluates `export const staticPaths` in Node
-/// (nowaki-core never runs JS). Returns (request path, file relative to `out`).
-async fn static_paths(root: &Path) -> Result<Vec<(String, String)>> {
+/// (nowaki-core never runs JS). Returns (request path, file relative to `out`, whether it's a
+/// page rather than a file route).
+async fn static_paths(root: &Path) -> Result<Vec<(String, String, bool)>> {
     let script = root.join("node_modules/@nowaki-dev/runtime/server/static-paths.mjs");
     if !script.exists() {
         return Ok(Vec::new()); // older runtime: dynamic routes stay unrendered, as before
@@ -355,6 +418,7 @@ async fn static_paths(root: &Path) -> Result<Vec<(String, String)>> {
             Some((
                 p["url"].as_str()?.to_string(),
                 p["file"].as_str()?.to_string(),
+                p["kind"].as_str() != Some("file"),
             ))
         })
         .collect())
@@ -373,13 +437,240 @@ fn static_security_headers() -> String {
     out
 }
 
-/// URL to output file path. `/` → index.html, `/about` → about/index.html (clean URLs).
-fn out_file_for(out: &Path, url: &str) -> PathBuf {
+/// URL to output file path, laid out the way static hosts map files to URLs: `/` → index.html;
+/// `/about` → about/index.html (served at `/about/`), or about.html under `trailingSlash: "never"`
+/// (served at `/about`).
+fn out_file_for(out: &Path, url: &str, trailing: TrailingSlash) -> PathBuf {
     if url == "/" {
         out.join("index.html")
     } else {
-        out.join(format!("{}/index.html", url.trim_start_matches('/')))
+        out.join(page_file(
+            &format!("{}/index.html", url.trim_start_matches('/')),
+            trailing,
+        ))
     }
+}
+
+/// A page's `x/index.html` as `x.html` under `trailingSlash: "never"`; unchanged otherwise.
+fn page_file(file: &str, trailing: TrailingSlash) -> String {
+    match file.strip_suffix("/index.html") {
+        Some(dir) if trailing == TrailingSlash::Never && !dir.is_empty() => {
+            format!("{dir}.html")
+        }
+        _ => file.to_string(),
+    }
+}
+
+/// i18n: the locale settings of the routing config, if any.
+fn read_i18n(routing_file: &Path) -> Option<I18nConfig> {
+    let text = std::fs::read_to_string(routing_file).ok()?;
+    serde_json::from_str::<nowaki_core::rules::RoutingConfig>(&text)
+        .ok()?
+        .i18n
+}
+
+/// i18n: each page URL in every locale, in config order (`/about` → `/about`, `/ja/about`).
+fn locale_urls(i18n: Option<&I18nConfig>, urls: Vec<String>) -> Vec<String> {
+    let Some(i18n) = i18n else {
+        return urls;
+    };
+    urls.iter()
+        .flat_map(|url| i18n.locales.iter().map(move |l| locale_url(i18n, url, l)))
+        .collect()
+}
+
+/// A route path (no locale in it) as `locale`'s URL: the default locale has no prefix unless
+/// `prefixDefaultLocale`. The runtime's `localePathFor` (server/i18n.mjs) builds the same URLs;
+/// tests/fixtures/i18n-cases.json drives both.
+fn locale_url(i18n: &I18nConfig, url: &str, locale: &str) -> String {
+    if locale == i18n.default_locale && !i18n.prefix_default_locale {
+        url.to_string()
+    } else if url == "/" {
+        format!("/{locale}")
+    } else {
+        format!("/{locale}{url}")
+    }
+}
+
+/// i18n: the 404 page of each locale directory, as (request path, file under the output dir).
+/// The unprefixed default locale's is the top-level 404.html.
+fn locale_404s(i18n: Option<&I18nConfig>) -> Vec<(String, String)> {
+    let Some(i18n) = i18n else {
+        return Vec::new();
+    };
+    i18n.locales
+        .iter()
+        .filter(|l| **l != i18n.default_locale || i18n.prefix_default_locale)
+        .map(|l| (format!("/{l}/404"), format!("{l}/404.html")))
+        .collect()
+}
+
+/// i18n: `_redirects` lines sending the default locale's prefix to the unprefixed URL (308), as the
+/// servers do. None with `prefixDefaultLocale`.
+fn locale_redirects(i18n: Option<&I18nConfig>, base: &str) -> String {
+    match i18n {
+        Some(i18n) if !i18n.prefix_default_locale => {
+            let l = &i18n.default_locale;
+            let root = if base.is_empty() { "/" } else { base };
+            format!("{base}/{l} {root} 308\n{base}/{l}/* {base}/:splat 308\n")
+        }
+        _ => String::new(),
+    }
+}
+
+/// nowaki.config routing in static-host form, with what a host can't do.
+#[derive(Default)]
+struct StaticHostRules {
+    redirects: String,
+    headers: String,
+    warnings: Vec<String>,
+}
+
+/// `_redirects` / `_headers` (Cloudflare Pages / Netlify) from the routing config: `[x]` becomes
+/// `:x`, `[...x]` becomes `*` in a source and `:splat` in a destination, rewrites are 200 rules.
+/// Rules a static host can't express are left out with a warning. `rendered` lists the prerendered
+/// page URLs (a rewrite can only reach a page that exists as a file).
+fn static_host_rules(
+    config: &nowaki_core::rules::RoutingConfig,
+    rendered: &[&str],
+) -> StaticHostRules {
+    let mut out = StaticHostRules::default();
+    let base = config.base_path.as_str();
+    if !base.is_empty() {
+        out.warnings.push(format!(
+            "basePath {base:?}: pages are written at the root of the output; deploy them under {base} (the rules below include it)"
+        ));
+    }
+    let internal = |d: &str| {
+        if d.starts_with('/') {
+            if d == "/" && !base.is_empty() {
+                base.to_string()
+            } else {
+                format!("{base}{d}")
+            }
+        } else {
+            d.to_string()
+        }
+    };
+    for r in &config.redirects {
+        match (static_pattern(&r.source, true), static_pattern(&r.destination, false)) {
+            (Some(from), Some(to)) => out.redirects.push_str(&format!(
+                "{} {} {}\n",
+                internal(&from),
+                internal(&to),
+                r.status
+            )),
+            _ => out.warnings.push(format!(
+                "redirect {} → {} can't be written for a static host (a [x].ext segment or a param name other than letters, digits and _); left out",
+                r.source, r.destination
+            )),
+        }
+    }
+    for r in &config.rewrites {
+        let (Some(from), Some(to)) = (
+            static_pattern(&r.source, true),
+            static_pattern(&r.destination, false),
+        ) else {
+            out.warnings.push(format!(
+                "rewrite {} → {} can't be written for a static host; left out",
+                r.source, r.destination
+            ));
+            continue;
+        };
+        if !rendered
+            .iter()
+            .any(|u| route_could_match(&r.destination, u))
+        {
+            out.warnings.push(format!(
+                "rewrite {} → {}: no prerendered page matches the destination, so a static host has nothing to serve",
+                r.source, r.destination
+            ));
+        }
+        out.redirects
+            .push_str(&format!("{} {} 200\n", internal(&from), internal(&to)));
+    }
+    let defaults: Vec<&str> = crate::security_headers::DEFAULTS
+        .iter()
+        .map(|(n, _)| *n)
+        .chain(["content-security-policy"])
+        .collect();
+    for h in &config.headers {
+        let Some(from) = static_pattern(&h.source, true) else {
+            out.warnings.push(format!(
+                "headers for {} can't be written for a static host; left out",
+                h.source
+            ));
+            continue;
+        };
+        out.headers.push_str(&internal(&from));
+        out.headers.push('\n');
+        for header in &h.headers {
+            let name = header.key.to_ascii_lowercase();
+            if defaults.contains(&name.as_str()) {
+                out.warnings.push(format!(
+                    "headers for {}: a static host may combine {name} with the default value instead of replacing it",
+                    h.source
+                ));
+            }
+            out.headers
+                .push_str(&format!("  {}: {}\n", header.key, header.value));
+        }
+    }
+    out
+}
+
+/// A rule path in `_redirects` syntax, or `None` when it has no equivalent there.
+fn static_pattern(path: &str, source: bool) -> Option<String> {
+    let (origin, rest) = match path.find("://") {
+        Some(i) => {
+            let after = &path[i + 3..];
+            let end = i + 3 + after.find('/').unwrap_or(after.len());
+            (&path[..end], &path[end..])
+        }
+        None => ("", path),
+    };
+    let named = |n: &str| {
+        !n.is_empty()
+            && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            && !n.as_bytes()[0].is_ascii_digit()
+    };
+    let mut out = String::from(origin);
+    for seg in rest.split('/').skip(1) {
+        out.push('/');
+        if let Some(name) = seg.strip_prefix("[...").and_then(|s| s.strip_suffix(']')) {
+            if !named(name) {
+                return None;
+            }
+            out.push_str(if source { "*" } else { ":splat" });
+        } else if let Some(name) = seg.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            if !named(name) || name == "splat" {
+                return None;
+            }
+            out.push(':');
+            out.push_str(name);
+        } else if seg.contains(['[', ']']) {
+            return None;
+        } else {
+            out.push_str(seg);
+        }
+    }
+    if out.is_empty() {
+        out.push('/');
+    }
+    Some(out)
+}
+
+/// Whether a route pattern (`/photo/[id]`) could match the page URL `url`.
+fn route_could_match(pattern: &str, url: &str) -> bool {
+    let pat: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
+    let parts: Vec<&str> = url.split('/').filter(|s| !s.is_empty()).collect();
+    let rest = pat.last().is_some_and(|s| s.starts_with("[..."));
+    if (rest && parts.len() < pat.len()) || (!rest && parts.len() != pat.len()) {
+        return false;
+    }
+    pat.iter()
+        .zip(&parts)
+        .all(|(p, u)| p.starts_with('[') || p == u)
 }
 
 fn copy_dir(from: &Path, to: &Path) -> Result<()> {
@@ -423,5 +714,156 @@ mod tests {
         assert!(check_out(&root, &root.join("./dist/site")).unwrap());
         assert!(!check_out(&root, &root.join("public-site")).unwrap());
         assert!(!check_out(&root, &root.join("distro")).unwrap());
+    }
+
+    fn routing(json: &str) -> nowaki_core::rules::RoutingConfig {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn static_host_files_from_the_routing_config() {
+        let host = static_host_rules(
+            &routing(
+                r#"{
+                "redirects":[
+                    {"source":"/old/[...rest]","destination":"/new/[...rest]","status":308},
+                    {"source":"/blog/[slug]","destination":"https://example.com/b/[slug]","status":301},
+                    {"source":"/og/[card].png","destination":"/cards/[card].png","status":302}
+                ],
+                "rewrites":[
+                    {"source":"/p/[id]","destination":"/photo/[id]"},
+                    {"source":"/x","destination":"/nowhere"}
+                ],
+                "headers":[{"source":"/api/[...rest]","headers":[
+                    {"key":"Cache-Control","value":"no-store"},
+                    {"key":"X-Frame-Options","value":"DENY"}
+                ]}]
+            }"#,
+            ),
+            &["/", "/photo/1"],
+        );
+        assert_eq!(
+            host.redirects,
+            "/old/* /new/:splat 308\n/blog/:slug https://example.com/b/:slug 301\n/p/:id /photo/:id 200\n/x /nowhere 200\n"
+        );
+        assert_eq!(
+            host.headers,
+            "/api/*\n  Cache-Control: no-store\n  X-Frame-Options: DENY\n"
+        );
+        let warned = |s: &str| host.warnings.iter().any(|w| w.contains(s));
+        assert!(warned("/og/[card].png"));
+        assert!(warned("/x → /nowhere"));
+        assert!(!warned("/p/[id]"));
+        assert!(warned("x-frame-options"));
+    }
+
+    #[test]
+    fn static_host_rules_carry_base_path_and_warn() {
+        let host = static_host_rules(
+            &routing(
+                r#"{"basePath":"/app","trailingSlash":"always",
+                "redirects":[{"source":"/","destination":"/home","status":307}]}"#,
+            ),
+            &["/home"],
+        );
+        assert_eq!(host.redirects, "/app /app/home 307\n");
+        assert!(host.warnings.iter().any(|w| w.contains("basePath")));
+        // The file layout carries the trailing-slash policy (out_file_for), so no warning.
+        assert!(!host.warnings.iter().any(|w| w.contains("trailingSlash")));
+        assert!(static_host_rules(&routing("{}"), &[]).redirects.is_empty());
+        assert!(static_host_rules(&routing("{}"), &[]).warnings.is_empty());
+    }
+
+    #[test]
+    fn output_files_follow_the_trailing_slash_policy() {
+        let out = Path::new("out");
+        let file = |url: &str, t| out_file_for(out, url, t);
+        for t in [TrailingSlash::Ignore, TrailingSlash::Always] {
+            assert_eq!(file("/", t), out.join("index.html"));
+            assert_eq!(file("/about", t), out.join("about/index.html"));
+            assert_eq!(file("/docs/a", t), out.join("docs/a/index.html"));
+        }
+        assert_eq!(file("/", TrailingSlash::Never), out.join("index.html"));
+        assert_eq!(file("/about", TrailingSlash::Never), out.join("about.html"));
+        assert_eq!(
+            file("/docs/a", TrailingSlash::Never),
+            out.join("docs/a.html")
+        );
+        // Dynamic pages from static-paths.mjs (decoded, already `x/index.html`).
+        assert_eq!(
+            page_file("blog/a b/index.html", TrailingSlash::Never),
+            "blog/a b.html"
+        );
+        assert_eq!(
+            page_file("blog/a b/index.html", TrailingSlash::Ignore),
+            "blog/a b/index.html"
+        );
+        assert_eq!(page_file("index.html", TrailingSlash::Never), "index.html");
+    }
+
+    fn i18n(json: &str) -> I18nConfig {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn locale_urls_follow_the_shared_fixture() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/i18n-cases.json")).unwrap();
+        let mut n = 0;
+        for case in fixture["localePath"].as_array().unwrap() {
+            // JS-only cases: paths that already carry a locale, a query, or aren't route paths.
+            if case["js"] == true {
+                continue;
+            }
+            let config = i18n(&fixture["configs"][case["config"].as_str().unwrap()].to_string());
+            let got = locale_url(
+                &config,
+                case["path"].as_str().unwrap(),
+                case["locale"].as_str().unwrap(),
+            );
+            assert_eq!(got, case["expected"].as_str().unwrap(), "{case}");
+            n += 1;
+        }
+        assert!(n >= 10);
+    }
+
+    #[test]
+    fn locale_expansion_404s_and_redirects() {
+        let plain = i18n(r#"{"locales":["en","ja"],"defaultLocale":"en"}"#);
+        assert_eq!(
+            locale_urls(Some(&plain), vec!["/".into(), "/about".into()]),
+            ["/", "/ja", "/about", "/ja/about"]
+        );
+        assert_eq!(
+            locale_urls(None, vec!["/about".into()]),
+            ["/about".to_string()]
+        );
+        assert_eq!(
+            locale_404s(Some(&plain)),
+            [("/ja/404".to_string(), "ja/404.html".to_string())]
+        );
+        assert!(locale_404s(None).is_empty());
+        assert_eq!(
+            locale_redirects(Some(&plain), ""),
+            "/en / 308\n/en/* /:splat 308\n"
+        );
+        assert_eq!(
+            locale_redirects(Some(&plain), "/app"),
+            "/app/en /app 308\n/app/en/* /app/:splat 308\n"
+        );
+        let prefixed =
+            i18n(r#"{"locales":["en","ja"],"defaultLocale":"en","prefixDefaultLocale":true}"#);
+        assert_eq!(locale_404s(Some(&prefixed)).len(), 2);
+        assert!(locale_redirects(Some(&prefixed), "").is_empty());
+        assert!(locale_redirects(None, "").is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("routing.json");
+        assert!(read_i18n(&file).is_none());
+        std::fs::write(
+            &file,
+            r#"{"i18n":{"locales":["en","ja"],"defaultLocale":"en"}}"#,
+        )
+        .unwrap();
+        assert_eq!(read_i18n(&file).unwrap().locales, ["en", "ja"]);
     }
 }

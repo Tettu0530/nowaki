@@ -1,5 +1,7 @@
 // Public types for the Nowaki framework (getContext is also exported as a value).
 
+import type { ComponentChildren } from "preact";
+
 /** Route params. `[slug]` is a string; `[...slug]` (catch-all) is a string[]. */
 export type RouteParams = Record<string, string | string[]>;
 
@@ -18,6 +20,29 @@ export interface CookieOptions {
 export interface ResponseInit {
   status?: number;
   headers?: Record<string, string>;
+}
+
+/**
+ * `ctx.session` (and `getContext().session`): per-visitor values kept across requests in an
+ * encrypted cookie (or, with a `store` in session.ts, server-side behind a signed id). Values must
+ * be JSON. Created on first access; reading it makes an ISR page per-user. Needs
+ * `NOWAKI_SESSION_SECRET` in production (dev generates one into `.nowaki/session-secret`).
+ */
+export interface Session {
+  /**
+   * True where the session can't be changed: on a cross-site request that changes state (it is
+   * also empty there, CSRF), and in live island renders. Writes throw.
+   */
+  readonly readOnly: boolean;
+  get<T = unknown>(key: string): Promise<T | undefined>;
+  has(key: string): Promise<boolean>;
+  /** Sets a JSON value (`undefined` deletes). Throws when the cookie would pass 4 KB. */
+  set(key: string, value: unknown): Promise<void>;
+  delete(key: string): Promise<void>;
+  /** A fresh cookie (and, with a store, a new id), keeping the values. Call it on sign-in. */
+  regenerate(): Promise<void>;
+  /** Clears the values and the cookie. Call it on sign-out. */
+  destroy(): Promise<void>;
 }
 
 /** Result of ctx.json / html / text / redirect (returning it finalizes the response). */
@@ -42,10 +67,24 @@ export interface LoaderContext {
   readonly params: RouteParams;
   /** The HTTP method. */
   readonly method: string;
+  /**
+   * The request's locale with `i18n` in nowaki.config: the locale prefix of the URL (`/ja/about`
+   * → `"ja"`), else the default locale. Undefined without i18n and for `/__nowaki/*` requests
+   * (server functions, live events).
+   */
+  readonly locale: string | undefined;
   /** Request headers (lowercase keys). */
   readonly headers: Record<string, string>;
   /** Parsed request cookies. */
   readonly cookies: Record<string, string>;
+  /**
+   * The visitor's session (see {@link Session}). Throws on first access in production when
+   * `NOWAKI_SESSION_SECRET` is missing, and while prerendering.
+   * @example
+   * await ctx.session.regenerate(); // on sign-in
+   * await ctx.session.set("userId", user.id);
+   */
+  readonly session: Session;
   /** Node's IncomingMessage (undefined on Edge). */
   readonly req?: unknown;
   /** Arbitrary data middleware passes to loaders and pages. */
@@ -71,8 +110,13 @@ export interface LoaderContext {
   /** Deletes a cookie (Max-Age=0, chainable). */
   deleteCookie(name: string, opts?: CookieOptions): this;
 
-  /** Redirects (302 by default). Return it from a loader, action, or middleware. */
-  redirect(to: string, status?: number): NowakiResult;
+  /**
+   * Redirects (302 by default). Return it from a loader, action, or middleware. Under
+   * nowaki.config `basePath`, a path starting with `/` gets the base in front unless it already
+   * starts with it; `{ basePath: false }` sends `to` as written.
+   */
+  redirect(to: string, status?: number, opts?: { basePath?: boolean }): NowakiResult;
+  redirect(to: string, opts: { basePath?: boolean }): NowakiResult;
   /** Returns a JSON response. */
   json<T>(data: T, init?: ResponseInit): NowakiResult;
   /** Returns an HTML response. */
@@ -89,10 +133,14 @@ export type Action = (ctx: LoaderContext) => unknown | Promise<unknown>;
 
 /**
  * `export const staticPaths` on a dynamic route: the params to prerender with `nowaki prerender`
- * or the static adapter, one page per entry. A `[...rest]` param takes a string[].
+ * or the static adapter, one page per entry. A `[...rest]` param takes a string[]. With i18n, a
+ * function runs once per locale, given `{ locale }` (also `getLocale()`, so `getCollection` returns
+ * that locale's entries), and each page is written under the locale's prefix.
  * @example export const staticPaths: StaticPaths = [{ slug: "hello" }, { slug: "world" }];
  */
-export type StaticPaths<P extends RouteParams = RouteParams> = P[] | (() => P[] | Promise<P[]>);
+export type StaticPaths<P extends RouteParams = RouteParams> =
+  | P[]
+  | ((info: { locale?: string }) => P[] | Promise<P[]>);
 
 /**
  * `export const budget` on a page route: the most first-load client JS the page may ship, in KB of
@@ -195,6 +243,24 @@ export interface RouteProps<D = unknown> {
 /** Page props with `data` inferred from the loader type. Use as `PageProps<typeof loader>`. */
 export type PageProps<L extends Loader<any> = Loader<unknown>> = RouteProps<Awaited<ReturnType<L>>>;
 
+/** Props a `_layout` component receives. */
+export interface LayoutProps<D = unknown> {
+  /** The layout's loader return value. */
+  data: D;
+  params: RouteParams;
+  url: URL;
+  /** The page (or the next layout down). */
+  children: ComponentChildren;
+  /**
+   * Parallel routes: what each slot directory next to this layout (`@modal/` → `slots.modal`)
+   * renders, wrapped in `<nowaki-slot name="modal" style="display:contents">`. That's the slot's
+   * file matching the URL (`@modal/photo/[id].tsx` for `/photo/42`), else its `default.tsx`, else
+   * null. Slot files get `{ data, params, url }` like a page, and their loaders get the slot's
+   * params. They don't contribute `meta`.
+   */
+  slots: Record<string, ComponentChildren>;
+}
+
 /**
  * Default export of `routes/loading.tsx`. When a client navigation takes over 150ms,
  * the nearest loading boundary (nestable) is shown until the target HTML arrives. No island needed.
@@ -255,6 +321,20 @@ export function publish(topic: string): void;
  * accept-language, and user-agent headers). Returns null elsewhere. Use it for auth.
  */
 export function getContext(): LoaderContext | null;
+
+/**
+ * The current locale with `i18n` in nowaki.config (`ctx.locale` of the request being rendered,
+ * usable in components, layouts and islands). In the browser it is the page's locale. Undefined
+ * without i18n, outside a page request, and in server functions.
+ */
+export function getLocale(): string | undefined;
+
+/**
+ * `path` in `locale` (default: the current locale): `localePath("/about", "ja")` → `"/ja/about"`,
+ * `localePath("/ja/about", "en")` → `"/about"` when `en` is the default locale. The query and
+ * fragment are kept. Returns `path` unchanged without i18n.
+ */
+export function localePath(path: string, locale?: string): string;
 
 /** A [Standard Schema](https://standardschema.dev) (zod, valibot, arktype, ...). */
 export interface StandardSchemaV1<Input = unknown, Output = Input> {

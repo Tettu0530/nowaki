@@ -60,6 +60,14 @@ const gallery = await (await req("/gallery")).text();
 check("<Image> renders AVIF + JPEG sources on the edge", /<source type="image\/avif" srcset="\/_nowaki\/hero-640\.[0-9a-f]+\.avif/.test(gallery) && gallery.includes('width="1200" height="750"'));
 const fontPage = await (await req("/about")).text();
 check("fonts: preload + stylesheet on the edge", /<link rel="preload" href="\/_nowaki\/atkinson-hyperlegible-400-normal\.[0-9a-f]+\.ttf" as="font"/.test(fontPage) && /<link rel="stylesheet" href="\/_nowaki\/fonts\.[0-9a-f]+\.css" \/>/.test(fontPage));
+const pricing = await req("/pricing");
+check("a route-group page on the edge: its layout and middleware",
+  pricing.status === 200 && (await pricing.text()).includes('<div data-group="marketing"><main') && pricing.headers.get("x-route-group") === "marketing");
+const photo = await (await req("/photos/1")).text();
+check("parallel routes on the edge: the slot file matching the URL, its CSS", photo.includes('<nowaki-slot name="modal" style="display:contents"><aside id="photo-modal"') && /\/_nowaki\/modal\.[0-9a-f]+\.css/.test(photo));
+check("parallel routes on the edge: the slot default", (await (await req("/photos")).text()).includes('<nowaki-slot name="modal" style="display:contents"><p id="modal-default">'));
+const bounds = await (await req("/__nowaki/boundaries")).json();
+check("loading / error boundaries on the edge", bounds.loading.length > 0 && bounds.error.length > 0);
 const mdxPage = await (await req("/guide")).text();
 check("an .mdx page on the edge", mdxPage.includes('<h1 id="an-mdx-page">An MDX page</h1>') && mdxPage.includes('<nowaki-island name="Counter"'));
 const mdxEntry = await (await req("/docs/components")).text();
@@ -107,6 +115,25 @@ check("serverFn rejects invalid input (400)", bad.status === 400 && (await bad.j
 const broken = await rpc({ id: "96224074eee5e982", args: [] });
 check("unexpected server function error is generic (500)", broken.status === 500 && (await broken.json()).error === "Internal Server Error");
 
+// Sessions: session.ts is imported by the worker; the secret comes from the Worker's bindings.
+{
+  const saved = process.env.NOWAKI_SESSION_SECRET;
+  delete process.env.NOWAKI_SESSION_SECRET;
+  const sess = (init = {}, bindings = env) =>
+    worker.fetch(new Request(ORIGIN + "/api/session", { ...init, headers: { origin: ORIGIN, ...(init.headers ?? {}) } }), bindings);
+  check("session without NOWAKI_SESSION_SECRET: 500", (await sess()).status === 500);
+  const withSecret = { ...env, NOWAKI_SESSION_SECRET: "edge-binding-session-secret-0123456789" };
+  const login = await sess({ method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "op=login&user=edge" }, withSecret);
+  const cookie = (login.headers.get("set-cookie") ?? "").split(";")[0];
+  check("session: login sets the session.ts cookie name, Secure over https",
+    /^hello_session=v1\./.test(cookie) && /; Secure/.test(login.headers.get("set-cookie") ?? ""));
+  const me = await (await sess({ headers: { cookie } }, withSecret)).json();
+  check("session: the cookie round-trips (secret from the bindings)", me.user === "edge");
+  const evil = await (await sess({ method: "POST", headers: { origin: "https://evil.test", cookie, "content-type": "application/x-www-form-urlencoded" }, body: "op=inc" }, withSecret)).json();
+  check("session: cross-site POST sees an empty, read-only session", evil.user === null && evil.readOnly === true && evil.wrote !== true);
+  if (saved !== undefined) process.env.NOWAKI_SESSION_SECRET = saved;
+}
+
 process.env.NOWAKI_CSP = "enforce";
 const csp = await req("/");
 const nonce = /'nonce-([0-9a-f]{32})'/.exec(csp.headers.get("content-security-policy") ?? "")?.[1];
@@ -114,6 +141,16 @@ const tags = (await csp.text()).match(/<(script|style)\b[^>]*>/gi) ?? [];
 check("NOWAKI_CSP=enforce: every script/style carries the response nonce",
   Boolean(nonce) && tags.length > 0 && tags.every((t) => t.includes(`nonce="${nonce}"`)));
 delete process.env.NOWAKI_CSP;
+
+// nowaki.config redirects / rewrites (examples/hello), applied before the Assets binding.
+const moved = await req("/old-docs/guide?x=1", { redirect: "manual" });
+check("config redirect on the edge keeps the query and the security headers",
+  moved.status === 308 && moved.headers.get("location") === "/guide?x=1" && secure(moved));
+const evil = await req("/go/%2F%2Fevil.com", { redirect: "manual" });
+check("config redirect capture can't leave the site on the edge", evil.headers.get("location") === "/%2F%2Fevil.com");
+check("config rewrite renders the destination on the edge", (await (await req("/p/hello")).text()).includes("Post: hello"));
+const forged = await (await req("/about", { headers: { "x-nowaki-route-path": "/env" } })).text();
+check("client x-nowaki-route-path is ignored on the edge", forged.includes("<h1>About</h1>") && !forged.includes("token length"));
 
 console.log(failures ? `\nEDGE HANDLER TEST FAILED (${failures})` : "\nEDGE HANDLER TEST PASSED");
 process.exit(failures ? 1 : 0);

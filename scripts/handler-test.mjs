@@ -1,5 +1,5 @@
 // Unit checks for server/handler.mjs with an in-memory env: layout wrapping (plain and
-// `streaming = "early"`), the routePath seam, and the finalize commit seam. No server needed.
+// `streaming = "early"`), the routePath seam, the finalize commit seam, and parallel-route slots. No server needed.
 import { createRequire } from "node:module";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
 
@@ -120,6 +120,72 @@ const text = async (res) => res.body ?? (await new Response(res.stream).text());
   check("commit hook runs once before the headers are built", commits.length === 1 && commits[0] === 200);
   check("a cookie set in the commit hook is sent", String(res.headers["set-cookie"] ?? "").startsWith("sid=abc"));
   check("a response that sets a cookie stays 200 with its body", res.status === 200 && (await text(res)).includes("post hello"));
+}
+
+{
+  // Parallel-route slots: CSS / scripts of the rendered slot file, early streaming, and the
+  // per-table cache of which layouts own slots.
+  const slotModules = {
+    "routes/_layout.tsx": { default: ({ children, slots }) => h("div", null, children, slots.modal) },
+    "routes/g/[id].tsx": { default: ({ params }) => h("p", null, `page ${params.id}`) },
+    "routes/g/early.tsx": { streaming: "early", default: () => h("p", null, "early") },
+    "routes/plain.tsx": { default: () => h("p", null, "plain") },
+    "routes/@modal/g/[id].tsx": {
+      scripts: ["./m.ts"],
+      loader: (ctx) => `L${ctx.params.id}`,
+      default: ({ data }) => h("b", null, data),
+    },
+    "routes/@modal/default.tsx": { default: () => h("i", null, "none") },
+  };
+  const slotTable = {
+    routes: [
+      { file: "routes/g/early.tsx", segments: [{ lit: "g" }, { lit: "early" }], dir: "/g", isApi: false },
+      { file: "routes/g/[id].tsx", segments: [{ lit: "g" }, { param: "id" }], dir: "/g", isApi: false },
+      { file: "routes/plain.tsx", segments: [{ lit: "plain" }], dir: "", isApi: false },
+    ],
+    layouts: [{ prefix: "", file: "routes/_layout.tsx" }],
+    middleware: [],
+    slots: [
+      {
+        ownerDir: "",
+        name: "modal",
+        routes: [{ file: "routes/@modal/g/[id].tsx", segments: [{ lit: "g" }, { param: "id" }] }],
+        default: "routes/@modal/default.tsx",
+        intercepts: [],
+      },
+    ],
+  };
+  const cssCalls = [];
+  const slotEnv = {
+    ...env,
+    routeTable: async () => slotTable,
+    importModule: async (file) => slotModules[file],
+    renderDocument: ({ body, meta }) => `${meta?.head ?? ""}|${body}`,
+    routeCss: async (file) => (cssCalls.push(file), file.includes("@modal/g") ? ["/site.css", "/modal.css"] : ["/site.css"]),
+    routeScripts: async (file, mod) => (mod?.scripts ?? []).map((s) => ({ src: `/${file}/${s}` })),
+  };
+  const get = (path) => handleRequest(slotEnv, { method: "GET", url: new URL(`http://x.test${path}`), headers: {}, version: 1 });
+  const body = await text(await get("/g/5"));
+  check("a slot renders inside <nowaki-slot>", body.endsWith('|<div><p>page 5</p><nowaki-slot name="modal" style="display:contents"><b>L5</b></nowaki-slot></div>'));
+  check(
+    "the rendered slot file's CSS follows the page's, deduped",
+    body.startsWith('<link rel="stylesheet" href="/site.css" />\n<link rel="stylesheet" href="/modal.css" />'),
+  );
+  check("the rendered slot file's page scripts are included", body.includes('src="/routes/@modal/g/[id].tsx/./m.ts"'));
+  const plain = await text(await get("/plain"));
+  check("the default renders where no slot route matches", plain.endsWith('<div><p>plain</p><nowaki-slot name="modal" style="display:contents"><i>none</i></nowaki-slot></div>'));
+  check("a default's CSS is asked for", cssCalls.includes("routes/@modal/default.tsx"));
+  const early = await text(await get("/g/early"));
+  check("early streaming renders slots too", early.includes('<p>early</p><nowaki-slot name="modal" style="display:contents"><b>Learly</b></nowaki-slot>'));
+  // The owners of a file's chain are computed once per table: a filter on table.slots that runs
+  // again would see the replaced array.
+  const saved = slotTable.slots;
+  slotTable.slots = [{ ...saved[0], name: "other" }];
+  check("slot owners are cached per table and file", (await text(await get("/g/6"))).includes('<nowaki-slot name="modal"'));
+  slotTable.slots = saved;
+  const noSlots = { ...slotTable, slots: [] };
+  const res = await handleRequest({ ...slotEnv, routeTable: async () => noSlots }, { method: "GET", url: new URL("http://x.test/g/5"), headers: {}, version: 1 });
+  check("without slots a layout gets an empty slots object", (await text(res)).endsWith("|<div><p>page 5</p></div>"));
 }
 
 if (failures) {

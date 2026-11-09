@@ -59,9 +59,11 @@ function attrString(obj, skip) {
 
 // Non-streaming: scan the whole body and put preloads for used islands in <head> (avoids waterfalls).
 // `opts.live === false` (static output from `nowaki prerender`): live islands keep their first
-// HTML but ship no live.js. A static host has no server to answer its events.
+// HTML but ship no live.js. A static host has no server to answer its events. `opts.assetBase`:
+// where the client files are served (`/_nowaki/`, or `<basePath>/_nowaki/`).
 export function prodDocument(manifest, { mod, body, meta }, opts = {}) {
   const m = pageMeta(meta, mod);
+  const a = opts.assetBase ?? "/_nowaki/";
   const islandNames = [...body.matchAll(/<nowaki-island name="([^"]+)"/g)].map((m) => m[1]);
   const hasIslands = islandNames.length > 0 && manifest.runtime;
   const preloadFiles = [];
@@ -85,16 +87,16 @@ export function prodDocument(manifest, { mod, body, meta }, opts = {}) {
     }
   }
   const preload = preloadFiles
-    .map((f) => `<link rel="modulepreload" href="/_nowaki/${f}" />`)
+    .map((f) => `<link rel="modulepreload" href="${a}${f}" />`)
     .join("\n");
   const runtime = hasIslands
-    ? `<script id="nowaki-runtime" type="module" src="/_nowaki/${manifest.runtime}"${dataRouter(manifest)}></script>`
+    ? `<script id="nowaki-runtime" type="module" src="${a}${manifest.runtime}"${dataRouter(manifest, a)}></script>`
     : "";
   // Only `nowaki dev` / `nowaki start` terminate the /__nowaki/live WebSocket, and they assemble
   // their own documents, so this one tells live.js to go straight to POST /__nowaki/live-event.
   const live =
     opts.live !== false && manifest.liveRuntime && body.includes("<nowaki-live")
-      ? `<script id="nowaki-live" type="module" src="/_nowaki/${manifest.liveRuntime}" data-live-transport="post"></script>`
+      ? `<script id="nowaki-live" type="module" src="${a}${manifest.liveRuntime}" data-live-transport="post"></script>`
       : "";
 
   return `<!DOCTYPE html>
@@ -118,14 +120,15 @@ ${live}
 
 // Streaming: islands aren't known when the shell is sent, so skip per-island preloads
 // and preload only the runtime chunk (the runtime finds <nowaki-island> and fetches each island).
-export function prodShell(manifest, mod, meta) {
+export function prodShell(manifest, mod, meta, opts = {}) {
   const m = pageMeta(meta, mod);
+  const a = opts.assetBase ?? "/_nowaki/";
   const runtimeChunk = manifest.runtime;
   const runtimePreload = runtimeChunk
-    ? `<link rel="modulepreload" href="/_nowaki/${runtimeChunk}" />\n`
+    ? `<link rel="modulepreload" href="${a}${runtimeChunk}" />\n`
     : "";
   const runtimeScript = runtimeChunk
-    ? `<script id="nowaki-runtime" type="module" src="/_nowaki/${runtimeChunk}"${dataRouter(manifest)}></script>`
+    ? `<script id="nowaki-runtime" type="module" src="${a}${runtimeChunk}"${dataRouter(manifest, a)}></script>`
     : "";
   const head = `<!DOCTYPE html>
 <html lang="${escapeHtml(m.lang)}"${m.htmlAttrs}>
@@ -147,8 +150,8 @@ ${runtimeScript}
 }
 
 // islands.js lazily imports the SPA router from this URL when idle.
-function dataRouter(manifest) {
-  return manifest.routerRuntime ? ` data-router="/_nowaki/${manifest.routerRuntime}"` : "";
+function dataRouter(manifest, assetBase) {
+  return manifest.routerRuntime ? ` data-router="${assetBase}${manifest.routerRuntime}"` : "";
 }
 
 export function escapeHtml(s) {

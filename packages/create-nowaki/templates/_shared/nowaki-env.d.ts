@@ -79,9 +79,11 @@ declare module "preact" {
 }
 
 declare global {
-  // import.meta.env (PUBLIC_* and MODE are inlined at build time).
+  // import.meta.env (PUBLIC_*, MODE and BASE_URL are inlined at build time).
   interface ImportMetaEnv {
     readonly MODE: string;
+    /** nowaki.config `basePath` with a trailing slash ("/app/"), or "/". */
+    readonly BASE_URL: string;
     readonly [key: `PUBLIC_${string}`]: string | undefined;
   }
   interface ImportMeta {

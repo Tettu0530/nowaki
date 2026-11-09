@@ -513,6 +513,9 @@ fn render_body(core: &NowakiCore, abs: &Path, idx: usize, wiring: &ImportWiring)
 }
 
 fn resolve(core: &NowakiCore, dir: &Path, spec: &str) -> Option<PathBuf> {
+    if crate::resolve::split_remote_spec(spec).is_some() {
+        return core.resolve_spec(dir, spec);
+    }
     if spec.starts_with('/') || spec.contains("://") || spec.starts_with("data:") {
         return None;
     }

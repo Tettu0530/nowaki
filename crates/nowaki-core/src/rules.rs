@@ -542,7 +542,7 @@ fn is_control(c: char) -> bool {
     c < ' ' || c == '\u{7f}'
 }
 
-fn check_base_path(base: &str) -> Result<(), String> {
+pub(crate) fn check_base_path(base: &str) -> Result<(), String> {
     if base.is_empty() {
         return Ok(());
     }

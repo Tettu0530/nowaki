@@ -8,7 +8,7 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { scanRoutes, matchRoute, underPrefix, routeUnderPrefix } from "../packages/nowaki-runtime/server/router.mjs";
+import { scanRoutes, matchRoute, underPrefix, routeUnderPrefix, isRouteGroup, stripRouteGroups } from "../packages/nowaki-runtime/server/router.mjs";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -70,10 +70,20 @@ eq(path.basename(table.notFound ?? ""), "_404.tsx", "notFound → routes/_404.ts
 eq(path.basename(table.errorRoute ?? ""), "_500.tsx", "errorRoute → routes/_500.tsx");
 eq(
   table.layouts.map((l) => l.prefix).sort(),
-  ["", "/blog"],
-  "layouts: root + nested /blog",
+  ["", "/(marketing)", "/blog", "/photos"],
+  "layouts: root + nested /blog + the (marketing) group + /photos (owns @modal)",
 );
-eq(table.middleware.map((m) => m.prefix), [""], "middleware at app root");
+eq(
+  table.slots.map((s) => [s.ownerDir, s.name, s.routes.map((r) => path.basename(r.file)), path.basename(s.default ?? ""), s.intercepts.map((i) => i.rel)]),
+  [["/photos", "modal", ["[id].tsx"], "default.tsx", ["(.)[id].tsx"]]],
+  "examples/hello: photos/@modal with a route, a default and a recorded intercept",
+);
+eq(snap(table, "/photos/1"), { file: "[id].tsx", params: { id: "1" }, isApi: false }, "/photos/1 → photos/[id] (not the slot file)");
+eq(table.routes.some((r) => r.file.includes("@modal")), false, "slot files are never routes");
+eq(table.middleware.map((m) => [m.prefix, m.group === true]), [["", false], ["/(marketing)", true]], "middleware at app root and in a group");
+eq(snap(table, "/pricing"), { file: "pricing.tsx", params: {}, isApi: false }, "/pricing → (marketing)/pricing (group left out of the URL)");
+eq(snap(table, "/(marketing)/pricing"), null, "a group name is not a URL segment");
+eq(table.routes.find((r) => r.file.endsWith("pricing.tsx"))?.dir, "/(marketing)", "a grouped route keeps its physical dir");
 eq(table.loadingBoundaries.map((b) => b.prefix), [""], "loading boundary at root");
 eq(table.errorBoundaries.map((b) => b.prefix), [""], "error boundary at root");
 eq(
@@ -154,6 +164,196 @@ eq(routeUnderPrefix({ dir: "/org/[org]/x" }, "/org/[org]"), true, "a file deeper
 eq(routeUnderPrefix({ dir: "/org" }, "/org/[org]"), false, "the sibling file routes/org/[org].tsx is not inside it");
 eq(routeUnderPrefix({ dir: "/org/[orgs]" }, "/org/[org]"), false, "a differently named dir is not inside it");
 eq(routeUnderPrefix({ dir: "/org" }, ""), true, "root prefix contains everything");
+
+eq(isRouteGroup("(marketing)"), true, "(name) is a route group");
+eq(["(.)", "(..)", "(...)", "()", "(a)b", "a"].map(isRouteGroup), [false, false, false, false, false, false], "reserved / malformed names are not groups");
+eq(stripRouteGroups("/(a)/docs/(b)"), "/docs", "groups stripped from a prefix");
+eq(stripRouteGroups("/(a)"), "", "a top-level group prefix is the root");
+eq(stripRouteGroups("/(.)/x"), "/(.)/x", "(.) stays literal");
+
+// Route groups end to end: URL, layout / middleware / boundary containment, collisions.
+{
+  const dir = await mkdtemp(path.join(os.tmpdir(), "nowaki-groups-"));
+  const put = async (rel, src) => {
+    await mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await writeFile(path.join(dir, rel), src);
+  };
+  const runtimeRequire = createRequire(path.join(ROOT, "packages/nowaki-runtime/server/handler.mjs"));
+  const preactDir = path.dirname(runtimeRequire.resolve("preact/package.json"));
+  const preact = JSON.stringify(pathToFileURL(path.join(preactDir, "dist/preact.mjs")).href);
+  const wrap = (id) => `import { h } from ${preact};\nexport default (p) => h("div", { id: ${JSON.stringify(id)} }, p.children);\n`;
+  const page = (text) => `import { h } from ${preact};\nexport default () => h("p", null, ${JSON.stringify(text)});\n`;
+  const deny = (msg) => `export default (ctx) => { if (!ctx.cookies.ok) return ctx.text(${JSON.stringify(msg)}, { status: 401 }); };\n`;
+  await put("routes/_layout.js", wrap("root"));
+  await put("routes/(marketing)/_layout.js", wrap("mkt"));
+  await put("routes/(marketing)/about.js", page("about"));
+  await put("routes/(marketing)/index.js", page("home"));
+  await put("routes/(app)/_middleware.js", deny("app only"));
+  await put("routes/(app)/dashboard.js", page("dash"));
+  await put("routes/(app)/docs/[slug].js", page("doc"));
+  await put("routes/(app)/loading.js", page("app loading"));
+  await put("routes/loading.js", page("root loading"));
+  await put("routes/(app)/docs/error.js", page("docs error"));
+  await put("routes/(app)/api/ping.js", `export const GET = (ctx) => ctx.text("pong");\n`);
+  await put("routes/open.js", page("open"));
+  await put("routes/docs/(x)/_middleware.js", deny("docs-x only"));
+  await put("routes/docs/(x)/guide.js", page("guide"));
+  const t = await scanRoutes(dir);
+  const env = {
+    routeTable: async () => t,
+    importModule: async (file) => import(pathToFileURL(file).href),
+    ensureIslands: async () => {},
+    renderDocument: ({ body }) => body,
+    renderError: (err) => ({ status: 500, headers: {}, body: String(err?.stack ?? err) }),
+  };
+  const get = async (p, headers = {}) => {
+    const r = await handleRequest(env, { method: "GET", url: new URL("http://x" + p), headers, version: 1 });
+    return { status: r.status, body: String(r.body ?? ""), headers: r.headers };
+  };
+  const about = await get("/about");
+  eq([about.status, about.body], [200, '<div id="root"><div id="mkt"><p>about</p></div></div>'], "group page at /about, wrapped by the group layout");
+  eq((await get("/")).body, '<div id="root"><div id="mkt"><p>home</p></div></div>', "(marketing)/index serves /");
+  eq((await get("/open")).body, '<div id="root"><p>open</p></div>', "a page outside the group doesn't get its layout");
+  eq((await get("/open")).status, 200, "group middleware doesn't run outside the group");
+  eq((await get("/dashboard")).status, 401, "group middleware runs for a route inside the group");
+  eq((await get("/docs/a")).status, 401, "group middleware runs for a nested route inside the group");
+  eq((await get("/dashboard", { cookie: "ok=1" })).status, 200, "group middleware lets the request through");
+  eq((await get("/nothing")).status, 404, "group middleware doesn't run for 404s");
+  eq((await get("/api/ping")).status, 401, "api/ in a group is an API route guarded by the group's middleware");
+  eq((await get("/api/ping", { cookie: "ok=1" })).body, "pong", "grouped API route served at /api/ping");
+  eq((await get("/docs/guide")).status, 401, "a nested group's middleware runs for its routes");
+  eq((await get("/docs/b", { cookie: "ok=1" })).status, 200, "a nested group's middleware doesn't run for a sibling URL served elsewhere");
+  eq(
+    t.loadingBoundaries.map((b) => [b.prefix, b.urlPrefix]),
+    [["", ""], ["/(app)", ""]],
+    "boundaries keep their physical prefix and a URL prefix; at the same URL prefix the ungrouped one goes first",
+  );
+  const bounds = JSON.parse((await get("/__nowaki/boundaries")).body);
+  eq(
+    [bounds.loading.map((b) => b.prefix), bounds.error.map((b) => b.prefix)],
+    [["", ""], ["/docs"]],
+    "boundaries are sent to the client with groups stripped",
+  );
+  await rm(dir, { recursive: true, force: true });
+
+  const clash = async (files) => {
+    const d = await mkdtemp(path.join(os.tmpdir(), "nowaki-clash-"));
+    for (const f of files) {
+      await mkdir(path.dirname(path.join(d, "routes", f)), { recursive: true });
+      await writeFile(path.join(d, "routes", f), "export default () => null;\n");
+    }
+    try {
+      await scanRoutes(d);
+      return null;
+    } catch (err) {
+      return String(err.message);
+    } finally {
+      await rm(d, { recursive: true, force: true });
+    }
+  };
+  const msg = await clash(["(a)/about.js", "(b)/about.js"]);
+  eq(
+    [/routes\/\(a\)\/about\.js/.test(msg ?? ""), /routes\/\(b\)\/about\.js/.test(msg ?? ""), / \/about:/.test(msg ?? "")],
+    [true, true, true],
+    `two groups serving /about is an error (${msg})`,
+  );
+  eq((await clash(["about.js", "(b)/about.js"])) !== null, true, "a group and an ungrouped file serving one URL is an error");
+  eq((await clash(["(a)/blog/[slug].js", "blog/[id].js"])) !== null, true, "param names don't avoid a collision");
+  eq(await clash(["(a)/blog/[slug].js", "(b)/blog/new.js"]), null, "a literal beside a param is not a collision");
+  eq(await clash(["about.js", "about/index.js"]), null, "duplicates without a group are left as they were");
+  eq(await clash(["(a)/_layout.js", "(b)/_layout.js", "(a)/loading.js", "loading.js"]), null, "convention files never collide");
+  eq(await clash(["photo/[id].js", "@modal/photo/[id].js", "@m/(g)/photo/[x].js"]), null, "slot files serve no URL of their own");
+}
+
+// Parallel routes: @slot directories render beside the page in their owner's layout.
+{
+  const dir = await mkdtemp(path.join(os.tmpdir(), "nowaki-slots-"));
+  const put = async (rel, src) => {
+    await mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await writeFile(path.join(dir, rel), src);
+  };
+  const runtimeRequire = createRequire(path.join(ROOT, "packages/nowaki-runtime/server/handler.mjs"));
+  const preactDir = path.dirname(runtimeRequire.resolve("preact/package.json"));
+  const preact = JSON.stringify(pathToFileURL(path.join(preactDir, "dist/preact.mjs")).href);
+  const page = (text) => `import { h } from ${preact};\nexport default () => h("p", null, ${JSON.stringify(text)});\n`;
+  // A layout printing its children, then each slot it got (name=node, or name=null).
+  const layout = (id, names) =>
+    `import { h } from ${preact};\nexport default (p) => h("div", { id: ${JSON.stringify(id)} }, p.children, ${names
+      .map((n) => `p.slots.${n} === null ? "${n}=null" : p.slots.${n}`)
+      .join(", ")});\n`;
+  await put("routes/_layout.js", layout("root", ["modal", "empty"]));
+  await put("routes/index.js", page("home"));
+  await put("routes/photo/[id].js", page("photo page"));
+  await put("routes/about.js", page("about"));
+  await put("routes/@modal/default.js", page("modal default"));
+  await put(
+    "routes/@modal/photo/[pid].js",
+    `import { h } from ${preact};\nexport const loader = (ctx) => { ctx.setHeader("x-slot", "1"); return "slot " + JSON.stringify(ctx.params); };\nexport const meta = { title: "ignored" };\nexport default ({ data, params, url }) => h("i", null, data + " " + params.pid + " " + url.pathname);\n`,
+  );
+  await put("routes/@modal/(.)photo/[id].js", page("intercepted"));
+  await put("routes/@modal/_layout.js", page("ignored layout"));
+  await put("routes/@modal/@nested/x.js", page("nested"));
+  await put("routes/@empty/about.js", page("empty about"));
+  await put("routes/(g)/shop/_layout.js", layout("shop", ["cart"]));
+  await put("routes/(g)/shop/[item].js", page("item"));
+  await put("routes/(g)/shop/@cart/[item].js", `import { h } from ${preact};\nexport default ({ params }) => h("b", null, "cart " + params.item);\n`);
+  await put("routes/(.)intercepted/x.js", page("top-level intercept"));
+  const t = await scanRoutes(dir);
+  eq(
+    t.slots.map((s) => [s.ownerDir, s.name, s.routes.map((r) => path.relative(dir, r.file).split(path.sep).join("/")), s.default && path.basename(s.default), s.intercepts.map((i) => i.rel)]).sort(),
+    [
+      ["", "empty", ["routes/@empty/about.js"], null, []],
+      ["", "modal", ["routes/@modal/photo/[pid].js"], "default.js", ["(.)photo/[id].js"]],
+      ["/(g)/shop", "cart", ["routes/(g)/shop/@cart/[item].js"], null, []],
+    ],
+    "slots: owner dir, name, routes, default, intercepts; _ files and nested slots ignored",
+  );
+  eq(t.intercepts.map((i) => i.dir), ["/(.)intercepted"], "an intercepting route outside a slot is recorded, not routed");
+  eq(matchRoute(t, "/intercepted/x"), null, "an intercepting route is not served");
+  eq(matchRoute(t, "/(.)intercepted/x"), null, "an intercepting route is not served under its literal name either");
+  eq(matchRoute(t, "/@modal/photo/1"), null, "a slot directory is not a URL segment");
+  const env = {
+    routeTable: async () => t,
+    importModule: async (file) => import(pathToFileURL(file).href),
+    ensureIslands: async () => {},
+    renderDocument: ({ body, meta }) => `${meta?.title ?? ""}|${body}`,
+    renderError: (err) => ({ status: 500, headers: {}, body: String(err?.stack ?? err) }),
+  };
+  const get = async (p, extra = {}) => {
+    const r = await handleRequest(env, { method: "GET", url: new URL("http://x" + p), headers: {}, version: 1, ...extra });
+    return { status: r.status, body: String(r.body ?? ""), headers: r.headers };
+  };
+  const slot = (name, inner) => `<nowaki-slot name="${name}" style="display:contents">${inner}</nowaki-slot>`;
+  eq(
+    (await get("/")).body,
+    `|<div id="root"><p>home</p>${slot("modal", "<p>modal default</p>")}empty=null</div>`,
+    "no slot route matches: the default renders; a slot without a default is null",
+  );
+  const photo = await get("/photo/7");
+  eq(
+    photo.body,
+    `|<div id="root"><p>photo page</p>${slot("modal", '<i>slot {&quot;pid&quot;:&quot;7&quot;} 7 /photo/7</i>')}empty=null</div>`,
+    "the slot route matching the URL renders with its own params and loader; slots add no meta",
+  );
+  eq(photo.headers["x-slot"], "1", "a slot loader's ctx writes reach the response");
+  eq(
+    (await get("/about")).body,
+    `|<div id="root"><p>about</p>${slot("modal", "<p>modal default</p>")}${slot("empty", "<p>empty about</p>")}</div>`,
+    "each slot resolves independently",
+  );
+  eq(
+    (await get("/shop/hat")).body,
+    `|<div id="root"><div id="shop"><p>item</p>${slot("cart", "<b>cart hat</b>")}</div>${slot("modal", "<p>modal default</p>")}empty=null</div>`,
+    "a slot in a group dir matches the URL with the group left out, below its owner's URL",
+  );
+  eq(
+    (await get("/x/photo/9", { routePath: "/photo/9" })).body.includes("<i>slot {&quot;pid&quot;:&quot;9&quot;} 9 /x/photo/9"),
+    true,
+    "slots match the route path (rewrites), not the browser path",
+  );
+  eq((await get("/photo/%zz")).status, 404, "a malformed path is still a 404");
+  await rm(dir, { recursive: true, force: true });
+}
 
 // _middleware / _layout / error.tsx inside a [param] directory apply to the URLs under it,
 // end to end through handleRequest (plain .js route files, no JSX).

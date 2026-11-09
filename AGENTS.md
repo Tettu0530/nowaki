@@ -185,7 +185,12 @@ code locations and CI coverage.
   + fallback, disk cache, `picture_html` for Markdown), emitted by `build.rs` `emit` (client) and
   `ServerAssets::image_module` (server); dev modules from `transform.rs` `dev_asset_module`,
   variants from `dev.rs` `dev_image` (`/__nowaki/image`). Component: `packages/nowaki-runtime/image.js`.
-  Markdown images: `content.rs` `local_image`.
+  Markdown images: `content.rs` `local_image`. Remote `?image` (`images.remotePatterns`):
+  `crates/nowaki-core/src/remote_image.rs` (allow-list, cache, `RemoteFetch` trait; resolved to the
+  cached file in `NowakiCore::resolve_remote_image`, so every transform mode reuses the local path),
+  downloads in `server/images-fetch.mjs` via `crates/nowaki/src/remote_images.rs`; the matcher
+  exists in both, driven by `crates/nowaki-core/tests/fixtures/remote-patterns-cases.json`
+  (`tests/remote_patterns.rs`, `scripts/images-fetch-test.mjs`).
 - **Fonts** — `crates/nowaki/src/fonts.rs` (faces, size-adjusted fallbacks from ttf-parser
   metrics, `dist/server/fonts.json`; dev: `.nowaki/fonts`), Google downloads in
   `server/fonts-fetch.mjs`, config via `site.rs` + `server/site-config.mjs`; the links go into
@@ -207,9 +212,20 @@ code locations and CI coverage.
   `app.mjs` `createApp`, `web.mjs` (first request), dev `sidecar.mjs` (first request). Client import
   guard: `build.rs` `emit` and the dev browser transform (`env::is_server_env_module`). Types:
   `typegen.rs` `render_env`. Tests: `scripts/env-schema-test.mjs`.
+- **Sessions (`ctx.session`)** — `server/session.mjs` (`defineSession`, `configureSessions`,
+  `createSession`: WebCrypto only, keys from `NOWAKI_SESSION_SECRET` via HKDF). `context.mjs`
+  creates the session on first access (`__sessionMode`: `"crossSite"` / `"live"` make it
+  read-only); it sets `ctx.__commit` when it has a cookie to write, which `handler.mjs`
+  `commitAndFinalize` awaits (a failure renders the 500 page). `handler.mjs` `routeRequest` marks
+  cross-site writes before middleware. Config: app-root `session.ts`, compiled by `build.rs`
+  `build_server` to `dist/server/session.js`; loaded by `app.mjs` `createApp`, `web.mjs` (the
+  worker imports it, `edge-build.mjs`), and dev `sidecar.mjs` (`ensureSession`, plus the
+  generated `.nowaki/session-secret`). Tests: `scripts/session-test.mjs`.
 - **SEO** — `packages/nowaki-runtime/server/seo.mjs` (site URL, meta tags, sitemap, robots);
   `handler.mjs` `withSeo` (layout + route meta) and the generated `/sitemap.xml` / `/robots.txt`;
-  page URLs from `server/isr-urls.mjs` `pageUrls`. The site comes from `crates/nowaki/src/site.rs`
+  page URLs from `server/isr-urls.mjs` `pageUrls`, shaped by `pagePath` per `trailingSlash`
+  (`env.trailingSlash`; the static output files from `prerender.rs` `out_file_for` match it).
+  The site comes from `crates/nowaki/src/site.rs`
   (`dist/server/site.json`, via `server/site-config.mjs`), `NOWAKI_SITE` winning. Unit checks:
   `scripts/seo-unit-test.mjs`.
 - **Routing config (`basePath`, `trailingSlash`, `redirects`, `rewrites`, `headers`)** —
@@ -219,6 +235,56 @@ code locations and CI coverage.
   (`crates/nowaki-core/tests/fixtures/rules-cases.json`, run by `tests/rules.rs` and
   `scripts/rules-test.mjs`); change both together. The segment grammar is shared with the router
   through `server/segments.mjs`.
+- **Route groups (`routes/(name)/`)** — no URL segment. JS: `server/router.mjs` `scanRoutes`
+  (URL without groups, `dir` stays physical, collision error; group `_middleware` marked
+  `group` and run by containment in `handler.mjs` `runMiddleware`; boundaries carry a
+  group-free `urlPrefix` for the client). Rust: `routes.rs` `strip_route_groups` (in
+  `url_pattern_from_stem`) and `check_url_conflicts` (called by `build_with_client`). Layout /
+  CSS lookups stay on physical dirs. Tests: `scripts/router-test.mjs`, `routes.rs` units.
+  through `server/segments.mjs`. Applied at the fronts by `crates/nowaki/src/front.rs`
+  (`start.rs` `handle`, `dev.rs` `serve_or_proxy`, the headers layer; the route path reaches the
+  sidecars in `x-nowaki-route-path` → `info.routePath`) and `server/front.mjs` (`app.mjs` `handle`,
+  the worker `fetch` from `edge-build.mjs`); Vercel platform routes from `server/vercel-routes.mjs`,
+  static `_redirects` / `_headers` from `prerender.rs`. Without a routing config each front does
+  one null check. Tests: `scripts/rules-front-test.mjs`, `scripts/rules-e2e.mjs` (every front).
+- **`basePath`** — build: `NowakiCore::set_base_path` (asset URLs via `asset_base()`, the server
+  function proxy path, the `import.meta.env.BASE_URL` define, plus `__NOWAKI_BASE_URL__` for the
+  classic-script `client/live.js`), set by `site::configure`; fonts and content images read
+  `site::asset_base()`. Runtime: `server/base-path.mjs` (`globalThis.__nowakiBase`, `withBase`)
+  set by `app.mjs` / `web.mjs` / dev `sidecar.mjs`, used by `<Link>`, `ctx.redirect`, `seo.mjs`,
+  the session cookie Path; asset hrefs from `assetBase` in `app.mjs` / `web.mjs` / `document.mjs`
+  and `Manifest.asset_base` in `start.rs`. Fronts: `<base>/_nowaki/*` and `<base>/__nowaki/*`
+  skip the rules (`front.rs` `framework_path`, `front.mjs` `frontStep` `internal`), and
+  `front.rs` `base_layer` wraps the router in start / dev so `<base>/__nowaki/*` reaches the
+  root handlers. Client: every base-dependent line compares `BASE_URL` with `"/"`, so it folds
+  away without a base (keep it that way: no-base output must stay byte-identical). Adapters:
+  `edge-build.mjs` / `vercel-build.mjs` place static files under the base. Tests:
+  `crates/nowaki-core/tests/base_path.rs`, `scripts/rules-e2e.mjs` (config B), `seo-unit-test`,
+  `session-test`, `router-browser-test.mjs` with `BASE=http://host:port/app`.
+- **i18n (`i18n` in nowaki.config)** — locale prefixes, `localePath` and the sitemap's alternate
+  groups in `server/i18n.mjs` (runtime-neutral; `navigation.js` uses it in the browser too). The
+  locale comes off the route path in `handler.mjs` `localizedRequest` (one `env.i18n` check per
+  request when off), which runs the request inside `server/i18n-context.mjs` (an
+  AsyncLocalStorage published on `globalThis[Symbol.for("nowaki.locale")]`, so `getLocale()` /
+  `getCollection` never import `node:async_hooks`) and renders through `localizedEnv` (`<html
+  lang>`, `data-nowaki-i18n`, hreflang from `seo.mjs` `hreflangTags`). `env.i18n` is set by
+  `app.mjs`, `web.mjs` (`routing`, passed by `edge-build.mjs`) and dev `sidecar.mjs`
+  (`.nowaki/routing.json`). Content locales: `content.rs` `split_locale` (locales from the routing
+  config). Per-locale URLs: `isr-urls.mjs` `localeUrls`, `static-paths.mjs` `localePages`,
+  `prerender.rs` `locale_urls` / `locale_404s` / `locale_redirects`; `locale_url` and
+  `localePathFor` share `crates/nowaki/tests/fixtures/i18n-cases.json`. Tests:
+  `scripts/i18n-test.mjs`, `scripts/i18n-e2e.mjs` (start, dev, node, cloudflare, static; its
+  "combo" app composes i18n with basePath, trailingSlash "never" and a parallel-route slot).
+- **Parallel routes (`routes/…/@name/`)** — JS: `server/router.mjs` `scanRoutes` collects
+  `slots: [{ ownerDir, name, routes, default, intercepts }]` (slot files are never in `routes`;
+  intercepting `(.)x` files are recorded in `slot.intercepts` / `table.intercepts`, not served),
+  `matchSlot`; `handler.mjs` `resolveSlots` (owners cached per table + file in `slotOwners`, one
+  length check without slots), `wrapLayouts` / `renderSlots` pass `slots` to the owner layout;
+  `withRouteCss` / `withScripts` take the rendered slot files. Rust: `routes.rs` `is_slot_rel`,
+  `is_intercept_segment`, `slot_route_patterns` (parity with `scripts/route-enumeration-parity.mjs`
+  in `crates/nowaki/tests/route_js_parity.rs`); `budget.rs` `slot_files_for`. The worker routeTable
+  carries `slots` (`edge-build.mjs`). Tests: `scripts/router-test.mjs`, `scripts/handler-test.mjs`,
+  `examples/hello/routes/photos/`.
 - **Page scripts (`export const scripts`)** — read from the AST in
   `crates/nowaki-core/src/page_scripts.rs`, emitted as client entries by
   `build.rs` `build_route_scripts` (manifest `routeScripts` per module and

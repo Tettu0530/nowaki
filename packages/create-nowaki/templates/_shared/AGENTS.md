@@ -26,6 +26,11 @@ After an edit or a failing request, check `recent_errors` first.
 ```
 routes/      file-based routes (pages + API). _layout.tsx, _middleware.ts,
              _404.tsx, _500.tsx, [slug].tsx, api/*.ts
+             (name)/ = route group: no URL segment, its own _layout /
+             _middleware for the files inside it (group middleware skips 404s)
+             @name/ = parallel route slot: the parent dir's _layout gets
+             `slots.name` (the @name file matching the URL, else
+             @name/default.tsx, else null)
 islands/     interactive components — THE ONLY things that ship JS and hydrate
 components/  shared server components (no client JS)
 lib/         shared server code

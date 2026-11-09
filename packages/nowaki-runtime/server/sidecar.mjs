@@ -4,10 +4,12 @@
 import "./exit-with-parent.mjs";
 import { createServer } from "node:http";
 import { createRequire, register } from "node:module";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveSite } from "./seo.mjs";
+import { compileI18n } from "./i18n.mjs";
 import { loadEnv } from "./env.mjs";
 import { requestOrigin } from "./origin.mjs";
 
@@ -75,6 +77,49 @@ function ensureEnv(version) {
       },
     );
   return envReady;
+}
+
+// Sessions in dev: without NOWAKI_SESSION_SECRET a secret is generated once into
+// .nowaki/session-secret (on the first ctx.session, so apps without sessions get no file).
+// session.ts is imported fresh for each SSR version.
+const { configureSessions, sessionConfigOf } = await import("./session.mjs");
+let devSecret;
+function devSessionSecret() {
+  if (process.env.NOWAKI_SESSION_SECRET) return process.env.NOWAKI_SESSION_SECRET;
+  if (devSecret) return devSecret;
+  const file = path.join(appRoot, ".nowaki/session-secret");
+  try {
+    devSecret = readFileSync(file, "utf8").trim();
+  } catch {}
+  if (!devSecret || devSecret.length < 32) {
+    devSecret = randomBytes(32).toString("hex");
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, `${devSecret}\n`, { mode: 0o600 });
+  }
+  console.warn("[nowaki] session: NOWAKI_SESSION_SECRET is not set; dev uses a generated secret (.nowaki/session-secret). Production needs NOWAKI_SESSION_SECRET.");
+  return devSecret;
+}
+configureSessions({ secret: devSessionSecret });
+const sessionFile = ["session.ts", "session.mts", "session.js", "session.mjs"].map((f) => path.join(appRoot, f)).find((f) => existsSync(f));
+let sessionVersion = null;
+async function ensureSession(version) {
+  if (!sessionFile || sessionVersion === version) return;
+  const mod = await env.importModule(sessionFile, version);
+  configureSessions({ config: sessionConfigOf(mod), secret: devSessionSecret });
+  sessionVersion = version;
+}
+
+// nowaki.config basePath: `nowaki dev` writes .nowaki/routing.json before it serves, after this
+// process starts, so it's read on the first request.
+const { setBasePath } = await import("./base-path.mjs");
+let baseRead = false;
+function ensureBasePath() {
+  baseRead = true;
+  try {
+    setBasePath(JSON.parse(readFileSync(path.join(appRoot, ".nowaki/routing.json"), "utf8")).basePath);
+  } catch {
+    setBasePath("");
+  }
 }
 
 const RUST = `http://127.0.0.1:${process.env.NOWAKI_RUST_PORT ?? "3000"}`;
@@ -181,19 +226,20 @@ async function devInfo(version) {
   return { routes, conventions, islands };
 }
 
-// NOWAKI_SITE, else `site` in nowaki.config (read once; restart dev after changing it).
-const devSite = await (async () => {
+// NOWAKI_SITE, else `site` in nowaki.config, and its `trailingSlash` (read once; restart dev
+// after changing them).
+const devConfig = await (async () => {
   for (const name of ["nowaki.config.mjs", "nowaki.config.js"]) {
     const p = path.join(appRoot, name);
     if (!existsSync(p)) continue;
     try {
       const mod = await import(pathToFileURL(p).href);
-      return (mod.default ?? mod.config ?? {}).site;
+      return mod.default ?? mod.config ?? {};
     } catch (err) {
       console.error(`[nowaki] ${name}: ${err?.message ?? err}`);
     }
   }
-  return undefined;
+  return {};
 })();
 
 // Self-hosted fonts in dev: `nowaki dev` builds them into .nowaki/fonts in the background at
@@ -217,11 +263,27 @@ function devFonts() {
   return fontsCache.value;
 }
 
+// i18n from .nowaki/routing.json, which `nowaki dev` writes before serving (a change needs a
+// restart, like the rest of the routing config): read on the first request.
+let devI18n;
+function readDevI18n() {
+  try {
+    return compileI18n(JSON.parse(readFileSync(path.join(appRoot, ".nowaki/routing.json"), "utf8")));
+  } catch {
+    return null;
+  }
+}
+
 const env = {
   dev: true,
-  site: resolveSite(devSite),
+  site: resolveSite(devConfig.site),
+  trailingSlash: devConfig.trailingSlash,
   get fonts() {
     return devFonts();
+  },
+  get i18n() {
+    if (devI18n === undefined) devI18n = readDevI18n();
+    return devI18n;
   },
   // dev rescans on every request (picks up file changes)
   routeTable: () => scanRoutes(appRoot),
@@ -289,6 +351,7 @@ const server = createServer(async (req, res) => {
         return;
       }
       if (envReady !== true) await ensureEnv(String(version ?? "0"));
+      await ensureSession(String(version ?? "0"));
       const reg = await loadIslandRegistry(appRoot, String(version ?? "0"));
       const entry = [...reg.values()].find((e) => e.name === name);
       if (!entry?.live) {
@@ -324,14 +387,18 @@ const server = createServer(async (req, res) => {
   }
   try {
     const version = String(req.headers["x-nowaki-ssr-version"] ?? "0");
+    if (!baseRead) ensureBasePath();
     if (envReady !== true) await ensureEnv(version);
     await ensureContent(version);
+    await ensureSession(version);
     const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
     const result = await handleRequest(env, {
       method: req.method,
       url,
       version,
       req,
+      // Set by the Rust front for a rewrite or basePath (a client's own value never gets here).
+      routePath: req.headers["x-nowaki-route-path"],
     });
     await sendResult(res, result);
   } catch (err) {
