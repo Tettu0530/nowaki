@@ -20,6 +20,21 @@ importers:
         specifier: ^6.8.2
         version: 6.8.2(preact@11.1.1)
 
+  examples/gallery:
+    dependencies:
+      '@nowaki-dev/runtime':
+        specifier: workspace:*
+        version: link:../../packages/nowaki-runtime
+      preact:
+        specifier: ^11.1.1
+        version: 11.1.1(preact-render-to-string@6.8.2)
+      preact-render-to-string:
+        specifier: ^6.8.2
+        version: 6.8.2(preact@11.1.1)
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+
   examples/hello:
     dependencies:
       '@nowaki-dev/markdoc':
