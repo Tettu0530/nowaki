@@ -189,6 +189,10 @@ milestone's worth of work; the codename is noted per entry.
   is unchanged: servers use the request's path and static output `x/index.html` with a slash.
 - An error while saving a request's session (a store failure, a cookie over 4 KB) now renders
   the 500 page instead of escaping the request handler.
+- `localePath` from `@nowaki-dev/runtime/navigation` returns an `Href` when given a static route
+  or a `route()` href, so `<Link href={localePath(route("/photo/[id]", { id }))}>` type-checks
+  once `nowaki typegen` has registered the routes. Before, the `string` it returned was refused
+  by `<Link href>`.
 - **The CI performance regression gate also compares each PR with the latest
   release**, failing beyond −10% req/s or +20% TTFB against it (the existing
   limits against base stay the same). Every metric (build, dev startup, req/s and

@@ -61,7 +61,12 @@ export function Link(props: LinkProps): VNode;
 /** The current locale with `i18n` in nowaki.config (see `getLocale` in `@nowaki-dev/runtime`). */
 export function getLocale(): string | undefined;
 
-/** `path` in `locale`, default the current one (see `localePath` in `@nowaki-dev/runtime`). */
+/**
+ * `path` in `locale`, default the current one (see `localePath` in `@nowaki-dev/runtime`). A
+ * static route or a `route()` href stays a `<Link href>`:
+ * `<Link href={localePath(route("/photo/[id]", { id }))}>`.
+ */
+export function localePath(path: StaticRoutePath | Href, locale?: string): Href;
 export function localePath(path: string, locale?: string): string;
 
 /** Remembers the visitor's locale for `i18n.detect` (see `setLocale` in `@nowaki-dev/runtime`). */
