@@ -121,6 +121,8 @@ jobs:
         run: node scripts/router-test.mjs
       - name: Routing rules (redirects / rewrites / headers / basePath; shared fixture with nowaki-core)
         run: node scripts/rules-test.mjs
+      - name: Routing rules at the JS fronts (front.mjs, Vercel routes against the shared fixture)
+        run: node scripts/rules-front-test.mjs
       - name: Client router-cache unit test (matchBoundary + Router Cache TTL/LRU)
         run: node scripts/router-cache-test.mjs
       - name: SSG staticPaths expansion

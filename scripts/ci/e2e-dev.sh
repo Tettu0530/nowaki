@@ -287,6 +287,9 @@ node scripts/mcp-e2e.mjs "$B"
 kill $SERVER_PID
 bash scripts/ci/assert-no-orphans.sh $SERVER_PID
 
+# nowaki.config redirects / rewrites / headers / basePath / trailingSlash in dev (a generated app)
+node scripts/rules-e2e.mjs dev --port "$((PORT + 8))"
+
 # SIGKILL: the dev sidecar and plugin host exit when their stdin pipe closes (exit-with-parent.mjs).
 ./target/debug/nowaki dev examples/hello --port "$((PORT + 7))" &
 KILL_PID=$!

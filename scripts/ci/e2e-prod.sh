@@ -258,6 +258,9 @@ node scripts/route-js-e2e.mjs http://127.0.0.1:3300 examples/hello
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) sleep 3 ;; esac
 kill $START_PID
 bash scripts/ci/assert-no-orphans.sh $START_PID
+# nowaki.config redirects / rewrites / headers / basePath / trailingSlash at the Rust front
+# (a generated app; listens on 3306 and 3307)
+node scripts/rules-e2e.mjs start --port 3306
 # Rooms survive a restart: on SIGTERM the sidecar wrote them to .nowaki/live-rooms.json.
 ROOMS=examples/hello/.nowaki/live-rooms.json
 test -f "$ROOMS"

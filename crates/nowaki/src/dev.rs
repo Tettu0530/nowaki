@@ -33,6 +33,8 @@ pub struct DevState {
     fs_allow: Vec<PathBuf>,
     /// Whether --host exposes all interfaces. Used for WS Origin/Host checks.
     pub(crate) expose: bool,
+    /// nowaki.config routing from `.nowaki/routing.json` (read at startup; a change needs a restart).
+    front: Option<Arc<crate::front::Front>>,
 }
 
 pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<()> {
@@ -73,6 +75,10 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
     if let Err(e) = crate::site::write_dev(&root, &config) {
         eprintln!("[nowaki] {e:#}");
     }
+    let front = crate::front::load(&root.join(".nowaki/routing.json")).unwrap_or_else(|e| {
+        eprintln!("[nowaki] {e:#}");
+        None
+    });
     // Fonts build in the background: startup doesn't wait on a download, and the renderer picks
     // up .nowaki/fonts.json once it exists.
     {
@@ -97,12 +103,13 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         plugins: plugin_host.is_some(),
         fs_allow: compute_fs_allow(&root),
         expose,
+        front: front.clone(),
     });
 
     dev_content(&state);
     let _watcher = start_watcher(&root, state.clone())?;
 
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/__nowaki/hmr", get(hmr_ws))
         .route("/__nowaki/live", get(live_ws))
         .route("/__nowaki/server-functions", get(server_functions))
@@ -114,7 +121,14 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         .route("/@fs/{*path}", get(serve_fs))
         .route(crate::mcp::PATH, axum::routing::any(crate::mcp::handle))
         .fallback(serve_or_proxy)
-        .with_state(state)
+        .with_state(state);
+    if let Some(front) = front.filter(|f| f.has_headers()) {
+        app = app.layer(axum::middleware::from_fn_with_state(
+            front,
+            crate::front::headers_layer,
+        ));
+    }
+    let app = app
         .layer(axum::middleware::from_fn_with_state(expose, host_guard))
         .layer(axum::middleware::from_fn(crate::csp::layer))
         .layer(axum::middleware::map_response(crate::security_headers::add));
@@ -555,12 +569,25 @@ async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Res
     if crate::forward::is_internal_path(&path) {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     }
-    // public/ files are sent as they are (no CSS shim, no TS transform), ahead of routes.
-    if matches!(
+    let read = matches!(
         *req.method(),
         axum::http::Method::GET | axum::http::Method::HEAD
-    ) {
-        if let Some(resp) = serve_public(&state, &path).await {
+    );
+    // nowaki.config routing. Dev module URLs (the app's own files, the runtime, virtual modules)
+    // are served ahead of it, at the root, where the pages reference them.
+    let route_path = match &state.front {
+        Some(front) if !dev_module_url(&state.core.root, &path, read) => {
+            match front.apply(req.method(), req.uri()) {
+                crate::front::Step::Respond(resp) => return resp,
+                crate::front::Step::Continue(route_path) => route_path,
+            }
+        }
+        _ => None,
+    };
+    let lookup = route_path.as_deref().unwrap_or(&path);
+    // public/ files are sent as they are (no CSS shim, no TS transform), ahead of routes.
+    if read {
+        if let Some(resp) = serve_public(&state, lookup).await {
             return resp;
         }
     }
@@ -572,16 +599,25 @@ async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Res
         let abs = state.core.root.join(path.trim_start_matches('/'));
         return transform_response(state, abs, Mode::Browser).await;
     }
-    let read = matches!(
-        *req.method(),
-        axum::http::Method::GET | axum::http::Method::HEAD
-    );
     if read && path != "/" {
         if let Some(candidate) = app_file(&state.core.root, &path) {
             return serve_file(state, candidate).await;
         }
     }
-    proxy_to_sidecar(state, req).await
+    proxy_to_sidecar(state, req, route_path).await
+}
+
+/// URLs `nowaki dev` serves itself, which config rules never apply to: framework endpoints, the
+/// runtime and dependencies, virtual modules, islands, and any other file of the app.
+fn dev_module_url(root: &Path, path: &str, read: bool) -> bool {
+    path.starts_with("/__nowaki/")
+        || path.starts_with("/node_modules/")
+        || path.starts_with("/islands/")
+        || path
+            .strip_prefix('/')
+            .and_then(|p| p.strip_prefix(VIRTUAL_DIR))
+            .is_some_and(|p| p.starts_with('/'))
+        || (read && path != "/" && app_file(root, path).is_some())
 }
 
 /// The app file a request path names, decoded (the renderer writes island and script URLs
@@ -714,7 +750,11 @@ async fn transform_response(state: Arc<DevState>, abs: PathBuf, mode: Mode) -> R
     }
 }
 
-async fn proxy_to_sidecar(state: Arc<DevState>, req: Request) -> Response {
+async fn proxy_to_sidecar(
+    state: Arc<DevState>,
+    req: Request,
+    route_path: Option<String>,
+) -> Response {
     let started = Instant::now();
     let path_q = req
         .uri()
@@ -741,6 +781,10 @@ async fn proxy_to_sidecar(state: Arc<DevState>, req: Request) -> Response {
         )
         .body(body.to_vec());
     builder = crate::forward::apply(builder, &headers, crate::forward::trust_proxy());
+    // After forward::apply, which drops a client's own value of this header.
+    if let Some(r) = &route_path {
+        builder = builder.header(crate::front::ROUTE_PATH_HEADER, r);
+    }
 
     match builder.send().await {
         Ok(resp) => {

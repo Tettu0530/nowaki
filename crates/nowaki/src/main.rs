@@ -6,6 +6,7 @@ mod encoding;
 mod env_schema;
 mod fonts;
 mod forward;
+mod front;
 mod live;
 mod mcp;
 mod plugins;

@@ -160,6 +160,9 @@ grep -q '<body class="site styled-page"' examples/hello/dist/static/styled/index
 # public/ files at their own path in the static output, dotfiles left out
 grep -q 'User-agent' examples/hello/dist/static/robots.txt
 grep -q 'hello from public' "examples/hello/dist/static/media/hello world.txt"
+# nowaki.config redirects and rewrites become _redirects rules
+grep -qx '/old-docs/\* /:splat 308' examples/hello/dist/static/_redirects
+grep -qx '/p/:slug /blog/:slug 200' examples/hello/dist/static/_redirects
 test -f examples/hello/dist/static/.well-known/security.txt
 ! test -e examples/hello/dist/static/.hidden
 # cloudflare (edge) adapter: generates a bundled fetch-handler worker + wrangler config
@@ -201,3 +204,6 @@ curl -sf http://127.0.0.1:3320/api/hello | grep -q '"hello":"nowaki"'
 curl -sf http://127.0.0.1:3320/docs/intro | grep -q '<h2 id="why-content-collections"'   # content on vercel
 curl -sf http://127.0.0.1:3320/nav | grep -q 'href="/blog/hello"'
 kill $VERCEL_PID
+# nowaki.config redirects / rewrites / headers / basePath / trailingSlash on the node, cloudflare,
+# vercel and static adapters (a generated app; the servers listen on 3313 and 3314)
+node scripts/rules-e2e.mjs node cloudflare vercel static --port 3313
