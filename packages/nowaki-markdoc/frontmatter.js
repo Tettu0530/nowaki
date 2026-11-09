@@ -19,7 +19,10 @@ export function splitFrontmatter(src) {
     const line = end < 0 ? rest.slice(offset) : rest.slice(offset, end + 1);
     if (line === "") break;
     lines++;
-    if (line.replace(/[\r\n]+$/, "") === fence) {
+    // Strip one "\n" and one "\r" without a backtracking regex (a line of many "\r" stays linear).
+    let bare = line.endsWith("\n") ? line.slice(0, -1) : line;
+    if (bare.endsWith("\r")) bare = bare.slice(0, -1);
+    if (bare === fence) {
       return {
         format: fence === "---" ? "yaml" : "toml",
         raw: rest.slice(0, offset),

@@ -46,6 +46,9 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         std::thread::spawn(move || crate::site::config(&root))
     };
 
+    // env.ts is checked in Node while the sidecar and plugin host start.
+    let env_check = crate::env_schema::start(&root)?;
+
     let live_hub = crate::live::LiveHub::new();
     let errors = crate::mcp::ErrorLog::new(&root);
     let sidecar = sidecar::spawn(&root, port, live_hub.clone(), errors.clone()).await?;
@@ -57,7 +60,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
     }
     // env.ts: validated at startup (a change to it or to .env needs a restart); its public values
     // are what the browser modules inline.
-    crate::env_schema::check(&root, &mut core)?;
+    crate::env_schema::finish(env_check, &mut core)?;
 
     // An invalid config is reported (site-config.mjs printed why) and dev runs without it.
     let config = config

@@ -14,6 +14,7 @@ const PRERENDER_JOBS: usize = 8;
 pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     // Checked before building: the build writes dist/, and clearing `out` must never reach it.
     let clear_out = check_out(&root, &out)?;
+    let env_check = crate::env_schema::start(&root)?;
     let config = crate::site::config(&root)?;
     let _plugin_host = crate::plugins::start(&root)?;
     let mut core = NowakiCore::new(root.clone());
@@ -21,7 +22,7 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         core.set_plugins(host.bridge.clone());
     }
     // env.ts: validated before the build, which inlines its public values.
-    crate::env_schema::check(&root, &mut core)?;
+    crate::env_schema::finish(env_check, &mut core)?;
     let (report, client) = core.build_with_client(&root.join("dist"))?;
     println!(
         "[nowaki] build: client {} / server {} modules",

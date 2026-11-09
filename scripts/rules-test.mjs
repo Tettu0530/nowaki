@@ -109,7 +109,7 @@ await rejects({ basePath: "/a/[b]" }, /basePath/, "basePath with a param");
 await rejects({ basePath: "/__nowaki" }, /reserved/, "basePath under /__nowaki/");
 await rejects({ trailingSlash: true }, /trailingSlash/, "trailingSlash must be a policy name");
 await rejects({ redirects: {} }, /must be an array/, "redirects must be an array");
-await rejects({ redirects: [{ source: "/a", destination: "/b", destionation: "/c" }] }, /unknown key "destionation"/, "unknown keys are typos");
+await rejects({ redirects: [{ source: "/a", destination: "/b", target: "/c" }] }, /unknown key "target"/, "unknown keys are typos");
 await rejects({ redirects: [{ source: "/a", destination: "/b", statusCode: 200 }] }, /statusCode/, "statusCode must be a redirect status");
 await rejects({ redirects: [{ source: "/a", destination: "//evil.com" }] }, /destination/, "protocol-relative destination");
 await rejects({ redirects: [{ source: "/a", destination: "/\\evil.com" }] }, /destination/, "backslash destination");

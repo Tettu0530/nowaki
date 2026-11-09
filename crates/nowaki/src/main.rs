@@ -124,6 +124,8 @@ fn main() -> anyhow::Result<()> {
                     .block_on(prerender::run(root.clone(), out));
             }
             let dist = root.join("dist");
+            // env.ts is checked in Node alongside the config read and the plugin host start.
+            let env_check = env_schema::start(&root)?;
             // Before the build: an invalid config fails before anything is built.
             let config = site::config(&root)?;
             // Keep alive until the build finishes (drop kills the host).
@@ -133,7 +135,7 @@ fn main() -> anyhow::Result<()> {
                 core.set_plugins(host.bridge.clone());
             }
             // env.ts: validated before the build, which inlines its public values.
-            env_schema::check(&root, &mut core)?;
+            env_schema::finish(env_check, &mut core)?;
             let started = std::time::Instant::now();
             let (report, client) = core.build_with_client(&dist)?;
             let client_js_kb = ui::dir_js_kb(&report.out_dir);
