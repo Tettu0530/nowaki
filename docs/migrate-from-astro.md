@@ -16,8 +16,9 @@ The short version: pages and components become Preact TSX, `<script>` becomes
    npm install @nowaki-dev/runtime preact preact-render-to-string
    npm install -D nowaki
    ```
-2. Copy `tsconfig.json` and `nowaki-env.d.ts` from a fresh app (`npm create nowaki`). They teach
-   the type checker CSS, asset, `?image`, and `.mdx` imports.
+2. Copy `tsconfig.json`, `nowaki-env.d.ts`, and `nowaki-jsx.d.ts` from a fresh app
+   (`npm create nowaki`). They teach the type checker CSS, asset, `?image`, and `.mdx` imports,
+   `import.meta.env`, and the `client:*` directives.
 3. Scripts: `nowaki dev`, `nowaki build --adapter static` (without `--adapter`, the build
    targets the Node server), and `nowaki start` to preview a server build.
 4. Move `site` from `astro.config.mjs` to `nowaki.config.mjs`:
