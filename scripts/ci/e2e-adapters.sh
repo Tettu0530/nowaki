@@ -176,6 +176,11 @@ grep -q 'hello from public' "examples/hello/dist/static/media/hello world.txt"
 # nowaki.config redirects and rewrites become _redirects rules
 grep -qx '/old-docs/\* /:splat 308' examples/hello/dist/static/_redirects
 grep -qx '/p/:slug /blog/:slug 200' examples/hello/dist/static/_redirects
+# nowaki.config headers become extra rules in _headers (after security defaults)
+grep -q '/docs/\*' examples/hello/dist/static/_headers
+grep -qi 'x-hello-routing: config' examples/hello/dist/static/_headers
+grep -q '/api/\*' examples/hello/dist/static/_headers
+grep -qi 'cache-control: no-store' examples/hello/dist/static/_headers
 test -f examples/hello/dist/static/.well-known/security.txt
 ! test -e examples/hello/dist/static/.hidden
 # cloudflare (edge) adapter: generates a bundled fetch-handler worker + wrangler config

@@ -56,6 +56,9 @@ curl -s -I "$ASSET" | grep -qi '^content-type: text/javascript'
 test "$(curl -s -I "$ASSET" -o /dev/null -w '%{size_download}')" = 0
 test "$(curl -s -I -o /dev/null -w '%{http_code}' http://127.0.0.1:3300/raw.css)" = 200
 test "$(curl -s -I -o /dev/null -w '%{http_code}' http://127.0.0.1:3300/about)" = 200
+# nowaki.config headers on the Rust front (pages and API routes)
+curl -sI http://127.0.0.1:3300/docs/intro | tr -d '\r' | grep -qi '^x-hello-routing: config'
+curl -sI http://127.0.0.1:3300/api/hello | tr -d '\r' | grep -qi '^cache-control: no-store'
 curl -sf http://127.0.0.1:3300/ | grep -q '<code>a→b</code>'
 # CSS Modules: prod SSR must use the same scoped class names as dev (css_scope_id).
 PROD_BADGE=$(curl -sf http://127.0.0.1:3300/ | grep -oE 'badge_[0-9a-f]{8}' | head -1)
