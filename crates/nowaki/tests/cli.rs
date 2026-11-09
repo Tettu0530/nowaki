@@ -539,7 +539,11 @@ fn prerender_multi_page_app(extra_routes: usize) -> tempfile::TempDir {
 /// Walk `dir` and collect relative path → file contents (directories only as path keys for files).
 fn dir_snapshot(dir: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
     let mut out = std::collections::BTreeMap::new();
-    fn walk(base: &std::path::Path, root: &std::path::Path, out: &mut std::collections::BTreeMap<String, Vec<u8>>) {
+    fn walk(
+        base: &std::path::Path,
+        root: &std::path::Path,
+        out: &mut std::collections::BTreeMap<String, Vec<u8>>,
+    ) {
         let read_dir = match std::fs::read_dir(base) {
             Ok(d) => d,
             Err(_) => return,
@@ -608,27 +612,17 @@ fn prerender_worker_pool_matches_single_worker_output() {
         .unwrap();
     let pool_stdout = String::from_utf8_lossy(&pool.stdout);
     let pool_stderr = String::from_utf8_lossy(&pool.stderr);
-    assert!(
-        pool.status.success(),
-        "{pool_stderr}\n{pool_stdout}"
-    );
+    assert!(pool.status.success(), "{pool_stderr}\n{pool_stdout}");
     assert!(
         pool_stdout.contains("2 Node render workers"),
         "expected a 2-worker pool:\n{pool_stdout}"
     );
-    assert!(
-        pool_stdout.contains("prerender done"),
-        "{pool_stdout}"
-    );
+    assert!(pool_stdout.contains("prerender done"), "{pool_stdout}");
 
     let a = dir_snapshot(&single_out);
     let b = dir_snapshot(&pool_out);
     assert_eq!(a.len(), b.len(), "file count differs");
     for (path, bytes) in &a {
-        assert_eq!(
-            b.get(path),
-            Some(bytes),
-            "mismatch at {path}"
-        );
+        assert_eq!(b.get(path), Some(bytes), "mismatch at {path}");
     }
 }
