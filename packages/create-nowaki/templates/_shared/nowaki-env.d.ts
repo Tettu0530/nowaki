@@ -1,5 +1,8 @@
 // Nowaki ambient types, so editors understand CSS / asset / virtual-module imports.
 // No need to edit (it only teaches the type checker the framework's import conventions).
+// Keep this file free of top-level import / export. Either one makes it a module, and then the
+// `declare module "*..."` wildcards below stop being ambient declarations. The preact JSX
+// additions (client:* directives) need a module, so they are in nowaki-jsx.d.ts.
 
 declare module "*.module.css" {
   const classes: Record<string, string>;
@@ -58,35 +61,15 @@ declare module "*.mdoc" {
 // Plugin virtual modules (resolveId/load in nowaki.config). Any export is allowed.
 declare module "virtual:*";
 
-// Extends preact's JSX.IntrinsicAttributes so client:* directives can go on any component.
-// This import makes the file a module, so the global types below are exposed via declare global.
-import "preact";
-declare module "preact" {
-  namespace JSX {
-    interface IntrinsicAttributes {
-      /** Hydrate on page load (default). */
-      "client:load"?: boolean;
-      /** Hydrate when idle, via requestIdleCallback. */
-      "client:idle"?: boolean;
-      /** Hydrate once visible, via IntersectionObserver. */
-      "client:visible"?: boolean;
-      /** Hydrate when the media query matches. e.g. client:media="(min-width: 768px)" */
-      "client:media"?: string;
-      /** Skip SSR and render on the client only (for islands using browser-only APIs). */
-      "client:only"?: boolean;
-    }
-  }
+// import.meta.env (PUBLIC_*, MODE and BASE_URL are inlined at build time). These are global
+// because this file is not a module. `nowaki typegen` adds the types of env.ts's public values
+// in .nowaki/types.d.ts.
+interface ImportMetaEnv {
+  readonly MODE: string;
+  /** nowaki.config `basePath` with a trailing slash ("/app/"), or "/". */
+  readonly BASE_URL: string;
+  readonly [key: `PUBLIC_${string}`]: string | undefined;
 }
-
-declare global {
-  // import.meta.env (PUBLIC_*, MODE and BASE_URL are inlined at build time).
-  interface ImportMetaEnv {
-    readonly MODE: string;
-    /** nowaki.config `basePath` with a trailing slash ("/app/"), or "/". */
-    readonly BASE_URL: string;
-    readonly [key: `PUBLIC_${string}`]: string | undefined;
-  }
-  interface ImportMeta {
-    readonly env: ImportMetaEnv;
-  }
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
 }

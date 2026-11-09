@@ -216,6 +216,20 @@ update `@nowaki-dev/runtime` to 0.16.3.
   read. On the comparison app's post page (Apple M2, `oha -c 50`), runtime
   0.15.3 served 9,993-10,208 req/s, 0.16.2 served 8,154-8,438, and 0.16.3 serves
   10,136-11,970.
+- **Asset and `<Image>` types in scaffolded apps**. The template's
+  `nowaki-env.d.ts` imported `preact`, which made it a module. Its
+  `declare module "*?image"` and other asset wildcards were then invalid
+  augmentations, so `import hero from "./hero.jpg?image"` (and `.png`,
+  `.module.css`, ...) failed with TS2307. The file is now ambient only (asset
+  wildcards, `ImportMetaEnv`, `ImportMeta`). The preact JSX additions for
+  `client:*` moved to a new `nowaki-jsx.d.ts`, and `tsconfig.json` includes
+  both. Existing apps can copy both files and the `include` entry from a new
+  app. `@nowaki-dev/runtime/image` typed `ImageProps` with
+  `JSX.HTMLAttributes`, which preact 11 doesn't export, so `<Image>` lost its
+  `<img>` attribute types under `skipLibCheck: false`. It now uses
+  `JSX.IntrinsicElements["img"]`, which works with preact 10 and 11. The
+  scaffold e2e type-checks a probe file with `tsc --noEmit` and
+  `skipLibCheck: false`.
 
 ## [0.17.2] — 2026-11-08 · patch
 
