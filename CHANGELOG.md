@@ -43,6 +43,16 @@ milestone's worth of work; the codename is noted per entry.
   types `env` and `import.meta.env` from the schemas. Public names must start
   with `PUBLIC_` and server names must not. New core API:
   `NowakiCore::set_public_env`.
+### Changed
+- **The CI performance regression gate also compares each PR with the latest
+  release**, failing beyond −10% req/s or +20% TTFB against it (the existing
+  limits against base stay the same). Every metric (build, dev startup, req/s and
+  TTFB) now runs on one fixed app, `benchmarks/ci-perf-app` from the PR, on every
+  side, instead of each side's own `examples/hello`, which grows with e2e
+  coverage. Besides a plain `/about`, it measures `/posts/[slug]`, with nested
+  layouts, a loader, page `meta` and layout/route CSS. Together these would have
+  caught the ~17% throughput regression that runtime 0.16.0 shipped in small
+  steps. The release's binary is cached per tag.
 
 ## [0.17.3] — 2026-11-09 · patch
 

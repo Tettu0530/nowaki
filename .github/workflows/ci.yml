@@ -268,7 +268,8 @@ jobs:
 
   perf:
     name: Performance (regression gate)
-    # Pull requests only: head is measured against its base branch in the same job.
+    # Pull requests only: head is measured against its base branch and the latest release tag
+    # reachable from base, in the same job.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -283,7 +284,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if git diff --name-only "$BASE_SHA" HEAD \
-            | grep -qE '^(crates/|packages/nowaki-runtime/|Cargo\.lock$|benchmarks/ci-perf\.mjs$)'; then
+            | grep -qE '^(crates/|packages/nowaki-runtime/|Cargo\.lock$|benchmarks/ci-perf\.mjs$|benchmarks/ci-perf-app/)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "No server, build, or runtime change: skipped."
@@ -295,6 +296,21 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
           path: .perf-base
       - if: steps.scope.outputs.run == 'true'
+        name: Check out the latest release
+        id: release
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          TAG=$(git describe --tags --abbrev=0 --match 'v*' "$BASE_SHA")
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [ "$(git rev-list -n 1 "$TAG")" = "$BASE_SHA" ]; then
+            echo "Base is $TAG: measured once."
+            echo "dir=.perf-base" >> "$GITHUB_OUTPUT"
+          else
+            git worktree add --detach .perf-release "$TAG"
+            echo "dir=.perf-release" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.scope.outputs.run == 'true'
         uses: ./.github/actions/setup
       - if: steps.scope.outputs.run == 'true'
         name: Install oha (pinned, checksum verified)
@@ -302,16 +318,37 @@ jobs:
           curl -sSfL -o /usr/local/bin/oha https://github.com/hatoo/oha/releases/download/v1.16.0/oha-linux-amd64
           echo "620bb9e16fb53eabc9a3fc45f88bdb41fefa3fee5c05e75892011ce320391716  /usr/local/bin/oha" | sha256sum -c -
           chmod +x /usr/local/bin/oha
+      - if: steps.scope.outputs.run == 'true' && steps.release.outputs.dir == '.perf-release'
+        name: Release binary cache key
+        id: release-key
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: echo "key=perf-nowaki-$TAG-$RUNNER_OS-$(rustc -V | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
+      # The same key as perf-release-cache below, which fills it from main (PR caches aren't shared).
+      - if: steps.scope.outputs.run == 'true' && steps.release.outputs.dir == '.perf-release'
+        id: release-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .perf-release/target/release/nowaki
+          key: ${{ steps.release-key.outputs.key }}
       - if: steps.scope.outputs.run == 'true'
         # Separate target dirs: base and head have the same crate versions, and in a shared dir Cargo
         # took head's nowaki for already built (base's binary measured as head; it finished in 0.2 s).
-        name: Build base and head (release, separate target dirs)
+        name: Build base, head and release (release profile, separate target dirs)
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          RELEASE_DIR: ${{ steps.release.outputs.dir }}
+          RELEASE_HIT: ${{ steps.release-cache.outputs.cache-hit }}
         run: |
           (cd .perf-base && pnpm install --frozen-lockfile)
           cargo build --release -p nowaki --locked --manifest-path .perf-base/Cargo.toml --target-dir .perf-base/target
           cargo build --release -p nowaki --locked
+          if [ "$RELEASE_DIR" = .perf-release ]; then
+            (cd .perf-release && pnpm install --frozen-lockfile)
+            if [ "$RELEASE_HIT" != true ]; then
+              cargo build --release -p nowaki --locked --manifest-path .perf-release/Cargo.toml --target-dir .perf-release/target
+            fi
+          fi
           # Guard: the two binaries must differ whenever the Rust code does.
           if ! git diff --quiet "$BASE_SHA" HEAD -- crates Cargo.lock; then
             if cmp -s target/release/nowaki .perf-base/target/release/nowaki; then
@@ -319,8 +356,44 @@ jobs:
             fi
           fi
       - if: steps.scope.outputs.run == 'true'
-        name: Measure head against base
-        run: node benchmarks/ci-perf.mjs --base .perf-base --head . --rounds 3
+        name: Measure head against base and the latest release
+        env:
+          RELEASE_DIR: ${{ steps.release.outputs.dir }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: node benchmarks/ci-perf.mjs --base .perf-base --head . --release "$RELEASE_DIR" --release-label "$TAG" --rounds 3
+
+  perf-release-cache:
+    name: Performance (release binary cache)
+    # Builds the latest release's binary on main, where the cache is visible to every PR's perf job.
+    if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check out the latest release
+        id: release
+        run: |
+          TAG=$(git describe --tags --abbrev=0 --match 'v*' HEAD)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          git worktree add --detach .perf-release "$TAG"
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - name: Release binary cache key
+        id: release-key
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: echo "key=perf-nowaki-$TAG-$RUNNER_OS-$(rustc -V | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
+      - id: release-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .perf-release/target/release/nowaki
+          key: ${{ steps.release-key.outputs.key }}
+      - if: steps.release-cache.outputs.cache-hit != 'true'
+        run: cargo build --release -p nowaki --locked --manifest-path .perf-release/Cargo.toml --target-dir .perf-release/target
 
   npm-cli:
     name: npm CLI wrapper (smoke)
@@ -411,7 +484,7 @@ jobs:
   ci-ok:
     name: CI OK
     if: always()
-    needs: [lint, test, msrv, semver, security, e2e, browser, jetstream-load, scaffold, runtimes, bench-regression, perf, npm-cli, docs, workflows, pr-size]
+    needs: [lint, test, msrv, semver, security, e2e, browser, jetstream-load, scaffold, runtimes, bench-regression, perf, perf-release-cache, npm-cli, docs, workflows, pr-size]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

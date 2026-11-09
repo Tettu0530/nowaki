@@ -1,0 +1,4 @@
+:root { --fg: #1d232b; --bg: #fff; --accent: #2a7ab0; }
+body { margin: 0; font-family: system-ui, sans-serif; color: var(--fg); background: var(--bg); }
+header nav { display: flex; gap: 1rem; padding: 1rem; border-bottom: 1px solid #ddd; }
+main { max-width: 42rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }

@@ -1,0 +1,5 @@
+{
+  "name": "ci-perf-app",
+  "private": true,
+  "type": "module"
+}
