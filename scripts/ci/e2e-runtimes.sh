@@ -8,6 +8,8 @@ cd "$(dirname "$0")/../.."
 target=$1
 APP=examples/hello
 port=3500
+# ctx.session (routes/api/session.ts) needs a secret in production.
+export NOWAKI_SESSION_SECRET="${NOWAKI_SESSION_SECRET:-e2e-session-secret-0123456789abcdef}"
 
 case "$target" in
   bun)
@@ -20,7 +22,7 @@ case "$target" in
     ;;
   cloudflare)
     ./target/debug/nowaki build $APP --adapter cloudflare
-    (cd $APP/dist/worker && npx --yes wrangler@4 dev --port $port --ip 127.0.0.1 --show-interactive-dev-session=false) &
+    (cd $APP/dist/worker && npx --yes wrangler@4 dev --var "NOWAKI_SESSION_SECRET:$NOWAKI_SESSION_SECRET" --port $port --ip 127.0.0.1 --show-interactive-dev-session=false) &
     ;;
   *)
     echo "unknown runtime: $target" >&2
@@ -44,4 +46,7 @@ curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-live: 1' \
   $B/__nowaki/live-event | grep -qE 'live: (<!-- -->)?1'
 test "$(curl -s -o /dev/null -w '%{http_code}' $B/nope)" = "404"
 curl -sf -XPOST -H 'content-type: application/json' -d '{"a":1}' $B/api/echo | grep -q '"received":{"a":1}'
+# sessions (WebCrypto on every runtime): sign in, then the cookie reads back
+SESSION_COOKIE=$(curl -s -D - -o /dev/null -XPOST -H "origin: $B" -d 'op=login&user=rt' $B/api/session | tr -d '\r' | awk 'tolower($1)=="set-cookie:" {print $2}' | cut -d';' -f1)
+curl -sf -H "cookie: $SESSION_COOKIE" $B/api/session | grep -q '"user":"rt"'
 echo "runtime e2e ($target): OK"

@@ -8,6 +8,8 @@ cd "$(dirname "$0")/../.."
 # seen, trace every command so the log shows where one stopped.
 curl() { command curl --max-time 30 "$@"; }
 if [ "${RUNNER_OS:-}" = Windows ]; then set -x; fi
+# ctx.session (routes/api/session.ts) needs a secret in production.
+export NOWAKI_SESSION_SECRET="${NOWAKI_SESSION_SECRET:-e2e-session-secret-0123456789abcdef}"
 
 # stdout stays in the log; stderr is captured for the unvalidated-server-function warning.
 { BUILD_ERR=$(./target/debug/nowaki build examples/hello 2>&1 1>&3 3>&-); } 3>&1

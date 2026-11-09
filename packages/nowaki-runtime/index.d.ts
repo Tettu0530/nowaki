@@ -20,6 +20,29 @@ export interface ResponseInit {
   headers?: Record<string, string>;
 }
 
+/**
+ * `ctx.session` (and `getContext().session`): per-visitor values kept across requests in an
+ * encrypted cookie (or, with a `store` in session.ts, server-side behind a signed id). Values must
+ * be JSON. Created on first access; reading it makes an ISR page per-user. Needs
+ * `NOWAKI_SESSION_SECRET` in production (dev generates one into `.nowaki/session-secret`).
+ */
+export interface Session {
+  /**
+   * True where the session can't be changed: on a cross-site request that changes state (it is
+   * also empty there, CSRF), and in live island renders. Writes throw.
+   */
+  readonly readOnly: boolean;
+  get<T = unknown>(key: string): Promise<T | undefined>;
+  has(key: string): Promise<boolean>;
+  /** Sets a JSON value (`undefined` deletes). Throws when the cookie would pass 4 KB. */
+  set(key: string, value: unknown): Promise<void>;
+  delete(key: string): Promise<void>;
+  /** A fresh cookie (and, with a store, a new id), keeping the values. Call it on sign-in. */
+  regenerate(): Promise<void>;
+  /** Clears the values and the cookie. Call it on sign-out. */
+  destroy(): Promise<void>;
+}
+
 /** Result of ctx.json / html / text / redirect (returning it finalizes the response). */
 export interface NowakiResult {
   readonly __nowakiResult: true;
@@ -46,6 +69,14 @@ export interface LoaderContext {
   readonly headers: Record<string, string>;
   /** Parsed request cookies. */
   readonly cookies: Record<string, string>;
+  /**
+   * The visitor's session (see {@link Session}). Throws on first access in production when
+   * `NOWAKI_SESSION_SECRET` is missing, and while prerendering.
+   * @example
+   * await ctx.session.regenerate(); // on sign-in
+   * await ctx.session.set("userId", user.id);
+   */
+  readonly session: Session;
   /** Node's IncomingMessage (undefined on Edge). */
   readonly req?: unknown;
   /** Arbitrary data middleware passes to loaders and pages. */

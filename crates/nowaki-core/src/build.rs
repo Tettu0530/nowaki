@@ -338,6 +338,14 @@ pub fn build_server(
     if let Some(env_file) = crate::env::env_file(&core.root) {
         files.push(env_file);
     }
+    // session.ts at the app root: the session options the server loads (dist/server/session.js).
+    if let Some(session_file) = ["session.ts", "session.mts", "session.js", "session.mjs"]
+        .iter()
+        .map(|f| core.root.join(f))
+        .find(|p| p.is_file())
+    {
+        files.push(session_file);
+    }
     // Plus every app module those import from anywhere else in the app (`data/`, `sections/`,
     // `utils/`, …): the conventional folders are entry points, not the whole server graph.
     // One walk over the whole graph: every module is parsed once, however many entries reach it.

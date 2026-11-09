@@ -207,6 +207,15 @@ code locations and CI coverage.
   `app.mjs` `createApp`, `web.mjs` (first request), dev `sidecar.mjs` (first request). Client import
   guard: `build.rs` `emit` and the dev browser transform (`env::is_server_env_module`). Types:
   `typegen.rs` `render_env`. Tests: `scripts/env-schema-test.mjs`.
+- **Sessions (`ctx.session`)** — `server/session.mjs` (`defineSession`, `configureSessions`,
+  `createSession`: WebCrypto only, keys from `NOWAKI_SESSION_SECRET` via HKDF). `context.mjs`
+  creates the session on first access (`__sessionMode`: `"crossSite"` / `"live"` make it
+  read-only); it sets `ctx.__commit` when it has a cookie to write, which `handler.mjs`
+  `commitAndFinalize` awaits (a failure renders the 500 page). `handler.mjs` `routeRequest` marks
+  cross-site writes before middleware. Config: app-root `session.ts`, compiled by `build.rs`
+  `build_server` to `dist/server/session.js`; loaded by `app.mjs` `createApp`, `web.mjs` (the
+  worker imports it, `edge-build.mjs`), and dev `sidecar.mjs` (`ensureSession`, plus the
+  generated `.nowaki/session-secret`). Tests: `scripts/session-test.mjs`.
 - **SEO** — `packages/nowaki-runtime/server/seo.mjs` (site URL, meta tags, sitemap, robots);
   `handler.mjs` `withSeo` (layout + route meta) and the generated `/sitemap.xml` / `/robots.txt`;
   page URLs from `server/isr-urls.mjs` `pageUrls`. The site comes from `crates/nowaki/src/site.rs`

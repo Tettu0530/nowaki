@@ -141,6 +141,8 @@ jobs:
         run: node scripts/loader-hooks-test.mjs
       - name: Request handler (layouts, routePath, commit hook)
         run: node scripts/handler-test.mjs
+      - name: Sessions (encryption, tampering, expiry, key rotation, store mode, CSRF read-only)
+        run: node scripts/session-test.mjs
       - name: Live session hub (join/event, queue, timeout, cap, presence)
         run: node scripts/live-hub-test.mjs
       - name: Markdoc plugin (compile, validation errors, escaping, frontmatter)

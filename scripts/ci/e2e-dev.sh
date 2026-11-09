@@ -279,6 +279,8 @@ curl -sf "$B/slow?ms=0" | grep -q 'data-testid="slow"'
 # denial without leaking; it is removed right after.
 printf 'DATABASE_URL=postgres://u:supersecretpw@db/prod\nSESSION_SECRET=ci-do-not-leak\n' > examples/hello/.env
 node scripts/security-e2e.mjs dev "$B" "$(pwd)/examples/hello"
+# without NOWAKI_SESSION_SECRET, dev generated one on the first ctx.session (security-e2e signed in)
+if [ -z "${NOWAKI_SESSION_SECRET:-}" ]; then test -s examples/hello/.nowaki/session-secret; fi
 rm -f examples/hello/.env
 
 # dev MCP endpoint (/__nowaki/mcp): tools + loopback/Host/Origin gate

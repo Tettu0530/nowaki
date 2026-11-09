@@ -8,6 +8,8 @@ cd "$(dirname "$0")/../.."
 # seen, trace every command so the log shows where one stopped.
 curl() { command curl --max-time 30 "$@"; }
 if [ "${RUNNER_OS:-}" = Windows ]; then set -x; fi
+# ctx.session (routes/api/session.ts) needs a secret in production.
+export NOWAKI_SESSION_SECRET="${NOWAKI_SESSION_SECRET:-e2e-session-secret-0123456789abcdef}"
 
 # node adapter: build emits a self-contained server entry runnable WITHOUT the nowaki binary
 ./target/debug/nowaki build examples/hello --adapter node
@@ -41,6 +43,12 @@ grep -q "Couldn't display this page" /tmp/nowaki-early-fail.html
 ! grep -q 'the data source is down' /tmp/nowaki-early-fail.html   # no message in production
 curl -s 'http://127.0.0.1:3310/stream-early?go=1' | grep -q 'location.replace("/about")'
 curl -sf http://127.0.0.1:3310/api/hello | grep -q '"hello":"nowaki"'
+# sessions on the node adapter: session.ts compiled to dist/server/session.js, the cookie round-trips
+test -f examples/hello/dist/server/session.js
+SESSION_COOKIE=$(curl -s -D - -o /dev/null -XPOST -H 'origin: http://127.0.0.1:3310' -d 'op=login&user=node' http://127.0.0.1:3310/api/session | tr -d '\r' | awk 'tolower($1)=="set-cookie:" {print $2}' | cut -d';' -f1)
+echo "$SESSION_COOKIE" | grep -q '^hello_session=v1\.'
+curl -sf -H "cookie: $SESSION_COOKIE" http://127.0.0.1:3310/api/session | grep -q '"user":"node"'
+curl -sf -XPOST -H 'origin: http://evil.test' -H "cookie: $SESSION_COOKIE" -d 'op=inc' http://127.0.0.1:3310/api/session | grep -q '"user":null,"n":0,"readOnly":true'
 # typed env on the node adapter: env.ts validated at startup, read by the loader
 curl -sf http://127.0.0.1:3310/env | grep -q 'token length 15'
 curl -sf http://127.0.0.1:3310/env | grep -q 'id="env-badge">Hello from env.ts x4<'
