@@ -311,6 +311,8 @@ bash scripts/ci/assert-no-orphans.sh $SERVER_PID
 node scripts/rules-e2e.mjs dev --port "$((PORT + 8))"
 # nowaki.config i18n in dev (generated apps on PORT+10, PORT+11 and PORT+12)
 node scripts/i18n-e2e.mjs dev --port "$((PORT + 10))"
+# examples/gallery (the v0.18 exit-criteria app) in dev, on PORT+13
+node scripts/gallery-e2e.mjs dev --port "$((PORT + 13))"
 
 # SIGKILL: the dev sidecar and plugin host exit when their stdin pipe closes (exit-with-parent.mjs).
 ./target/debug/nowaki dev examples/hello --port "$((PORT + 7))" &

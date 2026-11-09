@@ -11,6 +11,14 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **`examples/gallery`, the v0.18 exit-criteria app.** A photo gallery under `basePath: "/gallery"`
+  in English and Japanese (with `Accept-Language` detection and a `<Link locale>` switcher). A photo
+  opens in a modal on client navigation (`@modal/(.)photo/[id].tsx`) and as a full page on reload.
+  Sign-in uses `ctx.session` behind an `(account)` route group's middleware, and `env.ts` makes
+  `nowaki build` / `nowaki start` refuse to run without `GALLERY_ADMIN_PASSWORD`. It also has config
+  `redirects` / `headers` and `?image` photos. `scripts/gallery-e2e.mjs` checks it on `nowaki start`,
+  `nowaki dev`, the node adapter, the Cloudflare worker, and static output (what a static host can
+  serve). `scripts/gallery-browser-test.mjs` checks it in headless Chrome. Both run in CI.
 - **Locale detection on `/` (`i18n.detect: true`, opt-in).** A GET or HEAD of the site's root
   (`/`, or `basePath`) picks a locale from `Accept-Language` (q-values; an exact tag, then the
   range's primary subtag, so `ja-JP` finds `ja`, then a bare range such as `pt` finding `pt-BR`;
