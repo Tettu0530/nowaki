@@ -279,8 +279,9 @@ code locations and CI coverage.
   shared rules engines (the rules fixture's `negotiate` cases), run before the ISR lookup by
   `front.rs` `headers_layer` (installed only when `has_response_layer`) and `front.mjs`
   `frontLocale` (`app.mjs` `handle`, the worker `fetch`); `Vary: Accept-Language, Cookie` on every
-  root response. The `nowaki_locale` cookie comes from `navigation.js` `setLocale` and the
-  `<Link locale>` click listener in `client/islands.js`; static output only warns
+  root response. The `nowaki_locale` cookie comes from `navigation.js` `setLocale`, also called by
+  `<Link locale>`'s click handler (inside islands; nothing in `client/islands.js`, so apps without
+  i18n ship no extra bytes); static output only warns
   (`prerender.rs` `static_host_rules`).
 - **Parallel routes (`routes/…/@name/`)** — JS: `server/router.mjs` `scanRoutes` collects
   `slots: [{ ownerDir, name, routes, default, intercepts }]` (slot files are never in `routes`;

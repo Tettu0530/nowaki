@@ -146,7 +146,6 @@ async function detectChecks(label, req, { isr = false } = {}) {
   check(t("q=0 is not acceptable"), r.status === 200, `${r.status} ${r.headers.location}`);
   r = await req("/about", { headers: ja });
   check(t("only / is detected"), r.status === 200 && r.body.includes("ABOUT locale:en") && !/accept-language/i.test(r.headers.vary ?? ""), `${r.status} ${r.headers.vary}`);
-  check(t("<Link locale> marks the link for the cookie"), r.body.includes('data-nowaki-locale="ja"'), r.body.slice(0, 600));
   r = await req("/ja", { headers: { "accept-language": "en" } });
   check(t("/ja is never redirected"), r.status === 200 && r.body.includes("HOME ja"), `${r.status}`);
   r = await req("/", { method: "POST", headers: { ...ja, "content-type": "text/plain" } });

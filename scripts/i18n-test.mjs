@@ -103,7 +103,7 @@ const req = (e, path, extra = {}) => {
       body.includes('<link rel="alternate" hreflang="x-default" href="https://example.com/about" />'),
     body,
   );
-  check("<Link locale> links to the localized page", body.includes('<a href="/ja/about" hreflang="ja" data-nowaki-locale="ja">ja</a>'), body);
+  check("<Link locale> links to the localized page", body.includes('<a href="/ja/about" hreflang="ja">ja</a>'), body);
   check("middleware sees ctx.locale", seen.includes("mw ja"), seen.join(","));
 }
 {
@@ -288,10 +288,10 @@ const req = (e, path, extra = {}) => {
   globalThis.document = { documentElement: { getAttribute: (n) => attrs[n] ?? null } };
   check("client: getLocale() reads <html data-nowaki-i18n>", getLocale() === "ja");
   check("client: localePath", localePath("/about") === "/ja/about" && localePath("/ja/about", "en") === "/about");
-  check("client: <Link locale>", renderToString(h(Link, { href: "/about", locale: "en" }, "x")) === '<a href="/about" hreflang="en" data-nowaki-locale="en">x</a>');
+  check("client: <Link locale>", renderToString(h(Link, { href: "/about", locale: "en" }, "x")) === '<a href="/about" hreflang="en">x</a>');
   delete globalThis.document;
   const jar = [];
-  globalThis.document = { set cookie(v) { jar.push(v); } };
+  globalThis.document = { documentElement: { getAttribute: () => null }, set cookie(v) { jar.push(v); } };
   globalThis.location = { protocol: "https:" };
   globalThis.__nowakiBase = "/app";
   setLocale("ja");
@@ -300,6 +300,16 @@ const req = (e, path, extra = {}) => {
   globalThis.location = { protocol: "http:" };
   setLocale("pt-BR");
   check("client: setLocale at the root over http", jar[1] === "nowaki_locale=pt-BR; Path=/; Max-Age=31536000; SameSite=Lax", jar[1]);
+  let own = 0;
+  const link = Link({ href: "/", locale: "ja", onClick: () => own++ });
+  const ev = { defaultPrevented: false };
+  link.props.onClick(ev);
+  check(
+    "client: a click on <Link locale> sets the cookie, runs the own onClick, leaves the click to the router",
+    jar[2]?.startsWith("nowaki_locale=ja; Path=/;") && own === 1 && !ev.defaultPrevented,
+    jar[2],
+  );
+  jar.length = 2;
   delete globalThis.document;
   delete globalThis.location;
   setLocale("ja");

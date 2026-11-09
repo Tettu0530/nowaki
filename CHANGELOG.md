@@ -19,7 +19,8 @@ milestone's worth of work; the codename is noted per entry.
   `trailingSlash`); the default locale stays on `/` (unless `prefixDefaultLocale`). A
   `nowaki_locale` cookie naming a configured locale wins over the header, so a visitor's choice
   sticks: `setLocale(locale)` (from `@nowaki-dev/runtime` or `/navigation`) sets it, and so does
-  a click on `<Link locale>` on a page with islands. Detection runs at every front (`nowaki
+  a click on a `<Link locale>` used inside an island (a page without islands ships no JS, so a
+  language switcher belongs in one). Detection runs at every front (`nowaki
   start`, `nowaki dev`, the node / bun / deno / vercel adapters, the Cloudflare worker) after
   config redirects and before the ISR cache, so a cached `/` only ever answers visitors who stay
   on it; every response to `/` carries `Vary: Accept-Language, Cookie`, and the redirect is

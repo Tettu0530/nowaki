@@ -47,8 +47,8 @@ export interface LinkProps {
   /** `false` keeps `href` as written under nowaki.config `basePath` (default: the base is added). */
   basePath?: boolean;
   /**
-   * i18n: links to `href` in this locale (`localePath(href, locale)`), with `hreflang` set. On a
-   * page with islands, a click also remembers the choice for locale detection (`setLocale`).
+   * i18n: links to `href` in this locale (`localePath(href, locale)`), with `hreflang` set. Used
+   * inside an island, a click also remembers the choice for locale detection (`setLocale`).
    */
   locale?: string;
   children?: unknown;

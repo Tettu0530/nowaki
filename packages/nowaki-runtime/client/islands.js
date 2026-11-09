@@ -15,22 +15,6 @@ if (typeof document !== "undefined" && !window.__nowakiNonce) {
   window.__nowakiNonce = document.querySelector("script[nonce]")?.nonce || undefined;
 }
 
-// i18n: a click on a <Link locale> remembers the choice for locale detection on the root (the
-// nowaki_locale cookie, as navigation.js setLocale). Capture phase: set before the router fetches.
-if (typeof document !== "undefined" && document.documentElement.hasAttribute("data-nowaki-i18n")) {
-  document.addEventListener(
-    "click",
-    (e) => {
-      const l = e.target.closest?.("a[data-nowaki-locale]")?.getAttribute("data-nowaki-locale");
-      if (l) {
-        const secure = location.protocol === "https:" ? "; Secure" : "";
-        document.cookie = `nowaki_locale=${encodeURIComponent(l)}; Path=${window.__nowakiBase || "/"}; Max-Age=31536000; SameSite=Lax${secure}`;
-      }
-    },
-    true,
-  );
-}
-
 export function hydrateIslands(root = document) {
   for (const el of root.querySelectorAll("nowaki-island")) {
     if (el.__nowakiHydrated) continue; // prevent double hydration (on SPA navigation)

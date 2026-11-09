@@ -340,7 +340,7 @@ export function localePath(path: string, locale?: string): string;
  * Remembers `locale` as the visitor's choice when nowaki.config has `i18n.detect`: sets the
  * `nowaki_locale` cookie (Path = basePath, one year, SameSite=Lax), which the site's root follows
  * instead of `Accept-Language`. Call it from an island (a language switcher) before navigating;
- * `<Link locale>` does it on click on any page with islands. Does nothing on the server.
+ * a `<Link locale>` used inside an island does it on click. Does nothing on the server.
  */
 export function setLocale(locale: string): void;
 
