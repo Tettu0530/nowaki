@@ -44,6 +44,9 @@ milestone's worth of work; the codename is noted per entry.
   with `PUBLIC_` and server names must not. New core API:
   `NowakiCore::set_public_env`.
 ### Changed
+- **`nowaki prerender`:** copies `dist/client` into `out/_nowaki` with hard links
+  when the output tree is on the same filesystem (copies on cross-device
+  failure).
 - **The CI performance regression gate also compares each PR with the latest
   release**, failing beyond −10% req/s or +20% TTFB against it (the existing
   limits against base stay the same). Every metric (build, dev startup, req/s and
