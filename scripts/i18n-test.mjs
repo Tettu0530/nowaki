@@ -169,6 +169,25 @@ const req = (e, path, extra = {}) => {
   check("basePath: alternates carry it", body.includes('hreflang="ja" href="https://example.com/app/ja/about"') && body.includes('hreflang="en" href="https://example.com/app/about"'), body);
 }
 {
+  // basePath + trailingSlash together: the default-locale redirect lands on the canonical URL in
+  // one hop (the front has already moved the request to the policy's form).
+  const always = makeEnv({ basePath: "/app", trailingSlash: "always", ...I18N }, { trailingSlash: "always" });
+  let res = await req(always, "/app/en/", { routePath: "/en/" });
+  check("base + always: /app/en/ → /app/", res.status === 308 && res.headers.location === "/app/", JSON.stringify(res));
+  res = await req(always, "/app/en/about/?q=1", { routePath: "/en/about/" });
+  check("base + always: /app/en/about/ → /app/about/", res.status === 308 && res.headers.location === "/app/about/?q=1", JSON.stringify(res));
+  const body = await text(await req(always, "/app/ja/about/", { routePath: "/ja/about/" }));
+  check("base + always: alternates with the slash", body.includes('hreflang="en" href="https://example.com/app/about/"') && body.includes('hreflang="ja" href="https://example.com/app/ja/about/"'), body);
+  const home = await text(await req(always, "/app/", { routePath: "/" }));
+  check("base + always: the home page /app/ gets alternates", home.includes('hreflang="ja" href="https://example.com/app/ja/"') && home.includes('hreflang="x-default" href="https://example.com/app/"'), home);
+  const prefixedAlways = makeEnv({ basePath: "/app", trailingSlash: "always", i18n: { locales: ["en", "ja"], defaultLocale: "en", prefixDefaultLocale: true } });
+  res = await req(prefixedAlways, "/app/", { routePath: "/" });
+  check("base + always + prefixDefaultLocale: /app/ → 307 /app/en/", res.status === 307 && res.headers.location === "/app/en/", JSON.stringify(res));
+  const never = makeEnv({ basePath: "/app", trailingSlash: "never", ...I18N }, { trailingSlash: "never", staticOutput: true });
+  const neverBody = await text(await req(never, "/app/ja/about", { routePath: "/ja/about" }));
+  check("base + never in static output: alternates without the slash", neverBody.includes('hreflang="en" href="https://example.com/app/about"') && !neverBody.includes('href="https://example.com/app/about/"'), neverBody);
+}
+{
   const prefixed = makeEnv({ i18n: { locales: ["en", "ja"], defaultLocale: "en", prefixDefaultLocale: true } });
   const root = await req(prefixed, "/?a=1");
   check("prefixDefaultLocale: / → 307 /en", root.status === 307 && root.headers.location === "/en?a=1", JSON.stringify(root));

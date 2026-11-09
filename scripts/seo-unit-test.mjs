@@ -85,6 +85,18 @@ check("basePath: Link prefixes, basePath={false} keeps the href", Link({ href: "
   check("basePath: ctx.redirect prefixes a root-relative path", ctx.redirect("/login").headers.location === "/app/login" && ctx.redirect("/login", 303).status === 303);
   check("basePath: ctx.redirect leaves prefixed paths and URLs, and opts out", ctx.redirect("/app/x").headers.location === "/app/x" && ctx.redirect("https://e.x/").headers.location === "https://e.x/" && ctx.redirect("/x", { basePath: false }).headers.location === "/x" && ctx.redirect("/x", 307, { basePath: false }).status === 307);
 }
+// basePath + trailingSlash + i18n alternates together in the sitemap: the base, then the policy,
+// on every loc and xhtml:link (the base's root too).
+{
+  const alternates = () => new Map([["/a", [["en", "/a"], ["ja", "/ja/a"], ["x-default", "/a"]]], ["/ja/a", [["en", "/a"], ["ja", "/ja/a"], ["x-default", "/a"]]]]);
+  const always = sitemapXml("https://e.x", ["/", "/a", "/ja/a"], { trailingSlash: "always", alternates });
+  check("basePath + always: sitemap root is the base with a slash", always.includes("<loc>https://e.x/app/</loc>"), always);
+  check("basePath + always: locs and alternates get base and slash", always.includes("<loc>https://e.x/app/ja/a/</loc>") && always.includes('hreflang="en" href="https://e.x/app/a/"') && always.includes('hreflang="ja" href="https://e.x/app/ja/a/"'), always);
+  const never = sitemapXml("https://e.x", ["/", "/a", "/ja/a"], { trailingSlash: "never", staticOutput: true, alternates });
+  check("basePath + never (static): no slashes anywhere", never.includes("<loc>https://e.x/app</loc>") && never.includes('hreflang="ja" href="https://e.x/app/ja/a"') && !/\/<\/loc>|\/"\/>/.test(never), never);
+  const ignoreStatic = sitemapXml("https://e.x", ["/", "/a"], { staticOutput: true });
+  check("basePath + ignore (static): slashes like index.html", ignoreStatic.includes("<loc>https://e.x/app/</loc>") && ignoreStatic.includes("<loc>https://e.x/app/a/</loc>"), ignoreStatic);
+}
 setBasePath("");
 
 console.log(failures === 0 ? "\nSEO UNIT TEST PASSED" : `\nSEO UNIT TEST FAILED (${failures})`);

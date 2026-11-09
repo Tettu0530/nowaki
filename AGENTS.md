@@ -273,7 +273,8 @@ code locations and CI coverage.
   config). Per-locale URLs: `isr-urls.mjs` `localeUrls`, `static-paths.mjs` `localePages`,
   `prerender.rs` `locale_urls` / `locale_404s` / `locale_redirects`; `locale_url` and
   `localePathFor` share `crates/nowaki/tests/fixtures/i18n-cases.json`. Tests:
-  `scripts/i18n-test.mjs`, `scripts/i18n-e2e.mjs` (start, dev, node, cloudflare, static).
+  `scripts/i18n-test.mjs`, `scripts/i18n-e2e.mjs` (start, dev, node, cloudflare, static; its
+  "combo" app composes i18n with basePath, trailingSlash "never" and a parallel-route slot).
 - **Parallel routes (`routes/…/@name/`)** — JS: `server/router.mjs` `scanRoutes` collects
   `slots: [{ ownerDir, name, routes, default, intercepts }]` (slot files are never in `routes`;
   intercepting `(.)x` files are recorded in `slot.intercepts` / `table.intercepts`, not served),

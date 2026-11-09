@@ -157,7 +157,8 @@ async function localizedRequest(env, info) {
   if (s.prefixed && (s.path === "/sitemap.xml" || s.path === "/robots.txt")) return routeRequest(env, info);
   // The browser path's part in front of the route path (basePath), or null when a rewrite changed
   // the path: no redirect then, and no alternates (they would name the internal path).
-  const prefix = routed === url.pathname ? "" : i18n.base && url.pathname === (routed === "/" ? i18n.base : i18n.base + routed) ? i18n.base : null;
+  // The base's root is `/app`, or `/app/` under trailingSlash "always".
+  const prefix = routed === url.pathname ? "" : i18n.base && (url.pathname === i18n.base + routed || (routed === "/" && url.pathname === i18n.base)) ? i18n.base : null;
   if (prefix !== null && s.prefixed && s.locale === i18n.defaultLocale && !i18n.prefixDefault) {
     // The base back in front and the trailing-slash policy applied (the bare base for `/`, or
     // `<base>/` under "always"), so the redirect lands on the canonical URL in one hop.
