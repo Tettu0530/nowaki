@@ -269,6 +269,24 @@ fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
                 image_refs: Vec::new(),
             }
         }
+        // Markdoc: the plugin compiles the file into a module (its `headings` export is what
+        // `render()` returns; Rust can't run Markdoc, so the entry itself has none).
+        "mdoc" => {
+            let src = text()?;
+            let (front, body) = split_frontmatter(&src);
+            let data = frontmatter_data(&file, front)?;
+            let module = file.rsplit_once('.').map(|(stem, _)| format!("{stem}.js"));
+            Entry {
+                slug,
+                file,
+                data,
+                body: Some(body.to_string()),
+                html: None,
+                headings: None,
+                module,
+                image_refs: Vec::new(),
+            }
+        }
         "json" => Entry {
             data: serde_json::from_str(&text()?).map_err(|e| anyhow!("{file}: {e}"))?,
             slug,
@@ -949,5 +967,35 @@ mod tests {
         assert_eq!(headings[0].id, "setext-line-two");
         assert_eq!(headings[0].text, "Setext line two");
         assert_eq!(headings[1].id, "hard-break-code");
+    }
+
+    #[test]
+    fn mdoc_entries_are_modules_with_yaml_or_toml_frontmatter() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        std::fs::create_dir_all(r.join("content/docs")).unwrap();
+        std::fs::write(
+            r.join("content/docs/a.mdoc"),
+            "---\ntitle: A\norder: 1\n---\n# A\n\n{% callout %}x{% /callout %}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            r.join("content/docs/b.mdoc"),
+            "+++\r\ntitle = \"B\"\r\n+++\r\n# B\r\n",
+        )
+        .unwrap();
+        let all = collect(r, &Images::Dev).unwrap();
+        let [a, b] = &all["docs"][..] else {
+            panic!("{:?}", all["docs"]);
+        };
+        assert_eq!(a.data, serde_json::json!({ "title": "A", "order": 1 }));
+        assert_eq!(a.module.as_deref(), Some("content/docs/a.js"));
+        assert_eq!(
+            a.body.as_deref(),
+            Some("# A\n\n{% callout %}x{% /callout %}\n")
+        );
+        assert!(a.html.is_none() && a.headings.is_none());
+        assert_eq!(b.data, serde_json::json!({ "title": "B" }));
+        assert_eq!(b.module.as_deref(), Some("content/docs/b.js"));
     }
 }

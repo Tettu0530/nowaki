@@ -39,6 +39,13 @@ done
 test "$(curl -s -I -o /dev/null -w '%{http_code}' "$B/islands/Counter.tsx")" = 200
 curl -s -I "$B/islands/Counter.tsx" | grep -qi '^content-type: text/javascript'
 
+# typed env (env.ts): env/server in a loader, public values inlined in the browser module, and
+# env/server itself is an error module for the browser
+curl -sf $B/env | grep -q 'token length 15'
+curl -sf $B/env | grep -q 'id="env-badge">Hello from env.ts x4<'
+curl -sf "$B/islands/EnvBadge.tsx" | grep -q 'Hello from env.ts'
+curl -sf "$B/node_modules/@nowaki-dev/runtime/server/env-server.mjs" | grep -q 'throw new Error(.*server-only'
+
 # layouts (root + nested) and dynamic param
 curl -sf $B/ | grep -q 'href="/todos"'
 curl -sf $B/blog/hello | grep -q "blog section"
@@ -125,6 +132,17 @@ curl -sf $B/docs/components | grep -q 'client="visible"'
 curl -sf $B/docs/components | grep -q '<pre style="background-color:#ffffff;"><code class="language-ts"><span'
 curl -sf $B/docs/components | grep -q '<picture><source type="image/avif"'
 curl -sf $B/docs | grep -q 'Components in MDX'
+# Markdoc (@nowaki-dev/markdoc): a page importing a .mdoc (a custom tag, an island, frontmatter,
+# headings, raw HTML kept as text) and a .mdoc content entry
+curl -sf $B/markdoc | grep -q '<h1 id="a-markdoc-page">A Markdoc page</h1>'
+curl -sf $B/markdoc | grep -q 'Title from frontmatter: A Markdoc page.</p>'
+curl -sf $B/markdoc | grep -q '<aside data-testid="callout" class="callout callout-tip"><p>A <strong>custom tag</strong>'
+curl -sf $B/markdoc | grep -q '<nowaki-island name="Counter"'
+curl -sf $B/markdoc | grep -q '<a href="#escaping">Escaping</a>'
+curl -sf $B/markdoc | grep -q 'Raw HTML stays text: &lt;script>alert(1)&lt;/script>'
+curl -sf $B/docs/markdoc | grep -q '<a href="#callouts" style="margin-right:1rem">Callouts</a>'
+curl -sf $B/docs/markdoc | grep -q 'class="callout callout-warning"'
+curl -sf $B/docs | grep -q 'href="/docs/markdoc">Markdoc entry</a>'
 # SEO: typed meta → head tags (absolute against nowaki.config `site`), generated sitemap.xml
 curl -sf $B/docs/intro | grep -q '<link rel="canonical" href="https://hello.nowaki.dev/docs/intro" />'
 curl -sf $B/docs/intro | grep -q '<meta property="og:image" content="https://hello.nowaki.dev/og/intro.png" />'

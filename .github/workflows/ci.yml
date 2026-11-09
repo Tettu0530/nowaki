@@ -119,6 +119,8 @@ jobs:
       - run: cargo build -p nowaki --locked
       - name: Router snapshot/unit test (scanRoutes + matchRoute)
         run: node scripts/router-test.mjs
+      - name: Routing rules (redirects / rewrites / headers / basePath; shared fixture with nowaki-core)
+        run: node scripts/rules-test.mjs
       - name: Client router-cache unit test (matchBoundary + Router Cache TTL/LRU)
         run: node scripts/router-cache-test.mjs
       - name: SSG staticPaths expansion
@@ -137,8 +139,14 @@ jobs:
         run: node scripts/origin-test.mjs
       - name: Dev SSR loader hooks (which modules re-evaluate after an edit)
         run: node scripts/loader-hooks-test.mjs
+      - name: Request handler (layouts, routePath, commit hook)
+        run: node scripts/handler-test.mjs
       - name: Live session hub (join/event, queue, timeout, cap, presence)
         run: node scripts/live-hub-test.mjs
+      - name: Markdoc plugin (compile, validation errors, escaping, frontmatter)
+        run: node --test "packages/nowaki-markdoc/test/*.test.mjs"
+      - name: Typed env (env.ts schema, build / start / worker refusal, client import guard)
+        run: node scripts/env-schema-test.mjs
       - name: nowaki upgrade (command surface + non-app guard)
         run: bash scripts/ci/e2e-upgrade.sh
       - name: Typed routes (typegen)

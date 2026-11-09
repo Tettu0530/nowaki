@@ -10,6 +10,39 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **Routing config in nowaki.config** (v0.18, groundwork): `basePath`,
+  `trailingSlash` (`"never"` / `"always"` / `"ignore"`, default `"ignore"`),
+  `redirects`, `rewrites`, `headers` (arrays, or async functions called once at
+  build), `i18n`, and `images.remotePatterns` are validated at build, before
+  anything is built, and written to `dist/server/routing.json` (dev:
+  `.nowaki/routing.json`). A redirect or rewrite destination that could leave
+  the site (`//host`, `/\host`, a capture in an external host), a source or
+  destination under `/__nowaki/`, and CR / LF / NUL in a header value fail the
+  build. No server applies these rules yet.
+- **Markdoc** via the new `@nowaki-dev/markdoc` plugin. With
+  `markdoc({ components, tags, nodes })` in `plugins`, a `.mdoc` file compiles to a Preact module
+  at build and dev time. The module exports the rendered document, `frontmatter` and `headings`,
+  with the same heading ids as Markdown and MDX. Validation errors fail the build. Capitalized
+  tags render exports of the `components` module, islands included. `.mdoc` files can be content
+  entries (YAML or TOML frontmatter, `render()`). They are not routes. Without the plugin, a
+  `.mdoc` import fails with "add @nowaki-dev/markdoc to plugins".
+- **Typed environment variables (`env.ts`).** Declare them at the app root with
+  `defineEnv({ server, public })` from `@nowaki-dev/runtime/env`, each with a
+  Standard Schema (Zod, Valibot, ArkType, ...). `nowaki build` / `dev` /
+  `prerender` validate the environment (`.env`, `.env.local`, and the process
+  environment) first and fail on a missing or invalid variable, naming it but
+  never printing its value. Server code reads `env.X` from
+  `@nowaki-dev/runtime/env/server`; `PUBLIC_*` values are inlined as
+  `import.meta.env.PUBLIC_*` (replacing the `.env`-only values when env.ts
+  exists). `nowaki start`, the node / bun / deno / vercel adapters, and the dev
+  renderer validate again at startup and refuse to start; the Cloudflare worker
+  validates its vars and secrets before the first request and answers 500 until
+  they are fixed. Client code that imports `@nowaki-dev/runtime/env/server` fails
+  the build with the import chain (dev serves an error module). `nowaki typegen`
+  types `env` and `import.meta.env` from the schemas. Public names must start
+  with `PUBLIC_` and server names must not. New core API:
+  `NowakiCore::set_public_env`.
 ### Changed
 - **The CI performance regression gate also compares each PR with the latest
   release**, failing beyond −10% req/s or +20% TTFB against it (the existing

@@ -40,7 +40,9 @@ const JSON_CT = { "content-type": "application/json; charset=utf-8" };
 export async function handleRequest(env, info) {
   const { method, url, version } = info;
   const table = await env.routeTable(version);
-  const match = matchRoute(table.routes, url.pathname);
+  // What routing, middleware and the 404 see; ctx.url stays the URL the browser asked for.
+  const path = resolveRequestPath(env, info, url);
+  const match = matchRoute(table.routes, path);
   const ctx = makeContext({ ...info, params: match?.params ?? {} });
   // The site's URL (NOWAKI_SITE / nowaki.config `site`), for absolute links in feeds and the like.
   // Parsed on first read: most requests never look at it.
@@ -66,18 +68,18 @@ export async function handleRequest(env, info) {
 
   try {
     // Middleware runs before the 404 check and short-circuits if it returns a Response.
-    const short = await runMiddleware(env, table, ctx, version);
+    const short = await runMiddleware(env, table, ctx, version, path);
     if (short) return finalize(ctx, short);
 
     if (!match) {
       // With a site URL, sitemap.xml and robots.txt are generated unless a route or a public/
       // file (served before this) provides them.
       if (env.site && (method === "GET" || method === "HEAD")) {
-        if (url.pathname === "/sitemap.xml") {
+        if (path === "/sitemap.xml") {
           const body = sitemapXml(env.site, await sitemapUrls(env, version), { staticOutput: env.staticOutput === true });
           return finalize(ctx, { status: 200, headers: { "content-type": "application/xml; charset=utf-8" }, body });
         }
-        if (url.pathname === "/robots.txt") {
+        if (path === "/robots.txt") {
           return finalize(ctx, { status: 200, headers: { "content-type": "text/plain; charset=utf-8" }, body: robotsTxt(env.site) });
         }
       }
@@ -114,6 +116,13 @@ export async function handleRequest(env, info) {
   }
 }
 
+// The path the request is routed by. Identity for now; rewrites, basePath and i18n prefixes will
+// map the browser's path to the route's here. `info.routePath` lets a front that already resolved
+// it pass it in.
+function resolveRequestPath(env, info, url) {
+  return info.routePath ?? url.pathname;
+}
+
 const FORBIDDEN = { status: 403, headers: { "content-type": "text/plain; charset=utf-8" }, body: "Forbidden" };
 
 // Read request headers without going through ctx.get, which records Vary inputs for ISR.
@@ -131,7 +140,14 @@ function warnCrossSiteApi(file, pathname) {
   );
 }
 
+// `ctx.__commit(result)` (sessions) runs before the response headers are built, so a cookie it sets
+// goes out. Without one the result is built synchronously: the common path adds no await.
 function finalize(ctx, result) {
+  if (!ctx.__commit) return finalizeResult(ctx, result);
+  return Promise.resolve(ctx.__commit(result)).then(() => finalizeResult(ctx, result));
+}
+
+function finalizeResult(ctx, result) {
   if (!result) return { status: 500, headers: HTML, body: "Internal Error" };
   const headers = { ...(result.headers ?? {}) };
   for (const [k, v] of ctx.resHeaders) {
@@ -164,9 +180,9 @@ export function privateIfSetsCookie(headers) {
 // table.middleware is in root→leaf order. A middleware runs for every request whose URL is under
 // its directory, whichever route (if any) serves it: routes/admin/_middleware.ts guards
 // /admin/x even when routes/[...slug].tsx is the route that matched, and the 404 under /admin.
-async function runMiddleware(env, table, ctx, version) {
+async function runMiddleware(env, table, ctx, version, path) {
   for (const entry of table.middleware ?? []) {
-    if (!underPrefix(ctx.url.pathname, entry.prefix)) continue;
+    if (!underPrefix(path, entry.prefix)) continue;
     const mod = await env.importModule(entry.file, version);
     const fn = mod.default ?? mod.middleware;
     if (typeof fn !== "function") continue;
@@ -256,17 +272,7 @@ async function renderRoute(env, table, match, mod, ctx, version) {
   }
   const data = mod.loader ? await mod.loader(ctx) : undefined;
   const meta = await withDocAttrs(env, table, match.file, mod, version, withFonts(env, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data, params: ctx.params, url: ctx.url }))))));
-  let node = h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url });
-
-  // wrap outward in leaf→root order
-  const layouts = layoutChain(table, match.file);
-  for (let i = layouts.length - 1; i >= 0; i--) {
-    const lmod = await env.importModule(layouts[i], version);
-    const Layout = lmod.default;
-    if (typeof Layout !== "function") continue;
-    const ldata = lmod.loader ? await lmod.loader(ctx) : undefined;
-    node = h(Layout, { data: ldata, params: ctx.params, url: ctx.url, children: node });
-  }
+  const node = await wrapLayouts(env, table, match.file, h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url }), ctx, version);
 
   // With a shared Cache-Control, CDNs do ISR as-is. The `nowaki start` Rust front
   // reads x-nowaki-revalidate and caches in memory.
@@ -457,13 +463,18 @@ async function withDocAttrs(env, table, file, mod, version, meta) {
 // The page wrapped in its layouts, with every loader run (route first, then layouts leaf → root).
 async function routeNode(env, table, match, mod, ctx, version) {
   const data = mod.loader ? await mod.loader(ctx) : undefined;
-  let node = h(mod.default, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url });
-  const layouts = layoutChain(table, match.file);
+  return wrapLayouts(env, table, match.file, h(mod.default, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url }), ctx, version);
+}
+
+// Wraps the page node in the file's layouts, leaf → root, running each layout's loader in turn.
+async function wrapLayouts(env, table, file, node, ctx, version) {
+  const layouts = layoutChain(table, file);
   for (let i = layouts.length - 1; i >= 0; i--) {
     const lmod = await env.importModule(layouts[i], version);
-    if (typeof lmod.default !== "function") continue;
+    const Layout = lmod.default;
+    if (typeof Layout !== "function") continue;
     const ldata = lmod.loader ? await lmod.loader(ctx) : undefined;
-    node = h(lmod.default, { data: ldata, params: ctx.params, url: ctx.url, children: node });
+    node = h(Layout, { data: ldata, params: ctx.params, url: ctx.url, children: node });
   }
   return node;
 }

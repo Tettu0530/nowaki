@@ -141,6 +141,11 @@ nowaki.config.mjs   plugins (optional)
   Use `nowaki start` or a deploy adapter output in production.
 - **Secrets stay server-side.** Only `PUBLIC_*` (and `MODE`) reach the browser. Copy
   `.env.example` to `.env` and keep database URLs, API keys, and tokens unprefixed.
+  To validate them, declare them in `env.ts` at the app root with `defineEnv({ server,
+  public })` from `@nowaki-dev/runtime/env` and a Standard Schema per variable; the
+  build fails on a missing or invalid one. Read server values with
+  `import { env } from "@nowaki-dev/runtime/env/server"` in loaders, actions, and server
+  functions (never in islands: that fails the build).
 - **Server functions and API routes are public endpoints.** Validate and bound every
   argument; authorize with `getContext()` (cookies/headers) before mutating data.
   Use `serverFn(schema, impl)` for `"use server"` exports that take arguments (see

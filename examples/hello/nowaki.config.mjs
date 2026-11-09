@@ -3,6 +3,8 @@
 //   resolveId(source, importer) — claims a specifier and returns an id (called only when normal resolution fails)
 //   load(id)                    — returns the source for that id (a virtual module not on disk)
 // Return null/undefined for no change (fast path).
+import { markdoc } from "@nowaki-dev/markdoc";
+
 export default {
   // The site's URL: absolute canonical / Open Graph links, the generated sitemap.xml and
   // robots.txt, and `ctx.site` (NOWAKI_SITE overrides it at runtime).
@@ -13,6 +15,15 @@ export default {
     { family: "Atkinson Hyperlegible", src: "./fonts/atkinson-hyperlegible-400.ttf", weight: 400, variable: "--font-body" },
   ],
   plugins: [
+    // Markdoc: `.mdoc` files compile to Preact modules at build time. Tags render elements or the
+    // exports of markdoc/components.tsx; unknown tags or bad attributes fail the build.
+    markdoc({
+      components: "./markdoc/components.tsx",
+      tags: {
+        callout: { render: "Callout", attributes: { type: { type: String, matches: ["note", "tip", "warning"] } } },
+        counter: { render: "Counter", selfClosing: true, attributes: { start: { type: Number } } },
+      },
+    }),
     {
       name: "mark-replace",
       transform(code, id) {

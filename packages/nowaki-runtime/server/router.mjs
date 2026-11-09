@@ -18,6 +18,7 @@
 
 import { readdir } from "node:fs/promises";
 import path from "node:path";
+import { decodeSegment, matchSegments, parseSegment } from "./segments.mjs";
 
 const ROUTE_EXT = /\.(tsx|ts|jsx|js|mdx)$/;
 
@@ -104,60 +105,15 @@ export async function scanRoutes(appRoot) {
 
 export function matchRoute(routesOrTable, pathname) {
   const routes = Array.isArray(routesOrTable) ? routesOrTable : routesOrTable.routes;
-  const parts = pathname.split("/").filter(Boolean);
-  outer: for (const route of routes) {
-    const segs = route.segments;
-    const rest = segs.length > 0 && segs[segs.length - 1].rest;
-    if (rest) {
-      // A trailing catch-all collects the rest (≥1). Fixed part = segs.length - 1.
-      if (parts.length < segs.length) continue;
-    } else if (segs.length !== parts.length) {
-      continue;
-    }
-    const params = {};
-    const fixed = rest ? segs.length - 1 : segs.length;
-    for (let i = 0; i < fixed; i++) {
-      const seg = segs[i];
-      const part = decodeSegment(parts[i]);
-      if (part === null) return null; // malformed percent-escape: no route (404), never a throw
-      if (seg.lit !== undefined) {
-        if (seg.lit !== part) continue outer;
-      } else if (seg.suffix !== undefined) {
-        if (part.length <= seg.suffix.length || !part.endsWith(seg.suffix)) continue outer;
-        params[seg.param] = part.slice(0, -seg.suffix.length);
-      } else {
-        params[seg.param] = part;
-      }
-    }
-    if (rest) {
-      // A catch-all param is an array of the remaining segments.
-      const restParts = parts.slice(fixed).map(decodeSegment);
-      if (restParts.includes(null)) return null;
-      params[segs[segs.length - 1].param] = restParts;
-    }
-    return { file: route.file, params, isApi: route.isApi, fileExt: route.fileExt };
+  // Decoded up front: a match reads every part, so a malformed percent-escape anywhere means no
+  // route (404), never a throw.
+  const parts = pathname.split("/").filter(Boolean).map(decodeSegment);
+  if (parts.includes(null)) return null;
+  for (const route of routes) {
+    const params = matchSegments(route.segments, parts);
+    if (params) return { file: route.file, params, isApi: route.isApi, fileExt: route.fileExt };
   }
   return null;
-}
-
-// One route segment, or one directory name of a convention-file prefix.
-function parseSegment(seg) {
-  const rest = seg.match(/^\[\.\.\.(.+)\]$/); // [...slug] = catch-all
-  if (rest) return { param: rest[1], rest: true };
-  // [card].png: a param with a fixed extension after it (file routes)
-  const suffixed = seg.match(/^\[([^\].]+)\](\.[^/]+)$/);
-  if (suffixed) return { param: suffixed[1], suffix: suffixed[2] };
-  const m = seg.match(/^\[(.+)\]$/);
-  return m ? { param: m[1] } : { lit: seg };
-}
-
-// A path segment, percent-decoded; null when its escapes are malformed ("50%", "%E0%A4").
-function decodeSegment(seg) {
-  try {
-    return decodeURIComponent(seg);
-  } catch {
-    return null;
-  }
 }
 
 /// Number of directories in a convention-file prefix ("" → 0, "/org/[org]" → 2).

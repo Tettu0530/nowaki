@@ -16,6 +16,7 @@ pub mod public;
 pub mod resolve;
 pub mod route_css;
 pub mod routes;
+pub mod rules;
 pub mod server_fn;
 pub mod transform;
 
@@ -66,10 +67,20 @@ pub trait PluginBridge: Send + Sync {
 
 /// Extensions to transform. Anything else (css, images, etc.) is served as is.
 /// `.tsrx` is compiled to JSX by `@tsrx/preact` in the plugin host, then run through oxc.
+/// `.mdoc` (Markdoc) has no built-in compiler: a plugin (`@nowaki-dev/markdoc`) must turn it into
+/// a module.
 pub fn is_transformable(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()),
-        Some("ts" | "tsx" | "js" | "jsx" | "mjs" | "tsrx" | "mdx")
+        Some("ts" | "tsx" | "js" | "jsx" | "mjs" | "tsrx" | "mdx" | "mdoc")
+    )
+}
+
+/// The error for a `.mdoc` file no plugin compiled.
+fn no_markdoc_plugin(abs: &Path) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{}: no plugin compiled this Markdoc file; add @nowaki-dev/markdoc to plugins in nowaki.config.mjs",
+        abs.display()
     )
 }
 
@@ -140,13 +151,7 @@ impl NowakiCore {
         // paths in their normal form. A root that doesn't exist yet is kept as given.
         let root = dunce::canonicalize(&root).unwrap_or(root);
         let client_defines = env::load_client_defines(&root);
-        // salt = nowaki version + defines. Upgrades/env changes invalidate the disk cache.
-        let mut salt_buf = env!("CARGO_PKG_VERSION").as_bytes().to_vec();
-        for (k, v) in &client_defines {
-            salt_buf.extend_from_slice(k.as_bytes());
-            salt_buf.extend_from_slice(v.as_bytes());
-        }
-        let disk_cache = cache::DiskCache::new(&root, xxh3_64(&salt_buf));
+        let disk_cache = cache::DiskCache::new(&root, defines_salt(&client_defines));
         highlight::set_cache_root(&root);
         Self {
             root,
@@ -191,6 +196,21 @@ impl NowakiCore {
             return None;
         }
         self.virtual_ids.lock().unwrap().get(abs).cloned()
+    }
+
+    /// Replaces the `import.meta.env.PUBLIC_*` values read from `.env` with the public values an
+    /// app's `env.ts` validated (the CLI's env check). Each pair is `(name, literal)`: the name is
+    /// `PUBLIC_` + letters, digits, `_`; the literal is a JSON string, number, boolean, or null,
+    /// or `undefined`. Anything else is an error and changes nothing. Call it before building or
+    /// serving modules: it resets the transform caches.
+    pub fn set_public_env(&mut self, vars: &[(String, String)]) -> Result<()> {
+        let mut defines = self.client_defines.clone();
+        env::replace_public_defines(&mut defines, vars)?;
+        self.disk_cache = cache::DiskCache::new(&self.root, defines_salt(&defines));
+        self.client_defines = defines;
+        self.cache.clear();
+        self.inputs.clear();
+        Ok(())
     }
 
     /// Sets the plugin transform bridge (called by the CLI when it detects nowaki.config).
@@ -260,7 +280,11 @@ impl NowakiCore {
         if abs.extension().and_then(|e| e.to_str()) == Some("mdx") {
             source = crate::mdx::to_tsx(&source).with_context(|| format!("{}", abs.display()))?;
         }
+        let is_mdoc = abs.extension().and_then(|e| e.to_str()) == Some("mdoc");
         let Some(bridge) = &self.plugins else {
+            if is_mdoc {
+                return Err(no_markdoc_plugin(abs));
+            }
             return Ok(source);
         };
         let id = abs.to_string_lossy();
@@ -278,6 +302,9 @@ impl NowakiCore {
             {
                 return Ok(code);
             }
+        }
+        if is_mdoc {
+            return Err(no_markdoc_plugin(abs));
         }
         Ok(source)
     }
@@ -393,6 +420,17 @@ impl NowakiCore {
     }
 }
 
+/// Disk cache salt: the nowaki version + the client defines, so upgrades and env changes
+/// invalidate it.
+fn defines_salt(defines: &[(String, String)]) -> u64 {
+    let mut buf = env!("CARGO_PKG_VERSION").as_bytes().to_vec();
+    for (k, v) in defines {
+        buf.extend_from_slice(k.as_bytes());
+        buf.extend_from_slice(v.as_bytes());
+    }
+    xxh3_64(&buf)
+}
+
 impl transform::VirtualResolve for NowakiCore {
     fn virtual_browser(&self, dir: &Path, spec: &str) -> Option<PathBuf> {
         self.resolve_spec(dir, spec)
@@ -408,7 +446,7 @@ mod tests {
 
     #[test]
     fn transformable_extensions() {
-        for ext in ["ts", "tsx", "js", "jsx", "mjs", "tsrx", "mdx"] {
+        for ext in ["ts", "tsx", "js", "jsx", "mjs", "tsrx", "mdx", "mdoc"] {
             assert!(is_transformable(Path::new(&format!("a.{ext}"))), "{ext}");
         }
         for ext in ["css", "json", "png", "txt", "md"] {
@@ -631,5 +669,36 @@ mod tests {
             after.contains("/node_modules/pkg/two.js"),
             "stale import URL from the disk cache:\n{after}"
         );
+    }
+
+    #[test]
+    fn an_mdoc_file_without_a_markdoc_plugin_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("page.mdoc");
+        std::fs::write(&file, "# Hello\n").unwrap();
+        let core = NowakiCore::new(dir.path().to_path_buf());
+        let err = core.read_source(&file).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("add @nowaki-dev/markdoc to plugins"),
+            "{err:#}"
+        );
+
+        // Plugins that leave it alone count as no plugin.
+        let mut core = NowakiCore::new(dir.path().to_path_buf());
+        core.set_plugins(Arc::new(MockBridge));
+        let err = core.load_module(&file, Mode::Ssr).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("add @nowaki-dev/markdoc to plugins"),
+            "{err:#}"
+        );
+
+        // A plugin's output is an ordinary module.
+        let mut core = NowakiCore::new(dir.path().to_path_buf());
+        core.set_plugins(Arc::new(CountingBridge(Default::default())));
+        std::fs::write(&file, "export const x = __MARK__;\n").unwrap();
+        assert!(core
+            .load_module(&file, Mode::Ssr)
+            .unwrap()
+            .contains("marked"));
     }
 }

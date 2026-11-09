@@ -59,6 +59,12 @@ pub fn transform_file_with_inputs(
         let exports = crate::server_fn::collect_exports(path, source)?;
         return Ok((crate::server_fn::client_proxy(&key, &exports), Vec::new()));
     }
+    // The dev browser asking for `@nowaki-dev/runtime/env/server`: a module that throws, so the
+    // page shows the error instead of loading server values (the build refuses it outright).
+    if mode == Mode::Browser && crate::env::is_server_env_module(path) {
+        let msg = "@nowaki-dev/runtime/env/server is server-only and can't be imported from client code. Read server variables in a loader, action, or server function, or declare them as PUBLIC_* in env.ts (import.meta.env).";
+        return Ok((format!("throw new Error({msg:?});\n"), Vec::new()));
+    }
     let mut inputs = Vec::new();
 
     let allocator = Allocator::default();

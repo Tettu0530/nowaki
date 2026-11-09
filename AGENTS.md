@@ -194,11 +194,31 @@ code locations and CI coverage.
   pass-through, `headings`, images via `?image`, code via `highlight.rs`); applied in
   `NowakiCore::read_source`, so `.mdx` is an ordinary transformable module (routes, graph, dev,
   builds). Content entries: `content.rs` (`module`), `render()` in `server/content-store.mjs`.
+- **Markdoc** — `packages/nowaki-markdoc` (`@nowaki-dev/markdoc`): a plugin whose `transform`
+  compiles `.mdoc` in the plugin host (parse / validate / transform with `@markdoc/markdoc`) into a
+  TSX module holding the tree as data; `render.js` renders it with Preact. Core only marks `.mdoc`
+  transformable and errors when no plugin compiled it (`lib.rs` `compile_source`). Content
+  entries: `content.rs` (`module`). Tests: `node --test "packages/nowaki-markdoc/test/*.test.mjs"`.
+- **Typed env (`env.ts`)** — `defineEnv` / `validateEnv` / `initServerEnv` in
+  `server/env-schema.mjs`, the frozen values behind `@nowaki-dev/runtime/env/server` in
+  `server/env-server.mjs`. Before a build (and at `nowaki dev` startup) `crates/nowaki/src/env_schema.rs`
+  runs `server/env-check.mjs` and passes the public values to `NowakiCore::set_public_env`; the server
+  build compiles env.ts to `dist/server/env.js` and writes `env-public.json`. Startup validation:
+  `app.mjs` `createApp`, `web.mjs` (first request), dev `sidecar.mjs` (first request). Client import
+  guard: `build.rs` `emit` and the dev browser transform (`env::is_server_env_module`). Types:
+  `typegen.rs` `render_env`. Tests: `scripts/env-schema-test.mjs`.
 - **SEO** — `packages/nowaki-runtime/server/seo.mjs` (site URL, meta tags, sitemap, robots);
   `handler.mjs` `withSeo` (layout + route meta) and the generated `/sitemap.xml` / `/robots.txt`;
   page URLs from `server/isr-urls.mjs` `pageUrls`. The site comes from `crates/nowaki/src/site.rs`
   (`dist/server/site.json`, via `server/site-config.mjs`), `NOWAKI_SITE` winning. Unit checks:
   `scripts/seo-unit-test.mjs`.
+- **Routing config (`basePath`, `trailingSlash`, `redirects`, `rewrites`, `headers`)** —
+  normalized and validated by `server/site-config.mjs`, read by `site.rs` before the build and
+  written to `dist/server/routing.json` (dev: `.nowaki/routing.json`). The compiler / matcher
+  exists twice, `crates/nowaki-core/src/rules.rs` and `server/rules.mjs`, driven by one fixture
+  (`crates/nowaki-core/tests/fixtures/rules-cases.json`, run by `tests/rules.rs` and
+  `scripts/rules-test.mjs`); change both together. The segment grammar is shared with the router
+  through `server/segments.mjs`.
 - **Page scripts (`export const scripts`)** — read from the AST in
   `crates/nowaki-core/src/page_scripts.rs`, emitted as client entries by
   `build.rs` `build_route_scripts` (manifest `routeScripts` per module and

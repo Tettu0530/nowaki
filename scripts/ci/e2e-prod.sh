@@ -74,6 +74,12 @@ test -f examples/hello/dist/server/functions.json
 grep -q '"export": "addTodo"' examples/hello/dist/server/functions.json
 ! grep -rl 'nowaki-server-only-secret' examples/hello/dist/client >/dev/null 2>&1
 curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-rpc: 1' -d '{"id":"6c90d7dc921a9a3f","args":[]}' http://127.0.0.1:3300/__nowaki/fn | grep -q 'learn nowaki'
+# typed env (env.ts): server values through env/server, public ones inlined (the server ones never)
+test -f examples/hello/dist/server/env.js
+curl -sf http://127.0.0.1:3300/env | grep -q 'token length 15'
+curl -sf http://127.0.0.1:3300/env | grep -q 'id="env-badge">Hello from env.ts x4<'
+grep -q 'Hello from env.ts' examples/hello/dist/client/EnvBadge.*.js
+! grep -rl 'hello-dev-token' examples/hello/dist/client >/dev/null 2>&1
 # v0.9 virtual modules: SSR inlines the plugin-generated module (data:)
 curl -sf http://127.0.0.1:3300/virtual | grep -q 'VIRTUAL_OK · nowaki-plugin'
 # ISR (export const revalidate=2): the Rust front caches assembled HTML and
@@ -169,6 +175,17 @@ curl -sf http://127.0.0.1:3300/docs/components | grep -q 'client="visible"'
 curl -sf http://127.0.0.1:3300/docs/components | grep -q '<pre style="background-color:#ffffff;"><code class="language-ts"><span'
 curl -sf http://127.0.0.1:3300/docs/components | grep -q '<picture><source type="image/avif"'
 curl -sf http://127.0.0.1:3300/docs | grep -q 'Components in MDX'
+# Markdoc (@nowaki-dev/markdoc): a page importing a .mdoc (a custom tag, an island, frontmatter,
+# headings, raw HTML kept as text) and a .mdoc content entry
+curl -sf http://127.0.0.1:3300/markdoc | grep -q '<h1 id="a-markdoc-page">A Markdoc page</h1>'
+curl -sf http://127.0.0.1:3300/markdoc | grep -q 'Title from frontmatter: A Markdoc page.</p>'
+curl -sf http://127.0.0.1:3300/markdoc | grep -q '<aside data-testid="callout" class="callout callout-tip"><p>A <strong>custom tag</strong>'
+curl -sf http://127.0.0.1:3300/markdoc | grep -q '<nowaki-island name="Counter"'
+curl -sf http://127.0.0.1:3300/markdoc | grep -q '<a href="#escaping">Escaping</a>'
+curl -sf http://127.0.0.1:3300/markdoc | grep -q 'Raw HTML stays text: &lt;script>alert(1)&lt;/script>'
+curl -sf http://127.0.0.1:3300/docs/markdoc | grep -q '<a href="#callouts" style="margin-right:1rem">Callouts</a>'
+curl -sf http://127.0.0.1:3300/docs/markdoc | grep -q 'class="callout callout-warning"'
+curl -sf http://127.0.0.1:3300/docs | grep -q 'href="/docs/markdoc">Markdoc entry</a>'
 # ctx.url.origin is the browser's Host, not the sidecar's loopback address
 curl -sf -H 'Host: app.example' "http://127.0.0.1:3300/api/echo" | grep -q '"origin":"http://app.example"'
 # SEO: typed meta → head tags (absolute against nowaki.config `site`), generated sitemap.xml

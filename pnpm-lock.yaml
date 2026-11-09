@@ -22,6 +22,9 @@ importers:
 
   examples/hello:
     dependencies:
+      '@nowaki-dev/markdoc':
+        specifier: workspace:*
+        version: link:../../packages/nowaki-markdoc
       '@nowaki-dev/runtime':
         specifier: workspace:*
         version: link:../../packages/nowaki-runtime
@@ -34,6 +37,9 @@ importers:
       preact-render-to-string:
         specifier: ^6.8.2
         version: 6.8.2(preact@11.1.1)
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
 
   packages/create-nowaki: {}
 
@@ -42,6 +48,19 @@ importers:
       create-nowaki:
         specifier: ^0.18.3
         version: link:../create-nowaki
+
+  packages/nowaki-markdoc:
+    dependencies:
+      '@markdoc/markdoc':
+        specifier: 0.5.11
+        version: 0.5.11
+    devDependencies:
+      preact:
+        specifier: ^11.1.1
+        version: 11.1.1(preact-render-to-string@6.8.2)
+      preact-render-to-string:
+        specifier: ^6.8.2
+        version: 6.8.2(preact@11.1.1)
 
   packages/nowaki-runtime:
     devDependencies:
@@ -56,6 +75,18 @@ packages:
 
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
+
+  '@markdoc/markdoc@0.5.11':
+    resolution: {integrity: sha512-Jyoyv7Ieq2/L9fzz9lTN+ojoufpqiiWOZT3xPgssReZwGze84XFEU/xDNbM4iIua5sJ6JjhDDlBuwZoQLrqAgw==}
+    engines: {node: '>=14.7.0'}
+    peerDependencies:
+      '@types/react': '*'
+      react: '*'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+      react:
+        optional: true
 
   '@noble/hashes@2.2.0':
     resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
@@ -127,9 +158,14 @@ packages:
   zimmerframe@1.1.4:
     resolution: {integrity: sha512-B58NGBEoc8Y9MWWCQGl/gq9xBCe4IiKM0a2x7GZdQKOW5Exr8S1W24J6OgM1njK8xCRGvAJIL/MxXHf6SkmQKQ==}
 
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
+
 snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
+
+  '@markdoc/markdoc@0.5.11': {}
 
   '@noble/hashes@2.2.0': {}
 
@@ -201,3 +237,5 @@ snapshots:
   resolve-pkg-maps@1.0.0: {}
 
   zimmerframe@1.1.4: {}
+
+  zod@4.6.7: {}

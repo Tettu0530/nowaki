@@ -9,6 +9,8 @@ import { prodDocument, prodShell } from "./document.mjs";
 import { withSecurityHeaders } from "./security-headers.mjs";
 import { applyCsp } from "./csp.mjs";
 import { setContent, validateContent } from "./content-store.mjs";
+import { initServerEnv } from "./env-schema.mjs";
+import { setServerEnv } from "./env-server.mjs";
 
 export function resultToResponse(result) {
   const headers = new Headers();
@@ -32,6 +34,12 @@ function initialState(mod, props) {
 }
 
 let liveCounter = 0;
+
+function envSource(bindings) {
+  const source = { ...(globalThis.process?.env ?? {}) };
+  for (const [k, v] of Object.entries(bindings ?? {})) if (typeof v === "string") source[k] = v;
+  return source;
+}
 
 function installIslandHook(registry, liveRegistry, live) {
   const prev = options.vnode;
@@ -67,7 +75,10 @@ function installIslandHook(registry, liveRegistry, live) {
 ///   routeTable       : scanRoutes equivalent (file is a key of modules)
 ///   live             : { render: liveRender, props: liveProps } when there are live islands. Passed
 ///                      in by the worker entry so this module never imports node:crypto itself.
-/// Returns `(request) => Promise<Response>`.
+///   envModule        : the compiled env.ts (dist/server/env.js) when the app has one
+///   envPublic        : the public values the build inlined (dist/server/env-public.json)
+/// Returns `(request, bindings?) => Promise<Response>`; `bindings` (the Worker's `env`) adds its
+/// string vars and secrets to process.env for validating env.ts.
 export function createFetchHandler({
   manifest,
   modules,
@@ -79,6 +90,8 @@ export function createFetchHandler({
   content,
   site,
   fonts,
+  envModule,
+  envPublic,
 }) {
   const registry = new Map();
   for (const [name, comp] of Object.entries(islandComponents ?? {})) {
@@ -143,7 +156,25 @@ export function createFetchHandler({
       })
     : null;
 
-  return async (request) => {
+  // env.ts is validated on the first request, when the Worker's bindings are known; an invalid
+  // environment answers every request with a generic 500 (the problems go to the log once).
+  let envPending = !!envModule;
+  let envReady = null;
+  if (!envPending) setServerEnv(null);
+
+  return async (request, bindings) => {
+    if (envPending) {
+      envReady ??= initServerEnv(envModule, envSource(bindings), envPublic).catch((err) => {
+        console.error(err?.message ?? err);
+        throw err;
+      });
+      try {
+        await envReady;
+        envPending = false;
+      } catch {
+        return resultToResponse({ status: 500, headers: { "content-type": "text/plain; charset=utf-8" }, body: "Internal Server Error" });
+      }
+    }
     if (contentReady) await contentReady;
     const url = new URL(request.url);
     const headers = {};

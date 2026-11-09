@@ -39,16 +39,15 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
     let started = Instant::now();
 
     crate::typegen::write(&root).ok();
-    // Fonts (nowaki.config `fonts`) build in the background: startup doesn't wait on Node or a
-    // download, and the renderer picks up .nowaki/fonts.json once it exists.
-    {
+    // nowaki.config is read through Node while the sidecar and plugin host start, and joined
+    // before serving: routing (.nowaki/routing.json) must be in place for the first request.
+    let config = {
         let root = root.clone();
-        std::thread::spawn(move || {
-            if let Ok(config) = crate::site::config(&root) {
-                crate::fonts::build_dev(&root, &config);
-            }
-        });
-    }
+        std::thread::spawn(move || crate::site::config(&root))
+    };
+
+    // env.ts is checked in Node while the sidecar and plugin host start.
+    let env_check = crate::env_schema::start(&root)?;
 
     let live_hub = crate::live::LiveHub::new();
     let errors = crate::mcp::ErrorLog::new(&root);
@@ -58,6 +57,27 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
     let mut core = NowakiCore::new(root.clone());
     if let Some(ph) = &plugin_host {
         core.set_plugins(ph.bridge.clone());
+    }
+    // env.ts: validated at startup (a change to it or to .env needs a restart); its public values
+    // are what the browser modules inline.
+    crate::env_schema::finish(env_check, &mut core)?;
+
+    // An invalid config is reported (site-config.mjs printed why) and dev runs without it.
+    let config = config
+        .join()
+        .map_err(|_| anyhow::anyhow!("reading nowaki.config panicked"))?
+        .unwrap_or_else(|e| {
+            eprintln!("[nowaki] {e:#}");
+            serde_json::Value::Object(Default::default())
+        });
+    if let Err(e) = crate::site::write_dev(&root, &config) {
+        eprintln!("[nowaki] {e:#}");
+    }
+    // Fonts build in the background: startup doesn't wait on a download, and the renderer picks
+    // up .nowaki/fonts.json once it exists.
+    {
+        let root = root.clone();
+        std::thread::spawn(move || crate::fonts::build_dev(&root, &config));
     }
 
     let (hmr_tx, _) = broadcast::channel(64);

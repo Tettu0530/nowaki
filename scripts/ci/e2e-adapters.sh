@@ -41,6 +41,9 @@ grep -q "Couldn't display this page" /tmp/nowaki-early-fail.html
 ! grep -q 'the data source is down' /tmp/nowaki-early-fail.html   # no message in production
 curl -s 'http://127.0.0.1:3310/stream-early?go=1' | grep -q 'location.replace("/about")'
 curl -sf http://127.0.0.1:3310/api/hello | grep -q '"hello":"nowaki"'
+# typed env on the node adapter: env.ts validated at startup, read by the loader
+curl -sf http://127.0.0.1:3310/env | grep -q 'token length 15'
+curl -sf http://127.0.0.1:3310/env | grep -q 'id="env-badge">Hello from env.ts x4<'
 # file routes: feed.xml.ts (static) and og/[card].png.ts (a param with a fixed extension, bytes)
 curl -s -D - -o /dev/null http://127.0.0.1:3310/feed.xml | grep -qi '^content-type: application/xml'
 curl -sf http://127.0.0.1:3310/feed.xml | grep -q '<rss version="2.0">'
@@ -52,6 +55,9 @@ test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3310/og/intro.jp
 curl -sf http://127.0.0.1:3310/about | grep -qE '<link rel="stylesheet" href="/_nowaki/fonts\.[0-9a-f]+\.css" />'
 # MDX entries render from their compiled module on the node adapter
 curl -sf http://127.0.0.1:3310/docs/components | grep -q 'an expression (42), and highlighted code'
+# Markdoc on the node adapter: the .mdoc page and entry are compiled modules
+curl -sf http://127.0.0.1:3310/markdoc | grep -q 'class="callout callout-tip"'
+curl -sf http://127.0.0.1:3310/docs/markdoc | grep -q 'class="callout callout-warning"'
 # the node adapter reads the site from dist/server/site.json
 curl -sf http://127.0.0.1:3310/sitemap.xml | grep -q '<loc>https://hello.nowaki.dev/</loc>'
 curl -sf http://127.0.0.1:3310/docs/intro | grep -q 'og:url" content="https://hello.nowaki.dev/docs/intro"'
@@ -134,6 +140,10 @@ grep -q '<p id="greeting">Hello from data/</p>' examples/hello/dist/static/about
 # MDX in the static output: the page and the entry (an island inside it)
 grep -q '<h1 id="an-mdx-page">An MDX page</h1>' examples/hello/dist/static/guide/index.html
 grep -q '<nowaki-island name="Counter"' examples/hello/dist/static/docs/components/index.html
+# Markdoc in the static output: the page (an island inside it) and the entry
+grep -q '<h1 id="a-markdoc-page">A Markdoc page</h1>' examples/hello/dist/static/markdoc/index.html
+grep -q '<nowaki-island name="Counter"' examples/hello/dist/static/markdoc/index.html
+grep -q 'class="callout callout-warning"' examples/hello/dist/static/docs/markdoc/index.html
 # SEO in the static output: sitemap.xml generated against the site, public/robots.txt kept
 # static output: page URLs end in / (the page is docs/intro/index.html)
 grep -q '<loc>https://hello.nowaki.dev/docs/intro/</loc>' examples/hello/dist/static/sitemap.xml

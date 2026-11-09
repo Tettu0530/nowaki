@@ -1,0 +1,268 @@
+{
+  "about": "Routing rules (normalized routing.json) and requests with the expected outcome. Read by crates/nowaki-core/tests/rules.rs (Rust) and scripts/rules-test.mjs (server/rules.mjs); both must agree. expect: {redirect:{status,location}} | {rewrite:path} | {pass:path} | {notFound:true}. headers, when present, is the ruleHeaders / Rules::headers result. A case with error:true must fail to compile.",
+  "cases": [
+    {
+      "name": "empty config passes everything through",
+      "config": {},
+      "requests": [
+        { "path": "/", "expect": { "pass": "/" } },
+        { "path": "/a/b/", "expect": { "pass": "/a/b/" } },
+        { "path": "/old//evil.com", "expect": { "pass": "/old//evil.com" }, "headers": [] }
+      ]
+    },
+    {
+      "name": "redirects: literal, param, catch-all, status",
+      "config": {
+        "redirects": [
+          { "source": "/old/[...rest]", "destination": "/new/[...rest]", "status": 308 },
+          { "source": "/about-us", "destination": "/about", "status": 307 },
+          { "source": "/blog/[slug]", "destination": "/posts/[slug]", "status": 301 },
+          { "source": "/og/[card].png", "destination": "/cards/[card].png", "status": 302 },
+          { "source": "/", "destination": "/home", "status": 307 }
+        ]
+      },
+      "requests": [
+        { "path": "/old/a/b", "expect": { "redirect": { "status": 308, "location": "/new/a/b" } } },
+        { "path": "/old", "expect": { "pass": "/old" } },
+        { "path": "/about-us", "expect": { "redirect": { "status": 307, "location": "/about" } } },
+        { "path": "/about-us/", "expect": { "redirect": { "status": 307, "location": "/about" } } },
+        { "path": "/About-us", "expect": { "pass": "/About-us" } },
+        { "path": "/blog/hello", "expect": { "redirect": { "status": 301, "location": "/posts/hello" } } },
+        { "path": "/blog/a/b", "expect": { "pass": "/blog/a/b" } },
+        { "path": "/og/x.png", "expect": { "redirect": { "status": 302, "location": "/cards/x.png" } } },
+        { "path": "/og/.png", "expect": { "pass": "/og/.png" } },
+        { "path": "/og/x.jpg", "expect": { "pass": "/og/x.jpg" } },
+        { "path": "/", "expect": { "redirect": { "status": 307, "location": "/home" } } },
+        { "method": "POST", "path": "/about-us", "expect": { "redirect": { "status": 307, "location": "/about" } } }
+      ]
+    },
+    {
+      "name": "open redirect attempts stay on the site",
+      "config": {
+        "redirects": [
+          { "source": "/old/[...rest]", "destination": "/[...rest]", "status": 308 },
+          { "source": "/go/[to]", "destination": "/[to]", "status": 307 }
+        ]
+      },
+      "requests": [
+        { "path": "/old//evil.com", "expect": { "redirect": { "status": 308, "location": "/evil.com" } } },
+        { "path": "/old/%2F%2Fevil.com", "expect": { "redirect": { "status": 308, "location": "/%2F%2Fevil.com" } } },
+        { "path": "/old/\\evil.com", "expect": { "redirect": { "status": 308, "location": "/%5Cevil.com" } } },
+        { "path": "/old/%5Cevil.com", "expect": { "redirect": { "status": 308, "location": "/%5Cevil.com" } } },
+        { "path": "/go/%2F%2Fevil.com", "expect": { "redirect": { "status": 307, "location": "/%2F%2Fevil.com" } } },
+        { "path": "/go/%5C%5Cevil.com", "expect": { "redirect": { "status": 307, "location": "/%5C%5Cevil.com" } } },
+        { "path": "/go/..", "expect": { "redirect": { "status": 307, "location": "/%2E%2E" } } },
+        { "path": "/go/%2E", "expect": { "redirect": { "status": 307, "location": "/%2E" } } },
+        { "path": "/go/a%0D%0ASet-Cookie:%20x=1", "expect": { "redirect": { "status": 307, "location": "/a%0D%0ASet-Cookie%3A%20x%3D1" } } },
+        { "path": "/go/https:%2F%2Fevil.com", "expect": { "redirect": { "status": 307, "location": "/https%3A%2F%2Fevil.com" } } },
+        { "path": "/go/50%", "expect": { "pass": "/go/50%" } },
+        { "path": "/go/%E0%A4", "expect": { "pass": "/go/%E0%A4" } }
+      ]
+    },
+    {
+      "name": "external destinations: captures only in the path",
+      "config": {
+        "redirects": [
+          { "source": "/docs/[...rest]", "destination": "https://docs.example.com/v2/[...rest]", "status": 308 },
+          { "source": "/twitter", "destination": "https://x.example.com", "status": 307 },
+          { "source": "/shop/[id]", "destination": "https://shop.example.com/items/[id]/?ref=site#top", "status": 302 },
+          { "source": "/root", "destination": "https://example.org/", "status": 307 }
+        ]
+      },
+      "requests": [
+        { "path": "/docs/a/b", "expect": { "redirect": { "status": 308, "location": "https://docs.example.com/v2/a/b" } } },
+        { "path": "/docs/@evil.com", "expect": { "redirect": { "status": 308, "location": "https://docs.example.com/v2/%40evil.com" } } },
+        { "path": "/twitter", "expect": { "redirect": { "status": 307, "location": "https://x.example.com" } } },
+        { "path": "/shop/a%20b", "expect": { "redirect": { "status": 302, "location": "https://shop.example.com/items/a%20b/?ref=site#top" } } },
+        { "path": "/root", "expect": { "redirect": { "status": 307, "location": "https://example.org/" } } }
+      ]
+    },
+    {
+      "name": "internal destination with a query",
+      "config": {
+        "redirects": [{ "source": "/search/[q]", "destination": "/find/[q]?from=search", "status": 307 }]
+      },
+      "requests": [
+        { "path": "/search/x%3Fy", "expect": { "redirect": { "status": 307, "location": "/find/x%3Fy?from=search" } } }
+      ]
+    },
+    {
+      "name": "unicode: sources compare decoded, captures re-encoded",
+      "config": {
+        "redirects": [
+          { "source": "/café", "destination": "/coffee", "status": 308 },
+          { "source": "/t/[tag]", "destination": "/tags/[tag]", "status": 308 }
+        ]
+      },
+      "requests": [
+        { "path": "/caf%C3%A9", "expect": { "redirect": { "status": 308, "location": "/coffee" } } },
+        { "path": "/caf%c3%a9", "expect": { "redirect": { "status": 308, "location": "/coffee" } } },
+        { "path": "/t/%E6%97%A5%E6%9C%AC", "expect": { "redirect": { "status": 308, "location": "/tags/%E6%97%A5%E6%9C%AC" } } },
+        { "path": "/t/café", "expect": { "redirect": { "status": 308, "location": "/tags/caf%C3%A9" } } }
+      ]
+    },
+    {
+      "name": "rule order: first match wins across literal and pattern sources",
+      "config": {
+        "redirects": [
+          { "source": "/a/[x]", "destination": "/pattern/[x]", "status": 307 },
+          { "source": "/a/b", "destination": "/literal", "status": 307 },
+          { "source": "/c/d", "destination": "/literal-c", "status": 307 },
+          { "source": "/c/[x]", "destination": "/pattern-c/[x]", "status": 307 },
+          { "source": "/c/d", "destination": "/second", "status": 307 }
+        ]
+      },
+      "requests": [
+        { "path": "/a/b", "expect": { "redirect": { "status": 307, "location": "/pattern/b" } } },
+        { "path": "/c/d", "expect": { "redirect": { "status": 307, "location": "/literal-c" } } },
+        { "path": "/c/e", "expect": { "redirect": { "status": 307, "location": "/pattern-c/e" } } },
+        { "path": "/c%2Fd", "expect": { "pass": "/c%2Fd" } }
+      ]
+    },
+    {
+      "name": "rewrites run after redirects",
+      "config": {
+        "redirects": [{ "source": "/p/old", "destination": "/p/new", "status": 308 }],
+        "rewrites": [
+          { "source": "/p/[id]", "destination": "/photo/[id]" },
+          { "source": "/files/[...path]", "destination": "/api/files/[...path]" },
+          { "source": "/home", "destination": "/" }
+        ]
+      },
+      "requests": [
+        { "path": "/p/old", "expect": { "redirect": { "status": 308, "location": "/p/new" } } },
+        { "path": "/p/42", "expect": { "rewrite": "/photo/42" } },
+        { "path": "/p/a%2Fb", "expect": { "rewrite": "/photo/a%2Fb" } },
+        { "path": "/files/a/b.txt", "expect": { "rewrite": "/api/files/a/b.txt" } },
+        { "path": "/home/", "expect": { "rewrite": "/" } },
+        { "method": "POST", "path": "/p/7", "expect": { "rewrite": "/photo/7" } },
+        { "path": "/x", "expect": { "pass": "/x" } }
+      ]
+    },
+    {
+      "name": "headers: every matching rule, later wins",
+      "config": {
+        "headers": [
+          { "source": "/api/[...rest]", "headers": [{ "key": "cache-control", "value": "no-store" }, { "key": "x-api", "value": "1" }] },
+          { "source": "/api/public/[name]", "headers": [{ "key": "cache-control", "value": "public, max-age=60" }] },
+          { "source": "/", "headers": [{ "key": "x-home", "value": "yes" }] }
+        ]
+      },
+      "requests": [
+        { "path": "/api/x", "expect": { "pass": "/api/x" }, "headers": [["cache-control", "no-store"], ["x-api", "1"]] },
+        { "path": "/api/public/a", "expect": { "pass": "/api/public/a" }, "headers": [["cache-control", "public, max-age=60"], ["x-api", "1"]] },
+        { "path": "/", "expect": { "pass": "/" }, "headers": [["x-home", "yes"]] },
+        { "path": "/api", "expect": { "pass": "/api" }, "headers": [] },
+        { "path": "/api/%E0%A4", "expect": { "pass": "/api/%E0%A4" }, "headers": [] }
+      ]
+    },
+    {
+      "name": "basePath",
+      "config": {
+        "basePath": "/app",
+        "redirects": [{ "source": "/old", "destination": "/new", "status": 308 }, { "source": "/start", "destination": "/", "status": 307 }],
+        "rewrites": [{ "source": "/p/[id]", "destination": "/photo/[id]" }],
+        "headers": [{ "source": "/[...all]", "headers": [{ "key": "x-app", "value": "1" }] }]
+      },
+      "requests": [
+        { "path": "/app", "expect": { "pass": "/" }, "headers": [] },
+        { "path": "/app/", "expect": { "pass": "/" } },
+        { "path": "/app/about", "expect": { "pass": "/about" }, "headers": [["x-app", "1"]] },
+        { "path": "/app/old", "expect": { "redirect": { "status": 308, "location": "/app/new" } } },
+        { "path": "/app/start", "expect": { "redirect": { "status": 307, "location": "/app" } } },
+        { "path": "/app/p/1", "expect": { "rewrite": "/photo/1" } },
+        { "path": "/apple", "expect": { "notFound": true }, "headers": [] },
+        { "path": "/", "expect": { "notFound": true } },
+        { "path": "/old", "expect": { "notFound": true } },
+        { "path": "//app/old", "expect": { "notFound": true } }
+      ]
+    },
+    {
+      "name": "trailingSlash never",
+      "config": { "trailingSlash": "never" },
+      "requests": [
+        { "path": "/", "expect": { "pass": "/" } },
+        { "path": "/about", "expect": { "pass": "/about" } },
+        { "path": "/about/", "expect": { "redirect": { "status": 308, "location": "/about" } } },
+        { "method": "HEAD", "path": "/about//", "expect": { "redirect": { "status": 308, "location": "/about" } } },
+        { "method": "POST", "path": "/about/", "expect": { "pass": "/about/" } },
+        { "path": "//evil.com/", "expect": { "redirect": { "status": 308, "location": "/evil.com" } } },
+        { "path": "/\\evil.com/", "expect": { "redirect": { "status": 308, "location": "/%5Cevil.com" } } },
+        { "path": "/%2F%2Fevil.com/", "expect": { "redirect": { "status": 308, "location": "/%2F%2Fevil.com" } } },
+        { "path": "/caf%C3%A9/", "expect": { "redirect": { "status": 308, "location": "/caf%C3%A9" } } },
+        { "path": "/a%0D%0Ab/", "expect": { "redirect": { "status": 308, "location": "/a%0D%0Ab" } } },
+        { "path": "/bad%/", "expect": { "pass": "/bad%/" } }
+      ]
+    },
+    {
+      "name": "trailingSlash always",
+      "config": {
+        "trailingSlash": "always",
+        "redirects": [{ "source": "/old", "destination": "/new", "status": 308 }, { "source": "/feed", "destination": "/feed.xml", "status": 308 }]
+      },
+      "requests": [
+        { "path": "/", "expect": { "pass": "/" } },
+        { "path": "/about", "expect": { "redirect": { "status": 308, "location": "/about/" } } },
+        { "path": "/about/", "expect": { "pass": "/about/" } },
+        { "path": "/feed.xml", "expect": { "pass": "/feed.xml" } },
+        { "path": "/old/", "expect": { "redirect": { "status": 308, "location": "/new/" } } },
+        { "path": "/feed/", "expect": { "redirect": { "status": 308, "location": "/feed.xml" } } },
+        { "path": "//evil.com", "expect": { "pass": "//evil.com" } },
+        { "path": "//evil", "expect": { "redirect": { "status": 308, "location": "/evil/" } } },
+        { "method": "POST", "path": "/about", "expect": { "pass": "/about" } }
+      ]
+    },
+    {
+      "name": "trailingSlash with basePath",
+      "config": { "basePath": "/docs/v2", "trailingSlash": "always" },
+      "requests": [
+        { "path": "/docs/v2", "expect": { "redirect": { "status": 308, "location": "/docs/v2/" } } },
+        { "path": "/docs/v2/", "expect": { "pass": "/" } },
+        { "path": "/docs/v2/intro", "expect": { "redirect": { "status": 308, "location": "/docs/v2/intro/" } } },
+        { "path": "/docs/v2//evil", "expect": { "redirect": { "status": 308, "location": "/docs/v2/evil/" } } },
+        { "path": "/docs", "expect": { "notFound": true } }
+      ]
+    },
+    {
+      "name": "trailingSlash never with basePath",
+      "config": { "basePath": "/app", "trailingSlash": "never" },
+      "requests": [
+        { "path": "/app", "expect": { "pass": "/" } },
+        { "path": "/app/", "expect": { "redirect": { "status": 308, "location": "/app" } } },
+        { "path": "/app/x/", "expect": { "redirect": { "status": 308, "location": "/app/x" } } }
+      ]
+    },
+    {
+      "name": "trailingSlash ignore keeps a destination's slash",
+      "config": {
+        "redirects": [{ "source": "/a", "destination": "/b/", "status": 307 }, { "source": "/c", "destination": "/d", "status": 307 }]
+      },
+      "requests": [
+        { "path": "/a", "expect": { "redirect": { "status": 307, "location": "/b/" } } },
+        { "path": "/c/", "expect": { "redirect": { "status": 307, "location": "/d" } } }
+      ]
+    },
+    { "name": "error: destination param missing from source", "config": { "redirects": [{ "source": "/a/[x]", "destination": "/b/[y]", "status": 307 }] }, "error": true },
+    { "name": "error: catch-all used as a single param", "config": { "rewrites": [{ "source": "/a/[...x]", "destination": "/b/[x]" }] }, "error": true },
+    { "name": "error: catch-all not last", "config": { "redirects": [{ "source": "/a/[...x]/b", "destination": "/c", "status": 307 }] }, "error": true },
+    { "name": "error: repeated param", "config": { "redirects": [{ "source": "/[a]/[a]", "destination": "/c", "status": 307 }] }, "error": true },
+    { "name": "error: protocol-relative destination", "config": { "redirects": [{ "source": "/a", "destination": "//evil.com", "status": 307 }] }, "error": true },
+    { "name": "error: backslash destination", "config": { "redirects": [{ "source": "/a", "destination": "/\\evil.com", "status": 307 }] }, "error": true },
+    { "name": "error: capture in an external host", "config": { "redirects": [{ "source": "/[h]", "destination": "https://[h]/x", "status": 307 }] }, "error": true },
+    { "name": "error: other scheme", "config": { "redirects": [{ "source": "/a", "destination": "javascript:alert(1)", "status": 307 }] }, "error": true },
+    { "name": "error: external rewrite", "config": { "rewrites": [{ "source": "/a", "destination": "https://example.com/a" }] }, "error": true },
+    { "name": "error: rewrite with a query", "config": { "rewrites": [{ "source": "/a", "destination": "/b?x=1" }] }, "error": true },
+    { "name": "error: source under /__nowaki/", "config": { "redirects": [{ "source": "/__nowaki/live", "destination": "/x", "status": 307 }] }, "error": true },
+    { "name": "error: destination under /__nowaki/", "config": { "rewrites": [{ "source": "/x", "destination": "/__nowaki/live-render" }] }, "error": true },
+    { "name": "error: source without a leading slash", "config": { "headers": [{ "source": "api", "headers": [{ "key": "x", "value": "1" }] }] }, "error": true },
+    { "name": "error: source with a query", "config": { "redirects": [{ "source": "/a?x", "destination": "/b", "status": 307 }] }, "error": true },
+    { "name": "error: empty segment in a source", "config": { "redirects": [{ "source": "/a//b", "destination": "/b", "status": 307 }] }, "error": true },
+    { "name": "error: CRLF in a destination", "config": { "redirects": [{ "source": "/a", "destination": "/b\r\nSet-Cookie: x", "status": 307 }] }, "error": true },
+    { "name": "error: CRLF in a header value", "config": { "headers": [{ "source": "/a", "headers": [{ "key": "x", "value": "1\r\nSet-Cookie: y" }] }] }, "error": true },
+    { "name": "error: non-token header name", "config": { "headers": [{ "source": "/a", "headers": [{ "key": "x y", "value": "1" }] }] }, "error": true },
+    { "name": "error: bad redirect status", "config": { "redirects": [{ "source": "/a", "destination": "/b", "status": 200 }] }, "error": true },
+    { "name": "error: basePath with a trailing slash", "config": { "basePath": "/app/" }, "error": true },
+    { "name": "error: basePath with a param", "config": { "basePath": "/[x]" }, "error": true },
+    { "name": "error: basePath under /__nowaki/", "config": { "basePath": "/__nowaki" }, "error": true }
+  ]
+}
