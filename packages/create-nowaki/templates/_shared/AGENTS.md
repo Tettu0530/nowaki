@@ -28,6 +28,7 @@ routes/      file-based routes (pages + API). _layout.tsx, _middleware.ts,
              _404.tsx, _500.tsx, [slug].tsx, api/*.ts
              (name)/ = route group: no URL segment, its own _layout /
              _middleware for the files inside it (group middleware skips 404s)
+             @slot/ = parallel route (optional): renders in layout prop `slot`, not in the URL
 islands/     interactive components — THE ONLY things that ship JS and hydrate
 components/  shared server components (no client JS)
 lib/         shared server code
@@ -136,6 +137,10 @@ nowaki.config.mjs   plugins (optional)
     <a href={route("/blog/[slug]", { slug })}>Post</a>      // dynamic, params typed
     ```
     Unknown paths, missing params, and wrong param keys are compile errors.
+11. **Parallel routes (optional)** — an `@name/` folder under `routes/` (e.g.
+    `routes/gallery/@modal/`) renders in a layout prop `modal`, not in the URL. Put
+    `default.tsx` in the slot for fallbacks. Only slots next to the active layout run
+    (not every `@` folder on every page).
 
 ## Security
 

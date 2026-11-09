@@ -53,10 +53,12 @@ const routeTable = {
   routes: table.routes.map((r) => ({
     file: (addModule(r.file), keyOf(r.file)),
     dir: r.dir,
+    slot: r.slot ?? "children",
     segments: r.segments,
     isApi: r.isApi,
     fileExt: r.fileExt,
     specificity: r.specificity,
+    rest: r.rest,
   })),
   layouts: table.layouts.map((l) => ({ prefix: l.prefix, file: (addModule(l.file), keyOf(l.file)) })),
   middleware: table.middleware.map((m) => ({
@@ -74,6 +76,13 @@ const routeTable = {
     urlPrefix: b.urlPrefix,
     file: (addModule(b.file), keyOf(b.file)),
   })),
+  slotDefaults: (table.slotDefaults ?? []).map((d) => ({
+    slot: d.slot,
+    prefix: d.prefix,
+    urlPrefix: d.urlPrefix,
+    file: (addModule(d.file), keyOf(d.file)),
+  })),
+  slots: table.slots ?? [],
   notFound: table.notFound ? (addModule(table.notFound), keyOf(table.notFound)) : null,
   errorRoute: table.errorRoute ? (addModule(table.errorRoute), keyOf(table.errorRoute)) : null,
 };

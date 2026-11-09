@@ -66,6 +66,9 @@ curl -s -D - -o /dev/null http://127.0.0.1:3310/pricing | grep -qi '^x-route-gro
 curl -sf http://127.0.0.1:3310/about | grep -qE '<link rel="stylesheet" href="/_nowaki/fonts\.[0-9a-f]+\.css" />'
 # MDX entries render from their compiled module on the node adapter
 curl -sf http://127.0.0.1:3310/docs/components | grep -q 'an expression (42), and highlighted code'
+# Parallel @slot routes on the node adapter
+curl -sf http://127.0.0.1:3310/parallel | grep -q 'id="aside-default"'
+curl -sf http://127.0.0.1:3310/parallel/detail | grep -q 'id="aside-detail"'
 # Markdoc on the node adapter: the .mdoc page and entry are compiled modules
 curl -sf http://127.0.0.1:3310/markdoc | grep -q 'class="callout callout-tip"'
 curl -sf http://127.0.0.1:3310/docs/markdoc | grep -q 'class="callout callout-warning"'
@@ -157,6 +160,8 @@ grep -q '<nowaki-island name="Counter"' examples/hello/dist/static/docs/componen
 grep -q '<h1 id="a-markdoc-page">A Markdoc page</h1>' examples/hello/dist/static/markdoc/index.html
 grep -q '<nowaki-island name="Counter"' examples/hello/dist/static/markdoc/index.html
 grep -q 'class="callout callout-warning"' examples/hello/dist/static/docs/markdoc/index.html
+grep -q 'id="aside-default"' examples/hello/dist/static/parallel/index.html
+grep -q 'id="aside-detail"' examples/hello/dist/static/parallel/detail/index.html
 # SEO in the static output: sitemap.xml generated against the site, public/robots.txt kept
 # static output: page URLs end in / (the page is docs/intro/index.html)
 grep -q '<loc>https://hello.nowaki.dev/docs/intro/</loc>' examples/hello/dist/static/sitemap.xml

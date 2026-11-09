@@ -239,6 +239,12 @@ code locations and CI coverage.
   group-free `urlPrefix` for the client). Rust: `routes.rs` `strip_route_groups` (in
   `url_pattern_from_stem`) and `check_url_conflicts` (called by `build_with_client`). Layout /
   CSS lookups stay on physical dirs. Tests: `scripts/router-test.mjs`, `routes.rs` units.
+- **Parallel routes (`routes/@slot/`)** — no URL segment; the slot renders in a layout prop
+  (`panel`, not `@panel`). JS: `router.mjs` (`isParallelSlot`, `slotFromRel`, `slotDefaults`,
+  `activeSlotsForRoute`); `handler.mjs` `routeNode` matches each slot and passes props to `_layout`.
+  Rust:
+  `routes.rs` `strip_parallel_slots`, `route_slot_from_rel`, prerender/typegen count only the
+  `children` slot. Tests: `scripts/router-test.mjs`, `routes.rs` units, `examples/hello/routes/parallel/`.
   through `server/segments.mjs`. Applied at the fronts by `crates/nowaki/src/front.rs`
   (`start.rs` `handle`, `dev.rs` `serve_or_proxy`, the headers layer; the route path reaches the
   sidecars in `x-nowaki-route-path` → `info.routePath`) and `server/front.mjs` (`app.mjs` `handle`,

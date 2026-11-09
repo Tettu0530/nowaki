@@ -122,6 +122,46 @@ const text = async (res) => res.body ?? (await new Response(res.stream).text());
   check("a response that sets a cookie stays 200 with its body", res.status === 200 && (await text(res)).includes("post hello"));
 }
 
+{
+  const loaders = [];
+  const parallelModules = {
+    "routes/g/_layout.tsx": {
+      loader: () => (loaders.push("main-layout"), null),
+      default: ({ children, aside }) => h("div", { id: "wrap" }, children, aside),
+    },
+    "routes/g/@aside/_layout.tsx": {
+      loader: () => (loaders.push("slot-layout"), null),
+      default: ({ children }) => h("div", { id: "slot-wrap" }, children),
+    },
+    "routes/g/index.tsx": { default: () => h("p", { id: "main" }, "main") },
+    "routes/g/@aside/index.tsx": { default: () => h("p", { id: "aside" }, "aside") },
+  };
+  const parallelTable = {
+    routes: [
+      { file: "routes/g/index.tsx", segments: [{ lit: "g" }], dir: "/g", slot: "children", isApi: false },
+      { file: "routes/g/@aside/index.tsx", segments: [{ lit: "g" }], dir: "/g/@aside", slot: "aside", isApi: false },
+    ],
+    layouts: [
+      { prefix: "/g", file: "routes/g/_layout.tsx" },
+      { prefix: "/g/@aside", file: "routes/g/@aside/_layout.tsx" },
+    ],
+    slotDefaults: [],
+    slots: ["aside"],
+    middleware: [],
+  };
+  const pEnv = {
+    ...env,
+    routeTable: async () => parallelTable,
+    importModule: async (f) => parallelModules[f],
+  };
+  loaders.length = 0;
+  const res = await handleRequest(pEnv, { method: "GET", url: new URL("http://x.test/g"), headers: {}, version: 1 });
+  const body = await text(res);
+  check("parallel passes aside into the main layout", body.includes('id="aside"') && body.includes('id="main"'));
+  check("the main _layout runs once (wrap only, not inside the slot)", loaders.filter((x) => x === "main-layout").length === 1);
+  check("the slot _layout runs for @aside pages", loaders.includes("slot-layout"));
+}
+
 if (failures) {
   console.error(`${failures} failure(s)`);
   process.exit(1);

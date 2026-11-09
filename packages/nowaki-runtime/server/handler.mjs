@@ -5,7 +5,14 @@ import { h } from "preact";
 import { renderToStringAsync } from "preact-render-to-string";
 import { renderToReadableStream } from "preact-render-to-string/stream";
 
-import { matchRoute, prefixDepth, routeUnderPrefix, underPrefix } from "./router.mjs";
+import {
+  activeSlotsForRoute,
+  matchRoute,
+  prefixDepth,
+  routeUnderPrefix,
+  slotLayoutDir,
+  underPrefix,
+} from "./router.mjs";
 import { mergeAttrs } from "./document.mjs";
 import { mergeMeta, robotsTxt, seoTags, sitemapXml } from "./seo.mjs";
 import { sitemapUrls } from "./isr-urls.mjs";
@@ -30,7 +37,7 @@ const HTML = { "content-type": "text/html; charset=utf-8" };
 const JSON_CT = { "content-type": "application/json; charset=utf-8" };
 
 /// env provides:
-///   routeTable(version) -> { routes, layouts, middleware, notFound, errorRoute }
+///   routeTable(version) -> { routes, layouts, middleware, slotDefaults, slots, notFound, errorRoute }
 ///   importModule(file, version) -> module
 ///   ensureIslands(version) -> prepares the island registry (call before rendering)
 ///   renderDocument({ mod, body }) -> final HTML string
@@ -302,7 +309,7 @@ async function renderRoute(env, table, match, mod, ctx, version) {
   }
   const data = mod.loader ? await mod.loader(ctx) : undefined;
   const meta = await withDocAttrs(env, table, match.file, mod, version, withFonts(env, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data, params: ctx.params, url: ctx.url }))))));
-  const node = await wrapLayouts(env, table, match.file, h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url }), ctx, version);
+  const node = await routeNode(env, table, match, mod, ctx, version, data);
 
   // With a shared Cache-Control, CDNs do ISR as-is. The `nowaki start` Rust front
   // reads x-nowaki-revalidate and caches in memory.
@@ -491,15 +498,34 @@ async function withDocAttrs(env, table, file, mod, version, meta) {
   return { ...(meta ?? {}), htmlAttrs: merged("htmlAttrs"), bodyAttrs: merged("bodyAttrs") };
 }
 
-// The page wrapped in its layouts, with every loader run (route first, then layouts leaf → root).
-async function routeNode(env, table, match, mod, ctx, version) {
-  const data = mod.loader ? await mod.loader(ctx) : undefined;
-  return wrapLayouts(env, table, match.file, h(mod.default, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url }), ctx, version);
+// The page and every parallel @slot, wrapped in layouts (loaders: page first, then leaf → root).
+async function routeNode(env, table, match, mod, ctx, version, pageData) {
+  const data = pageData !== undefined ? pageData : mod.loader ? await mod.loader(ctx) : undefined;
+  const slots = { children: h(mod.default, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url }) };
+  for (const name of activeSlotsForRoute(table, match.file)) {
+    const routes = table.routes.filter((r) => r.slot === name);
+    let hit = routes.length ? matchRoute(routes, ctx.url.pathname) : null;
+    if (!hit) {
+      const file = pickSlotDefault(table, name, match, ctx.url.pathname);
+      if (file) hit = { file, params: ctx.params, isApi: false };
+    }
+    if (!hit) {
+      slots[name] = null;
+      continue;
+    }
+    slots[name] = await renderSlotPage(env, table, hit, ctx, version);
+  }
+  return wrapLayouts(env, table, match.file, slots, ctx, version);
 }
 
-// Wraps the page node in the file's layouts, leaf → root, running each layout's loader in turn.
-async function wrapLayouts(env, table, file, node, ctx, version) {
-  const layouts = layoutChain(table, file);
+// A parallel slot page, wrapped in any _layout files under its @directory (not the main layout chain).
+async function renderSlotPage(env, table, hit, ctx, version) {
+  const smod = await env.importModule(hit.file, version);
+  const Page = smod.default;
+  if (typeof Page !== "function") return null;
+  const data = smod.loader ? await smod.loader(ctx) : undefined;
+  let node = h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url });
+  const layouts = slotLayoutChain(table, hit.file);
   for (let i = layouts.length - 1; i >= 0; i--) {
     const lmod = await env.importModule(layouts[i], version);
     const Layout = lmod.default;
@@ -508,6 +534,42 @@ async function wrapLayouts(env, table, file, node, ctx, version) {
     node = h(Layout, { data: ldata, params: ctx.params, url: ctx.url, children: node });
   }
   return node;
+}
+
+// Wraps the page (and parallel slots) in the file's layouts, leaf → root.
+async function wrapLayouts(env, table, file, slots, ctx, version) {
+  let node = slots.children;
+  const parallel = { ...slots };
+  delete parallel.children;
+  const layouts = layoutChain(table, file);
+  for (let i = layouts.length - 1; i >= 0; i--) {
+    const lmod = await env.importModule(layouts[i], version);
+    const Layout = lmod.default;
+    if (typeof Layout !== "function") continue;
+    const ldata = lmod.loader ? await lmod.loader(ctx) : undefined;
+    node = h(Layout, { data: ldata, params: ctx.params, url: ctx.url, children: node, ...parallel });
+  }
+  return node;
+}
+
+function pickSlotDefault(table, slot, primary, pathname) {
+  const route = routeOf(table, primary.file);
+  if (!route) return null;
+  const layoutDir = slotLayoutDir(route);
+  let best = null;
+  let bestDepth = -1;
+  for (const d of table.slotDefaults ?? []) {
+    if (d.slot !== slot) continue;
+    const root = layoutDir ? `${layoutDir}/@${d.slot}` : `/@${d.slot}`;
+    if (d.prefix !== root && !d.prefix.startsWith(`${root}/`)) continue;
+    if (!underPrefix(pathname, d.urlPrefix)) continue;
+    const depth = prefixDepth(d.urlPrefix);
+    if (depth >= bestDepth) {
+      best = d;
+      bestDepth = depth;
+    }
+  }
+  return best?.file ?? null;
 }
 
 // After an early shell, a redirect becomes a client-side `location.replace`, and an error renders
@@ -627,6 +689,22 @@ function layoutChain(table, file) {
       if (route ? routeUnderPrefix(route, entry.prefix) : !entry.prefix) chain.push(entry.file);
     }
     byFile.set(file, chain);
+  }
+  return chain;
+}
+
+// Layouts under the @slot directory only (not ancestors like `parallel/_layout` for `@aside` pages).
+function slotLayoutChain(table, file) {
+  const route = routeOf(table, file);
+  if (!route || (route.slot ?? "children") === "children") return layoutChain(table, file);
+  const root = route.dir;
+  const chain = [];
+  for (const entry of table.layouts ?? []) {
+    if (!root) {
+      if (!entry.prefix) chain.push(entry.file);
+      continue;
+    }
+    if (entry.prefix === root || entry.prefix.startsWith(`${root}/`)) chain.push(entry.file);
   }
   return chain;
 }

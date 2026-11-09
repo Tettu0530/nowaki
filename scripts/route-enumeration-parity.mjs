@@ -26,7 +26,7 @@ function urlFromSegments(segments) {
 
 const table = await scanRoutes(ROOT);
 const urls = table.routes
-  .filter((r) => !r.isApi)
+  .filter((r) => !r.isApi && (r.slot ?? "children") === "children")
   .map((r) => urlFromSegments(r.segments))
   .sort();
 process.stdout.write(`${JSON.stringify(urls)}\n`);

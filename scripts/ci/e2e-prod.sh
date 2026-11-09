@@ -195,6 +195,10 @@ curl -sf http://127.0.0.1:3300/markdoc | grep -q 'Raw HTML stays text: &lt;scrip
 curl -sf http://127.0.0.1:3300/docs/markdoc | grep -q '<a href="#callouts" style="margin-right:1rem">Callouts</a>'
 curl -sf http://127.0.0.1:3300/docs/markdoc | grep -q 'class="callout callout-warning"'
 curl -sf http://127.0.0.1:3300/docs | grep -q 'href="/docs/markdoc">Markdoc entry</a>'
+# Parallel @slot routes in production SSR
+curl -sf http://127.0.0.1:3300/parallel | grep -q 'id="parallel-home"'
+curl -sf http://127.0.0.1:3300/parallel | grep -q 'id="aside-default"'
+curl -sf http://127.0.0.1:3300/parallel/detail | grep -q 'id="aside-detail"'
 # ctx.url.origin is the browser's Host, not the sidecar's loopback address
 curl -sf -H 'Host: app.example' "http://127.0.0.1:3300/api/echo" | grep -q '"origin":"http://app.example"'
 # SEO: typed meta → head tags (absolute against nowaki.config `site`), generated sitemap.xml

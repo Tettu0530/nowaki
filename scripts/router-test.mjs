@@ -8,7 +8,19 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { scanRoutes, matchRoute, underPrefix, routeUnderPrefix, isRouteGroup, stripRouteGroups } from "../packages/nowaki-runtime/server/router.mjs";
+import {
+  scanRoutes,
+  matchRoute,
+  underPrefix,
+  routeUnderPrefix,
+  isRouteGroup,
+  stripRouteGroups,
+  isParallelSlot,
+  stripParallelSlots,
+  stripRouteUrlPrefix,
+  activeSlotsForRoute,
+  slotLayoutDir,
+} from "../packages/nowaki-runtime/server/router.mjs";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -70,8 +82,8 @@ eq(path.basename(table.notFound ?? ""), "_404.tsx", "notFound → routes/_404.ts
 eq(path.basename(table.errorRoute ?? ""), "_500.tsx", "errorRoute → routes/_500.tsx");
 eq(
   table.layouts.map((l) => l.prefix).sort(),
-  ["", "/(marketing)", "/blog"],
-  "layouts: root + nested /blog + the (marketing) group",
+  ["", "/(marketing)", "/blog", "/parallel"],
+  "layouts: root + nested /blog + the (marketing) group + parallel",
 );
 eq(table.middleware.map((m) => [m.prefix, m.group === true]), [["", false], ["/(marketing)", true]], "middleware at app root and in a group");
 eq(snap(table, "/pricing"), { file: "pricing.tsx", params: {}, isApi: false }, "/pricing → (marketing)/pricing (group left out of the URL)");
@@ -163,6 +175,12 @@ eq(["(.)", "(..)", "(...)", "()", "(a)b", "a"].map(isRouteGroup), [false, false,
 eq(stripRouteGroups("/(a)/docs/(b)"), "/docs", "groups stripped from a prefix");
 eq(stripRouteGroups("/(a)"), "", "a top-level group prefix is the root");
 eq(stripRouteGroups("/(.)/x"), "/(.)/x", "(.) stays literal");
+eq(isParallelSlot("@aside"), true, "@aside is a parallel slot");
+eq(["@", "@1x", "@a-b"].map(isParallelSlot), [false, false, false], "malformed @ names are not slots");
+eq(stripParallelSlots("/gallery/@panel"), "/gallery", "@slot stripped from a prefix");
+eq(stripRouteUrlPrefix("/(a)/gallery/@panel"), "/gallery", "groups and @slots stripped together");
+eq(snap(table, "/parallel"), { file: "index.tsx", params: {}, isApi: false }, "/parallel → parallel/index (children)");
+eq(snap(table, "/parallel/detail"), { file: "detail.tsx", params: {}, isApi: false }, "/parallel/detail (children)");
 
 // Route groups end to end: URL, layout / middleware / boundary containment, collisions.
 {
@@ -255,6 +273,99 @@ eq(stripRouteGroups("/(.)/x"), "/(.)/x", "(.) stays literal");
   eq(await clash(["(a)/blog/[slug].js", "(b)/blog/new.js"]), null, "a literal beside a param is not a collision");
   eq(await clash(["about.js", "about/index.js"]), null, "duplicates without a group are left as they were");
   eq(await clash(["(a)/_layout.js", "(b)/_layout.js", "(a)/loading.js", "loading.js"]), null, "convention files never collide");
+}
+
+// Parallel @slots: same URL in different slots, default fallback, layouts receive slot props.
+{
+  const dir = await mkdtemp(path.join(os.tmpdir(), "nowaki-parallel-"));
+  const put = async (rel, src) => {
+    await mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await writeFile(path.join(dir, rel), src);
+  };
+  const runtimeRequire = createRequire(path.join(ROOT, "packages/nowaki-runtime/server/handler.mjs"));
+  const preactDir = path.dirname(runtimeRequire.resolve("preact/package.json"));
+  const preact = JSON.stringify(pathToFileURL(path.join(preactDir, "dist/preact.mjs")).href);
+  const wrapSlots = `import { h } from ${preact};\nexport default (p) => h("div", { id: "layout" }, [p.children, p.aside]);\n`;
+  const page = (id, text) => `import { h } from ${preact};\nexport default () => h("p", { id: ${JSON.stringify(id)} }, ${JSON.stringify(text)});\n`;
+  await put("routes/g/_layout.js", wrapSlots);
+  await put("routes/g/index.js", page("main", "home"));
+  await put("routes/g/detail.js", page("main", "detail"));
+  await put("routes/g/@aside/default.js", page("aside", "aside-default"));
+  await put("routes/g/@aside/detail.js", page("aside", "aside-detail"));
+  const t = await scanRoutes(dir);
+  eq(t.slots, ["aside"], "scanRoutes collects @slot names");
+  eq(
+    t.routes.filter((r) => r.slot === "aside").map((r) => path.basename(r.file)),
+    ["detail.js"],
+    "@aside pages are tagged (default.tsx is slotDefaults)",
+  );
+  eq(t.slotDefaults.map((d) => path.basename(d.file)), ["default.js"], "default.tsx is registered per slot");
+  const env = {
+    routeTable: async () => t,
+    importModule: async (file) => import(pathToFileURL(file).href),
+    ensureIslands: async () => {},
+    renderDocument: ({ body }) => body,
+    renderError: (err) => ({ status: 500, headers: {}, body: String(err?.stack ?? err) }),
+  };
+  const get = async (p) => {
+    const r = await handleRequest(env, { method: "GET", url: new URL("http://x" + p), headers: {}, version: 1 });
+    return String(r.body ?? "");
+  };
+  eq((await get("/g")).includes('id="main"') && (await get("/g")).includes("aside-default"), true, "/g renders children + default @aside");
+  eq((await get("/g/detail")).includes("detail") && (await get("/g/detail")).includes("aside-detail"), true, "/g/detail matches both slots");
+  const clash = async (files) => {
+    const d = await mkdtemp(path.join(os.tmpdir(), "nowaki-parallel-clash-"));
+    for (const f of files) {
+      await mkdir(path.dirname(path.join(d, "routes", f)), { recursive: true });
+      await writeFile(path.join(d, "routes", f), "export default () => null;\n");
+    }
+    try {
+      await scanRoutes(d);
+      return null;
+    } catch (err) {
+      return String(err.message);
+    } finally {
+      await rm(d, { recursive: true, force: true });
+    }
+  };
+  eq((await clash(["g/@aside/[a].js", "g/@aside/[b].js"]))?.includes("@aside"), true, "two @aside routes for one URL is an error");
+  eq(await clash(["g/a.js", "g/@aside/a.js"]), null, "the same URL in different slots is allowed");
+  const scoped = await mkdtemp(path.join(os.tmpdir(), "nowaki-parallel-scope-"));
+  const put2 = async (rel, src) => {
+    await mkdir(path.dirname(path.join(scoped, rel)), { recursive: true });
+    await writeFile(path.join(scoped, rel), src);
+  };
+  await put2("routes/index.js", page("main", "root"));
+  await put2("routes/g/_layout.js", wrapSlots);
+  await put2("routes/g/index.js", page("main", "g-home"));
+  await put2("routes/g/@aside/default.js", page("aside", "g-aside"));
+  const t2 = await scanRoutes(scoped);
+  const gRoute = t2.routes.find((r) => r.dir === "/g" && r.slot === "children");
+  eq(activeSlotsForRoute(t2, gRoute.file), ["aside"], "only @slots beside the page's layout run");
+  eq(slotLayoutDir(gRoute), "/g", "slotLayoutDir is the layout directory");
+  const rootRoute = t2.routes.find((r) => r.dir === "" && r.slot === "children");
+  eq(activeSlotsForRoute(t2, rootRoute.file), [], "a @slot under /g doesn't run on /");
+  const env2 = {
+    routeTable: async () => t2,
+    importModule: async (file) => import(pathToFileURL(file).href),
+    ensureIslands: async () => {},
+    renderDocument: ({ body }) => body,
+    renderError: (err) => ({ status: 500, headers: {}, body: String(err) }),
+  };
+  const get2 = async (p) => {
+    const r = await handleRequest(env2, { method: "GET", url: new URL("http://x" + p), headers: {}, version: 1 });
+    let body = r.body ?? "";
+    if (r.stream) {
+      for await (const c of r.stream) body += typeof c === "string" ? c : new TextDecoder().decode(c);
+    }
+    return String(body);
+  };
+  eq((await get2("/")).includes("g-aside"), false, "/ does not render a nested layout's @slot");
+  eq((await get2("/g")).includes("g-aside"), true, "/g renders its local @slot");
+  eq((await clash(["g/@aside/@nested/x.js"]))?.includes("nested @slot"), true, "nested @slot directories are rejected");
+  eq((await clash(["@children/x.js"]))?.includes("@children"), true, "@children is reserved");
+  await rm(scoped, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true });
 }
 
 // _middleware / _layout / error.tsx inside a [param] directory apply to the URLs under it,

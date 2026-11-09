@@ -11,6 +11,14 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **Parallel routes (`@slot`).** A directory named `@name` under `routes/` renders
+  in a matching layout prop without adding a URL segment
+  (`routes/gallery/@panel/[id].tsx` → `/gallery/:id` in `panel`). The primary page
+  stays in `children` (files outside any `@` directory). A `default.tsx` in a slot
+  is the fallback when that slot has no route for the URL. Only `@slot` directories
+  beside the active layout run (not every slot in the app on every page). Nested
+  `@` directories, API routes, and file routes inside a slot are rejected at scan.
+  Intercepting routes (`(.)`, …) are not implemented yet.
 - **Route groups.** A directory named `(name)` under `routes/` groups files
   without adding a URL segment: `routes/(marketing)/about.tsx` serves `/about`.
   The group's `_layout`, `loading` and `error` apply to the files inside it.

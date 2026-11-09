@@ -148,6 +148,11 @@ curl -sf $B/markdoc | grep -q 'Raw HTML stays text: &lt;script>alert(1)&lt;/scri
 curl -sf $B/docs/markdoc | grep -q '<a href="#callouts" style="margin-right:1rem">Callouts</a>'
 curl -sf $B/docs/markdoc | grep -q 'class="callout callout-warning"'
 curl -sf $B/docs | grep -q 'href="/docs/markdoc">Markdoc entry</a>'
+# Parallel @slot routes: one URL, multiple layout props (kitchen-sink /parallel)
+curl -sf $B/parallel | grep -q 'id="parallel-home"'
+curl -sf $B/parallel | grep -q 'id="aside-default"'
+curl -sf $B/parallel/detail | grep -q 'id="parallel-detail"'
+curl -sf $B/parallel/detail | grep -q 'id="aside-detail"'
 # SEO: typed meta → head tags (absolute against nowaki.config `site`), generated sitemap.xml
 curl -sf $B/docs/intro | grep -q '<link rel="canonical" href="https://hello.nowaki.dev/docs/intro" />'
 curl -sf $B/docs/intro | grep -q '<meta property="og:image" content="https://hello.nowaki.dev/og/intro.png" />'

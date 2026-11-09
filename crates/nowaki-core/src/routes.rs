@@ -49,6 +49,20 @@ pub fn is_convention_source(base: &str) -> bool {
     base.starts_with('_') || base == "loading" || base == "error"
 }
 
+/// Whether a directory name is a parallel slot (`@panel`): it renders in a layout prop without
+/// adding a URL segment. Matches router.mjs `isParallelSlot`.
+pub fn is_parallel_slot(name: &str) -> bool {
+    name.len() > 2
+        && name.starts_with('@')
+        && name
+            .as_bytes()
+            .get(1)
+            .is_some_and(|b| b.is_ascii_alphabetic())
+        && name[1..]
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
 /// Whether a directory name is a route group (`(marketing)`): it groups files without adding a
 /// URL segment. Names starting with `.` (`(.)`, `(..)`) are reserved and stay literal. Matches
 /// router.mjs `isRouteGroup`.
@@ -58,6 +72,46 @@ pub fn is_route_group(name: &str) -> bool {
         && name.ends_with(')')
         && !name[1..].starts_with('.')
         && !name[1..name.len() - 1].contains([')', '/'])
+}
+
+/// A route stem or relative path without its `@slot` directories (`gallery/@panel/[id]` →
+/// `gallery/[id]`). The last segment is a file name, never a slot.
+pub fn strip_parallel_slots(stem: &str) -> String {
+    if !stem.contains('@') {
+        return stem.to_string();
+    }
+    let parts: Vec<&str> = stem.split('/').collect();
+    let last = parts.len() - 1;
+    parts
+        .iter()
+        .enumerate()
+        .filter(|(i, p)| *i == last || !is_parallel_slot(p))
+        .map(|(_, p)| *p)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Route groups and parallel slots left out of the URL (`(x)/a/@b/c` → `a/c`).
+pub fn strip_url_segments(stem: &str) -> String {
+    strip_parallel_slots(&strip_route_groups(stem))
+}
+
+/// The parallel slot that owns a route file (`gallery/@aside/x.tsx` → `aside`; else `children`).
+pub fn route_slot_from_rel(rel: &str) -> String {
+    let rel = rel.replace('\\', "/");
+    for part in rel.rsplit('/').skip(1) {
+        if is_parallel_slot(part) {
+            return part[1..].to_string();
+        }
+    }
+    "children".to_string()
+}
+
+fn parallel_slot_count(rel: &str) -> usize {
+    rel.replace('\\', "/")
+        .split('/')
+        .filter(|p| is_parallel_slot(p))
+        .count()
 }
 
 /// A route stem or relative path without its route-group directories
@@ -106,7 +160,7 @@ pub fn stem_from_rel(rel: &str) -> Option<String> {
 /// URL pattern from a route stem (`blog/index` → `/blog`, `index` → `/`).
 /// Route groups are left out (`(marketing)/about` → `/about`).
 pub fn url_pattern_from_stem(stem: &str) -> String {
-    let mut url = format!("/{}", strip_route_groups(stem));
+    let mut url = format!("/{}", strip_url_segments(stem));
     if let Some(stripped) = url.strip_suffix("/index") {
         url = stripped.to_string();
     }
@@ -121,6 +175,9 @@ pub fn typegen_entry(rel: &str) -> Option<(String, String)> {
     let stem = stem_from_rel(rel)?;
     let base = file_base_name(&stem);
     if is_convention_source(base) || is_endpoint_rel(rel) {
+        return None;
+    }
+    if route_slot_from_rel(rel) != "children" || base == "default" {
         return None;
     }
 
@@ -162,7 +219,8 @@ pub fn scan_typegen(routes_dir: &Path) -> Result<Vec<(String, String)>> {
 /// Whether a built server route stem (`dist/server/routes/...` without `.js`) is a static HTML prerender target.
 /// File routes are listed by static-paths.mjs instead (written to their own path, not index.html).
 pub fn is_static_prerender_stem(stem: &str) -> bool {
-    !is_api_route_rel(stem)
+    route_slot_from_rel(stem) == "children"
+        && !is_api_route_rel(stem)
         && !stem.contains('[')
         && !is_file_route_stem(stem)
         && !is_convention_source(file_base_name(stem))
@@ -206,6 +264,9 @@ pub fn page_url_patterns(routes_dir: &Path) -> Result<Vec<String>> {
         if is_convention_source(base) || is_endpoint_rel(&rel) {
             continue;
         }
+        if route_slot_from_rel(&rel) != "children" || base == "default" {
+            continue;
+        }
         out.push(url_pattern_from_stem(&stem));
     }
     out.sort();
@@ -229,28 +290,52 @@ pub fn check_url_conflicts(routes_dir: &Path) -> Result<()> {
         let Some(stem) = stem_from_rel(&rel) else {
             continue;
         };
-        if file_base_name(&stem).starts_with('_')
-            || matches!(file_base_name(&stem), "loading" | "error")
-        {
+        let base = file_base_name(&stem);
+        if base.starts_with('_') || matches!(base, "loading" | "error") {
             continue;
         }
-        let in_group = strip_route_groups(&stem) != stem;
+        if parallel_slot_count(&rel) > 1 {
+            anyhow::bail!(
+                "routes/{rel}: nested @slot directories are not supported (use one @name per branch)."
+            );
+        }
+        if rel.replace('\\', "/").split('/').any(|p| p == "@children") {
+            anyhow::bail!(
+                "routes/{rel}: @children is reserved (use files outside @ directories for the main slot)."
+            );
+        }
+        let slot = route_slot_from_rel(&rel);
+        if base == "default" && slot != "children" {
+            continue;
+        }
+        if slot != "children" && is_endpoint_rel(&rel) {
+            anyhow::bail!("routes/{rel}: parallel @{slot} routes can't be API or file routes.");
+        }
+        let special = strip_url_segments(&stem) != stem;
         let url = url_pattern_from_stem(&stem);
-        let key = url
+        let shape = url
             .split('/')
             .filter(|s| !s.is_empty())
             .map(segment_shape)
             .collect::<Vec<_>>()
             .join("/");
+        let key = format!("{slot}:{shape}");
         match seen.get(&key) {
-            Some((prev, prev_group)) if *prev_group || in_group => {
-                anyhow::bail!(
-                    "routes/{prev} and routes/{rel} both serve {url}: route groups \"(name)\" add no URL segment. Rename or move one of them."
-                );
+            Some((prev, prev_special)) if slot != "children" || *prev_special || special => {
+                let msg = if slot == "children" {
+                    format!(
+                        "routes/{prev} and routes/{rel} both serve {url}: route groups \"(name)\" add no URL segment. Rename or move one of them."
+                    )
+                } else {
+                    format!(
+                        "routes/{prev} and routes/{rel} both serve {url} in the @{slot} slot. Rename or move one of them."
+                    )
+                };
+                anyhow::bail!(msg);
             }
             Some(_) => {}
             None => {
-                seen.insert(key, (rel, in_group));
+                seen.insert(key, (rel, special));
             }
         }
     }
@@ -465,6 +550,47 @@ mod tests {
             enumerate_static_prerender_urls(&build).unwrap(),
             vec!["/pricing".to_string()]
         );
+    }
+
+    #[test]
+    fn parallel_slots_leave_the_url() {
+        assert!(is_parallel_slot("@panel"));
+        assert!(!is_parallel_slot("@"));
+        assert!(!is_parallel_slot("@1bad"));
+        assert_eq!(strip_parallel_slots("gallery/@panel/[id]"), "gallery/[id]");
+        assert_eq!(strip_url_segments("(g)/gallery/@panel/x"), "gallery/x");
+        assert_eq!(route_slot_from_rel("parallel/@aside/detail.tsx"), "aside");
+        assert_eq!(route_slot_from_rel("parallel/detail.tsx"), "children");
+        assert_eq!(
+            entry("gallery/@panel/index.tsx"),
+            None,
+            "parallel slot pages are not typegen entries"
+        );
+        assert_eq!(
+            url_pattern_from_stem("parallel/@aside/detail"),
+            "/parallel/detail"
+        );
+    }
+
+    #[test]
+    fn parallel_slot_url_conflicts() {
+        let conflict = |files: &[&str]| -> Option<String> {
+            let tmp = tempfile::tempdir().unwrap();
+            let routes = tmp.path().join("routes");
+            for f in files {
+                let p = routes.join(f);
+                std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+                std::fs::write(p, "export default () => null;\n").unwrap();
+            }
+            check_url_conflicts(&routes).err().map(|e| e.to_string())
+        };
+        let msg = conflict(&["g/@aside/[a].tsx", "g/@aside/[b].tsx"]).expect("conflict");
+        assert!(msg.contains("@aside"), "{msg}");
+        assert!(conflict(&["g/a.tsx", "g/@aside/a.tsx"]).is_none());
+        let nested = conflict(&["g/@aside/@nested/x.tsx"]).expect("nested slots");
+        assert!(nested.contains("nested @slot"), "{nested}");
+        let reserved = conflict(&["@children/x.tsx"]).expect("@children reserved");
+        assert!(reserved.contains("@children"), "{reserved}");
     }
 
     #[test]
