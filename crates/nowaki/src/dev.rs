@@ -129,7 +129,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         .route(crate::mcp::PATH, axum::routing::any(crate::mcp::handle))
         .fallback(serve_or_proxy)
         .with_state(state);
-    if let Some(front) = front.filter(|f| f.has_headers()) {
+    if let Some(front) = front.filter(|f| f.has_response_layer()) {
         app = app.layer(axum::middleware::from_fn_with_state(
             front,
             crate::front::headers_layer,

@@ -541,6 +541,11 @@ fn static_host_rules(
             "basePath {base:?}: pages are written at the root of the output; deploy them under {base} (the rules below include it)"
         ));
     }
+    if config.i18n.as_ref().is_some_and(|i| i.detect) {
+        out.warnings.push(
+            "i18n.detect: a static host can't read Accept-Language or the nowaki_locale cookie, so / always serves the default locale (detection needs `nowaki start` or a server adapter)".to_string(),
+        );
+    }
     let internal = |d: &str| {
         if d.starts_with('/') {
             if d == "/" && !base.is_empty() {
@@ -772,6 +777,16 @@ mod tests {
         assert!(!host.warnings.iter().any(|w| w.contains("trailingSlash")));
         assert!(static_host_rules(&routing("{}"), &[]).redirects.is_empty());
         assert!(static_host_rules(&routing("{}"), &[]).warnings.is_empty());
+        let detect = static_host_rules(
+            &routing(r#"{"i18n":{"locales":["en","ja"],"defaultLocale":"en","detect":true}}"#),
+            &[],
+        );
+        assert!(detect.warnings.iter().any(|w| w.contains("i18n.detect")));
+        let no_detect = static_host_rules(
+            &routing(r#"{"i18n":{"locales":["en","ja"],"defaultLocale":"en"}}"#),
+            &[],
+        );
+        assert!(no_detect.warnings.is_empty());
     }
 
     #[test]

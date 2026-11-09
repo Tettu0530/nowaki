@@ -203,17 +203,17 @@ function plainFetch() {
 `;
 }
 
-/// The worker's fetch with nowaki.config routing: basePath, trailingSlash, redirects and rewrites
-/// run first (before the Assets binding), and the config headers go on every response.
+/// The worker's fetch with nowaki.config routing: basePath, trailingSlash, redirects, rewrites and
+/// locale detection (i18n.detect) run first (before the Assets binding), and the config headers go
+/// on every response.
 function routedFetch(routing) {
   return `import { compileRules } from "@nowaki-dev/runtime/server/rules.mjs";
-import { frontHeaders, frontStep, withHeaderDefaults } from "@nowaki-dev/runtime/server/front.mjs";
+import { frontHeaders, frontLocale, frontStep, withHeaderDefaults, withVary } from "@nowaki-dev/runtime/server/front.mjs";
 const rules = compileRules(${routing});
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    let routePath = url.pathname;
     const headers = rules ? frontHeaders(rules, url.pathname) : [];
     const step = rules && frontStep(rules, request.method, url);
     if (step?.redirect) {
@@ -224,19 +224,30 @@ export default {
       const r = new Response("not found", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
       return withSecurityHeaders(withHeaderDefaults(r, headers));
     }
-    if (step) routePath = step.routePath;
-    // Static files go to the Assets binding (dist/worker/assets: dist/client under
-    // <basePath>/_nowaki/, and public/ under basePath), looked up by the route path.
-    if (env.ASSETS && (routePath.startsWith("/_nowaki/") || ((request.method === "GET" || request.method === "HEAD") && isPublic(routePath)))) {
-      const assetPath = (rules?.base ?? "") + routePath;
-      const asset = assetPath === url.pathname ? request : new Request(new URL(assetPath + url.search, url), request);
-      return withSecurityHeaders(withHeaderDefaults(await env.ASSETS.fetch(asset), headers));
+    // i18n.detect: Accept-Language / the nowaki_locale cookie on the root; the response varies on them.
+    const locale = rules?.detect ? frontLocale(rules, request.method, url, request.headers.get("accept-language"), request.headers.get("cookie")) : null;
+    if (locale?.redirect) {
+      const r = new Response(null, { status: locale.redirect.status, headers: { ...locale.headers, location: locale.redirect.location } });
+      return withSecurityHeaders(withHeaderDefaults(r, headers));
     }
-    // A /__nowaki/* endpoint under basePath: the handler dispatches it by the root URL.
-    if (step?.internal) return handler(new Request(new URL(routePath + url.search, url), request), env, { headers });
-    return handler(request, env, { routePath: step ? routePath : undefined, headers });
+    const response = await serve(request, env, url, step, headers);
+    return locale ? withVary(response) : response;
   },
 };
+
+async function serve(request, env, url, step, headers) {
+  const routePath = step ? step.routePath : url.pathname;
+  // Static files go to the Assets binding (dist/worker/assets: dist/client under
+  // <basePath>/_nowaki/, and public/ under basePath), looked up by the route path.
+  if (env.ASSETS && (routePath.startsWith("/_nowaki/") || ((request.method === "GET" || request.method === "HEAD") && isPublic(routePath)))) {
+    const assetPath = (rules?.base ?? "") + routePath;
+    const asset = assetPath === url.pathname ? request : new Request(new URL(assetPath + url.search, url), request);
+    return withSecurityHeaders(withHeaderDefaults(await env.ASSETS.fetch(asset), headers));
+  }
+  // A /__nowaki/* endpoint under basePath: the handler dispatches it by the root URL.
+  if (step?.internal) return handler(new Request(new URL(routePath + url.search, url), request), env, { headers });
+  return handler(request, env, { routePath: step ? routePath : undefined, headers });
+}
 `;
 }
 

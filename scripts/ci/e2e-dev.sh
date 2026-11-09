@@ -309,7 +309,7 @@ bash scripts/ci/assert-no-orphans.sh $SERVER_PID
 
 # nowaki.config redirects / rewrites / headers / basePath / trailingSlash in dev (a generated app)
 node scripts/rules-e2e.mjs dev --port "$((PORT + 8))"
-# nowaki.config i18n in dev (generated apps on PORT+10 and PORT+11)
+# nowaki.config i18n in dev (generated apps on PORT+10, PORT+11 and PORT+12)
 node scripts/i18n-e2e.mjs dev --port "$((PORT + 10))"
 
 # SIGKILL: the dev sidecar and plugin host exit when their stdin pipe closes (exit-with-parent.mjs).

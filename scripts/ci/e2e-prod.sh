@@ -282,8 +282,8 @@ bash scripts/ci/assert-no-orphans.sh $START_PID
 # nowaki.config redirects / rewrites / headers / basePath / trailingSlash at the Rust front
 # (a generated app; listens on 3306 and 3307)
 node scripts/rules-e2e.mjs start --port 3306
-# nowaki.config i18n at the Rust front (generated apps; listen on 3308, and 3309 for i18n +
-# basePath + trailingSlash "never" + a slot)
+# nowaki.config i18n at the Rust front (generated apps; listen on 3308, 3309 for i18n +
+# basePath + trailingSlash "never" + a slot, and 3310 for locale detection)
 node scripts/i18n-e2e.mjs start --port 3308
 # Rooms survive a restart: on SIGTERM the sidecar wrote them to .nowaki/live-rooms.json.
 ROOMS=examples/hello/.nowaki/live-rooms.json

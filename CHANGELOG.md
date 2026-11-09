@@ -11,6 +11,22 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **Locale detection on `/` (`i18n.detect: true`, opt-in).** A GET or HEAD of the site's root
+  (`/`, or `basePath`) picks a locale from `Accept-Language` (q-values; an exact tag, then the
+  range's primary subtag, so `ja-JP` finds `ja`, then a bare range such as `pt` finding `pt-BR`;
+  `*` means the default; malformed ranges are ignored, and only the first 32 ranges of a value up
+  to 4 KB are read) and redirects (307) to that locale's root (`/ja`, shaped by `basePath` and
+  `trailingSlash`); the default locale stays on `/` (unless `prefixDefaultLocale`). A
+  `nowaki_locale` cookie naming a configured locale wins over the header, so a visitor's choice
+  sticks: `setLocale(locale)` (from `@nowaki-dev/runtime` or `/navigation`) sets it, and so does
+  a click on a `<Link locale>` used inside an island (a page without islands ships no JS, so a
+  language switcher belongs in one). Detection runs at every front (`nowaki
+  start`, `nowaki dev`, the node / bun / deno / vercel adapters, the Cloudflare worker) after
+  config redirects and before the ISR cache, so a cached `/` only ever answers visitors who stay
+  on it; every response to `/` carries `Vary: Accept-Language, Cookie`, and the redirect is
+  `Cache-Control: private, no-cache`. Other URLs are never redirected. Static output can't
+  negotiate: the build warns and `/` serves the default locale. Without `detect`, a request pays
+  one check (none at the Rust fronts).
 - **Parallel routes (`@slot`), server-rendered.** A directory named `@name` under `routes/` is a
   slot of the `_layout` in its parent directory, which gets it as `slots.name` (typed by the new
   `LayoutProps`). The slot's file matching the URL below the owner's directory renders there
@@ -126,8 +142,8 @@ milestone's worth of work; the codename is noted per entry.
   routing, so middleware, layouts and the 404 page see `/about`, while
   `ctx.url` keeps the browser's URL. With `prefixDefaultLocale: true` the
   default locale is prefixed too, an unprefixed page is a 404 (API and file
-  routes still answer), and `/` redirects (307) to `/en` until locale
-  detection lands. `ctx.locale` and `getLocale()` (from `@nowaki-dev/runtime`
+  routes still answer), and `/` redirects (307) to `/en` (with `detect`, to
+  the visitor's locale). `ctx.locale` and `getLocale()` (from `@nowaki-dev/runtime`
   or `/navigation`, in components and islands too) give the locale;
   `localePath(path, locale)` and `<Link locale="ja">` build localized links.
   Pages get `<html lang>` from the locale unless they set one, and, when the

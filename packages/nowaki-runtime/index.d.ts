@@ -343,6 +343,14 @@ export function getLocale(): string | undefined;
  */
 export function localePath(path: string, locale?: string): string;
 
+/**
+ * Remembers `locale` as the visitor's choice when nowaki.config has `i18n.detect`: sets the
+ * `nowaki_locale` cookie (Path = basePath, one year, SameSite=Lax), which the site's root follows
+ * instead of `Accept-Language`. Call it from an island (a language switcher) before navigating;
+ * a `<Link locale>` used inside an island does it on click. Does nothing on the server.
+ */
+export function setLocale(locale: string): void;
+
 /** A [Standard Schema](https://standardschema.dev) (zod, valibot, arktype, ...). */
 export interface StandardSchemaV1<Input = unknown, Output = Input> {
   readonly "~standard": {
