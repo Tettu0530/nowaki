@@ -25,7 +25,7 @@ const { env, liveRegistry } = await createApp({
 // Pages return body+meta markers instead of final HTML. Streaming bypasses the markers.
 env.renderDocument = ({ mod, body, meta }) => {
   const m = pageMeta(meta, mod);
-  return { __nowakiPage: true, body, title: m.title, head: m.head, lang: m.lang, htmlAttrs: m.htmlAttrs, bodyAttrs: m.bodyAttrs };
+  return { __nowakiPage: true, body, title: m.title, head: m.head, lang: m.lang, htmlAttrs: m.htmlAttrs, bodyAttrs: m.bodyAttrs, router: meta?.router === true };
 };
 
 const server = createServer(async (req, res) => {
@@ -91,7 +91,7 @@ const server = createServer(async (req, res) => {
         "content-type": "application/json; charset=utf-8",
         "x-nowaki-page": "1",
       });
-      res.end(JSON.stringify({ body: b.body, title: b.title, head: b.head, lang: b.lang, htmlAttrs: b.htmlAttrs, bodyAttrs: b.bodyAttrs }));
+      res.end(JSON.stringify({ body: b.body, title: b.title, head: b.head, lang: b.lang, htmlAttrs: b.htmlAttrs, bodyAttrs: b.bodyAttrs, router: b.router || undefined }));
     } else {
       res.writeHead(result.status ?? 200, result.headers ?? {});
       if (result.stream) {

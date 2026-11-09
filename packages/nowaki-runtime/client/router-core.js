@@ -4,15 +4,20 @@
 // Returns the boundary that best matches pathname (deepest directory). prefix "" matches everything.
 // loading/error boundaries nest; boundaries in deeper directories win. A prefix is the boundary's
 // directory as written: a [param] directory matches any one segment, [...rest] one or more,
-// [id].v2 one ending in .v2 (the same rule as underPrefix in server/router.mjs).
+// [id].v2 one ending in .v2 (the same rule as underPrefix in server/router.mjs). A route group's
+// boundary (its prefix leaves the group out) also lists `routes`, URL patterns in matching order,
+// those of routes outside the group marked "!": it applies when the first one the path matches is
+// the group's, and at the same prefix it wins over a boundary outside the group.
 export function matchBoundary(list, pathname) {
   const parts = String(pathname).split("/").filter(Boolean);
   let best = null;
   let bestDepth = -1;
   for (const b of list || []) {
     const want = (b.prefix || "").split("/").filter(Boolean);
-    if (!prefixHit(want, parts)) continue;
-    if (want.length > bestDepth) {
+    if (!segmentsHit(want, parts)) continue;
+    if (b.routes && b.routes.find((r) => matchPattern(r.replace(/^!/, ""), pathname))?.[0] !== "/") continue;
+    // At the same depth a group's boundary (closer to the route on disk) wins.
+    if (want.length > bestDepth || (want.length === bestDepth && b.routes)) {
       best = b;
       bestDepth = want.length;
     }
@@ -20,7 +25,15 @@ export function matchBoundary(list, pathname) {
   return best;
 }
 
-function prefixHit(want, parts) {
+// Does a URL path match a route pattern ("/photo/[id]", "/docs/[...rest]", "/og/[card].png")?
+// Trailing slashes don't count.
+export function matchPattern(pattern, pathname) {
+  return segmentsHit(String(pattern).split("/").filter(Boolean), String(pathname).split("/").filter(Boolean), true);
+}
+
+// `want` (segments as written) against `parts` (a path's, percent-encoded): as a prefix of the
+// path, or the whole path when `exact`.
+function segmentsHit(want, parts, exact) {
   for (let i = 0; i < want.length; i++) {
     if (i >= parts.length) return false;
     if (/^\[\.\.\..+\]$/.test(want[i])) return true;
@@ -38,7 +51,7 @@ function prefixHit(want, parts) {
     if (/^\[.+\]$/.test(want[i])) continue;
     if (part !== want[i]) return false;
   }
-  return true;
+  return !exact || want.length === parts.length;
 }
 
 // Small TTL + LRU page cache (Router Cache). Values are opaque ({doc,finalUrl} in router.js).

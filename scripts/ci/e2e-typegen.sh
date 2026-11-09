@@ -12,6 +12,9 @@ grep -q '"/files/\[\.\.\.path\]": { path: string\[\] }' examples/hello/.nowaki/t
 # a route group adds no URL segment
 grep -q '"/pricing": {}' examples/hello/.nowaki/types.d.ts
 ! grep -q '(marketing)' examples/hello/.nowaki/types.d.ts
+# parallel-route slot files and intercepting routes are not pages
+grep -q '"/photos/\[id\]": { id: string }' examples/hello/.nowaki/types.d.ts
+! grep -q '@modal\|(\.)' examples/hello/.nowaki/types.d.ts
 # API routes and convention files are NOT navigable → excluded
 ! grep -q '"/api/' examples/hello/.nowaki/types.d.ts
 ! grep -q '_404\|_layout\|loading\|error' examples/hello/.nowaki/types.d.ts

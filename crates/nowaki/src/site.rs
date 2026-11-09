@@ -50,6 +50,30 @@ pub fn config(root: &Path) -> Result<Value> {
     serde_json::from_slice(&output.stdout).context("site-config.mjs printed invalid JSON")
 }
 
+/// nowaki.config `basePath` from `config` (`""` without one).
+pub fn base_path(config: &Value) -> &str {
+    config
+        .pointer("/routing/basePath")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+}
+
+static ASSET_BASE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Gives `core` the config's basePath (asset URLs, the server function endpoint,
+/// `import.meta.env.BASE_URL`) and remembers its asset prefix for content entries and fonts.
+pub fn configure(core: &mut nowaki_core::NowakiCore, config: &Value) -> Result<()> {
+    core.set_base_path(base_path(config))
+        .map_err(|e| anyhow!("nowaki.config: {e}"))?;
+    let _ = ASSET_BASE.set(core.asset_base());
+    Ok(())
+}
+
+/// The URL prefix of built assets (`/_nowaki/`, or `<basePath>/_nowaki/`) `configure` set.
+pub fn asset_base() -> &'static str {
+    ASSET_BASE.get().map_or("/_nowaki/", String::as_str)
+}
+
 /// Writes `dist/server/site.json` and `dist/server/routing.json` from `config` (each removed
 /// when the config has nothing for it).
 pub fn write(dist: &Path, config: &Value) -> Result<()> {

@@ -143,6 +143,8 @@ jobs:
         run: node scripts/loader-hooks-test.mjs
       - name: Request handler (layouts, routePath, commit hook)
         run: node scripts/handler-test.mjs
+      - name: i18n (locale split and localePath against the shared fixture, hreflang, per-locale content)
+        run: node scripts/i18n-test.mjs
       - name: Sessions (encryption, tampering, expiry, key rotation, store mode, CSRF read-only)
         run: node scripts/session-test.mjs
       - name: Live session hub (join/event, queue, timeout, cap, presence)
@@ -206,6 +208,11 @@ jobs:
           PORT=8243 node examples/hello/dist/server/index.mjs &
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8243/ >/dev/null && break; sleep 1; done
           BASE=http://127.0.0.1:8243 EXPECT=post node scripts/live-browser-test.mjs
+          # Intercepting routes (a modal gallery): start, dev, an enforced CSP, basePath + locale.
+          node scripts/slot-browser-test.mjs start dev csp combo --port 8250
+          # i18n.detect: a click on <Link locale> in an island sets the nowaki_locale cookie, and
+          # the next / follows it (a generated app on 8251).
+          PORT=8251 node scripts/locale-browser-test.mjs
 
   jetstream-load:
     name: Jetstream load (1000 connections)

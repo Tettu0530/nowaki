@@ -44,9 +44,25 @@ export interface LinkProps {
   rel?: string;
   /** Disables SPA navigation and falls back to a full page load. */
   "data-no-router"?: boolean;
+  /** `false` keeps `href` as written under nowaki.config `basePath` (default: the base is added). */
+  basePath?: boolean;
+  /**
+   * i18n: links to `href` in this locale (`localePath(href, locale)`), with `hreflang` set. Used
+   * inside an island, a click also remembers the choice for locale detection (`setLocale`).
+   */
+  locale?: string;
   children?: unknown;
   [key: string]: unknown;
 }
 
 /** A typed <a>. The client router handles it as an SPA navigation. */
 export function Link(props: LinkProps): VNode;
+
+/** The current locale with `i18n` in nowaki.config (see `getLocale` in `@nowaki-dev/runtime`). */
+export function getLocale(): string | undefined;
+
+/** `path` in `locale`, default the current one (see `localePath` in `@nowaki-dev/runtime`). */
+export function localePath(path: string, locale?: string): string;
+
+/** Remembers the visitor's locale for `i18n.detect` (see `setLocale` in `@nowaki-dev/runtime`). */
+export function setLocale(locale: string): void;

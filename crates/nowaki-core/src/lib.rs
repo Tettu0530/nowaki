@@ -147,6 +147,8 @@ pub struct NowakiCore {
     remote: Option<Arc<RemoteImages>>,
     /// Hash of the remote patterns, in every cache key (MDX output depends on them).
     remote_salt: u64,
+    /// nowaki.config `basePath` ("" at the root); see `set_base_path`.
+    base_path: String,
 }
 
 impl NowakiCore {
@@ -172,7 +174,40 @@ impl NowakiCore {
             virtual_ids: Mutex::new(HashMap::new()),
             remote: None,
             remote_salt: 0,
+            base_path: String::new(),
         }
+    }
+
+    /// Serves the app under `base` (nowaki.config `basePath`, like `/app`; `""` for the root):
+    /// emitted asset URLs become `<base>/_nowaki/<file>`, server function proxies post to
+    /// `<base>/__nowaki/fn`, and `import.meta.env.BASE_URL` is `<base>/`. A base that isn't a
+    /// plain path (no trailing slash) is an error and changes nothing. Call it before building or
+    /// serving modules: it resets the transform caches.
+    pub fn set_base_path(&mut self, base: &str) -> Result<()> {
+        rules::check_base_path(base).map_err(|e| anyhow::anyhow!(e))?;
+        let mut defines = self.client_defines.clone();
+        env::set_base_url(&mut defines, base);
+        self.disk_cache = cache::DiskCache::new(&self.root, defines_salt(&defines));
+        self.client_defines = defines;
+        self.base_path = base.to_string();
+        self.cache.clear();
+        self.inputs.clear();
+        Ok(())
+    }
+
+    /// nowaki.config `basePath` as given to `set_base_path` (`""` at the root).
+    pub fn base_path(&self) -> &str {
+        &self.base_path
+    }
+
+    /// The server function endpoint the client proxies post to.
+    pub(crate) fn server_fn_path(&self) -> String {
+        server_fn::fn_path(&self.client_defines)
+    }
+
+    /// The URL prefix of emitted assets: `/_nowaki/`, or `<basePath>/_nowaki/`.
+    pub fn asset_base(&self) -> String {
+        format!("{}/_nowaki/", self.base_path)
     }
 
     /// Enables remote `?image` imports (and remote images in MDX) for the URLs `remote`'s

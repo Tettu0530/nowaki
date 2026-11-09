@@ -11,6 +11,32 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **Locale detection on `/` (`i18n.detect: true`, opt-in).** A GET or HEAD of the site's root
+  (`/`, or `basePath`) picks a locale from `Accept-Language` (q-values; an exact tag, then the
+  range's primary subtag, so `ja-JP` finds `ja`, then a bare range such as `pt` finding `pt-BR`;
+  `*` means the default; malformed ranges are ignored, and only the first 32 ranges of a value up
+  to 4 KB are read) and redirects (307) to that locale's root (`/ja`, shaped by `basePath` and
+  `trailingSlash`); the default locale stays on `/` (unless `prefixDefaultLocale`). A
+  `nowaki_locale` cookie naming a configured locale wins over the header, so a visitor's choice
+  sticks: `setLocale(locale)` (from `@nowaki-dev/runtime` or `/navigation`) sets it, and so does
+  a click on a `<Link locale>` used inside an island (a page without islands ships no JS, so a
+  language switcher belongs in one). Detection runs at every front (`nowaki
+  start`, `nowaki dev`, the node / bun / deno / vercel adapters, the Cloudflare worker) after
+  config redirects and before the ISR cache, so a cached `/` only ever answers visitors who stay
+  on it; every response to `/` carries `Vary: Accept-Language, Cookie`, and the redirect is
+  `Cache-Control: private, no-cache`. Other URLs are never redirected. Static output can't
+  negotiate: the build warns and `/` serves the default locale. Without `detect`, a request pays
+  one check (none at the Rust fronts).
+- **Parallel routes (`@slot`), server-rendered.** A directory named `@name` under `routes/` is a
+  slot of the `_layout` in its parent directory, which gets it as `slots.name` (typed by the new
+  `LayoutProps`). The slot's file matching the URL below the owner's directory renders there
+  (`routes/@modal/photo/[id].tsx` for `/photo/42`, with its own `loader` and params), else its
+  `default.tsx`, else `slots.name` is `null`. The rendered node is wrapped in
+  `<nowaki-slot name="…" style="display:contents">`; its CSS and page scripts are linked with the
+  page's, and it adds no `meta`. Slot files are never routes of their own: they're left out of
+  typegen, prerendering and URL conflict checks; a page's JS budget counts the islands of every
+  slot file its layouts can render. Files starting with `_` and nested slots inside a slot are
+  ignored (intercepting routes: see below). Apps without slots pay one length check per request.
 - **Route groups.** A directory named `(name)` under `routes/` groups files
   without adding a URL segment: `routes/(marketing)/about.tsx` serves `/about`.
   The group's `_layout`, `loading` and `error` apply to the files inside it.
@@ -19,9 +45,8 @@ milestone's worth of work; the codename is noted per entry.
   by URL. Two files serving the same URL because of groups
   (`(a)/about.tsx` and `(b)/about.tsx`) fail the build and show an error in
   dev. Names starting with `.` (`(.)`, `(..)`) are reserved. On client
-  navigation, a group's `loading` / `error` boundary is matched by its URL
-  prefix (the group left out), so it can also show for URLs outside the group;
-  a boundary outside any group wins at the same prefix.
+  navigation, a group's `loading` / `error` boundary shows for the routes inside
+  the group (and wins over one outside it at the same URL prefix).
   The Cloudflare worker now also serves `loading` / `error` boundaries.
 - **Remote images in `<Image>`.** `import hero from "https://images.example.com/photos/a.jpg?image"`
   is fetched at build time and optimized like a local `?image` import (AVIF + fallback widths,
@@ -67,10 +92,26 @@ milestone's worth of work; the codename is noted per entry.
   redirects and headers are also emitted as platform routes in `config.json`.
   The static adapter writes `_redirects` (rewrites as 200 rules) and appends
   the headers to `_headers`, warning about rules a static host can't express.
-  For now `basePath` only removes the prefix from requests (and 404s anything
-  outside it); asset URLs and links don't carry it yet, and `/_nowaki/*` and
-  `/__nowaki/*` stay at the root. Without a routing config nothing changes per
-  request.
+  Without a routing config nothing changes per request.
+- **`basePath` end to end.** With `basePath: "/app"` the whole app lives under
+  `/app`: built asset URLs (scripts, island chunks, CSS, fonts, images,
+  `?url` / asset imports, Markdown images) are `/app/_nowaki/*`, server
+  function calls, live events and the live socket, the SPA router's boundaries
+  fetch and HMR go to `/app/__nowaki/*`, `<Link href="/about">` renders
+  `/app/about` (`basePath={false}` keeps the href; a plain `<a>` is left as
+  written), `ctx.redirect("/login")` sends `/app/login` (a path that already
+  starts with the base, or `{ basePath: false }`, is sent as written),
+  canonical / Open Graph / sitemap URLs and the sitemap line in robots.txt
+  carry the base, and the session cookie gets `Path=/app`. The client router
+  does a full page load for links outside the base.
+  `import.meta.env.BASE_URL` is `"/app/"` (`"/"` without a base) in client and
+  server code. `/_nowaki/*` at the root is a 404 under a base; `/__nowaki/*`
+  endpoints still answer at the root, and `nowaki dev` keeps its module URLs
+  (`/islands/*`, `/node_modules/*`, `/@fs/*`) there. The Vercel and Cloudflare
+  adapters put the client files and `public/` under the base in their static
+  output; static output keeps them at the output root (deploy it at the base)
+  with the base in the pages' URLs and in `_headers` / `_redirects`. Apps
+  without a basePath build byte-identical client and server output.
 - **Markdoc** via the new `@nowaki-dev/markdoc` plugin. With
   `markdoc({ components, tags, nodes })` in `plugins`, a `.mdoc` file compiles to a Preact module
   at build and dev time. The module exports the rendered document, `frontmatter` and `headings`,
@@ -94,7 +135,58 @@ milestone's worth of work; the codename is noted per entry.
   types `env` and `import.meta.env` from the schemas. Public names must start
   with `PUBLIC_` and server names must not. New core API:
   `NowakiCore::set_public_env`.
+- **i18n routing.** With `i18n: { locales: ["en", "ja"], defaultLocale: "en" }`
+  in nowaki.config, every locale except the default is a URL prefix
+  (`/ja/about`); the default has none (`/about`), and `/en/about` redirects
+  (308) to `/about`. Routes stay locale-agnostic: the prefix is taken off before
+  routing, so middleware, layouts and the 404 page see `/about`, while
+  `ctx.url` keeps the browser's URL. With `prefixDefaultLocale: true` the
+  default locale is prefixed too, an unprefixed page is a 404 (API and file
+  routes still answer), and `/` redirects (307) to `/en` (with `detect`, to
+  the visitor's locale). `ctx.locale` and `getLocale()` (from `@nowaki-dev/runtime`
+  or `/navigation`, in components and islands too) give the locale;
+  `localePath(path, locale)` and `<Link locale="ja">` build localized links.
+  Pages get `<html lang>` from the locale unless they set one, and, when the
+  site URL is set (`site` / `NOWAKI_SITE`; hreflang needs absolute URLs),
+  `<link rel="alternate" hreflang>` for every locale plus `x-default`; the
+  generated sitemap.xml lists every locale with `xhtml:link` alternates. In
+  content collections, a first-level directory named after a locale
+  (`content/blog/ja/hello.md`) becomes `entry.locale` and leaves the slug;
+  `getCollection` / `getEntry` return the current locale's entries (and those
+  outside any locale directory) unless given `{ locale: "ja" }` or
+  `{ locale: "*" }`. Prerendering and the ISR warm-up cover every locale:
+  `staticPaths` runs once per locale (given `{ locale }`), the static adapter
+  writes each locale under its prefix with its own `404.html`, and `_redirects`
+  sends the default-locale prefix to the unprefixed URLs. Server functions and
+  live events have no locale. Without `i18n`, a request pays one null check.
+- **Intercepting routes, and the client router's slot mode.** A file in a parallel-route slot
+  whose path has a `(.)`, `(..)` or `(...)` segment (`routes/@modal/(.)photo/[id].tsx`) takes
+  over that URL on client navigation from a page its slot is on: clicking `<a href="/photo/1">`
+  in the gallery fetches just that file (with its loader, CSS and page scripts) and swaps it into
+  `<nowaki-slot name="modal">`; the URL becomes `/photo/1`, the gallery and its islands stay.
+  Back closes it (the slot's previous content comes back as it was), forward reopens it, and a
+  reload or a direct visit renders the full `routes/photo/[id].tsx` page. The marker counts URL
+  segments from its directory (groups and slots don't count): `(.)` the same level, `(..)` one
+  up, `(...)` the root. A slot with intercepting files always renders its `<nowaki-slot>` element
+  (empty when it has nothing to show), carrying the URL patterns it intercepts as the browser sees
+  them (basePath and locale prefix included). The fragment response is `private, no-store`, the
+  `nowaki start` ISR cache never answers or stores it, and full pages at intercepted URLs send
+  `Vary: X-Nowaki-Intercept`. Live islands inside a fragment join the page's live connection when
+  the page already loaded `live.js`. A page whose layouts own such a slot loads the islands runtime
+  (and so the router) even without islands, and a page reloaded on a history entry the router
+  made loads the router at once, so back and forward after a reload still work. Intercepting files
+  outside a slot are still recorded only.
+  Pages without an intercepting slot render the same bytes as before; apps without slots pay
+  only the existing length check per request.
 ### Changed
+- **`trailingSlash` also shapes static output and page URLs.** With `"never"`, the static
+  adapter writes `about.html` instead of `about/index.html`, and canonical URLs, the default
+  `og:url` and `sitemap.xml` drop the slash; with `"always"` they get one on every server too.
+  Cloudflare Pages serves `about.html` at `/about` and redirects `/about/` to it, and redirects
+  `/about` to `/about/` for `about/index.html`, so the files alone give it the configured
+  policy (no `_redirects` rules needed); the build no longer warns about `trailingSlash`. Other
+  hosts may need their own clean-URL setting. The default `"ignore"`
+  is unchanged: servers use the request's path and static output `x/index.html` with a slash.
 - An error while saving a request's session (a store failure, a cookie over 4 KB) now renders
   the 500 page instead of escaping the request handler.
 - **The CI performance regression gate also compares each PR with the latest

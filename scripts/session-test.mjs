@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
 import { makeContext } from "../packages/nowaki-runtime/server/context.mjs";
 import { configureSessions, defineSession, openCookie, sealCookie } from "../packages/nowaki-runtime/server/session.mjs";
+import { setBasePath } from "../packages/nowaki-runtime/server/base-path.mjs";
 
 const { h } = createRequire(new URL("../packages/nowaki-runtime/server/handler.mjs", import.meta.url))("preact");
 
@@ -319,6 +320,16 @@ useSessions();
   check("prerendering: ctx.session throws", await rejects(() => makeContext({ url: new URL("http://app.test/"), headers: {} }).session, /prerendered page/));
   useSessions();
 }
+
+// --- basePath: the cookie is scoped to it ---
+useSessions();
+setBasePath("/app");
+{
+  const login = await post("/login", { body: "user=alice" });
+  const attrs = setCookies(login)[0] ?? "";
+  check("under basePath the cookie has Path=/app", /; Path=\/app;/.test(attrs), attrs);
+}
+setBasePath("");
 
 if (failures) {
   console.error(`${failures} failure(s)`);
