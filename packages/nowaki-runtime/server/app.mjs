@@ -23,6 +23,7 @@ import { indexPublic, lookupPublic } from "./public-files.mjs";
 import { resolveSite } from "./seo.mjs";
 import { requestOrigin } from "./origin.mjs";
 import { compileRules } from "./rules.mjs";
+import { compileI18n } from "./i18n.mjs";
 import { frontHeaders, frontStep } from "./front.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
@@ -256,13 +257,13 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
   const publicFiles = await indexPublic(publicDir ?? path.join(clientDir, "..", "public"));
   // nowaki.config routing (dist/server/routing.json, written only when there is one): null
   // without it, so a request pays one check. An invalid file stops the server here.
-  const rules = await readFile(path.join(serverDir, "routing.json"), "utf8").then(
-    (t) => compileRules(JSON.parse(t)),
-    (e) => {
-      if (e.code === "ENOENT") return null;
-      throw e;
-    },
-  );
+  const routing = await readFile(path.join(serverDir, "routing.json"), "utf8").then(JSON.parse, (e) => {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  });
+  const rules = routing && compileRules(routing);
+  // i18n: null without it (handler.mjs checks it once per request).
+  env.i18n = compileI18n(routing);
 
   const handle = async (req, res) => {
     // Set before the response's own headers, which override any of these by name.

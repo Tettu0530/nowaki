@@ -2,6 +2,7 @@
 // routes/islands/manifest arrive as maps statically imported at build time.
 
 import { resolveSite } from "./seo.mjs";
+import { compileI18n } from "./i18n.mjs";
 import { h, options } from "preact";
 import { handleRequest } from "./handler.mjs";
 import { wrapIsland } from "./island-directive.mjs";
@@ -82,6 +83,7 @@ function installIslandHook(registry, liveRegistry, live) {
 ///   envModule        : the compiled env.ts (dist/server/env.js) when the app has one
 ///   envPublic        : the public values the build inlined (dist/server/env-public.json)
 ///   sessionModule    : the compiled session.ts (dist/server/session.js) when the app has one
+///   routing          : the routing config (dist/server/routing.json), for i18n
 /// Returns `(request, bindings?, front?) => Promise<Response>`; `bindings` (the Worker's `env`) adds
 /// its string vars and secrets to process.env for validating env.ts. `front` comes from the
 /// worker's nowaki.config routing (front.mjs): `{ routePath, headers }`, the path to route by and
@@ -100,6 +102,7 @@ export function createFetchHandler({
   envModule,
   envPublic,
   sessionModule,
+  routing,
 }) {
   const registry = new Map();
   for (const [name, comp] of Object.entries(islandComponents ?? {})) {
@@ -136,6 +139,8 @@ export function createFetchHandler({
     // NOWAKI_SITE (a Worker var) or nowaki.config `site`, embedded by edge-build.mjs.
     site: resolveSite(site),
     fonts: fonts ?? null,
+    // i18n from the routing config (null without it; handler.mjs checks it once per request).
+    i18n: compileI18n(routing),
     routeTable: () => routeTable,
     importModule: (key) => modules[key],
     ensureIslands: () => {},

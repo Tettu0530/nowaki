@@ -136,12 +136,33 @@ function imageType(url) {
 }
 
 /// sitemap.xml for `urls` (paths), against the site.
-export function sitemapXml(site, urls, { staticOutput = false } = {}) {
-  const items = [...new Set(staticOutput ? urls.map(staticPagePath) : urls)]
-    .sort()
-    .map((u) => `  <url><loc>${esc(absolute(u, site + "/"))}</loc></url>`)
+/// `alternates(paths)` (i18n) maps a listed path to its versions in every locale ([[hreflang,
+/// path]]), written as `xhtml:link` alternates.
+export function sitemapXml(site, urls, { staticOutput = false, alternates } = {}) {
+  const locs = [...new Set(staticOutput ? urls.map(staticPagePath) : urls)].sort();
+  const alt = typeof alternates === "function" ? alternates(locs) : null;
+  const items = locs
+    .map((u) => {
+      const loc = `<loc>${esc(absolute(u, site + "/"))}</loc>`;
+      const links = alt?.get(u);
+      if (!links) return `  <url>${loc}</url>`;
+      const xl = links.map(([l, p]) => `    <xhtml:link rel="alternate" hreflang="${esc(l)}" href="${esc(absolute(p, site + "/"))}"/>`);
+      return `  <url>\n    ${loc}\n${xl.join("\n")}\n  </url>`;
+    })
     .join("\n");
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${items}\n</urlset>\n`;
+  const ns = alt ? ` xmlns:xhtml="http://www.w3.org/1999/xhtml"` : "";
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"${ns}>\n${items}\n</urlset>\n`;
+}
+
+/// `<link rel="alternate" hreflang>` for a page in every locale (i18n), and `x-default` for the
+/// default locale's. `alternates`: [[locale, browser path]] (i18n.mjs `localeAlternates`).
+export function hreflangTags(alternates, defaultLocale, { origin, site, staticOutput = false }) {
+  const base = (site ?? origin ?? "http://localhost") + "/";
+  const href = (p) => esc(absolute(staticOutput ? staticPagePath(p) : p, base));
+  const tags = alternates.map(([l, p]) => `<link rel="alternate" hreflang="${esc(l)}" href="${href(p)}" />`);
+  const def = alternates.find(([l]) => l === defaultLocale);
+  if (def) tags.push(`<link rel="alternate" hreflang="x-default" href="${href(def[1])}" />`);
+  return tags.join("\n");
 }
 
 /// robots.txt that allows everything and points at the sitemap when there is a site.

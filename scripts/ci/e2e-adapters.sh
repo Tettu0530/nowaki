@@ -220,3 +220,5 @@ kill $VERCEL_PID
 # nowaki.config redirects / rewrites / headers / basePath / trailingSlash on the node, cloudflare,
 # vercel and static adapters (a generated app; the servers listen on 3313 and 3314)
 node scripts/rules-e2e.mjs node cloudflare vercel static --port 3313
+# nowaki.config i18n on the node and cloudflare adapters and in static output (listens on 3315)
+node scripts/i18n-e2e.mjs node cloudflare static --port 3315

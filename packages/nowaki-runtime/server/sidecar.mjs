@@ -9,6 +9,7 @@ import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveSite } from "./seo.mjs";
+import { compileI18n } from "./i18n.mjs";
 import { loadEnv } from "./env.mjs";
 import { requestOrigin } from "./origin.mjs";
 
@@ -248,11 +249,26 @@ function devFonts() {
   return fontsCache.value;
 }
 
+// i18n from .nowaki/routing.json, which `nowaki dev` writes before serving (a change needs a
+// restart, like the rest of the routing config): read on the first request.
+let devI18n;
+function readDevI18n() {
+  try {
+    return compileI18n(JSON.parse(readFileSync(path.join(appRoot, ".nowaki/routing.json"), "utf8")));
+  } catch {
+    return null;
+  }
+}
+
 const env = {
   dev: true,
   site: resolveSite(devSite),
   get fonts() {
     return devFonts();
+  },
+  get i18n() {
+    if (devI18n === undefined) devI18n = readDevI18n();
+    return devI18n;
   },
   // dev rescans on every request (picks up file changes)
   routeTable: () => scanRoutes(appRoot),

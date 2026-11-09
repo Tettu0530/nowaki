@@ -35,6 +35,11 @@ curl -sf "$B/islands/Counter.tsx" | grep -q "jsx-runtime"
 for f in islands router live hmr; do
   curl -sf "$B/node_modules/@nowaki-dev/runtime/client/$f.js" >/dev/null
 done
+# navigation.js (Link, getLocale, localePath) and the i18n module it imports load in the browser
+NAV_DEP=$(curl -sf "$B/node_modules/@nowaki-dev/runtime/navigation.js" | grep -oE '"[^"]*server/i18n\.mjs[^"]*"' | head -1 | tr -d '"')
+case "$NAV_DEP" in ./*) NAV_DEP="/node_modules/@nowaki-dev/runtime/${NAV_DEP#./}" ;; esac
+test -n "$NAV_DEP"
+curl -sf "$B$NAV_DEP" | grep -q localePathFor
 # HEAD mirrors GET for app files
 test "$(curl -s -I -o /dev/null -w '%{http_code}' "$B/islands/Counter.tsx")" = 200
 curl -s -I "$B/islands/Counter.tsx" | grep -qi '^content-type: text/javascript'
@@ -296,6 +301,8 @@ bash scripts/ci/assert-no-orphans.sh $SERVER_PID
 
 # nowaki.config redirects / rewrites / headers / basePath / trailingSlash in dev (a generated app)
 node scripts/rules-e2e.mjs dev --port "$((PORT + 8))"
+# nowaki.config i18n in dev (a generated app)
+node scripts/i18n-e2e.mjs dev --port "$((PORT + 10))"
 
 # SIGKILL: the dev sidecar and plugin host exit when their stdin pipe closes (exit-with-parent.mjs).
 ./target/debug/nowaki dev examples/hello --port "$((PORT + 7))" &

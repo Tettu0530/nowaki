@@ -2,3 +2,4 @@
 export { getContext } from "./server/functions.mjs";
 export { serverFn, ServerFnError } from "./server/server-fn.mjs";
 export { publish } from "./server/publish.mjs";
+export { getLocale, localePath } from "./navigation.js";
