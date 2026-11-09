@@ -24,8 +24,14 @@
 //   (routes/@modal/ → `slots.modal` of routes/_layout). Its files are never routes of their own:
 //   a slot file matches the URL below its owner's directory (routes/@modal/photo/[id].tsx matches
 //   /photo/42), and @name/default.tsx renders when none matches. Files starting with "_" and
-//   nested slots inside a slot are ignored. A path segment starting with "(.)", "(..)" or
-//   "(...)" marks an intercepting route; those are recorded (`intercepts`), not served.
+//   nested slots inside a slot are ignored.
+// Intercepting routes: inside a slot, a path segment starting with "(.)", "(..)" or "(...)" marks
+//   a file that takes over another URL on client navigation (routes/@modal/(.)photo/[id].tsx
+//   intercepts /photo/[id]): `slot.intercepts`, each with the `pattern` it intercepts. The marker
+//   counts URL segments (groups and slots don't count) from the directory holding it: "(.)" the
+//   same level, "(..)" one up (repeatable: "(..)(..)"), "(...)" the root. Served only as a
+//   fragment for the client router (handler.mjs); outside a slot they are recorded
+//   (`intercepts`), not served.
 
 import { readdir } from "node:fs/promises";
 import path from "node:path";
@@ -157,14 +163,19 @@ export async function scanRoutes(appRoot) {
   // (by segment count: "/[o]/x" is deeper than "/abcdefgh" though shorter as a string).
   layouts.sort((a, b) => prefixDepth(a.prefix) - prefixDepth(b.prefix));
   middleware.sort((a, b) => prefixDepth(a.prefix) - prefixDepth(b.prefix));
-  // The client takes the first boundary of the deepest URL prefix, so at the same prefix one
-  // outside a group ("loading.tsx") goes before a group's ("(app)/loading.tsx").
-  const ungroupedFirst = (a, b) => (a.urlPrefix !== a.prefix) - (b.urlPrefix !== b.prefix);
+  // The client takes the boundary of the deepest URL prefix and, at the same prefix, the last
+  // group boundary that lists the route (matchBoundary): ungrouped ones first, then groups
+  // outermost first, so "(app)/(admin)/loading.tsx" wins over "(app)/loading.tsx".
+  const ungroupedFirst = (a, b) => (a.urlPrefix !== a.prefix) - (b.urlPrefix !== b.prefix) || prefixDepth(a.prefix) - prefixDepth(b.prefix);
   loadingBoundaries.sort(ungroupedFirst);
   errorBoundaries.sort(ungroupedFirst);
 
   const slotList = [...slots.values()];
-  for (const slot of slotList) slot.routes.sort(bySpecificity);
+  for (const slot of slotList) {
+    slot.routes.sort(bySpecificity);
+    // Recorded-only entries (no segments) last; they never match.
+    slot.intercepts.sort((a, b) => !a.segments - !b.segments || (a.segments ? bySpecificity(a, b) : 0));
+  }
   return { routes, layouts, middleware, loadingBoundaries, errorBoundaries, notFound, errorRoute, slots: slotList, intercepts };
 }
 
@@ -186,7 +197,21 @@ function addSlotFile(slots, parts, slotAt, abs) {
   let slot = slots.get(key);
   if (!slot) slots.set(key, (slot = { ownerDir, name, routes: [], default: null, intercepts: [] }));
   if (inner.some(isInterceptSegment)) {
-    slot.intercepts.push({ file: abs, rel: inner.join("/") });
+    const pattern = interceptTarget(parts.slice(0, slotAt), inner);
+    // Without a target (or as a file route name) it is recorded only, like one outside a slot.
+    if (pattern === null || /\.[A-Za-z0-9]+$/.test(base.replace(/^.*\]/, ""))) {
+      slot.intercepts.push({ file: abs, rel: inner.join("/") });
+      return;
+    }
+    const segments = pattern.split("/").filter(Boolean).map(parseSegment);
+    slot.intercepts.push({
+      file: abs,
+      rel: inner.join("/"),
+      pattern,
+      segments,
+      specificity: segments.filter((s) => s.lit).length + segments.filter((s) => s.suffix).length / 2,
+      rest: segments.some((s) => s.rest),
+    });
     return;
   }
   if (base === "default") {
@@ -206,6 +231,46 @@ function addSlotFile(slots, parts, slotAt, abs) {
     specificity: segments.filter((s) => s.lit).length + segments.filter((s) => s.suffix).length / 2,
     rest: segments.some((s) => s.rest),
   });
+}
+
+/// The URL pattern an intercepting slot file takes over ("/photo/[id]"), or null when its marker
+/// climbs above routes/ or the path has more than one. `owner` is the path to the slot directory
+/// and `inner` the file's path inside it, both split on "/" (route groups still in). Kept in step
+/// with nowaki-core routes::intercept_target.
+export function interceptTarget(owner, inner) {
+  const parts = [...inner];
+  parts[parts.length - 1] = parts[parts.length - 1].replace(ROUTE_EXT, "");
+  const k = parts.findIndex(isInterceptSegment);
+  if (k < 0 || parts.slice(k + 1).some(isInterceptSegment)) return null;
+  const base = [...owner, ...parts.slice(0, k)].filter((p) => !GROUP_DIR.test(p));
+  let name = parts[k];
+  if (name.startsWith("(...)")) {
+    base.length = 0;
+    name = name.slice(5);
+  } else if (name.startsWith("(.)")) {
+    name = name.slice(3);
+  } else {
+    while (name.startsWith("(..)")) {
+      if (!base.length) return null;
+      base.pop();
+      name = name.slice(4);
+    }
+  }
+  if (!name) return null;
+  const out = [...base, name, ...parts.slice(k + 1).filter((p) => !GROUP_DIR.test(p))];
+  if (out[out.length - 1] === "index") out.pop();
+  return "/" + out.join("/");
+}
+
+/// The intercepting file of a slot that takes over a request path given as decoded segments
+/// (`pathParts`, null when one didn't decode): { file, params }, or null.
+export function matchIntercept(slot, parts) {
+  if (!parts) return null;
+  for (const r of slot.intercepts) {
+    const params = r.segments && matchSegments(r.segments, parts);
+    if (params) return { file: r.file, params };
+  }
+  return null;
 }
 
 /// The file a slot renders for a request path given as percent-decoded segments (`pathParts`;

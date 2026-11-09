@@ -24,7 +24,7 @@ import { resolveSite } from "./seo.mjs";
 import { requestOrigin } from "./origin.mjs";
 import { compileRules } from "./rules.mjs";
 import { compileI18n } from "./i18n.mjs";
-import { frontHeaders, frontStep } from "./front.mjs";
+import { LOCALE_VARY, frontHeaders, frontLocale, frontStep, withVaryHeaders } from "./front.mjs";
 import { setBasePath } from "./base-path.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
@@ -280,6 +280,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
       const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
       let pathname = url.pathname;
       let routePath;
+      let localeVary = false;
       if (rules) {
         // Config headers replace the security defaults set above and lose to the response's own.
         for (const [k, v] of frontHeaders(rules, pathname)) res.setHeader(k, v);
@@ -296,6 +297,16 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
         // dispatches /__nowaki/* endpoints by it).
         if (step?.internal) pathname = url.pathname = step.routePath;
         else if (step) pathname = routePath = step.routePath;
+        // i18n.detect: Accept-Language / the nowaki_locale cookie on the root, ahead of any cache.
+        const locale = rules.detect && frontLocale(rules, req.method, url, req.headers["accept-language"], req.headers.cookie);
+        if (locale?.redirect) {
+          res.writeHead(locale.redirect.status, { ...locale.headers, location: locale.redirect.location }).end();
+          return;
+        }
+        if (locale) {
+          localeVary = true;
+          res.setHeader("vary", LOCALE_VARY);
+        }
       }
 
       if (pathname.startsWith("/_nowaki/")) {
@@ -340,6 +351,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
         req,
         routePath,
       });
+      if (localeVary) result.headers = withVaryHeaders(result.headers);
       await sendResult(res, applyCsp(result));
     } catch (err) {
       console.error("[nowaki]", err);

@@ -1,7 +1,7 @@
 // Client router. Intercepts internal <a> clicks, fetches the target HTML,
 // swaps the body, and re-hydrates only the new islands (zero-JS pages do full navigations).
 
-import { matchBoundary, createPageCache } from "./router-core.js";
+import { matchBoundary, matchPattern, createPageCache } from "./router-core.js";
 
 // The eager runtime (islands.js) exposes hydrate on window.
 // Not importing islands.js here keeps the router a separate lazy chunk.
@@ -9,6 +9,7 @@ const hydrateIslands = (root) => window.__nowakiHydrateIslands?.(root);
 
 const pageCache = createPageCache({ ttlMs: readCacheTtl(), max: 32 });
 const scrollPos = new Map(); // history key -> scrollY
+const slotSaves = new Map(); // history key -> { body, slots: [[<nowaki-slot>, its child nodes]] }
 let curKey; // history key of the entry on screen (history.state has already moved on popstate)
 let curDoc; // path + query of the document on screen, null while a boundary shows
 let boundariesPromise = null; // result of /__nowaki/boundaries (fetched once)
@@ -55,12 +56,27 @@ function routePath(p) {
   return p.slice(import.meta.env.BASE_URL.length - 1) || "/";
 }
 
+// Intercepting routes: a <nowaki-slot> on screen whose layout has intercepting files lists the URL
+// patterns they take over (data-nowaki-intercepts, as the browser sees them). Navigating to one
+// fetches just the slot's new content. Returns that slot element, or null.
+function interceptFor(url) {
+  for (const el of document.querySelectorAll("nowaki-slot[data-nowaki-slot]")) {
+    try {
+      if (JSON.parse(el.getAttribute("data-nowaki-intercepts")).some((p) => matchPattern(p, url.pathname))) return el;
+    } catch {}
+  }
+  return null;
+}
+
 // Resolves to null for a response that isn't a page (a download, JSON, a redirect to another
-// origin): the browser loads those itself.
-async function fetchPage(url) {
+// origin): the browser loads those itself. With `slot`, the server answers with that slot's
+// fragment (x-nowaki-slot) when an intercepting file takes the URL, else with the page.
+async function fetchPage(url, slot) {
   let res;
+  const headers = { "x-nowaki-nav": "1" };
+  if (slot) headers["x-nowaki-intercept"] = slot.getAttribute("data-nowaki-slot");
   try {
-    res = await fetch(url, { headers: { "x-nowaki-nav": "1" } });
+    res = await fetch(url, { headers });
   } catch (e) {
     // A redirect to another origin fails CORS (x-nowaki-nav needs a preflight).
     if ((await fetch(url, { redirect: "manual" })).type === "opaqueredirect") return null;
@@ -75,6 +91,7 @@ async function fetchPage(url) {
     doc: new DOMParser().parseFromString(html, "text/html"),
     finalUrl: res.redirected ? res.url : url.href.split("#")[0],
     status: res.status,
+    slot: slot && res.headers.has("x-nowaki-slot"),
   };
 }
 
@@ -88,33 +105,37 @@ function loadBoundaries() {
   return boundariesPromise;
 }
 
+// Router Cache key: a slot's fragment is kept apart from the page at the same URL.
+const cacheKey = (url, slot) => (slot ? "slot:" : "") + url.href.split("#")[0];
+
 function prefetch(url) {
-  const key = url.href.split("#")[0];
-  if (pageCache.has(key)) return;
-  fetchPage(url)
+  const slot = interceptFor(url);
+  if (pageCache.has(cacheKey(url, slot))) return;
+  fetchPage(url, slot)
     .then((r) => {
-      if (r?.status === 200) pageCache.set(key, r);
+      if (r?.status === 200) pageCache.set(cacheKey(url, r.slot), r);
     })
     .catch(() => {});
 }
 
-async function navigate(url, { push = true } = {}) {
-  const key = url.href.split("#")[0];
+// `intercept`: whether a slot on screen may take the URL (not when going back to an entry that
+// showed the full page).
+async function navigate(url, { push = true, intercept = push } = {}) {
+  const slot = intercept ? interceptFor(url) : null;
   const token = ++navToken;
 
   // Immediate Router Cache hit (no loading shown).
-  const cached = pageCache.get(key);
-  if (cached) {
-    applyDocument(cached, push, token, url.hash);
-    return cached.finalUrl;
-  }
+  const cached = pageCache.get(cacheKey(url, slot));
+  if (cached) return apply(cached, slot, push, token, url.hash);
 
   const body = document.body;
-  const pending = fetchPage(url).catch(() => 0);
+  const pending = fetchPage(url, slot).catch(() => 0);
 
-  // Show loading after 150ms (no flicker on fast navigations).
+  // Show loading after 150ms (no flicker on fast navigations). Opening a slot keeps the page: a
+  // progress bar only.
   const timer = setTimeout(async () => {
     if (token !== navToken) return;
+    if (slot) return showProgressBar();
     const { loading } = await loadBoundaries();
     if (token !== navToken) return;
     showLoading(matchBoundary(loading, import.meta.env.BASE_URL === "/" ? url.pathname : routePath(url.pathname)));
@@ -125,6 +146,7 @@ async function navigate(url, { push = true } = {}) {
   if (token !== navToken) return; // superseded by a newer navigation
 
   if (result === 0) {
+    if (slot) return location.assign(url.href);
     await showError(url, "Failed to load the page");
     return;
   }
@@ -138,9 +160,65 @@ async function navigate(url, { push = true } = {}) {
     location.assign(url.href);
     return;
   }
-  if (result.status === 200) pageCache.set(key, result);
-  applyDocument(result, push, token, url.hash);
-  return result.finalUrl;
+  if (result.status === 200) pageCache.set(cacheKey(url, result.slot), result);
+  return apply(result, slot, push, token, url.hash);
+}
+
+// Returns the URL to scroll for, or undefined after a slot swap (the page stays where it is).
+function apply(entry, slot, push, token, hash) {
+  if (!entry.slot) {
+    applyDocument(entry, push, token, hash);
+    return entry.finalUrl;
+  }
+  if (push) {
+    scrollPos.set(curKey, window.scrollY);
+    saveSlots(curKey);
+  }
+  const { doc } = entry;
+  // The fragment's stylesheets and page scripts (<template data-nowaki-head>), into the page's
+  // head region so the next page swaps them out.
+  const tpl = doc.querySelector("template[data-nowaki-head]");
+  if (tpl) {
+    const end = headRegion(document)?.[1];
+    for (const l of tpl.content.querySelectorAll("link")) {
+      if (document.head.querySelector(`link[href="${CSS.escape(l.getAttribute("href"))}"]`)) continue;
+      end ? end.before(l.cloneNode()) : document.head.append(l.cloneNode());
+    }
+    loadPageScripts(tpl.content);
+  }
+  const body = stampNonce(doc.body.cloneNode(true));
+  body.querySelector("template[data-nowaki-head]")?.remove();
+  slot.replaceChildren(...body.childNodes);
+  if (push) history.pushState({ nowaki: (curKey = newKey()), slot: 1 }, "", entry.finalUrl + hash);
+  slotShown(slot);
+  document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: entry.finalUrl, slot: slot.getAttribute("name") } }));
+}
+
+// After a slot's content changed: hydrate its islands, join live islands, done loading.
+function slotShown(slot) {
+  curDoc = location.pathname + location.search;
+  hydrateIslands(slot);
+  syncLive();
+  removeProgressBar();
+}
+
+// What the intercepting slots on screen show, kept (the nodes themselves, islands and all) for
+// the history entry being left, so going back and forth puts it back as it was.
+function saveSlots(key) {
+  const slots = [...document.querySelectorAll("nowaki-slot[data-nowaki-slot]")].map((el) => [el, [...el.childNodes]]);
+  if (!slots.length) return;
+  slotSaves.delete(key);
+  slotSaves.set(key, { body: document.body, slots });
+  if (slotSaves.size > 50) slotSaves.delete(slotSaves.keys().next().value);
+}
+
+// Puts back what saveSlots kept for an entry, if the page it was taken from is still on screen.
+function restoreSlots(key) {
+  const save = slotSaves.get(key);
+  if (save?.body !== document.body) return false;
+  for (const [el, nodes] of save.slots) el.replaceChildren(...nodes);
+  for (const [el] of save.slots) slotShown(el);
+  return true;
 }
 
 // Apply a cached/fetched document to the live DOM (clones body to keep the cache intact).
@@ -155,7 +233,7 @@ function applyDocument(entry, push, token, hash = "") {
   if (push) history.pushState({ nowaki: (curKey = newKey()) }, "", finalUrl + hash);
   curDoc = location.pathname + location.search;
   hydrateIslands(document);
-  loadPageScripts(doc);
+  loadPageScripts(doc.head);
   syncLive();
   removeProgressBar();
   // Page scripts run once (they are modules); this is their cue to set up the new page's DOM.
@@ -164,8 +242,8 @@ function applyDocument(entry, push, token, hash = "") {
 
 // Page scripts (`export const scripts`) of the page navigated to. A module runs once per URL, so
 // one the previous page already loaded doesn't run again: it listens for nowaki:page-load instead.
-function loadPageScripts(doc) {
-  for (const s of doc.head.querySelectorAll("script[data-nowaki-script]")) {
+function loadPageScripts(root) {
+  for (const s of root.querySelectorAll("script[data-nowaki-script]")) {
     const src = s.getAttribute("src");
     if (!src || document.querySelector(`script[data-nowaki-script][src="${CSS.escape(src)}"]`)) continue;
     const el = document.createElement("script");
@@ -384,19 +462,22 @@ export function installRouter() {
   window.addEventListener("popstate", () => {
     // The entry left is curKey: history.state is already the one returned to.
     scrollPos.set(curKey, window.scrollY);
+    saveSlots(curKey);
     const key = (curKey = historyKey());
     const restore = () => {
       const y = scrollPos.get(key);
       if (y === undefined) scrollToHash(location.hash);
       else window.scrollTo(0, y);
     };
-    // Same document, another #hash: nothing to fetch (and a pending navigation is dropped).
-    if (location.pathname + location.search === curDoc) {
+    // Same document, another #hash: nothing to fetch (and a pending navigation is dropped). An
+    // entry an intercepting slot was opened or closed on gets the slot's content back.
+    if (restoreSlots(key) || location.pathname + location.search === curDoc) {
       navToken++;
       removeProgressBar();
       return restore();
     }
-    navigate(new URL(location.href), { push: false }).then((final) => final && key === curKey && restore());
+    // An entry a slot showed (and nothing kept) asks for the fragment again.
+    navigate(new URL(location.href), { push: false, intercept: !!history.state?.slot }).then((final) => final && key === curKey && restore());
   });
 
   // disable the browser's default scroll restoration (we manage it)
