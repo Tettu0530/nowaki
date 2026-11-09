@@ -711,16 +711,16 @@ where
     for (index, r) in list.iter().enumerate() {
         let segs = compile_source(r.source(), kind)?;
         let t = target(r, &segs)?;
-        let lits: Option<Vec<&str>> = segs
+        let literal_segs: Option<Vec<&str>> = segs
             .iter()
             .map(|s| match s {
                 Seg::Lit(l) => Some(l.as_str()),
                 _ => None,
             })
             .collect();
-        match lits {
-            Some(lits) => {
-                set.literals.entry(lits.join("/")).or_insert(index);
+        match literal_segs {
+            Some(literal_segs) => {
+                set.literals.entry(literal_segs.join("/")).or_insert(index);
             }
             None => set.patterns.push(index),
         }
