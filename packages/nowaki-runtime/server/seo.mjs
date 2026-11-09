@@ -67,11 +67,19 @@ export function staticPagePath(p) {
   return `${s}/`;
 }
 
-/// `staticOutput`: the page is being prerendered (`nowaki build --adapter static`), so this page's
-/// own URL (canonical: true, the default og:url) gets the trailing slash its file implies.
-export function seoTags(meta, { title, pathname, origin, site, staticOutput = false }) {
+/// A page's own URL under nowaki.config `trailingSlash`: `"always"` adds the slash, `"never"`
+/// drops it (`/` stays), `"ignore"` keeps the path as it is, except in static output, where the
+/// page is the file `x/index.html` and so `x/` (`staticOutput`). File names stay as they are.
+export function pagePath(p, trailingSlash = "ignore", staticOutput = false) {
+  if (trailingSlash === "never") return p.length > 1 && p.endsWith("/") ? p.replace(/\/+$/, "") || "/" : p;
+  return trailingSlash === "always" || staticOutput ? staticPagePath(p) : p;
+}
+
+/// `trailingSlash` / `staticOutput` (prerendering for `nowaki build --adapter static`) shape this
+/// page's own URL (canonical: true, the default og:url) with `pagePath`.
+export function seoTags(meta, { title, pathname, origin, site, trailingSlash, staticOutput = false }) {
   if (!isObj(meta)) return "";
-  if (staticOutput) pathname = staticPagePath(pathname);
+  pathname = pagePath(pathname, trailingSlash, staticOutput);
   const base = (site ?? origin ?? "http://localhost") + "/";
   const tags = [];
   const name = (n, c) => c !== undefined && c !== null && c !== "" && tags.push(`<meta name="${n}" content="${esc(c)}" />`);
@@ -135,9 +143,9 @@ function imageType(url) {
   return { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", avif: "image/avif", svg: "image/svg+xml" }[ext];
 }
 
-/// sitemap.xml for `urls` (paths), against the site.
-export function sitemapXml(site, urls, { staticOutput = false } = {}) {
-  const items = [...new Set(staticOutput ? urls.map(staticPagePath) : urls)]
+/// sitemap.xml for `urls` (paths), against the site; each page URL shaped by `pagePath`.
+export function sitemapXml(site, urls, { trailingSlash, staticOutput = false } = {}) {
+  const items = [...new Set(urls.map((u) => pagePath(u, trailingSlash, staticOutput)))]
     .sort()
     .map((u) => `  <url><loc>${esc(absolute(u, site + "/"))}</loc></url>`)
     .join("\n");

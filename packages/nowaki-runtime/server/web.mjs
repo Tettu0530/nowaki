@@ -82,6 +82,7 @@ function installIslandHook(registry, liveRegistry, live) {
 ///   envModule        : the compiled env.ts (dist/server/env.js) when the app has one
 ///   envPublic        : the public values the build inlined (dist/server/env-public.json)
 ///   sessionModule    : the compiled session.ts (dist/server/session.js) when the app has one
+///   trailingSlash    : nowaki.config `trailingSlash` when it isn't "ignore" (canonical / sitemap URLs)
 /// Returns `(request, bindings?, front?) => Promise<Response>`; `bindings` (the Worker's `env`) adds
 /// its string vars and secrets to process.env for validating env.ts. `front` comes from the
 /// worker's nowaki.config routing (front.mjs): `{ routePath, headers }`, the path to route by and
@@ -100,6 +101,7 @@ export function createFetchHandler({
   envModule,
   envPublic,
   sessionModule,
+  trailingSlash,
 }) {
   const registry = new Map();
   for (const [name, comp] of Object.entries(islandComponents ?? {})) {
@@ -135,6 +137,7 @@ export function createFetchHandler({
     dev: false,
     // NOWAKI_SITE (a Worker var) or nowaki.config `site`, embedded by edge-build.mjs.
     site: resolveSite(site),
+    trailingSlash,
     fonts: fonts ?? null,
     routeTable: () => routeTable,
     importModule: (key) => modules[key],

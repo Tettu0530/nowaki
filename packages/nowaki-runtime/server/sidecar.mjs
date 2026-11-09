@@ -212,19 +212,20 @@ async function devInfo(version) {
   return { routes, conventions, islands };
 }
 
-// NOWAKI_SITE, else `site` in nowaki.config (read once; restart dev after changing it).
-const devSite = await (async () => {
+// NOWAKI_SITE, else `site` in nowaki.config, and its `trailingSlash` (read once; restart dev
+// after changing them).
+const devConfig = await (async () => {
   for (const name of ["nowaki.config.mjs", "nowaki.config.js"]) {
     const p = path.join(appRoot, name);
     if (!existsSync(p)) continue;
     try {
       const mod = await import(pathToFileURL(p).href);
-      return (mod.default ?? mod.config ?? {}).site;
+      return mod.default ?? mod.config ?? {};
     } catch (err) {
       console.error(`[nowaki] ${name}: ${err?.message ?? err}`);
     }
   }
-  return undefined;
+  return {};
 })();
 
 // Self-hosted fonts in dev: `nowaki dev` builds them into .nowaki/fonts in the background at
@@ -250,7 +251,8 @@ function devFonts() {
 
 const env = {
   dev: true,
-  site: resolveSite(devSite),
+  site: resolveSite(devConfig.site),
+  trailingSlash: devConfig.trailingSlash,
   get fonts() {
     return devFonts();
   },

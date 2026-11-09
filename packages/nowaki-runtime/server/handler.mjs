@@ -82,7 +82,7 @@ export async function handleRequest(env, info) {
       // file (served before this) provides them.
       if (env.site && (method === "GET" || method === "HEAD")) {
         if (path === "/sitemap.xml") {
-          const body = sitemapXml(env.site, await sitemapUrls(env, version), { staticOutput: env.staticOutput === true });
+          const body = sitemapXml(env.site, await sitemapUrls(env, version), { trailingSlash: env.trailingSlash, staticOutput: env.staticOutput === true });
           return finalize(ctx, { status: 200, headers: { "content-type": "application/xml; charset=utf-8" }, body }, env, table, version);
         }
         if (path === "/robots.txt") {
@@ -428,7 +428,7 @@ async function withSeo(env, table, file, mod, version, ctx, meta) {
   if (layouts.length === 0 && !own && layoutHeads.length === 0) return meta;
   const merged = mergeMeta(...layouts, own);
   const title = (typeof meta?.title === "string" ? meta.title : undefined) ?? merged.title ?? mod?.title;
-  const tags = [seoTags(merged, { title, pathname: ctx.url.pathname, origin: ctx.url.origin, site: env.site, staticOutput: env.staticOutput === true }), ...layoutHeads]
+  const tags = [seoTags(merged, { title, pathname: ctx.url.pathname, origin: ctx.url.origin, site: env.site, trailingSlash: env.trailingSlash, staticOutput: env.staticOutput === true }), ...layoutHeads]
     .filter(Boolean)
     .join("\n");
   const next = { ...(meta ?? {}) };

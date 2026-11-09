@@ -1,5 +1,5 @@
 // Unit checks for server/seo.mjs (meta tags, sitemap, robots, site URL). No server needed.
-import { mergeMeta, normalizeSite, robotsTxt, seoTags, sitemapXml, staticPagePath } from "../packages/nowaki-runtime/server/seo.mjs";
+import { mergeMeta, normalizeSite, pagePath, robotsTxt, seoTags, sitemapXml, staticPagePath } from "../packages/nowaki-runtime/server/seo.mjs";
 
 let failures = 0;
 const check = (name, ok) => {
@@ -48,6 +48,16 @@ check("sitemap keeps encoded paths", map.includes("https://example.com/x%20y"));
 check("static output: page URLs get the slash their index.html implies", staticPagePath("/docs/a") === "/docs/a/" && staticPagePath("/") === "/" && staticPagePath("/feed.xml") === "/feed.xml");
 check("static output: canonical with a slash", seoTags({ canonical: true }, { pathname: "/docs/a", site: "https://e.x", staticOutput: true }).includes('href="https://e.x/docs/a/"'));
 check("static output: sitemap with slashes", sitemapXml("https://e.x", ["/", "/docs/a"], { staticOutput: true }).includes("<loc>https://e.x/docs/a/</loc>"));
+const canon = (pathname, opts) => seoTags({ canonical: true, openGraph: {} }, { pathname, site: "https://e.x", ...opts });
+check("ignore on a server: canonical keeps the request's form", canon("/a").includes('href="https://e.x/a"') && canon("/a/").includes('href="https://e.x/a/"'));
+check("ignore: sitemap keeps route paths", sitemapXml("https://e.x", ["/a"]).includes("<loc>https://e.x/a</loc>"));
+check("pagePath: never drops the slash, keeps /", pagePath("/a/", "never") === "/a" && pagePath("/", "never") === "/" && pagePath("/a", "never", true) === "/a");
+check("pagePath: always adds it, not after a file name", pagePath("/a", "always") === "/a/" && pagePath("/feed.xml", "always") === "/feed.xml" && pagePath("/", "always") === "/");
+check("pagePath: ignore keeps it on a server, static output adds it", pagePath("/a") === "/a" && pagePath("/a/") === "/a/" && pagePath("/a", "ignore", true) === "/a/");
+check("never: canonical and og:url without the slash, also in static output", canon("/docs/a/", { trailingSlash: "never" }).includes('href="https://e.x/docs/a"') && canon("/docs/a", { trailingSlash: "never", staticOutput: true }).includes('content="https://e.x/docs/a"'));
+check("always: canonical with the slash on a server", canon("/docs/a", { trailingSlash: "always" }).includes('href="https://e.x/docs/a/"'));
+check("never: sitemap without slashes in static output", sitemapXml("https://e.x", ["/", "/docs/a"], { trailingSlash: "never", staticOutput: true }).includes("<loc>https://e.x/docs/a</loc>"));
+check("always: sitemap with slashes on a server", sitemapXml("https://e.x", ["/", "/docs/a"], { trailingSlash: "always" }).includes("<loc>https://e.x/docs/a/</loc>"));
 check("robots.txt points at the sitemap", robotsTxt("https://example.com") === "User-agent: *\nAllow: /\n\nSitemap: https://example.com/sitemap.xml\n");
 
 console.log(failures === 0 ? "\nSEO UNIT TEST PASSED" : `\nSEO UNIT TEST FAILED (${failures})`);

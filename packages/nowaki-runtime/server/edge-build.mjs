@@ -32,6 +32,7 @@ const hasSession = await readFile(path.join(serverDir, "session.js")).then(() =>
 const envPublicJson = hasEnv ? await readFile(path.join(serverDir, "env-public.json"), "utf8").catch(() => null) : null;
 // nowaki.config routing, inlined; without it the worker imports and checks nothing for it.
 const routingJson = await readFile(path.join(serverDir, "routing.json"), "utf8").catch(() => null);
+const trailingSlash = routingJson ? JSON.parse(routingJson).trailingSlash : undefined;
 
 const keyOf = (abs) => path.relative(serverDir, abs).split(path.sep).join("/");
 // specifiers relative to dist/worker/index.js
@@ -147,7 +148,7 @@ const handler = createFetchHandler({
   islandComponents,
   liveIslands,
   routeTable,
-  serverFunctions,${site ? `\n  site: ${JSON.stringify(site)},` : ""}${fontsJson ? `\n  fonts: ${fontsJson.trim()},` : ""}${contentRaw ? "\n  content," : ""}${hasEnv ? "\n  envModule," : ""}${hasSession ? "\n  sessionModule," : ""}${envPublicJson ? `\n  envPublic: ${envPublicJson.trim()},` : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}
+  serverFunctions,${site ? `\n  site: ${JSON.stringify(site)},` : ""}${trailingSlash ? `\n  trailingSlash: ${JSON.stringify(trailingSlash)},` : ""}${fontsJson ? `\n  fonts: ${fontsJson.trim()},` : ""}${contentRaw ? "\n  content," : ""}${hasEnv ? "\n  envModule," : ""}${hasSession ? "\n  sessionModule," : ""}${envPublicJson ? `\n  envPublic: ${envPublicJson.trim()},` : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}
 });
 
 // public/ files by decoded URL path; they win over routes at the same path.

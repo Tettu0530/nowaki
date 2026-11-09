@@ -54,6 +54,7 @@ const CONFIG_A = `export default {
 };
 `;
 const CONFIG_B = `export default {
+  site: "https://e.x",
   basePath: "/app",
   trailingSlash: "never",
   redirects: [{ source: "/legacy", destination: "/about" }],
@@ -63,7 +64,8 @@ const CONFIG_B = `export default {
 const FILES = {
   "package.json": `{ "name": "rules-e2e", "private": true, "type": "module" }\n`,
   "routes/index.tsx": `export default function Home() { return <main>{"HOME"}</main>; }\n`,
-  "routes/about.tsx": `export const loader = (ctx) => ({ path: ctx.url.pathname });
+  "routes/about.tsx": `export const meta = { canonical: true };
+export const loader = (ctx) => ({ path: ctx.url.pathname });
 export default function About({ data }) { return <main>{\`ABOUT url:\${data.path}\`}</main>; }\n`,
   "routes/secret.tsx": `export default function Secret() { return <main>{"SECRET_ROUTE"}</main>; }\n`,
   "routes/photo/[id].tsx": `export const loader = (ctx) => ({ id: ctx.params.id, path: ctx.url.pathname });
@@ -190,6 +192,8 @@ async function checksA(label, req, { isr = false, assets = true } = {}) {
   r = await req("/api/own");
   check(t("a header the route set wins over the config"), r.headers["cache-control"] === "max-age=7", r.headers["cache-control"]);
   check(t("a config header wins over a security default"), r.headers["x-frame-options"] === "DENY", r.headers["x-frame-options"]);
+  r = await req("/about/");
+  check(t("trailingSlash ignore: both forms render; canonical keeps the request's"), r.status === 200 && /rel="canonical" href="[^"]*\/about\/"/.test(r.body), `${r.status} ${r.body.match(/rel="canonical"[^>]*/)?.[0]}`);
   r = await req("/nope");
   check(t("404 gets config headers"), r.status === 404 && r.headers["x-rules"] === "on");
   r = await req("/__nowaki/boundaries");
@@ -222,6 +226,9 @@ async function checksB(label, req, { assets = true } = {}) {
   check(t("trailing slash on basePath root → 308"), r.status === 308 && r.headers.location === "/app", `${r.status} ${r.headers.location}`);
   r = await req("/app/about");
   check(t("page under basePath; ctx.url keeps it"), r.status === 200 && r.body.includes("ABOUT url:/app/about"), r.body.slice(0, 200));
+  check(t("trailingSlash never: canonical without the slash"), /rel="canonical" href="https:\/\/e\.x[^"]*\/about"/.test(r.body), r.body.match(/rel="canonical"[^>]*/)?.[0]);
+  r = await req("/app/sitemap.xml");
+  check(t("trailingSlash never: sitemap URLs without the slash"), r.status === 200 && /<loc>https:\/\/e\.x[^<]*\/about<\/loc>/.test(r.body), `${r.status} ${r.body.slice(0, 300)}`);
   r = await req("/app/about/?q=1");
   check(t("trailingSlash never → 308 with the query"), r.status === 308 && r.headers.location === "/app/about?q=1", `${r.status} ${r.headers.location}`);
   r = await req("/about");
@@ -325,10 +332,17 @@ try {
       check("static A: _headers has the config headers after the defaults", /\/api\/\*\n {2}cache-control: no-store\n/.test(headers) && headers.indexOf("/api/*") > headers.indexOf("x-content-type-options"), headers);
       check("static A: warns about a header a host may merge", /x-frame-options/.test(outA));
       check("static A: pages rendered", readFileSync(path.join(appA, "dist/static/photo/1/index.html"), "utf8").includes("PHOTO id:1"));
+      check("static A: trailingSlash ignore: x/index.html with a canonical slash", /rel="canonical" href="[^"]*\/about\/"/.test(readFileSync(path.join(appA, "dist/static/about/index.html"), "utf8")));
       const outB = build(appB, "static");
-      check("static B: pages requested under basePath", readFileSync(path.join(appB, "dist/static/about/index.html"), "utf8").includes("ABOUT url:/app/about"));
+      const staticB = (f) => path.join(appB, "dist/static", f);
+      const aboutB = existsSync(staticB("about.html")) ? readFileSync(staticB("about.html"), "utf8") : "";
+      check("static B: pages requested under basePath", aboutB.includes("ABOUT url:/app/about"));
+      check("static B: trailingSlash never writes x.html", !existsSync(staticB("about/index.html")) && existsSync(staticB("photo/1.html")) && existsSync(staticB("new/a/b.html")) && existsSync(staticB("index.html")));
+      check("static B: canonical without the slash", /rel="canonical" href="https:\/\/e\.x[^"]*\/about"/.test(aboutB), aboutB.match(/rel="canonical"[^>]*/)?.[0]);
+      const sitemapB = existsSync(staticB("sitemap.xml")) ? readFileSync(staticB("sitemap.xml"), "utf8") : "";
+      check("static B: sitemap URLs without the slash", /<loc>https:\/\/e\.x[^<]*\/photo\/1<\/loc>/.test(sitemapB) && !/\/<\/loc>/.test(sitemapB.replace(/<loc>https:\/\/e\.x(\/app)?\/?<\/loc>/, "")), sitemapB);
       check("static B: _redirects carries basePath", readFileSync(path.join(appB, "dist/static/_redirects"), "utf8").includes("/app/legacy /app/about 307\n"));
-      check("static B: warns about basePath and trailingSlash", /basePath/.test(outB) && /trailingSlash/.test(outB));
+      check("static B: warns about basePath, not trailingSlash (the file layout carries it)", /basePath/.test(outB) && !/trailingSlash/.test(outB));
     }
   }
 } catch (e) {

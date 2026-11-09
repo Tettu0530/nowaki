@@ -223,7 +223,9 @@ code locations and CI coverage.
   generated `.nowaki/session-secret`). Tests: `scripts/session-test.mjs`.
 - **SEO** — `packages/nowaki-runtime/server/seo.mjs` (site URL, meta tags, sitemap, robots);
   `handler.mjs` `withSeo` (layout + route meta) and the generated `/sitemap.xml` / `/robots.txt`;
-  page URLs from `server/isr-urls.mjs` `pageUrls`. The site comes from `crates/nowaki/src/site.rs`
+  page URLs from `server/isr-urls.mjs` `pageUrls`, shaped by `pagePath` per `trailingSlash`
+  (`env.trailingSlash`; the static output files from `prerender.rs` `out_file_for` match it).
+  The site comes from `crates/nowaki/src/site.rs`
   (`dist/server/site.json`, via `server/site-config.mjs`), `NOWAKI_SITE` winning. Unit checks:
   `scripts/seo-unit-test.mjs`.
 - **Routing config (`basePath`, `trailingSlash`, `redirects`, `rewrites`, `headers`)** —

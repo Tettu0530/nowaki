@@ -95,6 +95,14 @@ milestone's worth of work; the codename is noted per entry.
   with `PUBLIC_` and server names must not. New core API:
   `NowakiCore::set_public_env`.
 ### Changed
+- **`trailingSlash` also shapes static output and page URLs.** With `"never"`, the static
+  adapter writes `about.html` instead of `about/index.html`, and canonical URLs, the default
+  `og:url` and `sitemap.xml` drop the slash; with `"always"` they get one on every server too.
+  Cloudflare Pages serves `about.html` at `/about` and redirects `/about/` to it, and redirects
+  `/about` to `/about/` for `about/index.html`, so the files alone give it the configured
+  policy (no `_redirects` rules needed); the build no longer warns about `trailingSlash`. Other
+  hosts may need their own clean-URL setting. The default `"ignore"`
+  is unchanged: servers use the request's path and static output `x/index.html` with a slash.
 - An error while saving a request's session (a store failure, a cookie over 4 KB) now renders
   the 500 page instead of escaping the request handler.
 - **The CI performance regression gate also compares each PR with the latest

@@ -263,6 +263,8 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
       throw e;
     },
   );
+  // Canonical / sitemap URLs follow the policy (seo.mjs pagePath).
+  if (rules) env.trailingSlash = rules.trailing;
 
   const handle = async (req, res) => {
     // Set before the response's own headers, which override any of these by name.

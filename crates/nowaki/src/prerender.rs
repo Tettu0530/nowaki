@@ -3,6 +3,7 @@ use std::process::Stdio;
 
 use anyhow::{anyhow, Context, Result};
 use futures_util::StreamExt;
+use nowaki_core::rules::TrailingSlash;
 use nowaki_core::NowakiCore;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -34,6 +35,11 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     crate::fonts::build_dist(&root, &root.join("dist"), &config)?;
     crate::check_route_budgets(&core, &report, &client)?;
     let routing_file = root.join("dist/server/routing.json");
+    let routing: nowaki_core::rules::RoutingConfig = match std::fs::read_to_string(&routing_file) {
+        Ok(text) => serde_json::from_str(&text)?,
+        Err(_) => nowaki_core::rules::RoutingConfig::default(),
+    };
+    let trailing = routing.trailing_slash;
     // The temporary server applies nowaki.config routing, so pages are requested by the URL a
     // browser uses (basePath, trailing slash).
     let front = crate::front::load(&routing_file)?;
@@ -105,11 +111,16 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         nowaki_core::routes::enumerate_static_prerender_urls(&root.join("dist/server/routes"))?
             .into_iter()
             .map(|url| {
-                let file = out_file_for(&out, &url);
+                let file = out_file_for(&out, &url, trailing);
                 (url, file)
             })
             .collect();
-    for (url, file) in dynamic_pages? {
+    for (url, file, page) in dynamic_pages? {
+        let file = if page {
+            page_file(&file, trailing)
+        } else {
+            file
+        };
         pages.push((url, out.join(file)));
     }
     if pages.is_empty() {
@@ -251,10 +262,6 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     }
     // nowaki.config routing for static hosts (Cloudflare Pages / Netlify syntax): redirects and
     // rewrites in `_redirects` after the app's own, config headers at the end of `_headers`.
-    let routing = match std::fs::read_to_string(&routing_file) {
-        Ok(text) => serde_json::from_str(&text)?,
-        Err(_) => nowaki_core::rules::RoutingConfig::default(),
-    };
     let rendered_urls: Vec<&str> = pages.iter().map(|(u, _)| u.as_str()).collect();
     let host = static_host_rules(&routing, &rendered_urls);
     for w in &host.warnings {
@@ -350,8 +357,9 @@ fn normalize(p: &Path) -> PathBuf {
 }
 
 /// Runs the runtime's static-paths.mjs, which evaluates `export const staticPaths` in Node
-/// (nowaki-core never runs JS). Returns (request path, file relative to `out`).
-async fn static_paths(root: &Path) -> Result<Vec<(String, String)>> {
+/// (nowaki-core never runs JS). Returns (request path, file relative to `out`, whether it's a
+/// page rather than a file route).
+async fn static_paths(root: &Path) -> Result<Vec<(String, String, bool)>> {
     let script = root.join("node_modules/@nowaki-dev/runtime/server/static-paths.mjs");
     if !script.exists() {
         return Ok(Vec::new()); // older runtime: dynamic routes stay unrendered, as before
@@ -389,6 +397,7 @@ async fn static_paths(root: &Path) -> Result<Vec<(String, String)>> {
             Some((
                 p["url"].as_str()?.to_string(),
                 p["file"].as_str()?.to_string(),
+                p["kind"].as_str() != Some("file"),
             ))
         })
         .collect())
@@ -407,12 +416,27 @@ fn static_security_headers() -> String {
     out
 }
 
-/// URL to output file path. `/` → index.html, `/about` → about/index.html (clean URLs).
-fn out_file_for(out: &Path, url: &str) -> PathBuf {
+/// URL to output file path, laid out the way static hosts map files to URLs: `/` → index.html;
+/// `/about` → about/index.html (served at `/about/`), or about.html under `trailingSlash: "never"`
+/// (served at `/about`).
+fn out_file_for(out: &Path, url: &str, trailing: TrailingSlash) -> PathBuf {
     if url == "/" {
         out.join("index.html")
     } else {
-        out.join(format!("{}/index.html", url.trim_start_matches('/')))
+        out.join(page_file(
+            &format!("{}/index.html", url.trim_start_matches('/')),
+            trailing,
+        ))
+    }
+}
+
+/// A page's `x/index.html` as `x.html` under `trailingSlash: "never"`; unchanged otherwise.
+fn page_file(file: &str, trailing: TrailingSlash) -> String {
+    match file.strip_suffix("/index.html") {
+        Some(dir) if trailing == TrailingSlash::Never && !dir.is_empty() => {
+            format!("{dir}.html")
+        }
+        _ => file.to_string(),
     }
 }
 
@@ -432,19 +456,12 @@ fn static_host_rules(
     config: &nowaki_core::rules::RoutingConfig,
     rendered: &[&str],
 ) -> StaticHostRules {
-    use nowaki_core::rules::TrailingSlash;
     let mut out = StaticHostRules::default();
     let base = config.base_path.as_str();
     if !base.is_empty() {
         out.warnings.push(format!(
             "basePath {base:?}: pages are written at the root of the output; deploy them under {base} (the rules below include it)"
         ));
-    }
-    if config.trailing_slash != TrailingSlash::Ignore {
-        out.warnings.push(
-            "trailingSlash isn't applied by a static host; use the host's own trailing-slash setting"
-                .to_string(),
-        );
     }
     let internal = |d: &str| {
         if d.starts_with('/') {
@@ -673,8 +690,36 @@ mod tests {
         );
         assert_eq!(host.redirects, "/app /app/home 307\n");
         assert!(host.warnings.iter().any(|w| w.contains("basePath")));
-        assert!(host.warnings.iter().any(|w| w.contains("trailingSlash")));
+        // The file layout carries the trailing-slash policy (out_file_for), so no warning.
+        assert!(!host.warnings.iter().any(|w| w.contains("trailingSlash")));
         assert!(static_host_rules(&routing("{}"), &[]).redirects.is_empty());
         assert!(static_host_rules(&routing("{}"), &[]).warnings.is_empty());
+    }
+
+    #[test]
+    fn output_files_follow_the_trailing_slash_policy() {
+        let out = Path::new("out");
+        let file = |url: &str, t| out_file_for(out, url, t);
+        for t in [TrailingSlash::Ignore, TrailingSlash::Always] {
+            assert_eq!(file("/", t), out.join("index.html"));
+            assert_eq!(file("/about", t), out.join("about/index.html"));
+            assert_eq!(file("/docs/a", t), out.join("docs/a/index.html"));
+        }
+        assert_eq!(file("/", TrailingSlash::Never), out.join("index.html"));
+        assert_eq!(file("/about", TrailingSlash::Never), out.join("about.html"));
+        assert_eq!(
+            file("/docs/a", TrailingSlash::Never),
+            out.join("docs/a.html")
+        );
+        // Dynamic pages from static-paths.mjs (decoded, already `x/index.html`).
+        assert_eq!(
+            page_file("blog/a b/index.html", TrailingSlash::Never),
+            "blog/a b.html"
+        );
+        assert_eq!(
+            page_file("blog/a b/index.html", TrailingSlash::Ignore),
+            "blog/a b/index.html"
+        );
+        assert_eq!(page_file("index.html", TrailingSlash::Never), "index.html");
     }
 }
