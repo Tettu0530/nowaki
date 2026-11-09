@@ -20,6 +20,12 @@
 //   inside it, and so does its _middleware (containment, not URL prefix: it doesn't run for
 //   404s). Names starting with "." ("(.)", "(..)") are reserved and stay literal.
 //   Two files that serve the same URL because of groups are an error.
+// Parallel routes: a directory named "@name" is a slot of the _layout in its parent directory
+//   (routes/@modal/ → `slots.modal` of routes/_layout). Its files are never routes of their own:
+//   a slot file matches the URL below its owner's directory (routes/@modal/photo/[id].tsx matches
+//   /photo/42), and @name/default.tsx renders when none matches. Files starting with "_" and
+//   nested slots inside a slot are ignored. A path segment starting with "(.)", "(..)" or
+//   "(...)" marks an intercepting route; those are recorded (`intercepts`), not served.
 
 import { readdir } from "node:fs/promises";
 import path from "node:path";
@@ -28,6 +34,13 @@ import { decodeSegment, matchSegments, parseSegment } from "./segments.mjs";
 const ROUTE_EXT = /\.(tsx|ts|jsx|js|mdx)$/;
 // Kept in step with nowaki-core routes::is_route_group.
 const GROUP_DIR = /^\((?!\.)[^)/]+\)$/;
+// Kept in step with nowaki-core routes::is_intercept_segment.
+const INTERCEPT = /^\(\.{1,3}\)/;
+
+/// Does a path segment mark an intercepting route ("(.)photo", "(..)x", "(...)x")?
+export function isInterceptSegment(name) {
+  return INTERCEPT.test(name);
+}
 
 /// Is a directory name a route group ("(marketing)")?
 export function isRouteGroup(name) {
@@ -52,13 +65,26 @@ export async function scanRoutes(appRoot) {
   const errorBoundaries = [];
   let notFound = null;
   let errorRoute = null;
+  // "ownerDir\0name" → slot, and intercepting route files outside any slot.
+  const slots = new Map();
+  const intercepts = [];
   // URL shape → { rel, inGroup } of the route files seen so far.
   const urls = new Map();
 
   for (const rel of files) {
     const abs = path.join(routesDir, rel);
+    const parts = rel.split("/");
+    const slotAt = parts.findIndex((p) => p.startsWith("@"));
+    if (slotAt !== -1) {
+      addSlotFile(slots, parts, slotAt, abs);
+      continue;
+    }
     const base = path.basename(rel).replace(ROUTE_EXT, "");
     const dirPrefix = dirToPrefix(path.dirname(rel));
+    if (parts.some(isInterceptSegment)) {
+      intercepts.push({ file: abs, dir: dirPrefix });
+      continue;
+    }
     // The directory as the URL sees it: route groups left out.
     const urlPrefix = stripRouteGroups(dirPrefix);
     const inGroup = urlPrefix !== dirPrefix;
@@ -126,7 +152,7 @@ export async function scanRoutes(appRoot) {
   }
 
   // static > dynamic > catch-all. Descending specificity (literal count); on ties, catch-all goes last.
-  routes.sort((a, b) => b.specificity - a.specificity || (a.rest ? 1 : 0) - (b.rest ? 1 : 0));
+  routes.sort(bySpecificity);
   // root→leaf order (shorter prefixes first)
   // (by segment count: "/[o]/x" is deeper than "/abcdefgh" though shorter as a string).
   layouts.sort((a, b) => prefixDepth(a.prefix) - prefixDepth(b.prefix));
@@ -137,7 +163,68 @@ export async function scanRoutes(appRoot) {
   loadingBoundaries.sort(ungroupedFirst);
   errorBoundaries.sort(ungroupedFirst);
 
-  return { routes, layouts, middleware, loadingBoundaries, errorBoundaries, notFound, errorRoute };
+  const slotList = [...slots.values()];
+  for (const slot of slotList) slot.routes.sort(bySpecificity);
+  return { routes, layouts, middleware, loadingBoundaries, errorBoundaries, notFound, errorRoute, slots: slotList, intercepts };
+}
+
+function bySpecificity(a, b) {
+  return b.specificity - a.specificity || (a.rest ? 1 : 0) - (b.rest ? 1 : 0);
+}
+
+// A file under routes/…/@name/. `parts` is its path relative to routes/, split on "/", and
+// parts[slotAt] is the "@name" directory.
+function addSlotFile(slots, parts, slotAt, abs) {
+  const name = parts[slotAt].slice(1);
+  const inner = parts.slice(slotAt + 1);
+  // routes/@x.tsx is a file, not a slot directory; "@" alone has no name.
+  if (!name || inner.length === 0 || inner.some((p) => p.startsWith("@"))) return;
+  const base = inner[inner.length - 1].replace(ROUTE_EXT, "");
+  if (base.startsWith("_") || base === "loading" || base === "error") return;
+  const ownerDir = slotAt ? "/" + parts.slice(0, slotAt).join("/") : "";
+  const key = `${ownerDir}\0${name}`;
+  let slot = slots.get(key);
+  if (!slot) slots.set(key, (slot = { ownerDir, name, routes: [], default: null, intercepts: [] }));
+  if (inner.some(isInterceptSegment)) {
+    slot.intercepts.push({ file: abs, rel: inner.join("/") });
+    return;
+  }
+  if (base === "default") {
+    // Only @name/default is the fallback; a nested default is reserved.
+    if (inner.length === 1) slot.default = abs;
+    return;
+  }
+  // A slot renders a page: a file route name (feed.xml, [card].png) has no place in one.
+  if (/\.[A-Za-z0-9]+$/.test(base.replace(/^.*\]/, ""))) return;
+  // The owner's URL followed by the slot file's path, groups left out of both.
+  const urlParts = [...parts.slice(0, slotAt), ...inner.slice(0, -1)].filter((p) => !GROUP_DIR.test(p));
+  if (base !== "index") urlParts.push(base);
+  const segments = urlParts.map(parseSegment);
+  slot.routes.push({
+    file: abs,
+    segments,
+    specificity: segments.filter((s) => s.lit).length + segments.filter((s) => s.suffix).length / 2,
+    rest: segments.some((s) => s.rest),
+  });
+}
+
+/// The file a slot renders for a request path given as percent-decoded segments (`pathParts`;
+/// null when one didn't decode): the first slot route that matches, else the slot's default.
+/// Returns { file, params } (params null for the default), or null when there is neither.
+export function matchSlot(slot, parts) {
+  if (parts) {
+    for (const r of slot.routes) {
+      const params = matchSegments(r.segments, parts);
+      if (params) return { file: r.file, params };
+    }
+  }
+  return slot.default ? { file: slot.default, params: null } : null;
+}
+
+/// A request path split into percent-decoded segments, or null when one doesn't decode.
+export function pathParts(pathname) {
+  const parts = pathname.split("/").filter(Boolean).map(decodeSegment);
+  return parts.includes(null) ? null : parts;
 }
 
 // Two route files serving the same URL is an error when a group causes it ((a)/about vs

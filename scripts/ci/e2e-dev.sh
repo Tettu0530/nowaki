@@ -131,6 +131,11 @@ curl -sf $B/pricing | grep -q '<div data-group="marketing"><main'
 curl -s -D - -o /dev/null $B/pricing | grep -qi '^x-route-group: marketing'
 ! curl -sf $B/about | grep -q 'data-group="marketing"'
 ! curl -s -D - -o /dev/null $B/no-such-page | grep -qi '^x-route-group'
+# parallel routes: photos/@modal renders beside the page (its [id] file on /photos/1, default on /photos)
+curl -sf $B/photos/1 | grep -q '<h1 id="photo-page">photo 1</h1>.*<nowaki-slot name="modal" style="display:contents"><aside id="photo-modal" class="photo-modal">modal 1: caption of 1</aside></nowaki-slot>'
+curl -sf $B/photos | grep -q '<nowaki-slot name="modal" style="display:contents"><p id="modal-default">no photo open</p></nowaki-slot>'
+! curl -sf $B/photos/1 | grep -q 'photo-intercepted'
+test "$(curl -s -o /dev/null -w '%{http_code}' "$B/photos/@modal/1")" = 404
 # MDX: a .mdx page (ESM exports, expressions, GFM, an island) and an .mdx content entry
 curl -sf $B/guide | grep -q '<title>Guide (MDX) — Nowaki</title>'
 curl -sf $B/guide | grep -q '<h1 id="an-mdx-page">An MDX page</h1>'

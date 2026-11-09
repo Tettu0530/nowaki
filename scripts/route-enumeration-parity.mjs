@@ -1,6 +1,7 @@
-// Prints sorted page URL patterns from scanRoutes (non-API) for parity with nowaki-core::routes.
+// Prints sorted page URL patterns and parallel-route slot patterns from scanRoutes, for parity
+// with nowaki-core::routes (page_url_patterns, slot_route_patterns).
 // Usage: node scripts/route-enumeration-parity.mjs [appRoot]
-// stdout: JSON string array
+// stdout: JSON { pages: string[], slots: string[] }
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,15 +19,22 @@ function urlFromSegments(segments) {
       .map((seg) => {
         if (seg.lit !== undefined) return seg.lit;
         if (seg.rest) return `[...${seg.param}]`;
-        return `[${seg.param}]`;
+        return `[${seg.param}]${seg.suffix ?? ""}`;
       })
       .join("/")
   );
 }
 
 const table = await scanRoutes(ROOT);
-const urls = table.routes
+const pages = table.routes
   .filter((r) => !r.isApi)
   .map((r) => urlFromSegments(r.segments))
   .sort();
-process.stdout.write(`${JSON.stringify(urls)}\n`);
+const slots = [];
+for (const slot of table.slots) {
+  const name = `${slot.ownerDir}/@${slot.name}`;
+  for (const r of slot.routes) slots.push(`${name} ${urlFromSegments(r.segments)}`);
+  if (slot.default) slots.push(`${name} default`);
+}
+slots.sort();
+process.stdout.write(`${JSON.stringify({ pages, slots })}\n`);

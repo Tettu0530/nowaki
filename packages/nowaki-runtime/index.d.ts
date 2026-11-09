@@ -1,5 +1,7 @@
 // Public types for the Nowaki framework (getContext is also exported as a value).
 
+import type { ComponentChildren } from "preact";
+
 /** Route params. `[slug]` is a string; `[...slug]` (catch-all) is a string[]. */
 export type RouteParams = Record<string, string | string[]>;
 
@@ -240,6 +242,24 @@ export interface RouteProps<D = unknown> {
 
 /** Page props with `data` inferred from the loader type. Use as `PageProps<typeof loader>`. */
 export type PageProps<L extends Loader<any> = Loader<unknown>> = RouteProps<Awaited<ReturnType<L>>>;
+
+/** Props a `_layout` component receives. */
+export interface LayoutProps<D = unknown> {
+  /** The layout's loader return value. */
+  data: D;
+  params: RouteParams;
+  url: URL;
+  /** The page (or the next layout down). */
+  children: ComponentChildren;
+  /**
+   * Parallel routes: what each slot directory next to this layout (`@modal/` → `slots.modal`)
+   * renders, wrapped in `<nowaki-slot name="modal" style="display:contents">`. That's the slot's
+   * file matching the URL (`@modal/photo/[id].tsx` for `/photo/42`), else its `default.tsx`, else
+   * null. Slot files get `{ data, params, url }` like a page, and their loaders get the slot's
+   * params. They don't contribute `meta`.
+   */
+  slots: Record<string, ComponentChildren>;
+}
 
 /**
  * Default export of `routes/loading.tsx`. When a client navigation takes over 150ms,

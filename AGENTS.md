@@ -274,6 +274,16 @@ code locations and CI coverage.
   `prerender.rs` `locale_urls` / `locale_404s` / `locale_redirects`; `locale_url` and
   `localePathFor` share `crates/nowaki/tests/fixtures/i18n-cases.json`. Tests:
   `scripts/i18n-test.mjs`, `scripts/i18n-e2e.mjs` (start, dev, node, cloudflare, static).
+- **Parallel routes (`routes/…/@name/`)** — JS: `server/router.mjs` `scanRoutes` collects
+  `slots: [{ ownerDir, name, routes, default, intercepts }]` (slot files are never in `routes`;
+  intercepting `(.)x` files are recorded in `slot.intercepts` / `table.intercepts`, not served),
+  `matchSlot`; `handler.mjs` `resolveSlots` (owners cached per table + file in `slotOwners`, one
+  length check without slots), `wrapLayouts` / `renderSlots` pass `slots` to the owner layout;
+  `withRouteCss` / `withScripts` take the rendered slot files. Rust: `routes.rs` `is_slot_rel`,
+  `is_intercept_segment`, `slot_route_patterns` (parity with `scripts/route-enumeration-parity.mjs`
+  in `crates/nowaki/tests/route_js_parity.rs`); `budget.rs` `slot_files_for`. The worker routeTable
+  carries `slots` (`edge-build.mjs`). Tests: `scripts/router-test.mjs`, `scripts/handler-test.mjs`,
+  `examples/hello/routes/photos/`.
 - **Page scripts (`export const scripts`)** — read from the AST in
   `crates/nowaki-core/src/page_scripts.rs`, emitted as client entries by
   `build.rs` `build_route_scripts` (manifest `routeScripts` per module and

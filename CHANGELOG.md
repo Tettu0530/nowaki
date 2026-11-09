@@ -11,6 +11,17 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **Parallel routes (`@slot`), server-rendered.** A directory named `@name` under `routes/` is a
+  slot of the `_layout` in its parent directory, which gets it as `slots.name` (typed by the new
+  `LayoutProps`). The slot's file matching the URL below the owner's directory renders there
+  (`routes/@modal/photo/[id].tsx` for `/photo/42`, with its own `loader` and params), else its
+  `default.tsx`, else `slots.name` is `null`. The rendered node is wrapped in
+  `<nowaki-slot name="…" style="display:contents">`; its CSS and page scripts are linked with the
+  page's, and it adds no `meta`. Slot files are never routes of their own: they're left out of
+  typegen, prerendering and URL conflict checks; a page's JS budget counts the islands of every
+  slot file its layouts can render. Files starting with `_` and nested slots inside a slot are
+  ignored. Intercepting routes (a segment starting with `(.)`, `(..)` or `(...)`) are recorded
+  but not served yet. Apps without slots pay one length check per request.
 - **Route groups.** A directory named `(name)` under `routes/` groups files
   without adding a URL segment: `routes/(marketing)/about.tsx` serves `/about`.
   The group's `_layout`, `loading` and `error` apply to the files inside it.
