@@ -5,6 +5,9 @@
 // A second app ("combo", on --port + 1) composes i18n with basePath "/app", trailingSlash
 // "never" and a parallel-route slot: prefixed URLs, canonical / hreflang / sitemap, the locale
 // redirect, static file names and _redirects, and the slot under a locale.
+// A third app ("detect", on --port + 2) turns on `i18n.detect`: Accept-Language and the
+// nowaki_locale cookie on `/`, Vary / Cache-Control, and an ISR root never answering another
+// language.
 //   node scripts/i18n-e2e.mjs <mode>... [--port 4990]
 // Modes: start (`nowaki start`), dev (`nowaki dev`), node (node adapter), cloudflare (the worker's
 // fetch, called in Node), static (prerender output). NOWAKI_BIN overrides the binary (default
@@ -85,7 +88,7 @@ const COMBO = {
   site: "https://example.com",
   basePath: "/app",
   trailingSlash: "never",
-  i18n: { locales: ["en", "ja"], defaultLocale: "en" },
+  i18n: { locales: ["en", "ja"], defaultLocale: "en", detect: true },
 };
 `,
   "routes/about.tsx": FILES["routes/about.tsx"].replace("export const loader", "export const meta = { canonical: true };\nexport const loader"),
@@ -99,6 +102,60 @@ export const loader = (ctx) => ({ id: ctx.params.id });
 export default function Modal({ data }) { return <aside>{\`MODAL \${data.id} \${getLocale()}\`}</aside>; }\n`,
   "routes/photos/@modal/default.tsx": `export default function NoModal() { return <p>NOMODAL</p>; }\n`,
 };
+
+// i18n.detect, with an ISR root.
+const DETECT = {
+  ...FILES,
+  "nowaki.config.mjs": `export default {
+  site: "https://example.com",
+  i18n: { locales: ["en", "ja"], defaultLocale: "en", detect: true },
+};
+`,
+  "routes/index.tsx": `import { getLocale } from "@nowaki-dev/runtime";
+export const revalidate = 60;
+export default function Home() { return <main>{\`HOME \${getLocale()}\`}</main>; }\n`,
+};
+
+async function detectChecks(label, req, { isr = false } = {}) {
+  const t = (s) => `${label} detect: ${s}`;
+  const varies = (r) => /accept-language/i.test(r.headers.vary ?? "") && /cookie/i.test(r.headers.vary ?? "");
+  const ja = { "accept-language": "ja-JP,ja;q=0.9,en;q=0.5" };
+  if (isr) {
+    // Fill the root's ISR entry from an English visitor first.
+    await req("/", { headers: { "accept-language": "en" } });
+    const hit = await req("/", { headers: { "accept-language": "en-US" } });
+    check(t("an English visitor gets the cached root"), hit.status === 200 && hit.body.includes("HOME en") && hit.headers["x-nowaki-cache"] === "HIT" && varies(hit), `${hit.status} ${hit.headers["x-nowaki-cache"]} ${hit.headers.vary}`);
+  }
+  let r = await req("/?utm=1", { headers: ja });
+  check(t("Accept-Language ja on / → 307 /ja with the query"), r.status === 307 && r.headers.location === "/ja?utm=1", `${r.status} ${r.headers.location} ${r.body.slice(0, 120)}`);
+  check(t("the redirect varies and is private"), varies(r) && /private/.test(r.headers["cache-control"] ?? ""), `${r.headers.vary} ${r.headers["cache-control"]}`);
+  check(t("the redirect has the security headers"), r.headers["x-content-type-options"] === "nosniff", JSON.stringify(r.headers));
+  r = await req("/", { method: "HEAD", headers: ja });
+  check(t("HEAD / is detected too"), r.status === 307 && r.headers.location === "/ja", `${r.status} ${r.headers.location}`);
+  r = await req("/", { headers: { "accept-language": "en-GB,en;q=0.9,ja;q=0.8" } });
+  check(t("English stays on / with Vary"), r.status === 200 && r.body.includes("HOME en") && varies(r), `${r.status} ${r.headers.vary}`);
+  r = await req("/");
+  check(t("no Accept-Language stays on /"), r.status === 200 && r.body.includes("HOME en") && varies(r), `${r.status} ${r.headers.vary}`);
+  r = await req("/", { headers: { ...ja, cookie: "nowaki_locale=en" } });
+  check(t("the nowaki_locale cookie wins over Accept-Language"), r.status === 200 && r.body.includes("HOME en"), `${r.status} ${r.headers.location}`);
+  r = await req("/", { headers: { "accept-language": "en", cookie: "theme=dark; nowaki_locale=ja" } });
+  check(t("a cookie naming a locale redirects to it"), r.status === 307 && r.headers.location === "/ja", `${r.status} ${r.headers.location}`);
+  r = await req("/", { headers: { "accept-language": "en", cookie: "nowaki_locale=%2F%2Fevil.com" } });
+  check(t("an invalid cookie is ignored"), r.status === 200 && r.body.includes("HOME en"), `${r.status} ${r.headers.location}`);
+  r = await req("/", { headers: { "accept-language": "ja;q=0, en" } });
+  check(t("q=0 is not acceptable"), r.status === 200, `${r.status} ${r.headers.location}`);
+  r = await req("/about", { headers: ja });
+  check(t("only / is detected"), r.status === 200 && r.body.includes("ABOUT locale:en") && !/accept-language/i.test(r.headers.vary ?? ""), `${r.status} ${r.headers.vary}`);
+  check(t("<Link locale> marks the link for the cookie"), r.body.includes('data-nowaki-locale="ja"'), r.body.slice(0, 600));
+  r = await req("/ja", { headers: { "accept-language": "en" } });
+  check(t("/ja is never redirected"), r.status === 200 && r.body.includes("HOME ja"), `${r.status}`);
+  r = await req("/", { method: "POST", headers: { ...ja, "content-type": "text/plain" } });
+  check(t("POST / is not detected"), r.headers.location !== "/ja", `${r.status} ${r.headers.location}`);
+  if (isr) {
+    const after = await req("/", { headers: { "accept-language": "ja" } });
+    check(t("the cached English root never answers a Japanese visitor"), after.status === 307 && !after.body.includes("HOME en"), `${after.status} ${after.headers["x-nowaki-cache"]}`);
+  }
+}
 
 async function comboChecks(label, req) {
   const t = (s) => `${label} combo: ${s}`;
@@ -125,6 +182,12 @@ async function comboChecks(label, req) {
   check(t("outside the base is a 404"), r.status === 404, `${r.status}`);
   r = await req("/app/ja");
   check(t("/app/ja is the locale's home"), r.status === 200 && r.body.includes("HOME ja"), `${r.status}`);
+  r = await req("/app", { headers: { "accept-language": "ja" } });
+  check(t("detection on the bare base → 307 /app/ja"), r.status === 307 && r.headers.location === "/app/ja", `${r.status} ${r.headers.location}`);
+  r = await req("/app/", { headers: { "accept-language": "ja" } });
+  check(t("/app/ → 308 /app first (never)"), r.status === 308 && r.headers.location === "/app", `${r.status} ${r.headers.location}`);
+  r = await req("/app", { headers: { "accept-language": "en" } });
+  check(t("English stays on the bare base"), r.status === 200 && r.body.includes("HOME en") && /accept-language/i.test(r.headers.vary ?? ""), `${r.status} ${r.headers.vary}`);
   r = await req("/app/ja/photos/1");
   check(t("slot renders under base + locale"), r.status === 200 && r.body.includes("PHOTO 1 ja") && /<nowaki-slot name="modal" style="display:contents"><aside>MODAL 1 ja<\/aside><\/nowaki-slot>/.test(r.body), `${r.status} ${r.body.slice(0, 600)}`);
   r = await req("/app/ja/photos");
@@ -169,8 +232,8 @@ async function workerClient(dir) {
       return existsSync(file) && !file.endsWith(path.sep) ? new Response(readFileSync(file)) : new Response("missing", { status: 404 });
     },
   };
-  return async (p) => {
-    const res = await worker.fetch(new Request(`https://app.example${p}`, { redirect: "manual" }), { ASSETS });
+  return async (p, { method = "GET", headers = {} } = {}) => {
+    const res = await worker.fetch(new Request(`https://app.example${p}`, { method, headers, redirect: "manual" }), { ASSETS });
     return { status: res.status, headers: Object.fromEntries(res.headers), body: await res.text() };
   };
 }
@@ -292,7 +355,9 @@ async function checks(label, req, { isr = false } = {}) {
 
 const app = makeApp("app");
 const combo = makeApp("combo", COMBO);
+const detect = makeApp("detect", DETECT);
 const P2 = PORT + 1;
+const P3 = PORT + 2;
 
 try {
   for (const mode of modes) {
@@ -306,6 +371,10 @@ try {
       const stop2 = await serve(BIN, ["start", combo, "--port", String(P2)], {}, P2);
       await comboChecks("start", httpClient(P2));
       stop2();
+      build(detect);
+      const stop3 = await serve(BIN, ["start", detect, "--port", String(P3)], { env: { ...process.env, NOWAKI_ISR_WARM: "0" } }, P3);
+      await detectChecks("start", httpClient(P3), { isr: true });
+      stop3();
     } else if (mode === "dev") {
       const stop = await serve(BIN, ["dev", app, "--port", String(PORT)], {}, PORT);
       await checks("dev", httpClient(PORT));
@@ -318,6 +387,9 @@ try {
       const stop2 = await serve(BIN, ["dev", combo, "--port", String(P2)], {}, P2);
       await comboChecks("dev", httpClient(P2));
       stop2();
+      const stop3 = await serve(BIN, ["dev", detect, "--port", String(P3)], {}, P3);
+      await detectChecks("dev", httpClient(P3));
+      stop3();
     } else if (mode === "node") {
       build(app, "node");
       const stop = await serve("node", [path.join(app, "dist/server/index.mjs")], { env: { ...process.env, PORT: String(PORT), NOWAKI_HOST: "127.0.0.1" } }, PORT);
@@ -327,11 +399,17 @@ try {
       const stop2 = await serve("node", [path.join(combo, "dist/server/index.mjs")], { env: { ...process.env, PORT: String(P2), NOWAKI_HOST: "127.0.0.1" } }, P2);
       await comboChecks("node", httpClient(P2));
       stop2();
+      build(detect, "node");
+      const stop3 = await serve("node", [path.join(detect, "dist/server/index.mjs")], { env: { ...process.env, PORT: String(P3), NOWAKI_HOST: "127.0.0.1" } }, P3);
+      await detectChecks("node", httpClient(P3));
+      stop3();
     } else if (mode === "cloudflare") {
       build(app, "cloudflare");
       await checks("cloudflare", await workerClient(app));
       build(combo, "cloudflare");
       await comboChecks("cloudflare", await workerClient(combo));
+      build(detect, "cloudflare");
+      await detectChecks("cloudflare", await workerClient(detect));
     } else if (mode === "static") {
       build(app, "static");
       const out = path.join(app, "dist/static");
@@ -347,6 +425,8 @@ try {
       check("static: sitemap alternates", read("sitemap.xml").includes('hreflang="ja" href="https://example.com/ja/about/"'), read("sitemap.xml").slice(0, 400));
       build(combo, "static");
       staticCombo(combo);
+      const log = build(detect, "static");
+      check("static: i18n.detect warns that a static host can't negotiate", log.includes("i18n.detect"), log.slice(-600));
     }
   }
 } catch (e) {

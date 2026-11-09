@@ -20,13 +20,15 @@ export function route(pattern, params = {}) {
 // Typed <a>. The client router intercepts clicks for SPA navigation (same as a plain <a>).
 // Under nowaki.config `basePath`, a root-relative href gets the base in front (`basePath={false}`
 // keeps it as written); a plain <a> is left alone. `locale` (i18n) links to the page in that
-// locale (the locale prefix goes after the base).
+// locale (the locale prefix goes after the base) and marks the link, so that a click on it in a
+// page with islands remembers the choice (islands.js sets the nowaki_locale cookie).
 export function Link(props) {
   if (!globalThis.__nowakiBase && props.basePath === undefined && props.locale === undefined) return h("a", props);
   const { basePath, locale, ...rest } = props;
   if (locale !== undefined) {
     rest.href = localePath(String(rest.href ?? ""), locale);
     rest.hreflang = rest.hreflang ?? locale;
+    rest["data-nowaki-locale"] = locale;
   }
   if (basePath !== false) rest.href = withBase(rest.href);
   return h("a", rest);
@@ -57,4 +59,13 @@ export function localePath(path, locale) {
   const st = localeState();
   if (!st) return String(path);
   return localePathFor(st.i18n, path, locale ?? st.locale);
+}
+
+/// Remembers `locale` as the visitor's choice for i18n.detect: the `nowaki_locale` cookie (Path =
+/// basePath, a year, SameSite=Lax), which the site's root follows instead of Accept-Language.
+/// Browser only; does nothing on the server.
+export function setLocale(locale) {
+  if (typeof document === "undefined") return;
+  const secure = location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `nowaki_locale=${encodeURIComponent(locale)}; Path=${globalThis.__nowakiBase || "/"}; Max-Age=31536000; SameSite=Lax${secure}`;
 }

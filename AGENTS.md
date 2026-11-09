@@ -275,6 +275,13 @@ code locations and CI coverage.
   `localePathFor` share `crates/nowaki/tests/fixtures/i18n-cases.json`. Tests:
   `scripts/i18n-test.mjs`, `scripts/i18n-e2e.mjs` (start, dev, node, cloudflare, static; its
   "combo" app composes i18n with basePath, trailingSlash "never" and a parallel-route slot).
+  Locale detection (`i18n.detect`, `/` only): `Rules::negotiate` / `negotiateLocale` in the
+  shared rules engines (the rules fixture's `negotiate` cases), run before the ISR lookup by
+  `front.rs` `headers_layer` (installed only when `has_response_layer`) and `front.mjs`
+  `frontLocale` (`app.mjs` `handle`, the worker `fetch`); `Vary: Accept-Language, Cookie` on every
+  root response. The `nowaki_locale` cookie comes from `navigation.js` `setLocale` and the
+  `<Link locale>` click listener in `client/islands.js`; static output only warns
+  (`prerender.rs` `static_host_rules`).
 - **Parallel routes (`routes/…/@name/`)** — JS: `server/router.mjs` `scanRoutes` collects
   `slots: [{ ownerDir, name, routes, default, intercepts }]` (slot files are never in `routes`;
   intercepting `(.)x` files are recorded in `slot.intercepts` / `table.intercepts`, not served),

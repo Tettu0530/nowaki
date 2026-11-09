@@ -10,7 +10,9 @@ import { hreflangTags, sitemapXml } from "../packages/nowaki-runtime/server/seo.
 import { pageUrls } from "../packages/nowaki-runtime/server/isr-urls.mjs";
 import { setContent, validateContent } from "../packages/nowaki-runtime/server/content-store.mjs";
 import { getCollection, getEntry } from "../packages/nowaki-runtime/content.js";
-import { getLocale, Link, localePath } from "../packages/nowaki-runtime/navigation.js";
+import { getLocale, Link, localePath, setLocale } from "../packages/nowaki-runtime/navigation.js";
+import { compileRules } from "../packages/nowaki-runtime/server/rules.mjs";
+import { frontLocale, mergeVary, withVary, withVaryHeaders } from "../packages/nowaki-runtime/server/front.mjs";
 
 const require = createRequire(new URL("../packages/nowaki-runtime/server/handler.mjs", import.meta.url));
 const { h } = require("preact");
@@ -101,7 +103,7 @@ const req = (e, path, extra = {}) => {
       body.includes('<link rel="alternate" hreflang="x-default" href="https://example.com/about" />'),
     body,
   );
-  check("<Link locale> links to the localized page", body.includes('<a href="/ja/about" hreflang="ja">ja</a>'), body);
+  check("<Link locale> links to the localized page", body.includes('<a href="/ja/about" hreflang="ja" data-nowaki-locale="ja">ja</a>'), body);
   check("middleware sees ctx.locale", seen.includes("mw ja"), seen.join(","));
 }
 {
@@ -286,8 +288,41 @@ const req = (e, path, extra = {}) => {
   globalThis.document = { documentElement: { getAttribute: (n) => attrs[n] ?? null } };
   check("client: getLocale() reads <html data-nowaki-i18n>", getLocale() === "ja");
   check("client: localePath", localePath("/about") === "/ja/about" && localePath("/ja/about", "en") === "/about");
-  check("client: <Link locale>", renderToString(h(Link, { href: "/about", locale: "en" }, "x")) === '<a href="/about" hreflang="en">x</a>');
+  check("client: <Link locale>", renderToString(h(Link, { href: "/about", locale: "en" }, "x")) === '<a href="/about" hreflang="en" data-nowaki-locale="en">x</a>');
   delete globalThis.document;
+  const jar = [];
+  globalThis.document = { set cookie(v) { jar.push(v); } };
+  globalThis.location = { protocol: "https:" };
+  globalThis.__nowakiBase = "/app";
+  setLocale("ja");
+  check("client: setLocale sets nowaki_locale under the base", jar[0] === "nowaki_locale=ja; Path=/app; Max-Age=31536000; SameSite=Lax; Secure", jar[0]);
+  delete globalThis.__nowakiBase;
+  globalThis.location = { protocol: "http:" };
+  setLocale("pt-BR");
+  check("client: setLocale at the root over http", jar[1] === "nowaki_locale=pt-BR; Path=/; Max-Age=31536000; SameSite=Lax", jar[1]);
+  delete globalThis.document;
+  delete globalThis.location;
+  setLocale("ja");
+  check("setLocale does nothing on the server", jar.length === 2);
+}
+
+// --- locale detection at the JS fronts (front.mjs) ------------------------------------------------
+{
+  const rules = compileRules({ basePath: "/app", i18n: { locales: ["en", "ja"], defaultLocale: "en", detect: true } });
+  const url = (p) => new URL(`http://x${p}`);
+  const r = frontLocale(rules, "GET", url("/app?x=1"), "ja", undefined);
+  check(
+    "frontLocale: redirect with the query, Vary and private cache-control",
+    r?.redirect?.status === 307 && r.redirect.location === "/app/ja?x=1" && r.headers.vary === "Accept-Language, Cookie" && r.headers["cache-control"] === "private, no-cache",
+    JSON.stringify(r),
+  );
+  check("frontLocale: staying on the root", JSON.stringify(frontLocale(rules, "GET", url("/app/"), "en", "")) === "{}");
+  check("frontLocale: not the root", frontLocale(rules, "GET", url("/app/about"), "ja", undefined) === null);
+  check("mergeVary", mergeVary(undefined) === "Accept-Language, Cookie" && mergeVary("Origin") === "Origin, Accept-Language, Cookie" && mergeVary("cookie, accept-language") === "cookie, accept-language" && mergeVary("*") === "*" && mergeVary(["Origin", "Cookie"]) === "Origin, Cookie, Accept-Language");
+  const h = withVaryHeaders({ "content-type": "text/html", Vary: "Origin" });
+  check("withVaryHeaders merges whatever the key's case", h.vary === "Origin, Accept-Language, Cookie" && !("Vary" in h) && h["content-type"] === "text/html", JSON.stringify(h));
+  const res = withVary(new Response("x", { headers: { vary: "Origin" } }));
+  check("withVary on a Web Response", res.headers.get("vary") === "Origin, Accept-Language, Cookie");
 }
 
 console.log(failures ? `\n${failures} i18n check(s) FAILED` : "\ni18n checks passed");
