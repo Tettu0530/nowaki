@@ -58,6 +58,17 @@ const routeTable = {
   middleware: table.middleware.map((m) => ({
     prefix: m.prefix,
     file: (addModule(m.file), keyOf(m.file)),
+    ...(m.group ? { group: true } : {}),
+  })),
+  loadingBoundaries: table.loadingBoundaries.map((b) => ({
+    prefix: b.prefix,
+    urlPrefix: b.urlPrefix,
+    file: (addModule(b.file), keyOf(b.file)),
+  })),
+  errorBoundaries: table.errorBoundaries.map((b) => ({
+    prefix: b.prefix,
+    urlPrefix: b.urlPrefix,
+    file: (addModule(b.file), keyOf(b.file)),
   })),
   notFound: table.notFound ? (addModule(table.notFound), keyOf(table.notFound)) : null,
   errorRoute: table.errorRoute ? (addModule(table.errorRoute), keyOf(table.errorRoute)) : null,

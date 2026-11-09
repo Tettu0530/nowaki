@@ -8,7 +8,7 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { scanRoutes, matchRoute, underPrefix, routeUnderPrefix } from "../packages/nowaki-runtime/server/router.mjs";
+import { scanRoutes, matchRoute, underPrefix, routeUnderPrefix, isRouteGroup, stripRouteGroups } from "../packages/nowaki-runtime/server/router.mjs";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -70,10 +70,13 @@ eq(path.basename(table.notFound ?? ""), "_404.tsx", "notFound → routes/_404.ts
 eq(path.basename(table.errorRoute ?? ""), "_500.tsx", "errorRoute → routes/_500.tsx");
 eq(
   table.layouts.map((l) => l.prefix).sort(),
-  ["", "/blog"],
-  "layouts: root + nested /blog",
+  ["", "/(marketing)", "/blog"],
+  "layouts: root + nested /blog + the (marketing) group",
 );
-eq(table.middleware.map((m) => m.prefix), [""], "middleware at app root");
+eq(table.middleware.map((m) => [m.prefix, m.group === true]), [["", false], ["/(marketing)", true]], "middleware at app root and in a group");
+eq(snap(table, "/pricing"), { file: "pricing.tsx", params: {}, isApi: false }, "/pricing → (marketing)/pricing (group left out of the URL)");
+eq(snap(table, "/(marketing)/pricing"), null, "a group name is not a URL segment");
+eq(table.routes.find((r) => r.file.endsWith("pricing.tsx"))?.dir, "/(marketing)", "a grouped route keeps its physical dir");
 eq(table.loadingBoundaries.map((b) => b.prefix), [""], "loading boundary at root");
 eq(table.errorBoundaries.map((b) => b.prefix), [""], "error boundary at root");
 eq(
@@ -154,6 +157,105 @@ eq(routeUnderPrefix({ dir: "/org/[org]/x" }, "/org/[org]"), true, "a file deeper
 eq(routeUnderPrefix({ dir: "/org" }, "/org/[org]"), false, "the sibling file routes/org/[org].tsx is not inside it");
 eq(routeUnderPrefix({ dir: "/org/[orgs]" }, "/org/[org]"), false, "a differently named dir is not inside it");
 eq(routeUnderPrefix({ dir: "/org" }, ""), true, "root prefix contains everything");
+
+eq(isRouteGroup("(marketing)"), true, "(name) is a route group");
+eq(["(.)", "(..)", "(...)", "()", "(a)b", "a"].map(isRouteGroup), [false, false, false, false, false, false], "reserved / malformed names are not groups");
+eq(stripRouteGroups("/(a)/docs/(b)"), "/docs", "groups stripped from a prefix");
+eq(stripRouteGroups("/(a)"), "", "a top-level group prefix is the root");
+eq(stripRouteGroups("/(.)/x"), "/(.)/x", "(.) stays literal");
+
+// Route groups end to end: URL, layout / middleware / boundary containment, collisions.
+{
+  const dir = await mkdtemp(path.join(os.tmpdir(), "nowaki-groups-"));
+  const put = async (rel, src) => {
+    await mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await writeFile(path.join(dir, rel), src);
+  };
+  const runtimeRequire = createRequire(path.join(ROOT, "packages/nowaki-runtime/server/handler.mjs"));
+  const preactDir = path.dirname(runtimeRequire.resolve("preact/package.json"));
+  const preact = JSON.stringify(pathToFileURL(path.join(preactDir, "dist/preact.mjs")).href);
+  const wrap = (id) => `import { h } from ${preact};\nexport default (p) => h("div", { id: ${JSON.stringify(id)} }, p.children);\n`;
+  const page = (text) => `import { h } from ${preact};\nexport default () => h("p", null, ${JSON.stringify(text)});\n`;
+  const deny = (msg) => `export default (ctx) => { if (!ctx.cookies.ok) return ctx.text(${JSON.stringify(msg)}, { status: 401 }); };\n`;
+  await put("routes/_layout.js", wrap("root"));
+  await put("routes/(marketing)/_layout.js", wrap("mkt"));
+  await put("routes/(marketing)/about.js", page("about"));
+  await put("routes/(marketing)/index.js", page("home"));
+  await put("routes/(app)/_middleware.js", deny("app only"));
+  await put("routes/(app)/dashboard.js", page("dash"));
+  await put("routes/(app)/docs/[slug].js", page("doc"));
+  await put("routes/(app)/loading.js", page("app loading"));
+  await put("routes/loading.js", page("root loading"));
+  await put("routes/(app)/docs/error.js", page("docs error"));
+  await put("routes/(app)/api/ping.js", `export const GET = (ctx) => ctx.text("pong");\n`);
+  await put("routes/open.js", page("open"));
+  await put("routes/docs/(x)/_middleware.js", deny("docs-x only"));
+  await put("routes/docs/(x)/guide.js", page("guide"));
+  const t = await scanRoutes(dir);
+  const env = {
+    routeTable: async () => t,
+    importModule: async (file) => import(pathToFileURL(file).href),
+    ensureIslands: async () => {},
+    renderDocument: ({ body }) => body,
+    renderError: (err) => ({ status: 500, headers: {}, body: String(err?.stack ?? err) }),
+  };
+  const get = async (p, headers = {}) => {
+    const r = await handleRequest(env, { method: "GET", url: new URL("http://x" + p), headers, version: 1 });
+    return { status: r.status, body: String(r.body ?? ""), headers: r.headers };
+  };
+  const about = await get("/about");
+  eq([about.status, about.body], [200, '<div id="root"><div id="mkt"><p>about</p></div></div>'], "group page at /about, wrapped by the group layout");
+  eq((await get("/")).body, '<div id="root"><div id="mkt"><p>home</p></div></div>', "(marketing)/index serves /");
+  eq((await get("/open")).body, '<div id="root"><p>open</p></div>', "a page outside the group doesn't get its layout");
+  eq((await get("/open")).status, 200, "group middleware doesn't run outside the group");
+  eq((await get("/dashboard")).status, 401, "group middleware runs for a route inside the group");
+  eq((await get("/docs/a")).status, 401, "group middleware runs for a nested route inside the group");
+  eq((await get("/dashboard", { cookie: "ok=1" })).status, 200, "group middleware lets the request through");
+  eq((await get("/nothing")).status, 404, "group middleware doesn't run for 404s");
+  eq((await get("/api/ping")).status, 401, "api/ in a group is an API route guarded by the group's middleware");
+  eq((await get("/api/ping", { cookie: "ok=1" })).body, "pong", "grouped API route served at /api/ping");
+  eq((await get("/docs/guide")).status, 401, "a nested group's middleware runs for its routes");
+  eq((await get("/docs/b", { cookie: "ok=1" })).status, 200, "a nested group's middleware doesn't run for a sibling URL served elsewhere");
+  eq(
+    t.loadingBoundaries.map((b) => [b.prefix, b.urlPrefix]),
+    [["", ""], ["/(app)", ""]],
+    "boundaries keep their physical prefix and a URL prefix; at the same URL prefix the ungrouped one goes first",
+  );
+  const bounds = JSON.parse((await get("/__nowaki/boundaries")).body);
+  eq(
+    [bounds.loading.map((b) => b.prefix), bounds.error.map((b) => b.prefix)],
+    [["", ""], ["/docs"]],
+    "boundaries are sent to the client with groups stripped",
+  );
+  await rm(dir, { recursive: true, force: true });
+
+  const clash = async (files) => {
+    const d = await mkdtemp(path.join(os.tmpdir(), "nowaki-clash-"));
+    for (const f of files) {
+      await mkdir(path.dirname(path.join(d, "routes", f)), { recursive: true });
+      await writeFile(path.join(d, "routes", f), "export default () => null;\n");
+    }
+    try {
+      await scanRoutes(d);
+      return null;
+    } catch (err) {
+      return String(err.message);
+    } finally {
+      await rm(d, { recursive: true, force: true });
+    }
+  };
+  const msg = await clash(["(a)/about.js", "(b)/about.js"]);
+  eq(
+    [/routes\/\(a\)\/about\.js/.test(msg ?? ""), /routes\/\(b\)\/about\.js/.test(msg ?? ""), / \/about:/.test(msg ?? "")],
+    [true, true, true],
+    `two groups serving /about is an error (${msg})`,
+  );
+  eq((await clash(["about.js", "(b)/about.js"])) !== null, true, "a group and an ungrouped file serving one URL is an error");
+  eq((await clash(["(a)/blog/[slug].js", "blog/[id].js"])) !== null, true, "param names don't avoid a collision");
+  eq(await clash(["(a)/blog/[slug].js", "(b)/blog/new.js"]), null, "a literal beside a param is not a collision");
+  eq(await clash(["about.js", "about/index.js"]), null, "duplicates without a group are left as they were");
+  eq(await clash(["(a)/_layout.js", "(b)/_layout.js", "(a)/loading.js", "loading.js"]), null, "convention files never collide");
+}
 
 // _middleware / _layout / error.tsx inside a [param] directory apply to the URLs under it,
 // end to end through handleRequest (plain .js route files, no JSX).

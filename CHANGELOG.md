@@ -11,6 +11,18 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **Route groups.** A directory named `(name)` under `routes/` groups files
+  without adding a URL segment: `routes/(marketing)/about.tsx` serves `/about`.
+  The group's `_layout`, `loading` and `error` apply to the files inside it.
+  Its `_middleware` runs for the routes whose files are inside the group, not
+  by URL, so it doesn't run for 404s; middleware outside groups still matches
+  by URL. Two files serving the same URL because of groups
+  (`(a)/about.tsx` and `(b)/about.tsx`) fail the build and show an error in
+  dev. Names starting with `.` (`(.)`, `(..)`) are reserved. On client
+  navigation, a group's `loading` / `error` boundary is matched by its URL
+  prefix (the group left out), so it can also show for URLs outside the group;
+  a boundary outside any group wins at the same prefix.
+  The Cloudflare worker now also serves `loading` / `error` boundaries.
 - **Routing config in nowaki.config** (v0.18, groundwork): `basePath`,
   `trailingSlash` (`"never"` / `"always"` / `"ignore"`, default `"ignore"`),
   `redirects`, `rewrites`, `headers` (arrays, or async functions called once at

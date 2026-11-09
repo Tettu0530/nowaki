@@ -26,6 +26,8 @@ After an edit or a failing request, check `recent_errors` first.
 ```
 routes/      file-based routes (pages + API). _layout.tsx, _middleware.ts,
              _404.tsx, _500.tsx, [slug].tsx, api/*.ts
+             (name)/ = route group: no URL segment, its own _layout /
+             _middleware for the files inside it (group middleware skips 404s)
 islands/     interactive components — THE ONLY things that ship JS and hydrate
 components/  shared server components (no client JS)
 lib/         shared server code

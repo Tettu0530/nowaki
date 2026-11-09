@@ -404,6 +404,7 @@ impl NowakiCore {
         &self,
         dist: &Path,
     ) -> Result<(build::BuildReport, build::ClientInfo)> {
+        routes::check_url_conflicts(&self.root.join("routes"))?;
         let (mut report, assets, client) = build::build_client_with_info(self, dist)?;
         report.server_modules = build::build_server(self, dist, &assets)?;
         public::copy_to(&self.root, &dist.join("public"))?;

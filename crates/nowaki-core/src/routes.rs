@@ -49,7 +49,36 @@ pub fn is_convention_source(base: &str) -> bool {
     base.starts_with('_') || base == "loading" || base == "error"
 }
 
+/// Whether a directory name is a route group (`(marketing)`): it groups files without adding a
+/// URL segment. Names starting with `.` (`(.)`, `(..)`) are reserved and stay literal. Matches
+/// router.mjs `isRouteGroup`.
+pub fn is_route_group(name: &str) -> bool {
+    name.len() > 2
+        && name.starts_with('(')
+        && name.ends_with(')')
+        && !name[1..].starts_with('.')
+        && !name[1..name.len() - 1].contains([')', '/'])
+}
+
+/// A route stem or relative path without its route-group directories
+/// (`(marketing)/about` → `about`). The last segment is a file name, never a group.
+pub fn strip_route_groups(stem: &str) -> String {
+    if !stem.contains('(') {
+        return stem.to_string();
+    }
+    let parts: Vec<&str> = stem.split('/').collect();
+    let last = parts.len() - 1;
+    parts
+        .iter()
+        .enumerate()
+        .filter(|(i, p)| *i == last || !is_route_group(p))
+        .map(|(_, p)| *p)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 pub fn is_api_route_rel(rel: &str) -> bool {
+    let rel = strip_route_groups(&rel.replace('\\', "/"));
     rel == "api" || rel.starts_with("api/")
 }
 
@@ -75,8 +104,9 @@ pub fn stem_from_rel(rel: &str) -> Option<String> {
 }
 
 /// URL pattern from a route stem (`blog/index` → `/blog`, `index` → `/`).
+/// Route groups are left out (`(marketing)/about` → `/about`).
 pub fn url_pattern_from_stem(stem: &str) -> String {
-    let mut url = format!("/{stem}");
+    let mut url = format!("/{}", strip_route_groups(stem));
     if let Some(stripped) = url.strip_suffix("/index") {
         url = stripped.to_string();
     }
@@ -132,7 +162,7 @@ pub fn scan_typegen(routes_dir: &Path) -> Result<Vec<(String, String)>> {
 /// Whether a built server route stem (`dist/server/routes/...` without `.js`) is a static HTML prerender target.
 /// File routes are listed by static-paths.mjs instead (written to their own path, not index.html).
 pub fn is_static_prerender_stem(stem: &str) -> bool {
-    !stem.starts_with("api/")
+    !is_api_route_rel(stem)
         && !stem.contains('[')
         && !is_file_route_stem(stem)
         && !is_convention_source(file_base_name(stem))
@@ -181,6 +211,68 @@ pub fn page_url_patterns(routes_dir: &Path) -> Result<Vec<String>> {
     out.sort();
     out.dedup();
     Ok(out)
+}
+
+/// Fails when two route files serve the same URL because of route groups (`(a)/about.tsx` and
+/// `(b)/about.tsx`, or `about.tsx` and `(b)/about.tsx`). Param names don't matter (`[slug]` and
+/// `[id]` collide). Duplicates without a group (`about.tsx` and `about/index.tsx`) are left alone.
+/// Matches router.mjs `scanRoutes`.
+pub fn check_url_conflicts(routes_dir: &Path) -> Result<()> {
+    let mut files = walk_routes_dir(routes_dir)?;
+    files.sort();
+    let mut seen: std::collections::HashMap<String, (String, bool)> =
+        std::collections::HashMap::new();
+    for abs in files {
+        let Some(rel) = rel_posix(&abs, routes_dir) else {
+            continue;
+        };
+        let Some(stem) = stem_from_rel(&rel) else {
+            continue;
+        };
+        if file_base_name(&stem).starts_with('_')
+            || matches!(file_base_name(&stem), "loading" | "error")
+        {
+            continue;
+        }
+        let in_group = strip_route_groups(&stem) != stem;
+        let url = url_pattern_from_stem(&stem);
+        let key = url
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(segment_shape)
+            .collect::<Vec<_>>()
+            .join("/");
+        match seen.get(&key) {
+            Some((prev, prev_group)) if *prev_group || in_group => {
+                anyhow::bail!(
+                    "routes/{prev} and routes/{rel} both serve {url}: route groups \"(name)\" add no URL segment. Rename or move one of them."
+                );
+            }
+            Some(_) => {}
+            None => {
+                seen.insert(key, (rel, in_group));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A URL segment with its param name dropped, read as router.mjs `parseSegment` reads it.
+fn segment_shape(seg: &str) -> String {
+    if seg.starts_with("[...") && seg.ends_with(']') && seg.len() > 5 {
+        return "*".to_string();
+    }
+    if let Some(rest) = seg.strip_prefix('[') {
+        if let Some((name, tail)) = rest.split_once(']') {
+            if !name.is_empty() && !name.contains('.') && tail.starts_with('.') && tail.len() > 1 {
+                return format!(":{tail}");
+            }
+        }
+        if seg.ends_with(']') && seg.len() > 2 {
+            return ":".to_string();
+        }
+    }
+    format!("={seg}")
 }
 
 #[cfg(test)]
@@ -301,6 +393,108 @@ mod tests {
         assert_eq!(
             urls,
             vec!["/".to_string(), "/about".to_string(), "/blog".to_string()]
+        );
+    }
+
+    #[test]
+    fn route_groups_leave_the_url() {
+        assert!(is_route_group("(marketing)"));
+        assert!(is_route_group("(a b)"));
+        assert!(!is_route_group("(.)"));
+        assert!(!is_route_group("(..)photo"));
+        assert!(!is_route_group("(...)"));
+        assert!(!is_route_group("()"));
+        assert!(!is_route_group("marketing"));
+        assert!(!is_route_group("(a)b"));
+        assert_eq!(strip_route_groups("(marketing)/about"), "about");
+        assert_eq!(strip_route_groups("(a)/docs/(b)/[slug]"), "docs/[slug]");
+        assert_eq!(strip_route_groups("(.)/x"), "(.)/x");
+        assert_eq!(
+            strip_route_groups("blog/(x)"),
+            "blog/(x)",
+            "a file name is never a group"
+        );
+        assert_eq!(
+            entry("(marketing)/about.tsx"),
+            Some(("/about".into(), "{}".into()))
+        );
+        assert_eq!(
+            entry("(marketing)/index.tsx"),
+            Some(("/".into(), "{}".into()))
+        );
+        assert_eq!(
+            entry("(shop)/items/[id].tsx"),
+            Some(("/items/[id]".into(), "{ id: string }".into()))
+        );
+        assert_eq!(entry("(marketing)/_layout.tsx"), None);
+        assert_eq!(entry("(marketing)/loading.tsx"), None);
+        assert_eq!(
+            entry("(x)/api/hello.ts"),
+            None,
+            "api/ under a group is still an API route"
+        );
+        assert!(is_api_route_rel("(x)/api/hello.ts"));
+        assert!(!is_static_prerender_stem("(x)/api/hello"));
+        assert!(is_static_prerender_stem("(marketing)/about"));
+        assert_eq!(url_pattern_from_stem("(marketing)/about"), "/about");
+    }
+
+    #[test]
+    fn route_group_prerender_and_page_urls() {
+        let tmp = tempfile::tempdir().unwrap();
+        let routes = tmp.path().join("routes");
+        std::fs::create_dir_all(routes.join("(marketing)")).unwrap();
+        for f in [
+            "(marketing)/pricing.tsx",
+            "(marketing)/_layout.tsx",
+            "index.tsx",
+        ] {
+            std::fs::write(routes.join(f), "export default () => null;\n").unwrap();
+        }
+        assert_eq!(
+            page_url_patterns(&routes).unwrap(),
+            vec!["/".to_string(), "/pricing".to_string()]
+        );
+        check_url_conflicts(&routes).expect("no conflict");
+
+        let build = tmp.path().join("dist");
+        std::fs::create_dir_all(build.join("(marketing)")).unwrap();
+        std::fs::write(build.join("(marketing)/pricing.js"), "").unwrap();
+        std::fs::write(build.join("(marketing)/_layout.js"), "").unwrap();
+        assert_eq!(
+            enumerate_static_prerender_urls(&build).unwrap(),
+            vec!["/pricing".to_string()]
+        );
+    }
+
+    #[test]
+    fn route_group_url_conflicts() {
+        let conflict = |files: &[&str]| -> Option<String> {
+            let tmp = tempfile::tempdir().unwrap();
+            let routes = tmp.path().join("routes");
+            for f in files {
+                let p = routes.join(f);
+                std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+                std::fs::write(p, "export default () => null;\n").unwrap();
+            }
+            check_url_conflicts(&routes).err().map(|e| e.to_string())
+        };
+        let msg = conflict(&["(a)/about.tsx", "(b)/about.tsx"]).expect("conflict");
+        assert!(msg.contains("routes/(a)/about.tsx"), "{msg}");
+        assert!(msg.contains("routes/(b)/about.tsx"), "{msg}");
+        assert!(msg.contains("/about"), "{msg}");
+        assert!(conflict(&["about.tsx", "(b)/about.tsx"]).is_some());
+        assert!(conflict(&["(a)/index.tsx", "index.tsx"]).is_some());
+        assert!(conflict(&["(a)/blog/[slug].tsx", "blog/[id].tsx"]).is_some());
+        assert!(conflict(&["(a)/f/[...p].tsx", "(b)/f/[...q].tsx"]).is_some());
+        assert!(conflict(&["(a)/og/[c].png.ts", "(b)/og/[d].png.ts"]).is_some());
+        assert!(conflict(&["(a)/og/[c].png.ts", "(b)/og/[d].jpg.ts"]).is_none());
+        assert!(conflict(&["(a)/blog/[slug].tsx", "(b)/blog/new.tsx"]).is_none());
+        assert!(conflict(&["(a)/_layout.tsx", "(b)/_layout.tsx"]).is_none());
+        assert!(conflict(&["(a)/loading.tsx", "loading.tsx"]).is_none());
+        assert!(
+            conflict(&["about.tsx", "about/index.tsx"]).is_none(),
+            "duplicates without a group are left as they were"
         );
     }
 }

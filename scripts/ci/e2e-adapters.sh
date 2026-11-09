@@ -51,6 +51,9 @@ curl -s -D - -o /dev/null http://127.0.0.1:3310/og/intro.png | grep -qi '^conten
 curl -sf http://127.0.0.1:3310/og/intro.png | head -c 4 | od -An -c | grep -q 'P   N   G'
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3310/og/nope.png)" = 404
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3310/og/intro.jpg)" = 404
+# route groups on the node adapter
+curl -sf http://127.0.0.1:3310/pricing | grep -q '<div data-group="marketing"><main'
+curl -s -D - -o /dev/null http://127.0.0.1:3310/pricing | grep -qi '^x-route-group: marketing'
 # fonts on the node adapter (dist/server/fonts.json)
 curl -sf http://127.0.0.1:3310/about | grep -qE '<link rel="stylesheet" href="/_nowaki/fonts\.[0-9a-f]+\.css" />'
 # MDX entries render from their compiled module on the node adapter
@@ -110,6 +113,8 @@ pkill -f 'node index.mjs' 2>/dev/null || true
 ./target/debug/nowaki build examples/hello --adapter static
 test -f examples/hello/dist/static/index.html
 test -f examples/hello/dist/static/about/index.html
+grep -q '<div data-group="marketing"><main' examples/hello/dist/static/pricing/index.html
+! test -e 'examples/hello/dist/static/(marketing)'
 # dynamic routes listed by `export const staticPaths` (including a catch-all), and 404.html
 grep -q 'Post: hello' examples/hello/dist/static/blog/hello/index.html
 grep -q 'Post: nowaki' examples/hello/dist/static/blog/nowaki/index.html

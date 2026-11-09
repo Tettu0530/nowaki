@@ -68,7 +68,7 @@ export async function handleRequest(env, info) {
 
   try {
     // Middleware runs before the 404 check and short-circuits if it returns a Response.
-    const short = await runMiddleware(env, table, ctx, version, path);
+    const short = await runMiddleware(env, table, ctx, version, path, match);
     if (short) return finalize(ctx, short);
 
     if (!match) {
@@ -180,9 +180,11 @@ export function privateIfSetsCookie(headers) {
 // table.middleware is in root→leaf order. A middleware runs for every request whose URL is under
 // its directory, whichever route (if any) serves it: routes/admin/_middleware.ts guards
 // /admin/x even when routes/[...slug].tsx is the route that matched, and the 404 under /admin.
-async function runMiddleware(env, table, ctx, version, path) {
+// A route group's middleware (`group`) has no URL to match, so it runs only for the routes whose
+// files are inside the group's directory, and not for 404s.
+async function runMiddleware(env, table, ctx, version, path, match) {
   for (const entry of table.middleware ?? []) {
-    if (!underPrefix(path, entry.prefix)) continue;
+    if (entry.group ? !(match && groupMiddleware(table, match.file).has(entry)) : !underPrefix(path, entry.prefix)) continue;
     const mod = await env.importModule(entry.file, version);
     const fn = mod.default ?? mod.middleware;
     if (typeof fn !== "function") continue;
@@ -341,7 +343,8 @@ async function renderBoundaries(env, table, version) {
       const mod = await env.importModule(entry.file, version);
       if (typeof mod.default !== "function") return null;
       const html = await renderToStringAsync(h(mod.default, props));
-      return { prefix: entry.prefix, html };
+      // The client matches boundaries by URL, so route groups are left out of the prefix.
+      return { prefix: entry.urlPrefix ?? entry.prefix, html };
     } catch {
       return null; // a failing boundary must not break everything
     }
@@ -490,7 +493,7 @@ async function earlyError(env, table, ctx, version, err, file) {
   console.error("[nowaki]", err);
   const route = routeOf(table, file);
   const boundary = (table.errorBoundaries ?? [])
-    .filter((b) => (route ? routeUnderPrefix(route, b.prefix) : underPrefix(ctx.url.pathname, b.prefix)))
+    .filter((b) => (route ? routeUnderPrefix(route, b.prefix) : underPrefix(ctx.url.pathname, b.urlPrefix ?? b.prefix)))
     .sort((a, b) => prefixDepth(b.prefix) - prefixDepth(a.prefix))[0];
   if (boundary) {
     try {
@@ -598,6 +601,21 @@ function layoutChain(table, file) {
     byFile.set(file, chain);
   }
   return chain;
+}
+
+// The group middleware entries whose directory contains a route file, once per route table and
+// file like layoutChain. Only asked for when a group has middleware.
+const groupMw = new WeakMap();
+function groupMiddleware(table, file) {
+  let byFile = groupMw.get(table);
+  if (!byFile) groupMw.set(table, (byFile = new Map()));
+  let set = byFile.get(file);
+  if (!set) {
+    const route = routeOf(table, file);
+    set = new Set((table.middleware ?? []).filter((m) => m.group && route && routeUnderPrefix(route, m.prefix)));
+    byFile.set(file, set);
+  }
+  return set;
 }
 
 function routeOf(table, file) {

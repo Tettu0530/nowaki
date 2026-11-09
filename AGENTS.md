@@ -219,6 +219,12 @@ code locations and CI coverage.
   (`crates/nowaki-core/tests/fixtures/rules-cases.json`, run by `tests/rules.rs` and
   `scripts/rules-test.mjs`); change both together. The segment grammar is shared with the router
   through `server/segments.mjs`.
+- **Route groups (`routes/(name)/`)** — no URL segment. JS: `server/router.mjs` `scanRoutes`
+  (URL without groups, `dir` stays physical, collision error; group `_middleware` marked
+  `group` and run by containment in `handler.mjs` `runMiddleware`; boundaries carry a
+  group-free `urlPrefix` for the client). Rust: `routes.rs` `strip_route_groups` (in
+  `url_pattern_from_stem`) and `check_url_conflicts` (called by `build_with_client`). Layout /
+  CSS lookups stay on physical dirs. Tests: `scripts/router-test.mjs`, `routes.rs` units.
 - **Page scripts (`export const scripts`)** — read from the AST in
   `crates/nowaki-core/src/page_scripts.rs`, emitted as client entries by
   `build.rs` `build_route_scripts` (manifest `routeScripts` per module and

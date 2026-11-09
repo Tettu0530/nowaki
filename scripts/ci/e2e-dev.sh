@@ -121,6 +121,11 @@ curl -sf $B/about | grep -q '<p id="greeting">Hello from data/</p>'
 ! curl -sf $B/about | grep -q 'id="nowaki-runtime"'
 curl -sf "$B/__nowaki/css?f=styles/site.css" | grep -q -- '--site-token: rgb(9, 8, 7)'
 ! curl -sf "$B/__nowaki/css?f=styles/site.css" | grep -q '@import'
+# route groups: routes/(marketing)/pricing.tsx at /pricing, with the group's layout and middleware
+curl -sf $B/pricing | grep -q '<div data-group="marketing"><main'
+curl -s -D - -o /dev/null $B/pricing | grep -qi '^x-route-group: marketing'
+! curl -sf $B/about | grep -q 'data-group="marketing"'
+! curl -s -D - -o /dev/null $B/no-such-page | grep -qi '^x-route-group'
 # MDX: a .mdx page (ESM exports, expressions, GFM, an island) and an .mdx content entry
 curl -sf $B/guide | grep -q '<title>Guide (MDX) — Nowaki</title>'
 curl -sf $B/guide | grep -q '<h1 id="an-mdx-page">An MDX page</h1>'
