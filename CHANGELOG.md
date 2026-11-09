@@ -34,6 +34,17 @@ milestone's worth of work; the codename is noted per entry.
   loopback, and link-local addresses, redirects outside the patterns (at most 3), bodies over
   20 MB, responses slower than 15 s, and anything but PNG, JPEG, WebP, or GIF. Nothing is fetched
   at runtime. A plain remote string `src` on `<Image>` is unchanged (a bare `<img>`).
+- **Sessions: `ctx.session`** (also `getContext().session` in server functions).
+  `await ctx.session.get(key)`, `set(key, value)`, `delete(key)`, `regenerate()` (call it on
+  sign-in) and `destroy()` keep JSON values per visitor in an AES-256-GCM encrypted cookie
+  (`HttpOnly; SameSite=Lax`, `Secure` over https, 4 KB at most), or, with a `store` in the
+  optional app-root `session.ts` (`defineSession({ cookieName, maxAge, rolling, store })` from
+  `@nowaki-dev/runtime/session`), server-side behind a signed random id. Keys come from
+  `NOWAKI_SESSION_SECRET` (comma-separate several to rotate keys); production throws on the first
+  `ctx.session` without it, dev generates `.nowaki/session-secret`. A cross-site non-GET request
+  sees an empty, read-only session, and so do live renders (read-only). The session is created on
+  first access: requests that don't use it cost nothing extra. Works on every adapter
+  (WebCrypto only).
 - **Routing config in nowaki.config** (v0.18, groundwork): `basePath`,
   `trailingSlash` (`"never"` / `"always"` / `"ignore"`, default `"ignore"`),
   `redirects`, `rewrites`, `headers` (arrays, or async functions called once at
@@ -84,6 +95,8 @@ milestone's worth of work; the codename is noted per entry.
   with `PUBLIC_` and server names must not. New core API:
   `NowakiCore::set_public_env`.
 ### Changed
+- An error while saving a request's session (a store failure, a cookie over 4 KB) now renders
+  the 500 page instead of escaping the request handler.
 - **The CI performance regression gate also compares each PR with the latest
   release**, failing beyond −10% req/s or +20% TTFB against it (the existing
   limits against base stay the same). Every metric (build, dev startup, req/s and

@@ -67,9 +67,15 @@ export async function handleRequest(env, info) {
   }
 
   try {
+    const unsafe = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
+    const crossOrigin = unsafe && isCrossSite(rawHeader(info));
+    // A cross-site write sees an empty, read-only session from the first middleware on; the
+    // route's `csrf = false` lifts that below (for a session nothing has read yet).
+    if (crossOrigin) ctx.__sessionMode = "crossSite";
+
     // Middleware runs before the 404 check and short-circuits if it returns a Response.
     const short = await runMiddleware(env, table, ctx, version, path, match);
-    if (short) return finalize(ctx, short);
+    if (short) return finalize(ctx, short, env, table, version);
 
     if (!match) {
       // With a site URL, sitemap.xml and robots.txt are generated unless a route or a public/
@@ -77,42 +83,42 @@ export async function handleRequest(env, info) {
       if (env.site && (method === "GET" || method === "HEAD")) {
         if (path === "/sitemap.xml") {
           const body = sitemapXml(env.site, await sitemapUrls(env, version), { staticOutput: env.staticOutput === true });
-          return finalize(ctx, { status: 200, headers: { "content-type": "application/xml; charset=utf-8" }, body });
+          return finalize(ctx, { status: 200, headers: { "content-type": "application/xml; charset=utf-8" }, body }, env, table, version);
         }
         if (path === "/robots.txt") {
-          return finalize(ctx, { status: 200, headers: { "content-type": "text/plain; charset=utf-8" }, body: robotsTxt(env.site) });
+          return finalize(ctx, { status: 200, headers: { "content-type": "text/plain; charset=utf-8" }, body: robotsTxt(env.site) }, env, table, version);
         }
       }
-      return finalize(ctx, await render404(env, table, ctx, version));
+      return finalize(ctx, await render404(env, table, ctx, version), env, table, version);
     }
 
     const mod = await env.importModule(match.file, version);
 
-    const unsafe = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
-    const crossSite = unsafe && mod.csrf !== false && isCrossSite(rawHeader(info));
+    const crossSite = crossOrigin && mod.csrf !== false;
+    if (crossOrigin && !crossSite) ctx.__sessionMode = undefined;
 
     if (match.isApi) {
       if (crossSite) {
         // Phase 1 for API routes: warn; `export const csrf = true` enforces now.
-        if (mod.csrf === true) return finalize(ctx, FORBIDDEN);
+        if (mod.csrf === true) return finalize(ctx, FORBIDDEN, env, table, version);
         warnCrossSiteApi(match.file, url.pathname);
       }
-      return finalize(ctx, await handleApi(mod, ctx, match.fileExt));
+      return finalize(ctx, await handleApi(mod, ctx, match.fileExt), env, table, version);
     }
 
-    if (crossSite && typeof mod.action === "function") return finalize(ctx, FORBIDDEN);
+    if (crossSite && typeof mod.action === "function") return finalize(ctx, FORBIDDEN, env, table, version);
 
     if (method !== "GET" && method !== "HEAD" && typeof mod.action === "function") {
       const out = await mod.action(ctx);
       const res = toResult(out);
-      if (res) return finalize(ctx, res);
+      if (res) return finalize(ctx, res, env, table, version);
       ctx.actionData = out; // data → re-render the page
     }
 
-    return finalize(ctx, await renderRoute(env, table, match, mod, ctx, version));
+    return finalize(ctx, await renderRoute(env, table, match, mod, ctx, version), env, table, version);
   } catch (err) {
-    if (ctx._redirect) return finalize(ctx, ctx._redirect); // throw path of ctx.redirect()
-    return finalize(ctx, await render500(env, table, ctx, version, err));
+    if (ctx._redirect) return finalize(ctx, ctx._redirect, env, table, version); // throw path of ctx.redirect()
+    return finalize(ctx, await render500(env, table, ctx, version, err), env, table, version);
   }
 }
 
@@ -141,14 +147,36 @@ function warnCrossSiteApi(file, pathname) {
 }
 
 // `ctx.__commit(result)` (sessions) runs before the response headers are built, so a cookie it sets
-// goes out. Without one the result is built synchronously: the common path adds no await.
-function finalize(ctx, result) {
+// goes out. Without one the result is built synchronously: the common path adds no await. A commit
+// that fails (a store error, a cookie over 4 KB) is handled here, since the promise returned from
+// the handler's try block would escape its catch: the 500 page when the route table is given,
+// else a plain 500.
+function finalize(ctx, result, env, table, version) {
   if (!ctx.__commit) return finalizeResult(ctx, result);
-  return Promise.resolve(ctx.__commit(result)).then(() => finalizeResult(ctx, result));
+  return commitAndFinalize(ctx, result, env, table, version);
+}
+
+async function commitAndFinalize(ctx, result, env, table, version) {
+  const commit = ctx.__commit;
+  ctx.__commit = undefined;
+  try {
+    await commit(result);
+  } catch (err) {
+    return finalizeResult(ctx, table ? await render500(env, table, ctx, version, err) : plainError(err));
+  }
+  return finalizeResult(ctx, result);
+}
+
+function plainError(err) {
+  console.error("[nowaki]", err);
+  return { status: 500, headers: { "content-type": "text/plain; charset=utf-8" }, body: "Internal Server Error" };
 }
 
 function finalizeResult(ctx, result) {
   if (!result) return { status: 500, headers: HTML, body: "Internal Error" };
+  // The headers are fixed now while code still runs (an early-streamed loader): a session write
+  // from there throws instead of being lost.
+  if (result.stream) ctx.__sent = true;
   const headers = { ...(result.headers ?? {}) };
   for (const [k, v] of ctx.resHeaders) {
     if (k.toLowerCase() === "set-cookie") continue;

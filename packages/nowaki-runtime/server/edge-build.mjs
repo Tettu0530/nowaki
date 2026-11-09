@@ -27,6 +27,8 @@ const contentRaw = await readFile(path.join(serverDir, "content/index.json"), "u
 const table = await scanRoutes(serverDir);
 // env.ts, compiled by the build; the worker validates it before its first request.
 const hasEnv = await readFile(path.join(serverDir, "env.js")).then(() => true, () => false);
+// session.ts, compiled by the build.
+const hasSession = await readFile(path.join(serverDir, "session.js")).then(() => true, () => false);
 const envPublicJson = hasEnv ? await readFile(path.join(serverDir, "env-public.json"), "utf8").catch(() => null) : null;
 // nowaki.config routing, inlined; without it the worker imports and checks nothing for it.
 const routingJson = await readFile(path.join(serverDir, "routing.json"), "utf8").catch(() => null);
@@ -125,7 +127,7 @@ import { withSecurityHeaders } from "@nowaki-dev/runtime/server/security-headers
 ${moduleImports.join("\n")}
 ${islandImports.join("\n")}
 ${liveImports.join("\n")}
-${contentRaw ? `import * as contentConfig from ${JSON.stringify(specOf("content/config.js"))};\n` : ""}${hasEnv ? `import * as envModule from ${JSON.stringify(specOf("env.js"))};\n` : ""}
+${contentRaw ? `import * as contentConfig from ${JSON.stringify(specOf("content/config.js"))};\n` : ""}${hasEnv ? `import * as envModule from ${JSON.stringify(specOf("env.js"))};\n` : ""}${hasSession ? `import * as sessionModule from ${JSON.stringify(specOf("session.js"))};\n` : ""}
 const manifest = ${JSON.stringify(manifest)};
 const modules = {
 ${moduleEntries.join("\n")}
@@ -145,7 +147,7 @@ const handler = createFetchHandler({
   islandComponents,
   liveIslands,
   routeTable,
-  serverFunctions,${site ? `\n  site: ${JSON.stringify(site)},` : ""}${fontsJson ? `\n  fonts: ${fontsJson.trim()},` : ""}${contentRaw ? "\n  content," : ""}${hasEnv ? "\n  envModule," : ""}${envPublicJson ? `\n  envPublic: ${envPublicJson.trim()},` : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}
+  serverFunctions,${site ? `\n  site: ${JSON.stringify(site)},` : ""}${fontsJson ? `\n  fonts: ${fontsJson.trim()},` : ""}${contentRaw ? "\n  content," : ""}${hasEnv ? "\n  envModule," : ""}${hasSession ? "\n  sessionModule," : ""}${envPublicJson ? `\n  envPublic: ${envPublicJson.trim()},` : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}
 });
 
 // public/ files by decoded URL path; they win over routes at the same path.

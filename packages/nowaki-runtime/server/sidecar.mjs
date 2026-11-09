@@ -4,7 +4,8 @@
 import "./exit-with-parent.mjs";
 import { createServer } from "node:http";
 import { createRequire, register } from "node:module";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveSite } from "./seo.mjs";
@@ -75,6 +76,36 @@ function ensureEnv(version) {
       },
     );
   return envReady;
+}
+
+// Sessions in dev: without NOWAKI_SESSION_SECRET a secret is generated once into
+// .nowaki/session-secret (on the first ctx.session, so apps without sessions get no file).
+// session.ts is imported fresh for each SSR version.
+const { configureSessions, sessionConfigOf } = await import("./session.mjs");
+let devSecret;
+function devSessionSecret() {
+  if (process.env.NOWAKI_SESSION_SECRET) return process.env.NOWAKI_SESSION_SECRET;
+  if (devSecret) return devSecret;
+  const file = path.join(appRoot, ".nowaki/session-secret");
+  try {
+    devSecret = readFileSync(file, "utf8").trim();
+  } catch {}
+  if (!devSecret || devSecret.length < 32) {
+    devSecret = randomBytes(32).toString("hex");
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, `${devSecret}\n`, { mode: 0o600 });
+  }
+  console.warn("[nowaki] session: NOWAKI_SESSION_SECRET is not set; dev uses a generated secret (.nowaki/session-secret). Production needs NOWAKI_SESSION_SECRET.");
+  return devSecret;
+}
+configureSessions({ secret: devSessionSecret });
+const sessionFile = ["session.ts", "session.mts", "session.js", "session.mjs"].map((f) => path.join(appRoot, f)).find((f) => existsSync(f));
+let sessionVersion = null;
+async function ensureSession(version) {
+  if (!sessionFile || sessionVersion === version) return;
+  const mod = await env.importModule(sessionFile, version);
+  configureSessions({ config: sessionConfigOf(mod), secret: devSessionSecret });
+  sessionVersion = version;
 }
 
 const RUST = `http://127.0.0.1:${process.env.NOWAKI_RUST_PORT ?? "3000"}`;
@@ -289,6 +320,7 @@ const server = createServer(async (req, res) => {
         return;
       }
       if (envReady !== true) await ensureEnv(String(version ?? "0"));
+      await ensureSession(String(version ?? "0"));
       const reg = await loadIslandRegistry(appRoot, String(version ?? "0"));
       const entry = [...reg.values()].find((e) => e.name === name);
       if (!entry?.live) {
@@ -326,6 +358,7 @@ const server = createServer(async (req, res) => {
     const version = String(req.headers["x-nowaki-ssr-version"] ?? "0");
     if (envReady !== true) await ensureEnv(version);
     await ensureContent(version);
+    await ensureSession(version);
     const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
     const result = await handleRequest(env, {
       method: req.method,

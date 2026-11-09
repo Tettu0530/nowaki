@@ -11,6 +11,7 @@ import { applyCsp } from "./csp.mjs";
 import { setContent, validateContent } from "./content-store.mjs";
 import { initServerEnv } from "./env-schema.mjs";
 import { setServerEnv } from "./env-server.mjs";
+import { configureSessions, sessionConfigOf } from "./session.mjs";
 
 /// `defaults`: [name, value] pairs (nowaki.config `headers`) set when the result doesn't set them,
 /// before the security headers, so they win over those.
@@ -80,6 +81,7 @@ function installIslandHook(registry, liveRegistry, live) {
 ///                      in by the worker entry so this module never imports node:crypto itself.
 ///   envModule        : the compiled env.ts (dist/server/env.js) when the app has one
 ///   envPublic        : the public values the build inlined (dist/server/env-public.json)
+///   sessionModule    : the compiled session.ts (dist/server/session.js) when the app has one
 /// Returns `(request, bindings?, front?) => Promise<Response>`; `bindings` (the Worker's `env`) adds
 /// its string vars and secrets to process.env for validating env.ts. `front` comes from the
 /// worker's nowaki.config routing (front.mjs): `{ routePath, headers }`, the path to route by and
@@ -97,6 +99,7 @@ export function createFetchHandler({
   fonts,
   envModule,
   envPublic,
+  sessionModule,
 }) {
   const registry = new Map();
   for (const [name, comp] of Object.entries(islandComponents ?? {})) {
@@ -113,6 +116,12 @@ export function createFetchHandler({
     }
   }
   installIslandHook(registry, liveRegistry, live);
+  // NOWAKI_SESSION_SECRET from the Worker's bindings (the latest request's), else process.env.
+  let sessionSecret;
+  configureSessions({
+    config: sessionModule ? sessionConfigOf(sessionModule) : null,
+    secret: () => sessionSecret ?? globalThis.process?.env?.NOWAKI_SESSION_SECRET,
+  });
 
   const serverFunctions =
     serverFnTable && Object.keys(serverFnTable).length
@@ -168,6 +177,7 @@ export function createFetchHandler({
   if (!envPending) setServerEnv(null);
 
   return async (request, bindings, front) => {
+    if (typeof bindings?.NOWAKI_SESSION_SECRET === "string") sessionSecret = bindings.NOWAKI_SESSION_SECRET;
     if (envPending) {
       envReady ??= initServerEnv(envModule, envSource(bindings), envPublic).catch((err) => {
         console.error(err?.message ?? err);

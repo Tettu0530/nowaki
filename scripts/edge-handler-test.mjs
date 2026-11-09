@@ -112,6 +112,25 @@ check("serverFn rejects invalid input (400)", bad.status === 400 && (await bad.j
 const broken = await rpc({ id: "96224074eee5e982", args: [] });
 check("unexpected server function error is generic (500)", broken.status === 500 && (await broken.json()).error === "Internal Server Error");
 
+// Sessions: session.ts is imported by the worker; the secret comes from the Worker's bindings.
+{
+  const saved = process.env.NOWAKI_SESSION_SECRET;
+  delete process.env.NOWAKI_SESSION_SECRET;
+  const sess = (init = {}, bindings = env) =>
+    worker.fetch(new Request(ORIGIN + "/api/session", { ...init, headers: { origin: ORIGIN, ...(init.headers ?? {}) } }), bindings);
+  check("session without NOWAKI_SESSION_SECRET: 500", (await sess()).status === 500);
+  const withSecret = { ...env, NOWAKI_SESSION_SECRET: "edge-binding-session-secret-0123456789" };
+  const login = await sess({ method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "op=login&user=edge" }, withSecret);
+  const cookie = (login.headers.get("set-cookie") ?? "").split(";")[0];
+  check("session: login sets the session.ts cookie name, Secure over https",
+    /^hello_session=v1\./.test(cookie) && /; Secure/.test(login.headers.get("set-cookie") ?? ""));
+  const me = await (await sess({ headers: { cookie } }, withSecret)).json();
+  check("session: the cookie round-trips (secret from the bindings)", me.user === "edge");
+  const evil = await (await sess({ method: "POST", headers: { origin: "https://evil.test", cookie, "content-type": "application/x-www-form-urlencoded" }, body: "op=inc" }, withSecret)).json();
+  check("session: cross-site POST sees an empty, read-only session", evil.user === null && evil.readOnly === true && evil.wrote !== true);
+  if (saved !== undefined) process.env.NOWAKI_SESSION_SECRET = saved;
+}
+
 process.env.NOWAKI_CSP = "enforce";
 const csp = await req("/");
 const nonce = /'nonce-([0-9a-f]{32})'/.exec(csp.headers.get("content-security-policy") ?? "")?.[1];

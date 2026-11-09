@@ -17,6 +17,7 @@ import { prodDocument, prodShell } from "./document.mjs";
 import { liveInitialState, liveRender, liveTopics, liveView } from "./live.mjs";
 import { loadContent } from "./content-load.mjs";
 import { initServerEnv } from "./env-schema.mjs";
+import { configureSessions, sessionConfigOf } from "./session.mjs";
 import { liveProps, warnIfEphemeralLiveKey } from "./live-sign.mjs";
 import { indexPublic, lookupPublic } from "./public-files.mjs";
 import { resolveSite } from "./seo.mjs";
@@ -91,6 +92,13 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
     ? await readFile(path.join(serverDir, "env-public.json"), "utf8").then(JSON.parse, () => undefined)
     : undefined;
   await initServerEnv(envModule, process.env, envPublic);
+  // session.ts (dist/server/session.js), when the app has one; ctx.session uses the defaults otherwise.
+  const sessionFile = path.join(serverDir, "session.js");
+  const sessionModule = await access(sessionFile).then(() => import(pathToFileURL(sessionFile).href), () => null);
+  configureSessions({
+    config: sessionModule ? sessionConfigOf(sessionModule) : null,
+    prerender: process.env.NOWAKI_PRERENDER === "1",
+  });
 
   const manifest = JSON.parse(await readFile(path.join(clientDir, "manifest.json"), "utf8"));
 
