@@ -3,10 +3,12 @@
 //
 // Usage: node vercel-build.mjs <serverDir> <clientDir> <outputDir> <appRoot>
 
-import { writeFile, mkdir, cp, rm } from "node:fs/promises";
+import { readFile, writeFile, mkdir, cp, rm } from "node:fs/promises";
 import path from "node:path";
 import { missingSecurityHeaders } from "./security-headers.mjs";
 import { indexPublic } from "./public-files.mjs";
+import { compileRules } from "./rules.mjs";
+import { vercelHeaders, vercelRedirects } from "./vercel-routes.mjs";
 
 const [serverDir, clientDir, outputDir, appRoot] = process.argv.slice(2);
 if (!serverDir || !clientDir || !outputDir || !appRoot) {
@@ -70,6 +72,35 @@ await writeFile(
     "\n",
 );
 
+// nowaki.config routing: redirects and headers as platform routes; the function (app.mjs) runs
+// the same rules for everything (rewrites, basePath, trailingSlash, redirects left to it).
+const rules = await readFile(path.join(serverDir, "routing.json"), "utf8").then(
+  (t) => compileRules(JSON.parse(t)),
+  () => null,
+);
+// A rewrite to a public/ file is answered by the function, which has no public/ of its own: copy
+// those files into it (its default public dir, next to client/).
+for (const rule of rules?.rewrites.rules ?? []) {
+  const segs = rule.dest.segs;
+  if (segs.every((s) => s.lit !== undefined)) {
+    let url;
+    try {
+      url = "/" + segs.map((s) => decodeURIComponent(s.lit)).join("/");
+    } catch {
+      continue;
+    }
+    const file = publicIndex.get(url)?.file;
+    if (!file) continue;
+    const to = path.join(funcDir, "public", ...url.split("/").filter(Boolean));
+    await mkdir(path.dirname(to), { recursive: true });
+    await cp(file, to);
+  } else {
+    const prefix = "/" + segs.slice(0, segs.findIndex((s) => s.lit === undefined)).map((s) => s.lit).join("/");
+    if ([...publicIndex.keys()].some((u) => u.startsWith(prefix === "/" ? "/" : prefix + "/"))) {
+      console.warn(`[nowaki] vercel adapter: a rewrite to ${prefix}/[...] can't reach public/ files there (only a fixed destination can); routes are still served`);
+    }
+  }
+}
 const config = {
   version: 3,
   routes: [
@@ -85,6 +116,9 @@ const config = {
     },
     // public/ files skip the function too; same headers, but revalidated (names aren't hashed).
     ...publicRoutes(),
+    // After the security headers, so a rule's value for the same name wins.
+    ...vercelHeaders(rules),
+    ...vercelRedirects(rules),
     { handle: "filesystem" },
     { src: "/.*", dest: "/index" },
   ],

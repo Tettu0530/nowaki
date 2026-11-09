@@ -14,6 +14,13 @@ export default {
   fonts: [
     { family: "Atkinson Hyperlegible", src: "./fonts/atkinson-hyperlegible-400.ttf", weight: 400, variable: "--font-body" },
   ],
+  // Redirects and rewrites, applied by every server before routes and public/ files. Sources and
+  // destinations use the route syntax; a capture is percent-encoded, so it can't leave the site.
+  redirects: [
+    { source: "/old-docs/[...rest]", destination: "/[...rest]", permanent: true },
+    { source: "/go/[to]", destination: "/[to]" },
+  ],
+  rewrites: [{ source: "/p/[slug]", destination: "/blog/[slug]" }],
   plugins: [
     // Markdoc: `.mdoc` files compile to Preact modules at build time. Tags render elements or the
     // exports of markdoc/components.tsx; unknown tags or bad attributes fail the build.

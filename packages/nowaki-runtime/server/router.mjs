@@ -15,12 +15,31 @@
 //     directory matches any one segment), matched route or not: pages, API routes and 404s.
 //   _layout / error: apply to route files inside the directory (routeUnderPrefix), as
 //     nowaki-core's budget::layouts_for and route_css find layouts.
+// Route groups: a directory named "(name)" groups files without adding a URL segment
+//   (routes/(marketing)/about.tsx → /about). Its _layout / loading / error apply to the files
+//   inside it, and so does its _middleware (containment, not URL prefix: it doesn't run for
+//   404s). Names starting with "." ("(.)", "(..)") are reserved and stay literal.
+//   Two files that serve the same URL because of groups are an error.
 
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { decodeSegment, matchSegments, parseSegment } from "./segments.mjs";
 
 const ROUTE_EXT = /\.(tsx|ts|jsx|js|mdx)$/;
+// Kept in step with nowaki-core routes::is_route_group.
+const GROUP_DIR = /^\((?!\.)[^)/]+\)$/;
+
+/// Is a directory name a route group ("(marketing)")?
+export function isRouteGroup(name) {
+  return GROUP_DIR.test(name);
+}
+
+/// A directory prefix ("/(marketing)/docs") without its route groups ("/docs").
+export function stripRouteGroups(prefix) {
+  if (!prefix || !prefix.includes("(")) return prefix;
+  const kept = prefix.split("/").filter((p) => p && !GROUP_DIR.test(p));
+  return kept.length ? "/" + kept.join("/") : "";
+}
 
 export async function scanRoutes(appRoot) {
   const routesDir = path.join(appRoot, "routes");
@@ -33,26 +52,32 @@ export async function scanRoutes(appRoot) {
   const errorBoundaries = [];
   let notFound = null;
   let errorRoute = null;
+  // URL shape → { rel, inGroup } of the route files seen so far.
+  const urls = new Map();
 
   for (const rel of files) {
     const abs = path.join(routesDir, rel);
     const base = path.basename(rel).replace(ROUTE_EXT, "");
     const dirPrefix = dirToPrefix(path.dirname(rel));
+    // The directory as the URL sees it: route groups left out.
+    const urlPrefix = stripRouteGroups(dirPrefix);
+    const inGroup = urlPrefix !== dirPrefix;
 
     if (base === "_layout") {
       layouts.push({ prefix: dirPrefix, file: abs });
       continue;
     }
     if (base === "_middleware") {
-      middleware.push({ prefix: dirPrefix, file: abs });
+      // In a group, middleware goes by containment (routeUnderPrefix), since the group has no URL.
+      middleware.push(inGroup ? { prefix: dirPrefix, file: abs, group: true } : { prefix: dirPrefix, file: abs });
       continue;
     }
     if (base === "loading") {
-      loadingBoundaries.push({ prefix: dirPrefix, file: abs });
+      loadingBoundaries.push({ prefix: dirPrefix, urlPrefix, file: abs });
       continue;
     }
     if (base === "error") {
-      errorBoundaries.push({ prefix: dirPrefix, file: abs });
+      errorBoundaries.push({ prefix: dirPrefix, urlPrefix, file: abs });
       continue;
     }
     if (base === "_404") {
@@ -65,7 +90,8 @@ export async function scanRoutes(appRoot) {
     }
     if (base.startsWith("_")) continue; // reserved
 
-    let urlPath = "/" + rel.replace(ROUTE_EXT, "");
+    const urlRel = inGroup ? (urlPrefix ? urlPrefix.slice(1) + "/" : "") + path.posix.basename(rel) : rel;
+    let urlPath = "/" + urlRel.replace(ROUTE_EXT, "");
     if (urlPath.endsWith("/index")) {
       urlPath = urlPath.slice(0, -"/index".length) || "/";
     }
@@ -79,7 +105,13 @@ export async function scanRoutes(appRoot) {
     const last = segments[segments.length - 1];
     const nameExt = base.replace(/^.*\]/, "").match(/\.[A-Za-z0-9]+$/)?.[0];
     const fileExt = base === "index" ? undefined : (last?.suffix ?? nameExt);
-    const isApi = rel === "api" || rel.startsWith("api/") || fileExt !== undefined;
+    const isApi = urlRel === "api" || urlRel.startsWith("api/") || fileExt !== undefined;
+    const prev = claimUrl(urls, segments, rel, inGroup);
+    if (prev) {
+      throw new Error(
+        `routes/${prev} and routes/${rel} both serve ${urlPath}: route groups "(name)" add no URL segment. Rename or move one of them.`,
+      );
+    }
     routes.push({
       file: abs,
       // The file's directory as written ("/org/[org]"), for layout / error-boundary containment.
@@ -99,8 +131,25 @@ export async function scanRoutes(appRoot) {
   // (by segment count: "/[o]/x" is deeper than "/abcdefgh" though shorter as a string).
   layouts.sort((a, b) => prefixDepth(a.prefix) - prefixDepth(b.prefix));
   middleware.sort((a, b) => prefixDepth(a.prefix) - prefixDepth(b.prefix));
+  // The client takes the first boundary of the deepest URL prefix, so at the same prefix one
+  // outside a group ("loading.tsx") goes before a group's ("(app)/loading.tsx").
+  const ungroupedFirst = (a, b) => (a.urlPrefix !== a.prefix) - (b.urlPrefix !== b.prefix);
+  loadingBoundaries.sort(ungroupedFirst);
+  errorBoundaries.sort(ungroupedFirst);
 
   return { routes, layouts, middleware, loadingBoundaries, errorBoundaries, notFound, errorRoute };
+}
+
+// Two route files serving the same URL is an error when a group causes it ((a)/about vs
+// (b)/about, or about.tsx vs (b)/about.tsx). Param names don't matter: [slug] and [id] collide.
+// Other duplicates (about.tsx vs about/index.tsx) are left as they were. Returns the earlier
+// file's rel on a collision.
+function claimUrl(seen, segments, rel, inGroup) {
+  const key = segments.map((s) => (s.lit !== undefined ? `=${s.lit}` : s.rest ? "*" : `:${s.suffix ?? ""}`)).join("/");
+  const prev = seen.get(key);
+  if (prev && (prev.inGroup || inGroup)) return prev.rel;
+  if (!prev) seen.set(key, { rel, inGroup });
+  return null;
 }
 
 export function matchRoute(routesOrTable, pathname) {

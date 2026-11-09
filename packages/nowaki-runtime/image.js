@@ -3,7 +3,8 @@
 // a few widths, with the file's own width / height. Works in pages, layouts, and islands alike.
 import { h } from "preact";
 
-/// `src`: the `?image` import, or a plain URL (then pass `width` / `height` yourself).
+/// `src`: the `?image` import (a remote one too, `https://…?image`, when images.remotePatterns
+/// allows it), or a plain URL string, rendered as a bare <img> (then pass `width` / `height`).
 /// `sizes` defaults to "the rendered width, or the viewport when narrower".
 export function Image({
   src,

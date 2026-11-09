@@ -9,6 +9,9 @@ cd "$(dirname "$0")/../.."
 test -f examples/hello/.nowaki/types.d.ts
 grep -q '"/blog/\[slug\]": { slug: string }' examples/hello/.nowaki/types.d.ts
 grep -q '"/files/\[\.\.\.path\]": { path: string\[\] }' examples/hello/.nowaki/types.d.ts
+# a route group adds no URL segment
+grep -q '"/pricing": {}' examples/hello/.nowaki/types.d.ts
+! grep -q '(marketing)' examples/hello/.nowaki/types.d.ts
 # API routes and convention files are NOT navigable → excluded
 ! grep -q '"/api/' examples/hello/.nowaki/types.d.ts
 ! grep -q '_404\|_layout\|loading\|error' examples/hello/.nowaki/types.d.ts

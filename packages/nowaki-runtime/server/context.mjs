@@ -1,5 +1,7 @@
 // LoaderContext: shared context passed to loaders, actions, middleware, and API handlers.
 
+import { createSession } from "./session.mjs";
+
 export function makeContext(info) {
   const { url, params = {}, method = "GET", req } = info;
   // Callers may inject headers / readBody (Node: from req; Edge: from the Web Request).
@@ -43,6 +45,7 @@ export function makeContext(info) {
   });
 
   let cookiesCache;
+  let session;
 
   const ctx = {
     url: urlProxy,
@@ -64,6 +67,14 @@ export function makeContext(info) {
       if (!cookiesCache) cookiesCache = parseCookies(reqHeaders["cookie"] ?? "");
       noteHeader("cookie");
       return cookiesCache;
+    },
+    // Created on first access, so a request that never touches it pays nothing. Reading it reads
+    // the cookie header (above), which makes an ISR page per-user. `__sessionMode` ("crossSite",
+    // set by handler.mjs before middleware; "live" for live renders) makes it read-only. The
+    // session sets `__commit` when it has a cookie to write (handler.mjs `finalize` awaits it).
+    // These internal fields are only added when used, keeping the common path's object unchanged.
+    get session() {
+      return (session ??= createSession(ctx, ctx.__sessionMode));
     },
     resHeaders,
     resStatus: undefined,
@@ -130,6 +141,7 @@ export function makeContext(info) {
       return result(init.status ?? 200, "text/plain; charset=utf-8", String(s), init.headers);
     },
   };
+  if (info.sessionMode) ctx.__sessionMode = info.sessionMode;
   return ctx;
 }
 

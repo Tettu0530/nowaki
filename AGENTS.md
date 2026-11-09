@@ -185,7 +185,12 @@ code locations and CI coverage.
   + fallback, disk cache, `picture_html` for Markdown), emitted by `build.rs` `emit` (client) and
   `ServerAssets::image_module` (server); dev modules from `transform.rs` `dev_asset_module`,
   variants from `dev.rs` `dev_image` (`/__nowaki/image`). Component: `packages/nowaki-runtime/image.js`.
-  Markdown images: `content.rs` `local_image`.
+  Markdown images: `content.rs` `local_image`. Remote `?image` (`images.remotePatterns`):
+  `crates/nowaki-core/src/remote_image.rs` (allow-list, cache, `RemoteFetch` trait; resolved to the
+  cached file in `NowakiCore::resolve_remote_image`, so every transform mode reuses the local path),
+  downloads in `server/images-fetch.mjs` via `crates/nowaki/src/remote_images.rs`; the matcher
+  exists in both, driven by `crates/nowaki-core/tests/fixtures/remote-patterns-cases.json`
+  (`tests/remote_patterns.rs`, `scripts/images-fetch-test.mjs`).
 - **Fonts** — `crates/nowaki/src/fonts.rs` (faces, size-adjusted fallbacks from ttf-parser
   metrics, `dist/server/fonts.json`; dev: `.nowaki/fonts`), Google downloads in
   `server/fonts-fetch.mjs`, config via `site.rs` + `server/site-config.mjs`; the links go into
@@ -207,6 +212,15 @@ code locations and CI coverage.
   `app.mjs` `createApp`, `web.mjs` (first request), dev `sidecar.mjs` (first request). Client import
   guard: `build.rs` `emit` and the dev browser transform (`env::is_server_env_module`). Types:
   `typegen.rs` `render_env`. Tests: `scripts/env-schema-test.mjs`.
+- **Sessions (`ctx.session`)** — `server/session.mjs` (`defineSession`, `configureSessions`,
+  `createSession`: WebCrypto only, keys from `NOWAKI_SESSION_SECRET` via HKDF). `context.mjs`
+  creates the session on first access (`__sessionMode`: `"crossSite"` / `"live"` make it
+  read-only); it sets `ctx.__commit` when it has a cookie to write, which `handler.mjs`
+  `commitAndFinalize` awaits (a failure renders the 500 page). `handler.mjs` `routeRequest` marks
+  cross-site writes before middleware. Config: app-root `session.ts`, compiled by `build.rs`
+  `build_server` to `dist/server/session.js`; loaded by `app.mjs` `createApp`, `web.mjs` (the
+  worker imports it, `edge-build.mjs`), and dev `sidecar.mjs` (`ensureSession`, plus the
+  generated `.nowaki/session-secret`). Tests: `scripts/session-test.mjs`.
 - **SEO** — `packages/nowaki-runtime/server/seo.mjs` (site URL, meta tags, sitemap, robots);
   `handler.mjs` `withSeo` (layout + route meta) and the generated `/sitemap.xml` / `/robots.txt`;
   page URLs from `server/isr-urls.mjs` `pageUrls`. The site comes from `crates/nowaki/src/site.rs`
@@ -219,6 +233,18 @@ code locations and CI coverage.
   (`crates/nowaki-core/tests/fixtures/rules-cases.json`, run by `tests/rules.rs` and
   `scripts/rules-test.mjs`); change both together. The segment grammar is shared with the router
   through `server/segments.mjs`.
+- **Route groups (`routes/(name)/`)** — no URL segment. JS: `server/router.mjs` `scanRoutes`
+  (URL without groups, `dir` stays physical, collision error; group `_middleware` marked
+  `group` and run by containment in `handler.mjs` `runMiddleware`; boundaries carry a
+  group-free `urlPrefix` for the client). Rust: `routes.rs` `strip_route_groups` (in
+  `url_pattern_from_stem`) and `check_url_conflicts` (called by `build_with_client`). Layout /
+  CSS lookups stay on physical dirs. Tests: `scripts/router-test.mjs`, `routes.rs` units.
+  through `server/segments.mjs`. Applied at the fronts by `crates/nowaki/src/front.rs`
+  (`start.rs` `handle`, `dev.rs` `serve_or_proxy`, the headers layer; the route path reaches the
+  sidecars in `x-nowaki-route-path` → `info.routePath`) and `server/front.mjs` (`app.mjs` `handle`,
+  the worker `fetch` from `edge-build.mjs`); Vercel platform routes from `server/vercel-routes.mjs`,
+  static `_redirects` / `_headers` from `prerender.rs`. Without a routing config each front does
+  one null check. Tests: `scripts/rules-front-test.mjs`, `scripts/rules-e2e.mjs` (every front).
 - **Page scripts (`export const scripts`)** — read from the AST in
   `crates/nowaki-core/src/page_scripts.rs`, emitted as client entries by
   `build.rs` `build_route_scripts` (manifest `routeScripts` per module and
