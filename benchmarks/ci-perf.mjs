@@ -10,14 +10,16 @@
 // installed. A --release that is the same directory as --base is measured once. Needs `oha` on PATH.
 // Writes a Markdown table to $GITHUB_STEP_SUMMARY when set.
 //
-// Metrics, each with that checkout's binary and runtime:
-//   build       `nowaki build` wall time of <checkout>/examples/hello (ms)
-//   dev         `nowaki dev` spawn → "ready in" line, examples/hello (ms)
-//   about rps   `nowaki start`, examples/hello GET /about, oha -c 50 for 5 s (req/s; higher is better)
+// Every metric runs on benchmarks/ci-perf-app from this script's checkout, copied per side, so all
+// sides measure the same app (examples/hello grows with e2e coverage, which isn't a regression).
+// Each side uses its own binary and runtime (linked from <checkout>/examples/hello/node_modules):
+//   build       `nowaki build` wall time (ms)
+//   dev         `nowaki dev` spawn → "ready in" line (ms)
+//   about rps   `nowaki start`, GET /about (a plain page), oha -c 50 for 5 s (req/s; higher is better)
 //   about ttfb  same server, 300 sequential requests, p50 (ms)
-//   post rps    `nowaki start`, benchmarks/ci-perf-app GET /posts/post-7: nested layouts, a dynamic
-//   post ttfb   route with a loader, page meta, layout + route CSS and an island, so per-request work
-//               in the runtime shows. The app comes from this script's checkout, the same for all.
+//   post rps    same server, GET /posts/post-7: nested layouts, a dynamic route with a loader, page
+//   post ttfb   meta, layout + route CSS and an island, so per-request work in the runtime shows.
+// Keep the app to features every compared release supports (0.16.x and later).
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, cpSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import http from "node:http";
@@ -122,7 +124,7 @@ function build(side, app) {
 async function measureDev(side) {
   const p = port++;
   const t0 = performance.now();
-  const child = spawn(bin(side), ["dev", hello(side), "--port", String(p)], { stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(bin(side), ["dev", fixtures[side], "--port", String(p)], { stdio: ["ignore", "pipe", "pipe"] });
   try {
     return await new Promise((resolve, reject) => {
       let out = "";
@@ -146,7 +148,7 @@ function oha(args) {
   return JSON.parse(r.stdout);
 }
 
-async function measureServer(side, app, route) {
+async function measureServer(side, app, routes) {
   const p = port++;
   const child = spawn(bin(side), ["start", app, "--port", String(p)], {
     stdio: ["ignore", "pipe", "pipe"],
@@ -155,16 +157,20 @@ async function measureServer(side, app, route) {
   let out = "";
   child.stdout.on("data", (d) => (out = (out + d).slice(-8000)));
   child.stderr.on("data", (d) => (out = (out + d).slice(-8000)));
-  const url = `http://127.0.0.1:${p}${route}`;
   // On a timeout, also show what the build left in dist/server, and the source tree, side by side.
   const tree = () =>
     `--- ${app}/dist/server now ---\n${ls(path.join(app, "dist/server"))}\n--- right after the last build ---\n${lastTree[app] ?? ""}\n--- server output (tail) ---\n${out.slice(-2500)}`;
   try {
-    await waitFor(url, 30000, tree);
-    oha(["-z", "2s", "-c", "50", url]); // warm-up
-    const load = oha(["-z", "5s", "-c", "50", url]);
-    const seq = oha(["-n", "300", "-c", "1", url]);
-    return { rps: load.summary.requestsPerSec, ttfb: seq.latencyPercentiles.p50 * 1000 };
+    const res = [];
+    for (const route of routes) {
+      const url = `http://127.0.0.1:${p}${route}`;
+      await waitFor(url, 30000, tree);
+      oha(["-z", "2s", "-c", "50", url]); // warm-up
+      const load = oha(["-z", "5s", "-c", "50", url]);
+      const seq = oha(["-n", "300", "-c", "1", url]);
+      res.push({ rps: load.summary.requestsPerSec, ttfb: seq.latencyPercentiles.p50 * 1000 });
+    }
+    return res;
   } finally {
     await stop(child);
   }
@@ -178,10 +184,9 @@ async function round(n) {
   const order = SIDES.map((_, i) => SIDES[(i + n) % SIDES.length]);
   for (const side of order) {
     const r = results[side];
-    r.build.push(build(side, hello(side)));
+    r.build.push(build(side, fixtures[side]));
     r.dev.push(await measureDev(side));
-    const about = await measureServer(side, hello(side), "/about");
-    const post = await measureServer(side, fixtures[side], "/posts/post-7");
+    const [about, post] = await measureServer(side, fixtures[side], ["/about", "/posts/post-7"]);
     r.aboutRps.push(about.rps);
     r.aboutTtfb.push(about.ttfb);
     r.postRps.push(post.rps);
@@ -213,8 +218,7 @@ function evaluate() {
 }
 
 for (const side of SIDES) {
-  build(side, hello(side)); // warm caches; also leaves dist/ for start
-  build(side, fixtures[side]);
+  build(side, fixtures[side]); // warm caches; also leaves dist/ for start
 }
 let rounds = 0;
 for (; rounds < ROUNDS; rounds++) await round(rounds);

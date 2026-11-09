@@ -74,11 +74,14 @@ Timings get a separate CI job, the performance regression gate (`perf`,
 that touch `crates/` or the runtime, and builds three binaries in one job: the PR
 (head), its base, and the latest `v*` release tag reachable from base. Each side
 is measured in alternating rounds on the same runner (3 rounds; 3 more if
-anything is over the limit). The job measures `nowaki build` and `nowaki dev`
-startup on `examples/hello`, and `nowaki start` req/s and TTFB on two pages:
-`/about` and `/posts/[slug]` of `benchmarks/ci-perf-app`. The second page has
-nested layouts, a loader, page `meta`, and layout and route CSS, so per-request
-work in the runtime shows up there. Head fails against base beyond −15% req/s,
+anything is over the limit). Every side measures the same fixed app,
+`benchmarks/ci-perf-app` from the PR, with its own binary and runtime;
+`examples/hello` is not used because it grows with e2e coverage. The metrics are
+`nowaki build` time, `nowaki dev` startup, and `nowaki start` req/s and TTFB on
+two pages: a plain `/about` and `/posts/[slug]`. The second page has nested
+layouts, a loader, page `meta`, and layout and route CSS, so per-request work in
+the runtime shows up there. The app sticks to features that every release it is
+compared with supports. Head fails against base beyond −15% req/s,
 +25% TTFB or +25% build/dev time. Against the release, the limits are −10% req/s
 and +20% TTFB, so a series of small regressions that each pass against base
 still fails before the next release. Run it locally with
