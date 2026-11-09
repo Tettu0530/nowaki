@@ -1,5 +1,8 @@
 // Unit checks for server/seo.mjs (meta tags, sitemap, robots, site URL). No server needed.
 import { mergeMeta, normalizeSite, pagePath, robotsTxt, seoTags, sitemapXml, staticPagePath } from "../packages/nowaki-runtime/server/seo.mjs";
+import { basePath, setBasePath, withBase } from "../packages/nowaki-runtime/server/base-path.mjs";
+import { Link } from "../packages/nowaki-runtime/navigation.js";
+import { makeContext } from "../packages/nowaki-runtime/server/context.mjs";
 
 let failures = 0;
 const check = (name, ok) => {
@@ -59,6 +62,30 @@ check("always: canonical with the slash on a server", canon("/docs/a", { trailin
 check("never: sitemap without slashes in static output", sitemapXml("https://e.x", ["/", "/docs/a"], { trailingSlash: "never", staticOutput: true }).includes("<loc>https://e.x/docs/a</loc>"));
 check("always: sitemap with slashes on a server", sitemapXml("https://e.x", ["/", "/docs/a"], { trailingSlash: "always" }).includes("<loc>https://e.x/docs/a/</loc>"));
 check("robots.txt points at the sitemap", robotsTxt("https://example.com") === "User-agent: *\nAllow: /\n\nSitemap: https://example.com/sitemap.xml\n");
+
+// basePath (server/base-path.mjs): canonical, Open Graph and sitemap URLs carry it, and so do
+// <Link> and ctx.redirect.
+check("no basePath: withBase is the identity", withBase("/about") === "/about" && basePath() === "");
+check("no basePath: Link renders the href as written", Link({ href: "/about" }).props.href === "/about");
+setBasePath("/app");
+check("withBase prefixes root-relative paths", withBase("/about") === "/app/about" && withBase("/") === "/app" && withBase("/?q=1") === "/app?q=1" && withBase("/#top") === "/app#top");
+check("withBase leaves the base, URLs and relative paths alone",
+  withBase("/app") === "/app" && withBase("/app/x") === "/app/x" && withBase("/app?x") === "/app?x" && withBase("https://e.x/a") === "https://e.x/a" && withBase("//e.x/a") === "//e.x/a" && withBase("/\\e.x") === "/\\e.x" && withBase("a/b") === "a/b");
+check("withBase: a path that only starts like the base still gets it", withBase("/apple") === "/app/apple");
+check("basePath: canonical: true keeps the request path (it has the base)", seoTags({ canonical: true }, { pathname: "/app/docs", site: "https://e.x" }).includes('href="https://e.x/app/docs"'));
+check("basePath: a canonical path and og:image get the base", (() => {
+  const t = seoTags({ canonical: "/docs", openGraph: { image: "/og.png", url: "https://other.x/p" } }, { pathname: "/app/docs", site: "https://e.x" });
+  return t.includes('href="https://e.x/app/docs"') && t.includes('content="https://e.x/app/og.png"') && t.includes('content="https://other.x/p"');
+})());
+check("basePath: sitemap URLs get the base", sitemapXml("https://e.x", ["/", "/a"]).includes("<loc>https://e.x/app</loc>") && sitemapXml("https://e.x", ["/a"]).includes("<loc>https://e.x/app/a</loc>"));
+check("basePath: robots.txt points at the sitemap under the base", robotsTxt("https://e.x").includes("Sitemap: https://e.x/app/sitemap.xml"));
+check("basePath: Link prefixes, basePath={false} keeps the href", Link({ href: "/about" }).props.href === "/app/about" && Link({ href: "/about", basePath: false }).props.href === "/about" && !("basePath" in Link({ href: "/x", basePath: false }).props));
+{
+  const ctx = makeContext({ url: new URL("http://x/app/a") });
+  check("basePath: ctx.redirect prefixes a root-relative path", ctx.redirect("/login").headers.location === "/app/login" && ctx.redirect("/login", 303).status === 303);
+  check("basePath: ctx.redirect leaves prefixed paths and URLs, and opts out", ctx.redirect("/app/x").headers.location === "/app/x" && ctx.redirect("https://e.x/").headers.location === "https://e.x/" && ctx.redirect("/x", { basePath: false }).headers.location === "/x" && ctx.redirect("/x", 307, { basePath: false }).status === 307);
+}
+setBasePath("");
 
 console.log(failures === 0 ? "\nSEO UNIT TEST PASSED" : `\nSEO UNIT TEST FAILED (${failures})`);
 process.exit(failures === 0 ? 0 : 1);

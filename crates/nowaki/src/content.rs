@@ -527,7 +527,8 @@ fn image_set(root: &Path, abs: &Path, images: &Images) -> Result<nowaki_core::im
         Images::Dev => nowaki_core::image::dev_set(root, abs, &q),
         Images::Build(client_dir) => {
             nowaki_core::image::build_set(root, abs, &q, |stem, w, ext, bytes| {
-                nowaki_core::image::write_variant(client_dir, stem, w, ext, bytes)
+                let base = crate::site::asset_base();
+                nowaki_core::image::write_variant_at(client_dir, base, stem, w, ext, bytes)
             })
         }
     }

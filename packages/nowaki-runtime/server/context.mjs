@@ -1,6 +1,7 @@
 // LoaderContext: shared context passed to loaders, actions, middleware, and API handlers.
 
 import { createSession } from "./session.mjs";
+import { withBase } from "./base-path.mjs";
 
 export function makeContext(info) {
   const { url, params = {}, method = "GET", req } = info;
@@ -126,8 +127,12 @@ export function makeContext(info) {
       return setCookies;
     },
 
-    redirect(to, status = 302) {
-      const res = { __nowakiResult: true, status, headers: { location: to }, body: "" };
+    // A root-relative `to` gets basePath in front (unless it already starts with it);
+    // `{ basePath: false }` sends it as written.
+    redirect(to, status = 302, opts) {
+      if (typeof status === "object" && status !== null) [status, opts] = [302, status];
+      const location = opts?.basePath === false ? to : withBase(to);
+      const res = { __nowakiResult: true, status, headers: { location }, body: "" };
       ctx._redirect = res; // keep it so the throw path can pick it up
       return res;
     },

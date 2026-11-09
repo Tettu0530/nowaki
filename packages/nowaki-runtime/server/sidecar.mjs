@@ -108,6 +108,19 @@ async function ensureSession(version) {
   sessionVersion = version;
 }
 
+// nowaki.config basePath: `nowaki dev` writes .nowaki/routing.json before it serves, after this
+// process starts, so it's read on the first request.
+const { setBasePath } = await import("./base-path.mjs");
+let baseRead = false;
+function ensureBasePath() {
+  baseRead = true;
+  try {
+    setBasePath(JSON.parse(readFileSync(path.join(appRoot, ".nowaki/routing.json"), "utf8")).basePath);
+  } catch {
+    setBasePath("");
+  }
+}
+
 const RUST = `http://127.0.0.1:${process.env.NOWAKI_RUST_PORT ?? "3000"}`;
 
 // dev doesn't build, so Rust discovers the server function allowlist. Cached per HMR generation.
@@ -358,6 +371,7 @@ const server = createServer(async (req, res) => {
   }
   try {
     const version = String(req.headers["x-nowaki-ssr-version"] ?? "0");
+    if (!baseRead) ensureBasePath();
     if (envReady !== true) await ensureEnv(version);
     await ensureContent(version);
     await ensureSession(version);

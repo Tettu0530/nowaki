@@ -247,6 +247,20 @@ code locations and CI coverage.
   the worker `fetch` from `edge-build.mjs`); Vercel platform routes from `server/vercel-routes.mjs`,
   static `_redirects` / `_headers` from `prerender.rs`. Without a routing config each front does
   one null check. Tests: `scripts/rules-front-test.mjs`, `scripts/rules-e2e.mjs` (every front).
+- **`basePath`** — build: `NowakiCore::set_base_path` (asset URLs via `asset_base()`, the server
+  function proxy path, the `import.meta.env.BASE_URL` define, plus `__NOWAKI_BASE_URL__` for the
+  classic-script `client/live.js`), set by `site::configure`; fonts and content images read
+  `site::asset_base()`. Runtime: `server/base-path.mjs` (`globalThis.__nowakiBase`, `withBase`)
+  set by `app.mjs` / `web.mjs` / dev `sidecar.mjs`, used by `<Link>`, `ctx.redirect`, `seo.mjs`,
+  the session cookie Path; asset hrefs from `assetBase` in `app.mjs` / `web.mjs` / `document.mjs`
+  and `Manifest.asset_base` in `start.rs`. Fronts: `<base>/_nowaki/*` and `<base>/__nowaki/*`
+  skip the rules (`front.rs` `framework_path`, `front.mjs` `frontStep` `internal`), and
+  `front.rs` `base_layer` wraps the router in start / dev so `<base>/__nowaki/*` reaches the
+  root handlers. Client: every base-dependent line compares `BASE_URL` with `"/"`, so it folds
+  away without a base (keep it that way: no-base output must stay byte-identical). Adapters:
+  `edge-build.mjs` / `vercel-build.mjs` place static files under the base. Tests:
+  `crates/nowaki-core/tests/base_path.rs`, `scripts/rules-e2e.mjs` (config B), `seo-unit-test`,
+  `session-test`, `router-browser-test.mjs` with `BASE=http://host:port/app`.
 - **Page scripts (`export const scripts`)** — read from the AST in
   `crates/nowaki-core/src/page_scripts.rs`, emitted as client entries by
   `build.rs` `build_route_scripts` (manifest `routeScripts` per module and

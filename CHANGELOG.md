@@ -67,10 +67,26 @@ milestone's worth of work; the codename is noted per entry.
   redirects and headers are also emitted as platform routes in `config.json`.
   The static adapter writes `_redirects` (rewrites as 200 rules) and appends
   the headers to `_headers`, warning about rules a static host can't express.
-  For now `basePath` only removes the prefix from requests (and 404s anything
-  outside it); asset URLs and links don't carry it yet, and `/_nowaki/*` and
-  `/__nowaki/*` stay at the root. Without a routing config nothing changes per
-  request.
+  Without a routing config nothing changes per request.
+- **`basePath` end to end.** With `basePath: "/app"` the whole app lives under
+  `/app`: built asset URLs (scripts, island chunks, CSS, fonts, images,
+  `?url` / asset imports, Markdown images) are `/app/_nowaki/*`, server
+  function calls, live events and the live socket, the SPA router's boundaries
+  fetch and HMR go to `/app/__nowaki/*`, `<Link href="/about">` renders
+  `/app/about` (`basePath={false}` keeps the href; a plain `<a>` is left as
+  written), `ctx.redirect("/login")` sends `/app/login` (a path that already
+  starts with the base, or `{ basePath: false }`, is sent as written),
+  canonical / Open Graph / sitemap URLs and the sitemap line in robots.txt
+  carry the base, and the session cookie gets `Path=/app`. The client router
+  does a full page load for links outside the base.
+  `import.meta.env.BASE_URL` is `"/app/"` (`"/"` without a base) in client and
+  server code. `/_nowaki/*` at the root is a 404 under a base; `/__nowaki/*`
+  endpoints still answer at the root, and `nowaki dev` keeps its module URLs
+  (`/islands/*`, `/node_modules/*`, `/@fs/*`) there. The Vercel and Cloudflare
+  adapters put the client files and `public/` under the base in their static
+  output; static output keeps them at the output root (deploy it at the base)
+  with the base in the pages' URLs and in `_headers` / `_redirects`. Apps
+  without a basePath build byte-identical client and server output.
 - **Markdoc** via the new `@nowaki-dev/markdoc` plugin. With
   `markdoc({ components, tags, nodes })` in `plugins`, a `.mdoc` file compiles to a Preact module
   at build and dev time. The module exports the rendered document, `frontmatter` and `headings`,

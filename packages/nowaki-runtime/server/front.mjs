@@ -7,19 +7,28 @@
 import { applyRules, ruleHeaders } from "./rules.mjs";
 
 /// The config headers for a response to `pathname`: [[name, value]]. None for the framework's
-/// /__nowaki/* endpoints (a catch-all `cache-control` must not reach RPC or live responses).
+/// /__nowaki/* endpoints, at the root or under basePath (a catch-all `cache-control` must not reach
+/// RPC or live responses).
 export function frontHeaders(rules, pathname) {
-  return pathname.startsWith("/__nowaki/") ? [] : ruleHeaders(rules, pathname);
+  if (pathname.startsWith("/__nowaki/")) return [];
+  if (rules.base && pathname.startsWith(rules.base + "/__nowaki/")) return [];
+  return ruleHeaders(rules, pathname);
 }
 
+const isFramework = (p) => p.startsWith("/_nowaki/") || p.startsWith("/__nowaki/") || p === "/__nowaki";
+
 /// One request through the rules. Returns null to go on with the browser's path; { routePath } to
-/// route by another path (basePath removed, a rewrite); { redirect: { status, location } } (the
-/// request's query carried over); or { notFound: true } (outside basePath).
+/// route by another path (basePath removed, a rewrite); { routePath, internal: true } for a
+/// framework URL under basePath (`<base>/_nowaki/*`, `<base>/__nowaki/*`), to serve as the root
+/// path `routePath`; { redirect: { status, location } } (the request's query carried over); or
+/// { notFound: true } (outside basePath).
 export function frontStep(rules, method, url) {
   const p = url.pathname;
-  // Framework URLs no rule applies to: /__nowaki/* endpoints and /_nowaki/* assets, which are
-  // served at the root until asset URLs carry basePath.
-  if (p.startsWith("/_nowaki/") || p.startsWith("/__nowaki/") || p === "/__nowaki") return null;
+  const base = rules.base;
+  // Ahead of the rules: a catch-all rewrite or the trailing-slash policy must never move them.
+  if (base && p.startsWith(base) && isFramework(p.slice(base.length))) return { routePath: p.slice(base.length), internal: true };
+  // At the root, /__nowaki/* endpoints answer too; /_nowaki/* assets only without a basePath.
+  if (p.startsWith("/__nowaki/") || p === "/__nowaki" || (!base && p.startsWith("/_nowaki/"))) return null;
   const out = applyRules(rules, method, p);
   if (out.redirect) return { redirect: { status: out.redirect.status, location: withQuery(out.redirect.location, url.search) } };
   if (out.notFound) return out;

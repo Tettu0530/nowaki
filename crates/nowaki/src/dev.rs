@@ -82,6 +82,9 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
     if let Err(e) = crate::remote_images::configure(&mut core, &root, &config) {
         eprintln!("[nowaki] {e:#}");
     }
+    if let Err(e) = crate::site::configure(&mut core, &config) {
+        eprintln!("[nowaki] {e:#}");
+    }
     // Fonts build in the background: startup doesn't wait on a download, and the renderer picks
     // up .nowaki/fonts.json once it exists.
     {
@@ -112,6 +115,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
     dev_content(&state);
     let _watcher = start_watcher(&root, state.clone())?;
 
+    let base = front.clone().filter(|f| f.has_base());
     let mut app = Router::new()
         .route("/__nowaki/hmr", get(hmr_ws))
         .route("/__nowaki/live", get(live_ws))
@@ -159,15 +163,34 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
 
     // Don't wait for open HMR/live sockets on shutdown; just stop serving and drop the children.
     tokio::select! {
-        r = std::future::IntoFuture::into_future(axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-        )) => r?,
+        r = serve(listener, app, base) => r?,
         _ = crate::shutdown::signal() => {}
     }
     drop(plugin_host);
     drop(sidecar);
     Ok(())
+}
+
+/// Serves `app` with the peer address (the MCP endpoint checks it), behind the basePath layer when
+/// there is a basePath: the client reaches `/__nowaki/*` under the base, dev module URLs stay at
+/// the root.
+async fn serve(
+    listener: tokio::net::TcpListener,
+    app: Router,
+    base: Option<Arc<crate::front::Front>>,
+) -> std::io::Result<()> {
+    use axum::ServiceExt;
+    use tower_layer::Layer;
+    type Peer = std::net::SocketAddr;
+    match base {
+        None => axum::serve(listener, app.into_make_service_with_connect_info::<Peer>()).await,
+        Some(front) => {
+            let app =
+                axum::middleware::from_fn_with_state(front, crate::front::base_layer).layer(app);
+            let app = ServiceExt::<Request>::into_make_service_with_connect_info::<Peer>(app);
+            axum::serve(listener, app).await
+        }
+    }
 }
 
 /// File watch → bump ssr_version + broadcast reload (100ms debounce)

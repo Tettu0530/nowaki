@@ -64,7 +64,7 @@ function clearOverlay() {
   if (el) el.remove();
 }
 
-const ws = new WebSocket(`ws://${location.host}/__nowaki/hmr`);
+const ws = new WebSocket(`ws://${location.host}${import.meta.env.BASE_URL}__nowaki/hmr`);
 
 ws.addEventListener("message", (e) => {
   const msg = JSON.parse(e.data);
@@ -83,7 +83,7 @@ ws.addEventListener("close", () => {
   // wait for the dev server to restart, then reconnect
   const timer = setInterval(async () => {
     try {
-      await fetch("/", { method: "HEAD" });
+      await fetch(import.meta.env.BASE_URL, { method: "HEAD" });
       clearInterval(timer);
       location.reload();
     } catch {}

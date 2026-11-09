@@ -2,6 +2,7 @@
 // importing it from a client island doesn't pull in node:async_hooks.
 
 import { h } from "preact";
+import { withBase } from "./server/base-path.mjs";
 
 // route("/blog/[slug]", { slug: "x" }) → "/blog/x"。
 // A catch-all ([...path]) joins its array with "/". Each segment is encodeURIComponent'd.
@@ -16,6 +17,11 @@ export function route(pattern, params = {}) {
 }
 
 // Typed <a>. The client router intercepts clicks for SPA navigation (same as a plain <a>).
+// Under nowaki.config `basePath`, a root-relative href gets the base in front (`basePath={false}`
+// keeps it as written); a plain <a> is left alone.
 export function Link(props) {
-  return h("a", props);
+  if (!globalThis.__nowakiBase && props.basePath === undefined) return h("a", props);
+  const { basePath, ...rest } = props;
+  if (basePath !== false) rest.href = withBase(rest.href);
+  return h("a", rest);
 }

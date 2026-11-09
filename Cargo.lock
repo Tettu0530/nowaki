@@ -1678,6 +1678,8 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "tower-layer",
+ "tower-service",
  "ttf-parser",
  "xxhash-rust",
 ]

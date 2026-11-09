@@ -25,6 +25,7 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     // env.ts: validated before the build, which inlines its public values.
     crate::env_schema::finish(env_check, &mut core)?;
     crate::remote_images::configure(&mut core, &root, &config)?;
+    crate::site::configure(&mut core, &config)?;
     let (report, client) = core.build_with_client(&root.join("dist"))?;
     println!(
         "[nowaki] build: client {} / server {} modules",
@@ -273,10 +274,12 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
             format!("{own_redirects}{}", host.redirects),
         )?;
     }
+    // The host serves the output at basePath, so its paths carry it.
+    let base = routing.base_path.as_str();
     std::fs::write(
         out.join("_headers"),
         format!(
-            "{own_headers}/*\n{}/_nowaki/*\n  Cache-Control: public, max-age=31536000, immutable\n/__nowaki/boundaries\n  Content-Type: application/json\n{}",
+            "{own_headers}/*\n{}{base}/_nowaki/*\n  Cache-Control: public, max-age=31536000, immutable\n{base}/__nowaki/boundaries\n  Content-Type: application/json\n{}",
             static_security_headers(),
             host.headers
         ),
