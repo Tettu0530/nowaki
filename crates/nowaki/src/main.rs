@@ -79,6 +79,9 @@ enum Command {
         /// Output directory (relative to dir, or absolute)
         #[arg(short, long, default_value = "dist/static")]
         out: PathBuf,
+        /// Render from existing `dist/` (`nowaki build`); skips the transform and content-index steps
+        #[arg(long)]
+        skip_build: bool,
     },
     /// Update nowaki (CLI) and @nowaki-dev/runtime to the latest version
     Upgrade {
@@ -121,7 +124,7 @@ fn main() -> anyhow::Result<()> {
                 return tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()?
-                    .block_on(prerender::run(root.clone(), out));
+                    .block_on(prerender::run(root.clone(), out, false));
             }
             let dist = root.join("dist");
             // env.ts is checked in Node alongside the config read and the plugin host start.
@@ -180,7 +183,11 @@ fn main() -> anyhow::Result<()> {
                 .build()?
                 .block_on(start::run(root, port, host))
         }
-        Command::Prerender { dir, out } => {
+        Command::Prerender {
+            dir,
+            out,
+            skip_build,
+        } => {
             let root = dunce::canonicalize(&dir)?;
             let out = if out.is_absolute() {
                 out
@@ -190,7 +197,7 @@ fn main() -> anyhow::Result<()> {
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
-                .block_on(prerender::run(root, out))
+                .block_on(prerender::run(root, out, skip_build))
         }
         Command::Upgrade { dir, to } => {
             let root = dunce::canonicalize(&dir)?;

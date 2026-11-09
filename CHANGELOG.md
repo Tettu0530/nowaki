@@ -43,6 +43,12 @@ milestone's worth of work; the codename is noted per entry.
   types `env` and `import.meta.env` from the schemas. Public names must start
   with `PUBLIC_` and server names must not. New core API:
   `NowakiCore::set_public_env`.
+### Added
+- **`nowaki prerender --skip-build`:** render static HTML from an existing
+  `nowaki build` output (`dist/`) without re-running the transform, content
+  index, or route JS budgets. `env.ts` is still validated; app source changes
+  require a new build.
+
 ### Changed
 - **The CI performance regression gate also compares each PR with the latest
   release**, failing beyond −10% req/s or +20% TTFB against it (the existing
