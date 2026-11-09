@@ -46,7 +46,10 @@ milestone's worth of work; the codename is noted per entry.
 ### Changed
 - **`nowaki prerender`:** copies `dist/client` into `out/_nowaki` with hard links
   when the output tree is on the same filesystem (copies on cross-device
-  failure).
+  failure). On the same volume, files under `out/_nowaki` share inodes with
+  `dist/client`; `nowaki build` clears `dist/client` before rewriting, but
+  in-place edits under `out/_nowaki` (for example a post-deploy minifier) also
+  change `dist/client`.
 - **The CI performance regression gate also compares each PR with the latest
   release**, failing beyond −10% req/s or +20% TTFB against it (the existing
   limits against base stay the same). Every metric (build, dev startup, req/s and
