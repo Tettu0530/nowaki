@@ -36,9 +36,23 @@ function internalAnchor(target) {
     return null;
   }
   if (url.origin !== location.origin) return null;
+  // Outside nowaki.config basePath is another app on the same host: a full load.
+  if (import.meta.env.BASE_URL !== "/" && !underBase(url.pathname)) return null;
   // A path ending in a file name (/feed.xml, /og/a.png, /robots.txt) is a file, not a page.
   if (/\.[A-Za-z0-9]+$/.test(url.pathname.split("/").pop())) return null;
   return url;
+}
+
+// nowaki.config basePath. BASE_URL ("/app/", or "/") is inlined at build, and every use is guarded
+// by a comparison with "/", so an app without a base ships none of this.
+function underBase(p) {
+  const base = import.meta.env.BASE_URL.slice(0, -1);
+  return p === base || p.startsWith(base + "/");
+}
+// The path boundaries are matched by: the URL path without basePath.
+function routePath(p) {
+  if (import.meta.env.BASE_URL === "/" || !underBase(p)) return p;
+  return p.slice(import.meta.env.BASE_URL.length - 1) || "/";
 }
 
 // Resolves to null for a response that isn't a page (a download, JSON, a redirect to another
@@ -67,7 +81,7 @@ async function fetchPage(url) {
 // Fetch the SSR HTML for loading/error boundaries once and reuse it.
 function loadBoundaries() {
   if (!boundariesPromise) {
-    boundariesPromise = fetch("/__nowaki/boundaries", { headers: { "x-nowaki-nav": "1" } })
+    boundariesPromise = fetch(import.meta.env.BASE_URL + "__nowaki/boundaries", { headers: { "x-nowaki-nav": "1" } })
       .then((r) => (r.ok ? r.json() : { loading: [], error: [] }))
       .catch(() => ({ loading: [], error: [] }));
   }
@@ -103,7 +117,7 @@ async function navigate(url, { push = true } = {}) {
     if (token !== navToken) return;
     const { loading } = await loadBoundaries();
     if (token !== navToken) return;
-    showLoading(matchBoundary(loading, url.pathname));
+    showLoading(matchBoundary(loading, import.meta.env.BASE_URL === "/" ? url.pathname : routePath(url.pathname)));
   }, 150);
 
   const result = await pending;
@@ -218,7 +232,7 @@ function showLoading(boundary) {
 async function showError(url, message) {
   curDoc = null;
   const { error } = await loadBoundaries();
-  const boundary = matchBoundary(error, url.pathname);
+  const boundary = matchBoundary(error, import.meta.env.BASE_URL === "/" ? url.pathname : routePath(url.pathname));
   if (boundary) {
     const tmp = new DOMParser().parseFromString(`<body>${boundary.html}</body>`, "text/html");
     for (const slot of tmp.body.querySelectorAll("[data-nowaki-error]")) slot.textContent = message;

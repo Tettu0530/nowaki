@@ -63,7 +63,8 @@ struct Family {
 pub fn build_dist(root: &Path, dist: &Path, config: &Value) -> Result<()> {
     let json_out = dist.join("server/fonts.json");
     let _ = std::fs::remove_file(&json_out);
-    let Some(out) = build(root, config, &dist.join("client"), "/_nowaki/")? else {
+    let base = crate::site::asset_base();
+    let Some(out) = build(root, config, &dist.join("client"), base)? else {
         return Ok(());
     };
     std::fs::create_dir_all(dist.join("server"))?;

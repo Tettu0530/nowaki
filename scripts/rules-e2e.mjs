@@ -1,7 +1,9 @@
 // nowaki.config routing end to end: redirects, rewrites, headers, basePath and trailingSlash at
 // every front, on a small app generated into a temp directory (linked to examples/hello's
 // node_modules). Two configs: A (redirects / rewrites / headers) and B (basePath "/app" with
-// trailingSlash "never").
+// trailingSlash "never", plus an island, a live island, a server function, a session and <Link>,
+// so asset URLs, RPC, the live transports, the boundaries fetch and the cookie Path are checked
+// under the base).
 //   node scripts/rules-e2e.mjs <mode>... [--port 4820]
 // Modes: start (`nowaki start`), dev (`nowaki dev`), node (node adapter), cloudflare (the worker's
 // fetch, called in Node), vercel (config.json routes + the function), static (prerender output).
@@ -81,6 +83,29 @@ export default function Isr({ data }) { return <main>{\`ISR render:\${data.n}\`}
 export function POST(ctx) { return { body: { path: ctx.url.pathname } }; }\n`,
   "public/logo.txt": "LOGO\n",
 };
+// App B only: what basePath has to reach besides routes.
+const FILES_B = {
+  "actions/hello.ts": `"use server";\nexport async function hello() { return "HELLO_FN"; }\n`,
+  "islands/Count.tsx": `import { useState } from "preact/hooks";
+import { hello } from "../actions/hello.ts";
+export default function Count() {
+  const [n, setN] = useState("");
+  return <button onClick={async () => setN(await hello())}>{\`COUNT \${n}\`}</button>;
+}\n`,
+  "islands/Tick.tsx": `export const live = { state: () => ({ n: 0 }), on: { inc: (s) => ({ n: s.n + 1 }) } };
+export default function Tick({ state }) { return <p>{\`TICK \${state.n}\`}<button data-live="inc">+</button></p>; }\n`,
+  "routes/kit.tsx": `import Count from "../islands/Count.tsx";
+import Tick from "../islands/Tick.tsx";
+import { Link } from "@nowaki-dev/runtime/navigation";
+export default function Kit() { return <main><Count /><Tick /><Link href="/about">LINK</Link><a href="/about">PLAIN</a></main>; }\n`,
+  "routes/loading.tsx": `export default function Loading() { return <p>{"LOADING"}</p>; }\n`,
+  "routes/login.tsx": `export async function action(ctx) {
+  await ctx.session.set("user", "alice");
+  return ctx.redirect("/about");
+}
+export default function Login() { return <main>{"LOGIN"}</main>; }\n`,
+};
+const SESSION_SECRET = "rules-e2e-session-secret-0123456789abcdef";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "nowaki-rules-e2e-"));
 const children = new Set();
@@ -91,9 +116,9 @@ const cleanup = () => {
 process.on("exit", cleanup);
 process.on("SIGINT", () => process.exit(130));
 
-function makeApp(name, config) {
+function makeApp(name, config, extra = {}) {
   const dir = path.join(tmp, name);
-  for (const [file, text] of Object.entries({ ...FILES, "nowaki.config.mjs": config })) {
+  for (const [file, text] of Object.entries({ ...FILES, ...extra, "nowaki.config.mjs": config })) {
     mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
     writeFileSync(path.join(dir, file), text);
   }
@@ -144,7 +169,7 @@ async function serve(cmd, argv, opts, port) {
 }
 
 // A request with the path sent verbatim: { status, headers, body }.
-const httpClient = (port) => (p, { method = "GET", headers = {} } = {}) =>
+const httpClient = (port) => (p, { method = "GET", headers = {}, body } = {}) =>
   new Promise((resolve) => {
     const req = http.request({ host: "127.0.0.1", port, path: p, method, headers }, (res) => {
       let body = "";
@@ -153,7 +178,7 @@ const httpClient = (port) => (p, { method = "GET", headers = {} } = {}) =>
       res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body }));
     });
     req.on("error", (e) => resolve({ status: 0, headers: {}, body: String(e) }));
-    req.end();
+    req.end(body);
   });
 
 const offSite = (loc) => loc === undefined || /^\/\/|^\/\\/.test(loc);
@@ -214,6 +239,64 @@ async function checksA(label, req, { isr = false, assets = true } = {}) {
   }
 }
 
+const unescapeAttr = (v) => v.replaceAll("&quot;", '"').replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
+const attr = (tag, name) => {
+  const m = tag.match(new RegExp(` ${name}="([^"]*)"`));
+  return m ? unescapeAttr(m[1]) : undefined;
+};
+
+// What basePath reaches besides routes: asset URLs, RPC, live events (and the socket where there
+// is one), the boundaries fetch, the session cookie, <Link>. `fnId` gives the server function id.
+async function checksBase(label, req, { assets = true, fnId, ws, origin } = {}) {
+  const t = (s) => `${label} B: ${s}`;
+  let r = await req("/app/kit");
+  check(t("kit page renders"), r.status === 200 && r.body.includes("COUNT") && r.body.includes("TICK 0"), `${r.status} ${r.body.slice(0, 200)}`);
+  const kit = r.body;
+  check(t("<Link> gets basePath, a plain <a> is left as written"), kit.includes('href="/app/about">LINK') && kit.includes('href="/about">PLAIN'), kit.slice(0, 400));
+  if (assets) {
+    const runtime = kit.match(/<script id="nowaki-runtime"[^>]*>/)?.[0] ?? "";
+    const island = kit.match(/<nowaki-island [^>]*>/)?.[0] ?? "";
+    check(t("runtime, router and island URLs are under basePath"),
+      attr(runtime, "src")?.startsWith("/app/_nowaki/") && attr(runtime, "data-router")?.startsWith("/app/_nowaki/") && attr(island, "src")?.startsWith("/app/_nowaki/Count."), `${runtime} ${island}`);
+    check(t("every preload is under basePath"), [...kit.matchAll(/rel="modulepreload" href="([^"]+)"/g)].every((m) => m[1].startsWith("/app/_nowaki/")));
+    r = await req(attr(runtime, "src") ?? "/app/_nowaki/missing");
+    check(t("the runtime is served under basePath"), r.status === 200 && r.body.length > 0, `${r.status}`);
+    r = await req(attr(island, "src") ?? "/app/_nowaki/missing");
+    check(t("the island chunk is served under basePath"), r.status === 200, `${r.status}`);
+    r = await req("/app/_nowaki/manifest.json");
+    check(t("assets under basePath"), r.status === 200, `${r.status}`);
+    r = await req("/_nowaki/manifest.json");
+    check(t("no assets at the root"), r.status === 404, `${r.status}`);
+  }
+  r = await req("/app/__nowaki/boundaries");
+  check(t("boundaries under basePath"), r.status === 200 && r.body.includes("LOADING"), `${r.status} ${r.body.slice(0, 120)}`);
+  const id = await fnId();
+  r = await req("/app/__nowaki/fn", { method: "POST", headers: { "content-type": "application/json", "x-nowaki-rpc": "1" }, body: JSON.stringify({ id, args: [] }) });
+  check(t("server function call under basePath"), r.status === 200 && r.body.includes("HELLO_FN"), `${id} ${r.status} ${r.body.slice(0, 120)}`);
+  const live = kit.match(/<nowaki-live [^>]*>/)?.[0] ?? "";
+  r = await req("/app/__nowaki/live-event", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-nowaki-live": "1" },
+    body: JSON.stringify({ name: attr(live, "name"), state: JSON.parse(attr(live, "state") ?? "null"), sig: attr(live, "sig"), handler: "inc", payload: {} }),
+  });
+  check(t("live event (POST) under basePath"), r.status === 200 && r.body.includes("TICK 1"), `${r.status} ${r.body.slice(0, 160)}`);
+  if (ws) {
+    const opened = await new Promise((resolve) => {
+      const sock = new WebSocket(`${ws}/app/__nowaki/live`);
+      const timer = setTimeout(() => resolve(false), 5000);
+      sock.onopen = () => (clearTimeout(timer), sock.close(), resolve(true));
+      sock.onerror = () => (clearTimeout(timer), resolve(false));
+    });
+    check(t("the live socket opens under basePath"), opened);
+  }
+  r = await req("/app/login", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...(origin ? { origin } : {}) }, body: "" });
+  const cookie = [r.headers["set-cookie"] ?? []].flat().join("\n");
+  check(t("ctx.redirect gets basePath"), r.status === 302 && r.headers.location === "/app/about", `${r.status} ${r.headers.location}`);
+  check(t("the session cookie is scoped to basePath"), /nowaki_session=[^;]+;.*Path=\/app;/.test(cookie), cookie);
+  r = await req("/app/__nowaki/live-render", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  check(t("internal endpoints stay unreachable under basePath"), r.status === 404 || r.status === 405, `${r.status}`);
+}
+
 async function checksB(label, req, { assets = true } = {}) {
   const t = (s) => `${label} B: ${s}`;
   let r = await req("/app");
@@ -235,17 +318,16 @@ async function checksB(label, req, { assets = true } = {}) {
   r = await req("/app/api/echo/", { method: "POST", headers: { "content-type": "application/json" } });
   check(t("POST with a trailing slash isn't redirected"), r.status === 200 && r.body.includes('"/app/api/echo/"'), `${r.status} ${r.body.slice(0, 100)}`);
   r = await req("/__nowaki/boundaries");
-  check(t("framework endpoints stay at the root"), r.status === 200, `${r.status}`);
+  check(t("framework endpoints answer at the root too"), r.status === 200, `${r.status}`);
   r = await req("/app/about", { headers: { "x-nowaki-route-path": "/secret" } });
   check(t("client x-nowaki-route-path is ignored"), r.body.includes("ABOUT url:/app/about") && !r.body.includes("SECRET_ROUTE"));
-  if (assets) {
-    r = await req("/_nowaki/manifest.json");
-    check(t("assets stay at the root"), r.status === 200, `${r.status}`);
-  }
 }
 
+// The server function id from the build's allowlist.
+const builtFnId = (dir) => () => Object.keys(JSON.parse(readFileSync(path.join(dir, "dist/server/functions.json"), "utf8")))[0];
+
 const appA = makeApp("a", CONFIG_A);
-const appB = makeApp("b", CONFIG_B);
+const appB = makeApp("b", CONFIG_B, FILES_B);
 
 try {
   for (const mode of modes) {
@@ -253,11 +335,12 @@ try {
     if (mode === "start") {
       build(appA);
       build(appB);
-      const env = { ...process.env, NOWAKI_ISR_WARM: "0" };
+      const env = { ...process.env, NOWAKI_ISR_WARM: "0", NOWAKI_SESSION_SECRET: SESSION_SECRET };
       const stopA = await serve(BIN, ["start", appA, "--port", String(PORT)], { env }, PORT);
       const stopB = await serve(BIN, ["start", appB, "--port", String(PORT + 1)], { env }, PORT + 1);
       await checksA("start", httpClient(PORT), { isr: true });
       await checksB("start", httpClient(PORT + 1));
+      await checksBase("start", httpClient(PORT + 1), { fnId: builtFnId(appB), ws: `ws://127.0.0.1:${PORT + 1}` });
       stopA();
       stopB();
     } else if (mode === "dev") {
@@ -268,6 +351,11 @@ try {
       const mod = await reqA("/routes/about.tsx");
       check("dev A: app modules are served ahead of the rules", mod.status === 200 && /javascript/.test(mod.headers["content-type"] ?? ""));
       await checksB("dev", httpClient(PORT + 1), { assets: false });
+      // dev serves the "use server" module's client proxy at its own path.
+      const devFnId = async () => (await httpClient(PORT + 1)("/actions/hello.ts")).body.match(/__nowakiCall\("([^"]+)"\)/)?.[1];
+      const proxy = await httpClient(PORT + 1)("/actions/hello.ts");
+      check("dev B: the server function proxy posts under basePath", proxy.body.includes('"/app/__nowaki/fn"'), proxy.body.slice(0, 300));
+      await checksBase("dev", httpClient(PORT + 1), { assets: false, fnId: devFnId, ws: `ws://127.0.0.1:${PORT + 1}` });
       const rt = await httpClient(PORT + 1)("/node_modules/@nowaki-dev/runtime/client/router.js");
       check("dev B: the runtime is served at the root under basePath", rt.status === 200, `${rt.status}`);
       stopA();
@@ -276,9 +364,10 @@ try {
       build(appA, "node");
       build(appB, "node");
       const stopA = await serve("node", [path.join(appA, "dist/server/index.mjs")], { env: { ...process.env, PORT: String(PORT), NOWAKI_HOST: "127.0.0.1" } }, PORT);
-      const stopB = await serve("node", [path.join(appB, "dist/server/index.mjs")], { env: { ...process.env, PORT: String(PORT + 1), NOWAKI_HOST: "127.0.0.1" } }, PORT + 1);
+      const stopB = await serve("node", [path.join(appB, "dist/server/index.mjs")], { env: { ...process.env, PORT: String(PORT + 1), NOWAKI_HOST: "127.0.0.1", NOWAKI_SESSION_SECRET: SESSION_SECRET } }, PORT + 1);
       await checksA("node", httpClient(PORT));
       await checksB("node", httpClient(PORT + 1));
+      await checksBase("node", httpClient(PORT + 1), { fnId: builtFnId(appB) });
       stopA();
       stopB();
     } else if (mode === "cloudflare") {
@@ -296,10 +385,17 @@ try {
           },
         };
         const req = async (p, init = {}) => {
-          const res = await worker.fetch(new Request(`https://app.example${p}`, { redirect: "manual", ...init }), { ASSETS });
-          return { status: res.status, headers: Object.fromEntries(res.headers), body: await res.text() };
+          const res = await worker.fetch(new Request(`https://app.example${p}`, { redirect: "manual", ...init }), { ASSETS, NOWAKI_SESSION_SECRET: SESSION_SECRET });
+          const headers = Object.fromEntries(res.headers);
+          if (res.headers.getSetCookie().length) headers["set-cookie"] = res.headers.getSetCookie();
+          return { status: res.status, headers, body: await res.text() };
         };
         await run("cloudflare", req);
+        if (dir === appB) {
+          check("cloudflare B: client files and public/ are under basePath in the assets directory",
+            existsSync(path.join(workerDir, "assets/app/_nowaki/manifest.json")) && existsSync(path.join(workerDir, "assets/app/logo.txt")) && !existsSync(path.join(workerDir, "assets/_nowaki")));
+          await checksBase("cloudflare", req, { fnId: builtFnId(appB), origin: "https://app.example" });
+        }
       }
     } else if (mode === "vercel") {
       build(appA, "vercel");
@@ -317,6 +413,14 @@ try {
       const stop = await serve("node", ["-e", `import(${JSON.stringify(pathToFileURL(path.join(funcDir, "index.mjs")).href)}).then(m=>require("http").createServer(m.default).listen(${PORT}, "127.0.0.1"))`], { cwd: funcDir }, PORT);
       await checksA("vercel function", httpClient(PORT), { assets: false });
       stop();
+      build(appB, "vercel");
+      const out = path.join(appB, ".vercel/output");
+      const configB = JSON.parse(readFileSync(path.join(out, "config.json"), "utf8"));
+      check("vercel B: client files and public/ are under basePath",
+        existsSync(path.join(out, "static/app/_nowaki/manifest.json")) && existsSync(path.join(out, "static/app/logo.txt")) && !existsSync(path.join(out, "static/_nowaki")));
+      check("vercel B: the static routes carry basePath",
+        configB.routes.some((r) => r.src && new RegExp(r.src).test("/app/_nowaki/a.js") && r.headers?.["cache-control"]?.includes("immutable")) &&
+          configB.routes.some((r) => r.src && new RegExp(r.src).test("/app/logo.txt")));
     } else if (mode === "static") {
       const outA = build(appA, "static");
       const redirects = readFileSync(path.join(appA, "dist/static/_redirects"), "utf8");
@@ -329,6 +433,12 @@ try {
       check("static B: pages requested under basePath", readFileSync(path.join(appB, "dist/static/about/index.html"), "utf8").includes("ABOUT url:/app/about"));
       check("static B: _redirects carries basePath", readFileSync(path.join(appB, "dist/static/_redirects"), "utf8").includes("/app/legacy /app/about 307\n"));
       check("static B: warns about basePath and trailingSlash", /basePath/.test(outB) && /trailingSlash/.test(outB));
+      const kit = readFileSync(path.join(appB, "dist/static/kit/index.html"), "utf8");
+      check("static B: pages reference assets under basePath, <Link> gets it", /src="\/app\/_nowaki\/islands\.[0-9a-f]+\.js"/.test(kit) && kit.includes('href="/app/about">LINK') && !/"\/_nowaki\//.test(kit), kit.slice(0, 300));
+      check("static B: assets and boundaries stay at the output root (the host serves it at the base)",
+        existsSync(path.join(appB, "dist/static/_nowaki/manifest.json")) && existsSync(path.join(appB, "dist/static/__nowaki/boundaries")));
+      const headersB = readFileSync(path.join(appB, "dist/static/_headers"), "utf8");
+      check("static B: _headers paths carry basePath", headersB.includes("\n/app/_nowaki/*\n") && headersB.includes("\n/app/__nowaki/boundaries\n"), headersB);
     }
   }
 } catch (e) {

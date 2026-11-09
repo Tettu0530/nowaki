@@ -44,6 +44,8 @@ export interface LinkProps {
   rel?: string;
   /** Disables SPA navigation and falls back to a full page load. */
   "data-no-router"?: boolean;
+  /** `false` keeps `href` as written under nowaki.config `basePath` (default: the base is added). */
+  basePath?: boolean;
   children?: unknown;
   [key: string]: unknown;
 }

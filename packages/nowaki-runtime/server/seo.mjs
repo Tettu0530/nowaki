@@ -29,6 +29,8 @@ export function resolveSite(fromConfig) {
   return normalizeSite(env || fromConfig);
 }
 
+import { basePath, withBase } from "./base-path.mjs";
+
 const esc = (s) =>
   String(s).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -48,9 +50,10 @@ export function mergeMeta(...metas) {
 }
 
 /// An absolute URL for `value` (absolute already, or a path against the site / request origin).
+/// A root-relative path gets nowaki.config `basePath` unless it already starts with it.
 function absolute(value, base) {
   try {
-    return new URL(String(value), base).href;
+    return new URL(withBase(String(value)), base).href;
   } catch {
     return String(value);
   }
@@ -146,5 +149,5 @@ export function sitemapXml(site, urls, { staticOutput = false } = {}) {
 
 /// robots.txt that allows everything and points at the sitemap when there is a site.
 export function robotsTxt(site) {
-  return `User-agent: *\nAllow: /\n${site ? `\nSitemap: ${site}/sitemap.xml\n` : ""}`;
+  return `User-agent: *\nAllow: /\n${site ? `\nSitemap: ${site}${basePath()}/sitemap.xml\n` : ""}`;
 }

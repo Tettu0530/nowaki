@@ -102,8 +102,13 @@ export interface LoaderContext {
   /** Deletes a cookie (Max-Age=0, chainable). */
   deleteCookie(name: string, opts?: CookieOptions): this;
 
-  /** Redirects (302 by default). Return it from a loader, action, or middleware. */
-  redirect(to: string, status?: number): NowakiResult;
+  /**
+   * Redirects (302 by default). Return it from a loader, action, or middleware. Under
+   * nowaki.config `basePath`, a path starting with `/` gets the base in front unless it already
+   * starts with it; `{ basePath: false }` sends `to` as written.
+   */
+  redirect(to: string, status?: number, opts?: { basePath?: boolean }): NowakiResult;
+  redirect(to: string, opts: { basePath?: boolean }): NowakiResult;
   /** Returns a JSON response. */
   json<T>(data: T, init?: ResponseInit): NowakiResult;
   /** Returns an HTML response. */

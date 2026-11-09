@@ -12,6 +12,7 @@ import { setContent, validateContent } from "./content-store.mjs";
 import { initServerEnv } from "./env-schema.mjs";
 import { setServerEnv } from "./env-server.mjs";
 import { configureSessions, sessionConfigOf } from "./session.mjs";
+import { setBasePath } from "./base-path.mjs";
 
 /// `defaults`: [name, value] pairs (nowaki.config `headers`) set when the result doesn't set them,
 /// before the security headers, so they win over those.
@@ -82,6 +83,7 @@ function installIslandHook(registry, liveRegistry, live) {
 ///   envModule        : the compiled env.ts (dist/server/env.js) when the app has one
 ///   envPublic        : the public values the build inlined (dist/server/env-public.json)
 ///   sessionModule    : the compiled session.ts (dist/server/session.js) when the app has one
+///   basePath         : nowaki.config `basePath` ("/app"), when set
 /// Returns `(request, bindings?, front?) => Promise<Response>`; `bindings` (the Worker's `env`) adds
 /// its string vars and secrets to process.env for validating env.ts. `front` comes from the
 /// worker's nowaki.config routing (front.mjs): `{ routePath, headers }`, the path to route by and
@@ -100,11 +102,14 @@ export function createFetchHandler({
   envModule,
   envPublic,
   sessionModule,
+  basePath,
 }) {
+  setBasePath(basePath);
+  const assetBase = `${basePath ?? ""}/_nowaki/`;
   const registry = new Map();
   for (const [name, comp] of Object.entries(islandComponents ?? {})) {
     if (typeof comp === "function") {
-      registry.set(comp, { name, src: `/_nowaki/${manifest.islands?.[name] ?? ""}` });
+      registry.set(comp, { name, src: `${assetBase}${manifest.islands?.[name] ?? ""}` });
     }
   }
   const liveRegistry = new Map();
@@ -144,13 +149,13 @@ export function createFetchHandler({
       live && liveByName.size
         ? { lookup: (name) => liveByName.get(name) ?? null, render: live.render }
         : null,
-    renderDocument: (args) => prodDocument(manifest, args),
-    renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta),
-    routeCss: (key) => (manifest.routeCss?.[key] ?? []).map((f) => `/_nowaki/${f}`),
+    renderDocument: (args) => prodDocument(manifest, args, { assetBase }),
+    renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta, { assetBase }),
+    routeCss: (key) => (manifest.routeCss?.[key] ?? []).map((f) => `${assetBase}${f}`),
     routeScripts: (key) =>
       (manifest.routeScripts?.[key] ?? []).map((f) => ({
-        src: `/_nowaki/${f}`,
-        preload: (manifest.scriptPreload?.[f] ?? []).map((d) => `/_nowaki/${d}`),
+        src: `${assetBase}${f}`,
+        preload: (manifest.scriptPreload?.[f] ?? []).map((d) => `${assetBase}${d}`),
       })),
     // render500 has already logged it.
     renderError: () => {
