@@ -136,6 +136,17 @@ nowaki.config.mjs   plugins (optional)
     <a href={route("/blog/[slug]", { slug })}>Post</a>      // dynamic, params typed
     ```
     Unknown paths, missing params, and wrong param keys are compile errors.
+11. **Markdoc (optional)** — [Markdoc](https://markdoc.dev) via the official
+    `@nowaki-dev/markdoc` plugin (`npm install @nowaki-dev/markdoc`). Register it
+    in `nowaki.config.mjs` and import `.mdoc` files from routes; they are not
+    routes themselves. Upstream docs: `packages/nowaki-markdoc/README.md`.
+    ```js
+    // nowaki.config.mjs
+    import { markdoc } from "@nowaki-dev/markdoc";
+    export default {
+      plugins: [markdoc({ components: "./markdoc/components.tsx", tags: { /* … */ } })],
+    };
+    ```
 
 ## Security
 

@@ -127,7 +127,7 @@ Routing features that larger apps and existing Next.js / Remix users expect.
 
 **Exit criteria**: a photo gallery opens a photo in a modal on client navigation and as a full page on reload (intercepting + parallel routes). The same app is served under a `basePath` in two locales, with a signed-in session, and fails to start when a required env var is missing.
 
-- [ ] Markdoc as an official plugin (it runs on the Node side through the plugin host) (moved from v0.17)
+- [x] Markdoc as an official plugin (it runs on the Node side through the plugin host) (moved from v0.17)
 - [ ] Remote images in `<Image>` with an allow-list (fetched and optimized at build time) (moved from v0.17)
 - [ ] Route groups: `(group)` directories that share layouts without adding a URL segment
 - [ ] Parallel routes (`@slot` directories rendered side by side in a layout) and intercepting routes (`(.)photo`, for modals)
