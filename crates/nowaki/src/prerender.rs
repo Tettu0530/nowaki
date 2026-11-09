@@ -455,6 +455,8 @@ mod tests {
         std::fs::create_dir_all(from.join("sub")).unwrap();
         std::fs::write(from.join("sub/a.js"), b"chunk").unwrap();
         std::fs::write(from.join("manifest.json"), b"{}").unwrap();
+        // Same as `run`: `out/_nowaki` already exists before we link into it.
+        std::fs::create_dir_all(&to).unwrap();
         link_client_dir(&from, &to).unwrap();
         assert_eq!(
             std::fs::read_to_string(to.join("sub/a.js")).unwrap(),
