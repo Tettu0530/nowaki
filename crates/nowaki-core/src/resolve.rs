@@ -43,6 +43,30 @@ pub fn alias_specifier(spec: &str) -> Option<&'static str> {
     }
 }
 
+/// Splits a remote image import (`https://cdn.example.com/a.jpg?image&w=400`) into the URL to
+/// fetch and the `?image` options (without `?`). Nowaki's options start at the `image` key;
+/// anything before it belongs to the remote URL (`…/a.jpg?v=2&image` fetches `…/a.jpg?v=2`).
+/// None for anything else, including remote imports without `image` (left as URL imports).
+pub fn split_remote_spec(spec: &str) -> Option<(&str, &str)> {
+    if !(spec.starts_with("https://") || spec.starts_with("http://")) {
+        return None;
+    }
+    let q = spec.find('?')?;
+    let mut start = q + 1;
+    loop {
+        let end = spec[start..].find('&').map_or(spec.len(), |i| start + i);
+        let key = spec[start..end].split('=').next().unwrap_or("");
+        if key == "image" {
+            let url = &spec[..start - 1];
+            return (!url.is_empty()).then_some((url, &spec[start..]));
+        }
+        if end == spec.len() {
+            return None;
+        }
+        start = end + 1;
+    }
+}
+
 /// Client builds only: `preact/jsx-runtime` resolves to the runtime's tiny `createElement`
 /// wrapper (`client/jsx-runtime.js`) instead of Preact's own module, which saves about 0.9 KB gzip
 /// on every page with an island. None when the app's runtime predates it.
@@ -137,6 +161,29 @@ mod tests {
         assert_eq!(alias_specifier("lodash"), None);
         // no aliasing on partial matches
         assert_eq!(alias_specifier("react-icons"), None);
+    }
+
+    #[test]
+    fn splits_remote_image_specifiers() {
+        assert_eq!(
+            split_remote_spec("https://cdn.example.com/a.jpg?image"),
+            Some(("https://cdn.example.com/a.jpg", "image"))
+        );
+        assert_eq!(
+            split_remote_spec("https://cdn.example.com/a.jpg?v=2&image&w=400"),
+            Some(("https://cdn.example.com/a.jpg?v=2", "image&w=400"))
+        );
+        assert_eq!(
+            split_remote_spec("http://127.0.0.1:4860/a.png?image=1"),
+            Some(("http://127.0.0.1:4860/a.png", "image=1"))
+        );
+        assert_eq!(split_remote_spec("https://cdn.example.com/a.jpg"), None);
+        assert_eq!(
+            split_remote_spec("https://cdn.example.com/a.jpg?images"),
+            None
+        );
+        assert_eq!(split_remote_spec("./a.jpg?image"), None);
+        assert_eq!(split_remote_spec("//cdn.example.com/a.jpg?image"), None);
     }
 
     #[test]

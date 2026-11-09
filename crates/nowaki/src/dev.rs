@@ -79,6 +79,9 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         eprintln!("[nowaki] {e:#}");
         None
     });
+    if let Err(e) = crate::remote_images::configure(&mut core, &root, &config) {
+        eprintln!("[nowaki] {e:#}");
+    }
     // Fonts build in the background: startup doesn't wait on a download, and the renderer picks
     // up .nowaki/fonts.json once it exists.
     {

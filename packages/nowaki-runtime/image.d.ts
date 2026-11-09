@@ -12,7 +12,11 @@ export interface ImageSource {
 }
 
 export type ImageProps = Omit<JSX.HTMLAttributes<HTMLImageElement>, "src" | "srcset" | "width" | "height"> & {
-  /** A `?image` import, or a plain URL (then set width / height yourself). */
+  /**
+   * A `?image` import (local, or a remote URL that `images.remotePatterns` allows, fetched at
+   * build time), or a plain URL string: rendered as a bare `<img>`, not optimized (set width /
+   * height yourself).
+   */
   src: ImageSource | string;
   /** Required; use "" for a decorative image. */
   alt: string;

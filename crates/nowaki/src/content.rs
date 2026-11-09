@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use comrak::nodes::NodeValue;
 use comrak::{format_html_with_plugins, parse_document, Arena, Options};
+use nowaki_core::remote_image::RemoteImages;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -51,7 +52,10 @@ pub struct Entry {
 /// One Markdown image to turn into a `<picture>` (see `collect`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageRef {
+    /// The image file (for a remote image, its cached download, set by `fill_images`).
     pub abs: PathBuf,
+    /// A remote image `images.remotePatterns` allows: its URL.
+    pub remote: Option<String>,
     pub alt: String,
     pub title: String,
 }
@@ -80,6 +84,15 @@ pub enum Images {
 }
 
 pub fn collect(root: &Path, images: &Images) -> Result<BTreeMap<String, Vec<Entry>>> {
+    collect_with(root, images, crate::remote_images::current().as_deref())
+}
+
+/// [`collect`] with the remote image settings (None: remote images stay plain `<img>`).
+fn collect_with(
+    root: &Path,
+    images: &Images,
+    remote: Option<&RemoteImages>,
+) -> Result<BTreeMap<String, Vec<Entry>>> {
     let dir = root.join("content");
     let mut out = BTreeMap::new();
     let Ok(read) = std::fs::read_dir(&dir) else {
@@ -109,7 +122,7 @@ pub fn collect(root: &Path, images: &Images) -> Result<BTreeMap<String, Vec<Entr
         use rayon::prelude::*;
         let read: Vec<Result<Option<Entry>>> = files
             .par_iter()
-            .map(|path| read_entry(root, &coll, path))
+            .map(|path| read_entry(root, &coll, path, remote))
             .collect();
         for e in read {
             if let Some(e) = e? {
@@ -129,7 +142,7 @@ pub fn collect(root: &Path, images: &Images) -> Result<BTreeMap<String, Vec<Entr
         }
         out.insert(name, entries);
     }
-    fill_images(root, &mut out, images)?;
+    fill_images(root, &mut out, images, remote)?;
     Ok(out)
 }
 
@@ -203,7 +216,12 @@ fn rel(root: &Path, p: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
+fn read_entry(
+    root: &Path,
+    coll: &Path,
+    path: &Path,
+    remote: Option<&RemoteImages>,
+) -> Result<Option<Entry>> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     let file = rel(root, path);
     let slug = {
@@ -221,11 +239,16 @@ fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
             // is read (building inside this parallel read could wait on itself, see collect).
             let mut image_refs = Vec::new();
             let mut image = |url: &str, alt: &str, title: &str| -> Result<Option<String>> {
-                let Some(abs) = local_image_path(dir, url)? else {
-                    return Ok(None);
+                let (abs, remote_url) = match remote_image_url(&file, url, remote) {
+                    Some(u) => (PathBuf::new(), Some(u)),
+                    None => match local_image_path(dir, url)? {
+                        Some(abs) => (abs, None),
+                        None => return Ok(None),
+                    },
                 };
                 image_refs.push(ImageRef {
                     abs,
+                    remote: remote_url,
                     alt: alt.to_string(),
                     title: title.to_string(),
                 });
@@ -478,6 +501,25 @@ fn local_image_path(dir: &Path, url: &str) -> Result<Option<PathBuf>> {
     Ok(Some(dunce::canonicalize(&abs).unwrap_or(abs)))
 }
 
+/// A remote Markdown image (`![alt](https://…)`) that `images.remotePatterns` allows: its URL,
+/// to go through the image pipeline. Other remote images stay as Markdown wrote them, with a
+/// warning when remote patterns are configured.
+fn remote_image_url(file: &str, url: &str, remote: Option<&RemoteImages>) -> Option<String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return None;
+    }
+    let remote = remote?;
+    if remote.allowed(url) {
+        return Some(url.to_string());
+    }
+    if !remote.patterns().is_empty() {
+        eprintln!(
+            "[nowaki] warning: {file}: remote image {url} doesn't match images.remotePatterns; it stays a plain <img>"
+        );
+    }
+    None
+}
+
 /// The image set for a file: dev URLs, or the variants written into dist/client.
 fn image_set(root: &Path, abs: &Path, images: &Images) -> Result<nowaki_core::image::ImageSet> {
     let q = nowaki_core::image::ImageQuery::default();
@@ -495,8 +537,36 @@ fn image_set(root: &Path, abs: &Path, images: &Images) -> Result<nowaki_core::im
 /// entry's placeholders for its `<picture>`. This runs after the entries are read, outside that
 /// parallel loop: building an image (its own parallel variants) while other entries wait on the
 /// same file deadlocked rayon, whose waiting worker picks up one of those entries.
-fn fill_images(root: &Path, all: &mut BTreeMap<String, Vec<Entry>>, images: &Images) -> Result<()> {
+fn fill_images(
+    root: &Path,
+    all: &mut BTreeMap<String, Vec<Entry>>,
+    images: &Images,
+    remote: Option<&RemoteImages>,
+) -> Result<()> {
     use rayon::prelude::*;
+    // Remote images first, downloading every miss in one go.
+    let mut urls: Vec<String> = all
+        .values()
+        .flatten()
+        .flat_map(|e| e.image_refs.iter().filter_map(|r| r.remote.clone()))
+        .collect();
+    urls.sort();
+    urls.dedup();
+    if let (Some(remote), false) = (remote, urls.is_empty()) {
+        let mut files = std::collections::HashMap::new();
+        for (url, file) in urls.iter().zip(remote.ensure(&urls)) {
+            files.insert(url.clone(), file?);
+        }
+        for r in all
+            .values_mut()
+            .flatten()
+            .flat_map(|e| e.image_refs.iter_mut())
+        {
+            if let Some(url) = &r.remote {
+                r.abs = files[url].clone();
+            }
+        }
+    }
     let mut files: Vec<PathBuf> = all
         .values()
         .flatten()
@@ -627,6 +697,7 @@ pub fn render_markdown_with(md: &str, image: &mut ImageHtml) -> Result<(String, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn splits_yaml_frontmatter() {
@@ -997,5 +1068,70 @@ mod tests {
         assert!(a.html.is_none() && a.headings.is_none());
         assert_eq!(b.data, serde_json::json!({ "title": "B" }));
         assert_eq!(b.module.as_deref(), Some("content/docs/b.js"));
+    }
+
+    /// Writes a small PNG for every request, counting fetcher calls.
+    struct FakeFetch(std::sync::atomic::AtomicUsize);
+
+    impl nowaki_core::RemoteFetch for FakeFetch {
+        fn fetch(
+            &self,
+            _: &[nowaki_core::RemotePattern],
+            reqs: &[nowaki_core::remote_image::RemoteRequest],
+        ) -> Vec<Result<()>> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            reqs.iter()
+                .map(|r| {
+                    std::fs::create_dir_all(&r.dir)?;
+                    let file = format!("{}.png", r.stem);
+                    let png = Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("../../examples/hello/photo.png");
+                    std::fs::copy(png, r.dir.join(&file))?;
+                    std::fs::write(
+                        r.dir.join("meta.json"),
+                        serde_json::json!({ "url": r.url, "file": file }).to_string(),
+                    )?;
+                    Ok(())
+                })
+                .collect()
+        }
+    }
+
+    #[test]
+    fn allowed_remote_markdown_images_become_pictures_in_one_fetch() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("content/docs")).unwrap();
+        let md = "![a](https://img.test/p/a.png) ![b](https://img.test/p/b.png)\n\n![other](https://other.test/c.png)\n";
+        std::fs::write(dir.path().join("content/docs/a.md"), md).unwrap();
+        std::fs::write(dir.path().join("content/docs/b.md"), md).unwrap();
+        let fetch = Arc::new(FakeFetch(Default::default()));
+        let patterns = vec![nowaki_core::RemotePattern {
+            protocol: None,
+            hostname: "img.test".into(),
+            port: None,
+            pathname: Some("/p/**".into()),
+        }];
+        let remote = RemoteImages::new(dir.path().to_path_buf(), patterns, Some(fetch.clone()));
+        let client = dir.path().join("dist/client");
+        let all = collect_with(dir.path(), &Images::Build(client), Some(&remote)).unwrap();
+        assert_eq!(fetch.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let html = all["docs"][0].html.clone().unwrap();
+        assert!(html.contains("srcset=\"/_nowaki/a-256."), "{html}");
+        assert!(
+            html.contains("width=\"256\" height=\"256\" alt=\"a\""),
+            "{html}"
+        );
+        assert!(
+            html.contains("<img src=\"https://other.test/c.png\""),
+            "{html}"
+        );
+        // Cached: no fetch the second time.
+        let remote = RemoteImages::new(
+            dir.path().to_path_buf(),
+            remote.patterns().to_vec(),
+            Some(fetch.clone()),
+        );
+        collect_with(dir.path(), &Images::Dev, Some(&remote)).unwrap();
+        assert_eq!(fetch.0.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }

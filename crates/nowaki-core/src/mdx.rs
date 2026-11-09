@@ -15,8 +15,9 @@
 //! - Markdown becomes plain JSX elements (`<h2 id="…">`, `<p>`, `<table>`, …). Heading ids match
 //!   a Markdown entry's (comrak's anchorizer), and so does the `headings` list.
 //! - Fenced code is highlighted at build time exactly like Markdown (`highlight.rs`).
-//! - Local images (`![alt](./hero.jpg)`) go through `?image` and `<Image>`; root-relative and
-//!   remote ones stay `<img>`.
+//! - Local images (`![alt](./hero.jpg)`) go through `?image` and `<Image>`, and so do remote
+//!   ones that `images.remotePatterns` allows (`to_tsx_with_remote`); other remote and
+//!   root-relative ones stay `<img>`.
 //! - JSX elements and expressions are passed through, so imported components and islands
 //!   (`<Counter client:visible />`) work as in TSX.
 //! - Frontmatter (YAML `---` or TOML `+++`) is skipped here; content collections read it in Rust
@@ -63,10 +64,19 @@ pub fn headings(source: &str) -> Result<Vec<Heading>> {
     Ok(gen.headings)
 }
 
-/// TSX for an MDX source (see the module docs).
+/// TSX for an MDX source (see the module docs). Remote images stay `<img>`.
 pub fn to_tsx(source: &str) -> Result<String> {
+    to_tsx_with_remote(source, &|_| false)
+}
+
+/// [`to_tsx`], with remote images (`https://…`) for which `remote(url)` is true imported through
+/// `?image` like local ones.
+pub fn to_tsx_with_remote(source: &str, remote: &dyn Fn(&str) -> bool) -> Result<String> {
     let root = parse(source)?;
-    let mut gen = Gen::default();
+    let mut gen = Gen {
+        remote: Some(remote),
+        ..Gen::default()
+    };
     gen.collect_headings(&root);
     let Node::Root(r) = &root else {
         return Err(anyhow!("MDX: no root"));
@@ -88,12 +98,8 @@ pub fn to_tsx(source: &str) -> Result<String> {
     out.push_str(&esm);
     if !gen.images.is_empty() {
         out.push_str("import { Image as __NowakiImage } from \"@nowaki-dev/runtime/image\";\n");
-        for (i, url) in gen.images.iter().enumerate() {
-            let _ = writeln!(
-                out,
-                "import __nowakiImage{i} from {};",
-                js_string(&format!("{url}?image"))
-            );
+        for (i, spec) in gen.images.iter().enumerate() {
+            let _ = writeln!(out, "import __nowakiImage{i} from {};", js_string(spec));
         }
     }
     let heads: Vec<String> = gen
@@ -117,15 +123,17 @@ pub fn to_tsx(source: &str) -> Result<String> {
 }
 
 #[derive(Default)]
-struct Gen {
+struct Gen<'r> {
     headings: Vec<Heading>,
     /// Heading ids in document order, handed out again while generating.
     next_heading: usize,
-    /// Local image URLs, imported with `?image` (index = import name).
+    /// `?image` import specifiers (index = import name).
     images: Vec<String>,
+    /// Which remote image URLs go through `?image`.
+    remote: Option<&'r dyn Fn(&str) -> bool>,
 }
 
-impl Gen {
+impl Gen<'_> {
     fn collect_headings(&mut self, root: &Node) {
         let mut anchorizer = comrak::Anchorizer::new();
         let mut stack = vec![root];
@@ -244,10 +252,22 @@ impl Gen {
                 self.wrap("a", &attrs, &l.children, out);
             }
             Node::Image(i) => {
-                if is_local(&i.url) {
+                let spec = if is_local(&i.url) {
+                    Some(format!(
+                        "{}?image",
+                        i.url.split(['?', '#']).next().unwrap_or(&i.url)
+                    ))
+                } else if (i.url.starts_with("https://") || i.url.starts_with("http://"))
+                    && self.remote.is_some_and(|ok| ok(&i.url))
+                {
+                    let sep = if i.url.contains('?') { '&' } else { '?' };
+                    Some(format!("{}{sep}image", i.url))
+                } else {
+                    None
+                };
+                if let Some(spec) = spec {
                     let idx = self.images.len();
-                    self.images
-                        .push(i.url.split(['?', '#']).next().unwrap_or(&i.url).to_string());
+                    self.images.push(spec);
                     let _ = write!(
                         out,
                         "<__NowakiImage src={{__nowakiImage{idx}}} alt={}",
@@ -553,6 +573,26 @@ mod tests {
             tsx.contains("<img src={\"/logo.svg\"} alt={\"logo\"}"),
             "{tsx}"
         );
+    }
+
+    #[test]
+    fn allowed_remote_images_go_through_image() {
+        let src = "![a](https://img.test/a.jpg) ![b](https://img.test/b.jpg?v=2) ![c](https://other.test/c.jpg)\n";
+        let tsx = to_tsx_with_remote(src, &|url| url.starts_with("https://img.test/")).unwrap();
+        assert!(
+            tsx.contains("import __nowakiImage0 from \"https://img.test/a.jpg?image\";"),
+            "{tsx}"
+        );
+        assert!(
+            tsx.contains("import __nowakiImage1 from \"https://img.test/b.jpg?v=2&image\";"),
+            "{tsx}"
+        );
+        assert!(
+            tsx.contains("<img src={\"https://other.test/c.jpg\"}"),
+            "{tsx}"
+        );
+        // Without an allow-list every remote image stays an <img>.
+        assert!(!to_tsx(src).unwrap().contains("__nowakiImage"));
     }
 
     #[test]

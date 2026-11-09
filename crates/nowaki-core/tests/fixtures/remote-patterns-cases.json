@@ -1,0 +1,99 @@
+{
+  "_comment": "images.remotePatterns matching, shared by crates/nowaki-core/tests/remote_patterns.rs (remote_image.rs) and scripts/images-fetch-test.mjs (server/images-fetch.mjs). Change both matchers together.",
+  "groups": [
+    {
+      "patterns": [{ "protocol": "https", "hostname": "images.example.com", "pathname": "/photos/**" }],
+      "cases": [
+        ["https://images.example.com/photos/a.jpg", true],
+        ["https://images.example.com/photos/2026/11/a.jpg?w=400", true],
+        ["https://images.example.com/photos/", true],
+        ["https://IMAGES.example.com/photos/a.jpg", true],
+        ["https://images.example.com:443/photos/a.jpg", true],
+        ["https://images.example.com/photos", false],
+        ["https://images.example.com/other/a.jpg", false],
+        ["http://images.example.com/photos/a.jpg", false],
+        ["https://images.example.com:8443/photos/a.jpg", false],
+        ["https://evil.images.example.com/photos/a.jpg", false],
+        ["https://images.example.com.evil.com/photos/a.jpg", false],
+        ["https://images.example.com@evil.com/photos/a.jpg", false],
+        ["https://user:pass@images.example.com/photos/a.jpg", false],
+        ["https://images.example.com/photos/../secret.jpg", false],
+        ["https://images.example.com/photos/%2e%2e/secret.jpg", false],
+        ["https://images.example.com/photos/%2E./secret.jpg", false],
+        ["https://images.example.com/photos/./a.jpg", false],
+        ["https://images.example.com/photos/a%2f..%2fb.jpg", false],
+        ["https://images.example.com/photos/a%5cb.jpg", false],
+        ["https://images.example.com/photos\\a.jpg", false],
+        ["https://images.example.com/photos/a.jpg#x", false],
+        ["https://images.example.com/photos/a b.jpg", false],
+        ["https://images.example.com/photos/é.jpg", false],
+        ["https://images.example.com\t/photos/a.jpg", false],
+        ["https://[::1]/photos/a.jpg", false],
+        ["//images.example.com/photos/a.jpg", false],
+        ["ftp://images.example.com/photos/a.jpg", false],
+        ["https:/images.example.com/photos/a.jpg", false],
+        ["https://images.example.com:0/photos/a.jpg", false],
+        ["https://images.example.com:65536/photos/a.jpg", false],
+        ["https://images..example.com/photos/a.jpg", false],
+        ["https://images.example.com./photos/a.jpg", false],
+        ["https://images_example.com/photos/a.jpg", false]
+      ]
+    },
+    {
+      "patterns": [{ "hostname": "cdn.example.com" }],
+      "cases": [
+        ["https://cdn.example.com/", true],
+        ["https://cdn.example.com", true],
+        ["https://cdn.example.com?x=1", true],
+        ["https://cdn.example.com/any/path.png", true],
+        ["http://cdn.example.com/a.png", false]
+      ]
+    },
+    {
+      "patterns": [{ "protocol": "https", "hostname": "*.example.com", "pathname": "/img/*.png" }],
+      "cases": [
+        ["https://a.example.com/img/x.png", true],
+        ["https://example.com/img/x.png", false],
+        ["https://a.b.example.com/img/x.png", false],
+        ["https://a.example.com/img/sub/x.png", false],
+        ["https://a.example.com/img/x.jpg", false],
+        ["https://aexample.com/img/x.png", false]
+      ]
+    },
+    {
+      "patterns": [{ "protocol": "https", "hostname": "**.example.com", "pathname": "/a/**/b.png" }],
+      "cases": [
+        ["https://a.example.com/a/x/b.png", true],
+        ["https://a.b.c.example.com/a/x/y/b.png", true],
+        ["https://a.example.com/a//b.png", true],
+        ["https://example.com/a/x/b.png", false],
+        ["https://a.example.com/a/x/c.png", false]
+      ]
+    },
+    {
+      "patterns": [{ "protocol": "http", "hostname": "127.0.0.1", "port": "4870" }],
+      "cases": [
+        ["http://127.0.0.1:4870/a.png", true],
+        ["http://127.0.0.1/a.png", false],
+        ["http://127.0.0.1:4871/a.png", false],
+        ["https://127.0.0.1:4870/a.png", false]
+      ]
+    },
+    {
+      "patterns": [{ "protocol": "https", "hostname": "a.example.com", "port": "443" }, { "protocol": "http", "hostname": "b.example.com" }],
+      "cases": [
+        ["https://a.example.com/x.png", true],
+        ["https://a.example.com:443/x.png", true],
+        ["http://b.example.com/x.png", true],
+        ["http://b.example.com:80/x.png", true],
+        ["http://b.example.com:8080/x.png", false]
+      ]
+    },
+    {
+      "patterns": [],
+      "cases": [
+        ["https://images.example.com/photos/a.jpg", false]
+      ]
+    }
+  ]
+}
