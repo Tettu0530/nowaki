@@ -14,3 +14,4 @@ als = "als" # AsyncLocalStorage instance
 
 [default.extend-words]
 Vor = "Vor" # VorEdge
+caf = "caf" # "caf%C3%A9" (café percent-encoded) in the rules fixtures
