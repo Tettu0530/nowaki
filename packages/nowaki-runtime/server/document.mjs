@@ -65,7 +65,9 @@ export function prodDocument(manifest, { mod, body, meta }, opts = {}) {
   const m = pageMeta(meta, mod);
   const a = opts.assetBase ?? "/_nowaki/";
   const islandNames = [...body.matchAll(/<nowaki-island name="([^"]+)"/g)].map((m) => m[1]);
-  const hasIslands = islandNames.length > 0 && manifest.runtime;
+  // `meta.router` (handler.mjs): a slot on the page intercepts URLs, so it needs the runtime's
+  // router even without islands.
+  const hasIslands = (islandNames.length > 0 || meta?.router === true) && manifest.runtime;
   const preloadFiles = [];
   if (hasIslands) {
     const entryChunks = [

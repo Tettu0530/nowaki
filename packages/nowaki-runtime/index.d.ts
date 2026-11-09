@@ -257,6 +257,13 @@ export interface LayoutProps<D = unknown> {
    * file matching the URL (`@modal/photo/[id].tsx` for `/photo/42`), else its `default.tsx`, else
    * null. Slot files get `{ data, params, url }` like a page, and their loaders get the slot's
    * params. They don't contribute `meta`.
+   *
+   * Intercepting routes: a file in a slot whose path has a `(.)` / `(..)` / `(...)` segment
+   * (`@modal/(.)photo/[id].tsx`) takes over that URL on client navigation from a page the slot is
+   * on: the router fetches just that file and swaps it into the slot (the URL changes, the rest of
+   * the page and its island state stay; back restores the slot). A reload or a direct visit
+   * renders the full page. Such a slot is always rendered as its `<nowaki-slot>` element, empty
+   * when it has nothing to show, so render `slots.modal` even then: it's where the fragment goes.
    */
   slots: Record<string, ComponentChildren>;
 }
@@ -335,6 +342,14 @@ export function getLocale(): string | undefined;
  * fragment are kept. Returns `path` unchanged without i18n.
  */
 export function localePath(path: string, locale?: string): string;
+
+/**
+ * Remembers `locale` as the visitor's choice when nowaki.config has `i18n.detect`: sets the
+ * `nowaki_locale` cookie (Path = basePath, one year, SameSite=Lax), which the site's root follows
+ * instead of `Accept-Language`. Call it from an island (a language switcher) before navigating;
+ * a `<Link locale>` used inside an island does it on click. Does nothing on the server.
+ */
+export function setLocale(locale: string): void;
 
 /** A [Standard Schema](https://standardschema.dev) (zod, valibot, arktype, ...). */
 export interface StandardSchemaV1<Input = unknown, Output = Input> {

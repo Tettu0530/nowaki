@@ -132,10 +132,13 @@ curl -s -D - -o /dev/null $B/pricing | grep -qi '^x-route-group: marketing'
 ! curl -sf $B/about | grep -q 'data-group="marketing"'
 ! curl -s -D - -o /dev/null $B/no-such-page | grep -qi '^x-route-group'
 # parallel routes: photos/@modal renders beside the page (its [id] file on /photos/1, default on /photos)
-curl -sf $B/photos/1 | grep -q '<h1 id="photo-page">photo 1</h1>.*<nowaki-slot name="modal" style="display:contents"><aside id="photo-modal" class="photo-modal">modal 1: caption of 1</aside></nowaki-slot>'
-curl -sf $B/photos | grep -q '<nowaki-slot name="modal" style="display:contents"><p id="modal-default">no photo open</p></nowaki-slot>'
+curl -sf $B/photos/1 | grep -q '<h1 id="photo-page">photo 1</h1>.*<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><aside id="photo-modal" class="photo-modal">modal 1: caption of 1</aside></nowaki-slot>'
+curl -sf $B/photos | grep -q '<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><p id="modal-default">no photo open</p></nowaki-slot>'
 ! curl -sf $B/photos/1 | grep -q 'photo-intercepted'
 test "$(curl -s -o /dev/null -w '%{http_code}' "$B/photos/@modal/1")" = 404
+# intercepting route: the router's x-nowaki-intercept request gets the slot fragment
+curl -sf -H 'x-nowaki-intercept: /photos/@modal' $B/photos/1 | grep -q '^<template data-nowaki-head>.*</template><aside id="photo-intercepted">intercepted 1</aside>$'
+curl -s -D - -o /dev/null -H 'x-nowaki-intercept: /photos/@modal' $B/photos/1 | grep -qi '^x-nowaki-slot: modal'
 # MDX: a .mdx page (ESM exports, expressions, GFM, an island) and an .mdx content entry
 curl -sf $B/guide | grep -q '<title>Guide (MDX) — Nowaki</title>'
 curl -sf $B/guide | grep -q '<h1 id="an-mdx-page">An MDX page</h1>'
@@ -306,7 +309,7 @@ bash scripts/ci/assert-no-orphans.sh $SERVER_PID
 
 # nowaki.config redirects / rewrites / headers / basePath / trailingSlash in dev (a generated app)
 node scripts/rules-e2e.mjs dev --port "$((PORT + 8))"
-# nowaki.config i18n in dev (generated apps on PORT+10 and PORT+11)
+# nowaki.config i18n in dev (generated apps on PORT+10, PORT+11 and PORT+12)
 node scripts/i18n-e2e.mjs dev --port "$((PORT + 10))"
 
 # SIGKILL: the dev sidecar and plugin host exit when their stdin pipe closes (exit-with-parent.mjs).

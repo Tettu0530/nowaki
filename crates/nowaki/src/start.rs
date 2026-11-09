@@ -48,6 +48,10 @@ struct PageMeta {
     html_attrs: String,
     #[serde(default, rename = "bodyAttrs")]
     body_attrs: String,
+    /// A slot on the page intercepts URLs (handler.mjs): it gets the islands runtime, and so the
+    /// client router, even without islands.
+    #[serde(default)]
+    router: bool,
 }
 
 struct ProdState {
@@ -201,7 +205,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         .fallback(any(handle))
         .with_state(state);
     // Inside the security-headers layer, so a rule's header wins over a default one.
-    if let Some(front) = front.filter(|f| f.has_headers()) {
+    if let Some(front) = front.filter(|f| f.has_response_layer()) {
         app = app.layer(axum::middleware::from_fn_with_state(
             front,
             crate::front::headers_layer,
@@ -290,6 +294,16 @@ fn prod_ws_origin_ok(headers: &axum::http::HeaderMap) -> bool {
     }
 }
 
+/// Sent by the client router for an intercepting route's fragment (handler.mjs `renderIntercept`).
+const INTERCEPT_HEADER: &str = "x-nowaki-intercept";
+
+/// Whether the ISR cache may answer (and store) a request: GETs, except the client router asking for
+/// an intercepting slot's fragment. The ISR key is the path, so a cached full page must not answer
+/// that request, and the fragment must not be stored.
+fn isr_eligible(method: &Method, headers: &axum::http::HeaderMap) -> bool {
+    *method == Method::GET && !headers.contains_key(INTERCEPT_HEADER)
+}
+
 async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
     let path = req.uri().path().to_string();
     if crate::forward::is_internal_path(&path) {
@@ -315,7 +329,7 @@ async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
             return serve_public(file, req.headers()).await;
         }
     }
-    if req.method() == Method::GET {
+    if isr_eligible(req.method(), req.headers()) {
         let pathname = isr_path(&path, route_path.as_deref());
         let query = req.uri().query().map(|q| q.to_string());
         let spec = state
@@ -1005,7 +1019,7 @@ async fn proxy(
 fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
     let base = &manifest.asset_base;
     let island_names = scan_island_names(&meta.body);
-    let has_islands = !island_names.is_empty() && manifest.runtime.is_some();
+    let has_islands = (!island_names.is_empty() || meta.router) && manifest.runtime.is_some();
 
     let mut preload_files: Vec<String> = Vec::new();
     if has_islands {
@@ -1250,5 +1264,15 @@ mod tests {
         assert!(!public_etag("text/html; charset=utf-8", Mode::Enforce));
         assert!(!public_etag("text/html; charset=utf-8", Mode::ReportOnly));
         assert!(public_etag("text/css; charset=utf-8", Mode::Enforce));
+    }
+
+    #[test]
+    fn intercept_requests_skip_the_isr_cache() {
+        assert!(isr_eligible(&Method::GET, &header_map(&[])));
+        assert!(!isr_eligible(&Method::POST, &header_map(&[])));
+        assert!(!isr_eligible(
+            &Method::GET,
+            &header_map(&[("x-nowaki-intercept", b"/@modal")])
+        ));
     }
 }
