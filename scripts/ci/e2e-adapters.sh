@@ -231,3 +231,6 @@ node scripts/rules-e2e.mjs node cloudflare vercel static --port 3313
 # nowaki.config i18n on the node and cloudflare adapters and in static output (listens on 3315,
 # 3316 for i18n + basePath + trailingSlash "never" + a slot, and 3317 for locale detection)
 node scripts/i18n-e2e.mjs node cloudflare static --port 3315
+# examples/gallery on the node adapter (3331) and the cloudflare worker, and what static output
+# can serve of it
+node scripts/gallery-e2e.mjs node cloudflare static --port 3331

@@ -213,6 +213,9 @@ jobs:
           # i18n.detect: a click on <Link locale> in an island sets the nowaki_locale cookie, and
           # the next / follows it (a generated app on 8251).
           PORT=8251 node scripts/locale-browser-test.mjs
+          # examples/gallery, the v0.18 exit criteria: modal on navigation, full page on reload,
+          # under /gallery in ja, the language switcher's cookie, sign-in and sign-out (8252).
+          node scripts/gallery-browser-test.mjs --port 8252
 
   jetstream-load:
     name: Jetstream load (1000 connections)

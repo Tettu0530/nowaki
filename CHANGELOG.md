@@ -11,6 +11,14 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **`examples/gallery`, the v0.18 exit-criteria app.** A photo gallery under `basePath: "/gallery"`
+  in English and Japanese (with `Accept-Language` detection and a `<Link locale>` switcher). A photo
+  opens in a modal on client navigation (`@modal/(.)photo/[id].tsx`) and as a full page on reload.
+  Sign-in uses `ctx.session` behind an `(account)` route group's middleware, and `env.ts` makes
+  `nowaki build` / `nowaki start` refuse to run without `GALLERY_ADMIN_PASSWORD`. It also has config
+  `redirects` / `headers` and `?image` photos. `scripts/gallery-e2e.mjs` checks it on `nowaki start`,
+  `nowaki dev`, the node adapter, the Cloudflare worker, and static output (what a static host can
+  serve). `scripts/gallery-browser-test.mjs` checks it in headless Chrome. Both run in CI.
 - **Locale detection on `/` (`i18n.detect: true`, opt-in).** A GET or HEAD of the site's root
   (`/`, or `basePath`) picks a locale from `Accept-Language` (q-values; an exact tag, then the
   range's primary subtag, so `ja-JP` finds `ja`, then a bare range such as `pt` finding `pt-BR`;
@@ -189,6 +197,10 @@ milestone's worth of work; the codename is noted per entry.
   is unchanged: servers use the request's path and static output `x/index.html` with a slash.
 - An error while saving a request's session (a store failure, a cookie over 4 KB) now renders
   the 500 page instead of escaping the request handler.
+- `localePath` from `@nowaki-dev/runtime/navigation` returns an `Href` when given a static route
+  or a `route()` href, so `<Link href={localePath(route("/photo/[id]", { id }))}>` type-checks
+  once `nowaki typegen` has registered the routes. Before, the `string` it returned was refused
+  by `<Link href>`.
 - **The CI performance regression gate also compares each PR with the latest
   release**, failing beyond −10% req/s or +20% TTFB against it (the existing
   limits against base stay the same). Every metric (build, dev startup, req/s and
