@@ -203,10 +203,15 @@ fn dev_content(state: &DevState) {
         return;
     }
     crate::typegen::write(root).ok();
+    // i18n locales from the routing config `run` wrote before the first call.
+    let routing = std::fs::read_to_string(root.join(".nowaki/routing.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
     if let Err(e) = crate::content::write(
         root,
         &root.join(".nowaki/content"),
         &crate::content::Images::Dev,
+        &crate::content::locales(routing.as_ref()),
     ) {
         let msg = format!("{e:#}");
         eprintln!("[nowaki] content: {msg}");

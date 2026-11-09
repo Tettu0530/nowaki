@@ -261,6 +261,19 @@ code locations and CI coverage.
   `edge-build.mjs` / `vercel-build.mjs` place static files under the base. Tests:
   `crates/nowaki-core/tests/base_path.rs`, `scripts/rules-e2e.mjs` (config B), `seo-unit-test`,
   `session-test`, `router-browser-test.mjs` with `BASE=http://host:port/app`.
+- **i18n (`i18n` in nowaki.config)** — locale prefixes, `localePath` and the sitemap's alternate
+  groups in `server/i18n.mjs` (runtime-neutral; `navigation.js` uses it in the browser too). The
+  locale comes off the route path in `handler.mjs` `localizedRequest` (one `env.i18n` check per
+  request when off), which runs the request inside `server/i18n-context.mjs` (an
+  AsyncLocalStorage published on `globalThis[Symbol.for("nowaki.locale")]`, so `getLocale()` /
+  `getCollection` never import `node:async_hooks`) and renders through `localizedEnv` (`<html
+  lang>`, `data-nowaki-i18n`, hreflang from `seo.mjs` `hreflangTags`). `env.i18n` is set by
+  `app.mjs`, `web.mjs` (`routing`, passed by `edge-build.mjs`) and dev `sidecar.mjs`
+  (`.nowaki/routing.json`). Content locales: `content.rs` `split_locale` (locales from the routing
+  config). Per-locale URLs: `isr-urls.mjs` `localeUrls`, `static-paths.mjs` `localePages`,
+  `prerender.rs` `locale_urls` / `locale_404s` / `locale_redirects`; `locale_url` and
+  `localePathFor` share `crates/nowaki/tests/fixtures/i18n-cases.json`. Tests:
+  `scripts/i18n-test.mjs`, `scripts/i18n-e2e.mjs` (start, dev, node, cloudflare, static).
 - **Page scripts (`export const scripts`)** — read from the AST in
   `crates/nowaki-core/src/page_scripts.rs`, emitted as client entries by
   `build.rs` `build_route_scripts` (manifest `routeScripts` per module and

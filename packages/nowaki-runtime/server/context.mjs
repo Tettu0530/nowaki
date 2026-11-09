@@ -52,6 +52,8 @@ export function makeContext(info) {
     url: urlProxy,
     params,
     method,
+    // The request's locale with i18n configured (handler.mjs `localizedRequest`), else undefined.
+    locale: info.locale,
     // Header/query access through raw req (Node IncomingMessage) can't be tracked, so
     // touching it counts as "depends on everything" and disables the ISR cache (prevents per-user leaks).
     get req() {

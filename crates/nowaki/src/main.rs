@@ -153,7 +153,7 @@ fn main() -> anyhow::Result<()> {
                 report.asset_in,
                 report.asset_out,
             );
-            content::build(&root, &dist)?;
+            content::build(&root, &dist, &config)?;
             site::write(&dist, &config)?;
             fonts::build_dist(&root, &dist, &config)?;
             check_route_budgets(&core, &report, &client)?;

@@ -37,6 +37,8 @@ const trailingSlash = routingConfig?.trailingSlash;
 // basePath: client files and public/ go under it in the assets directory, so the platform serves
 // them at the URL the pages use.
 const basePath = routingConfig?.basePath ?? "";
+// i18n reaches the handler through the routing config (it adds no front rule).
+const i18nRouting = routingConfig?.i18n ? routingJson.trim() : null;
 
 const keyOf = (abs) => path.relative(serverDir, abs).split(path.sep).join("/");
 // specifiers relative to dist/worker/index.js
@@ -152,7 +154,7 @@ const handler = createFetchHandler({
   islandComponents,
   liveIslands,
   routeTable,
-  serverFunctions,${site ? `\n  site: ${JSON.stringify(site)},` : ""}${trailingSlash ? `\n  trailingSlash: ${JSON.stringify(trailingSlash)},` : ""}${fontsJson ? `\n  fonts: ${fontsJson.trim()},` : ""}${contentRaw ? "\n  content," : ""}${hasEnv ? "\n  envModule," : ""}${hasSession ? "\n  sessionModule," : ""}${envPublicJson ? `\n  envPublic: ${envPublicJson.trim()},` : ""}${basePath ? `\n  basePath: ${JSON.stringify(basePath)},` : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}
+  serverFunctions,${site ? `\n  site: ${JSON.stringify(site)},` : ""}${trailingSlash ? `\n  trailingSlash: ${JSON.stringify(trailingSlash)},` : ""}${fontsJson ? `\n  fonts: ${fontsJson.trim()},` : ""}${contentRaw ? "\n  content," : ""}${hasEnv ? "\n  envModule," : ""}${hasSession ? "\n  sessionModule," : ""}${envPublicJson ? `\n  envPublic: ${envPublicJson.trim()},` : ""}${basePath ? `\n  basePath: ${JSON.stringify(basePath)},` : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}${i18nRouting ? `\n  routing: ${i18nRouting},` : ""}
 });
 
 // public/ files by decoded URL path; they win over routes at the same path.

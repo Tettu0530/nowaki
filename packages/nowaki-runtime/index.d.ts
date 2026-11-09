@@ -65,6 +65,12 @@ export interface LoaderContext {
   readonly params: RouteParams;
   /** The HTTP method. */
   readonly method: string;
+  /**
+   * The request's locale with `i18n` in nowaki.config: the locale prefix of the URL (`/ja/about`
+   * → `"ja"`), else the default locale. Undefined without i18n and for `/__nowaki/*` requests
+   * (server functions, live events).
+   */
+  readonly locale: string | undefined;
   /** Request headers (lowercase keys). */
   readonly headers: Record<string, string>;
   /** Parsed request cookies. */
@@ -125,10 +131,14 @@ export type Action = (ctx: LoaderContext) => unknown | Promise<unknown>;
 
 /**
  * `export const staticPaths` on a dynamic route: the params to prerender with `nowaki prerender`
- * or the static adapter, one page per entry. A `[...rest]` param takes a string[].
+ * or the static adapter, one page per entry. A `[...rest]` param takes a string[]. With i18n, a
+ * function runs once per locale, given `{ locale }` (also `getLocale()`, so `getCollection` returns
+ * that locale's entries), and each page is written under the locale's prefix.
  * @example export const staticPaths: StaticPaths = [{ slug: "hello" }, { slug: "world" }];
  */
-export type StaticPaths<P extends RouteParams = RouteParams> = P[] | (() => P[] | Promise<P[]>);
+export type StaticPaths<P extends RouteParams = RouteParams> =
+  | P[]
+  | ((info: { locale?: string }) => P[] | Promise<P[]>);
 
 /**
  * `export const budget` on a page route: the most first-load client JS the page may ship, in KB of
@@ -291,6 +301,20 @@ export function publish(topic: string): void;
  * accept-language, and user-agent headers). Returns null elsewhere. Use it for auth.
  */
 export function getContext(): LoaderContext | null;
+
+/**
+ * The current locale with `i18n` in nowaki.config (`ctx.locale` of the request being rendered,
+ * usable in components, layouts and islands). In the browser it is the page's locale. Undefined
+ * without i18n, outside a page request, and in server functions.
+ */
+export function getLocale(): string | undefined;
+
+/**
+ * `path` in `locale` (default: the current locale): `localePath("/about", "ja")` → `"/ja/about"`,
+ * `localePath("/ja/about", "en")` → `"/about"` when `en` is the default locale. The query and
+ * fragment are kept. Returns `path` unchanged without i18n.
+ */
+export function localePath(path: string, locale?: string): string;
 
 /** A [Standard Schema](https://standardschema.dev) (zod, valibot, arktype, ...). */
 export interface StandardSchemaV1<Input = unknown, Output = Input> {

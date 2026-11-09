@@ -146,13 +146,41 @@ function imageType(url) {
   return { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", avif: "image/avif", svg: "image/svg+xml" }[ext];
 }
 
-/// sitemap.xml for `urls` (paths), against the site; each page URL shaped by `pagePath`.
-export function sitemapXml(site, urls, { trailingSlash, staticOutput = false } = {}) {
-  const items = [...new Set(urls.map((u) => pagePath(u, trailingSlash, staticOutput)))]
-    .sort()
-    .map((u) => `  <url><loc>${esc(absolute(u, site + "/"))}</loc></url>`)
+/// sitemap.xml for `urls` (route paths), against the site. Each page URL gets basePath and then
+/// the trailing-slash policy (`pagePath`), so the base's root follows the policy too.
+/// `alternates(paths)` (i18n) maps a listed route path to its versions in every locale
+/// ([[hreflang, route path]]), written as `xhtml:link` alternates shaped the same way.
+export function sitemapXml(site, urls, { trailingSlash, staticOutput = false, alternates } = {}) {
+  const shape = (u) => pagePath(withBase(u), trailingSlash, staticOutput);
+  const paths = [...new Set(urls)];
+  const alt = typeof alternates === "function" ? alternates(paths) : null;
+  const seen = new Set();
+  const items = paths
+    .map((u) => [shape(u), u])
+    .filter(([loc]) => !seen.has(loc) && seen.add(loc))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([shaped, u]) => {
+      const loc = `<loc>${esc(absolute(shaped, site + "/"))}</loc>`;
+      const links = alt?.get(u);
+      if (!links) return `  <url>${loc}</url>`;
+      const xl = links.map(([l, p]) => `    <xhtml:link rel="alternate" hreflang="${esc(l)}" href="${esc(absolute(shape(p), site + "/"))}"/>`);
+      return `  <url>\n    ${loc}\n${xl.join("\n")}\n  </url>`;
+    })
     .join("\n");
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${items}\n</urlset>\n`;
+  const ns = alt ? ` xmlns:xhtml="http://www.w3.org/1999/xhtml"` : "";
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"${ns}>\n${items}\n</urlset>\n`;
+}
+
+/// `<link rel="alternate" hreflang>` for a page in every locale (i18n), and `x-default` for the
+/// default locale's. `alternates`: [[locale, browser path]] (i18n.mjs `localeAlternates`).
+/// `trailingSlash` / `staticOutput` shape each URL like the page's own (`pagePath`).
+export function hreflangTags(alternates, defaultLocale, { origin, site, trailingSlash, staticOutput = false }) {
+  const base = (site ?? origin ?? "http://localhost") + "/";
+  const href = (p) => esc(absolute(pagePath(p, trailingSlash, staticOutput), base));
+  const tags = alternates.map(([l, p]) => `<link rel="alternate" hreflang="${esc(l)}" href="${href(p)}" />`);
+  const def = alternates.find(([l]) => l === defaultLocale);
+  if (def) tags.push(`<link rel="alternate" hreflang="x-default" href="${href(def[1])}" />`);
+  return tags.join("\n");
 }
 
 /// robots.txt that allows everything and points at the sitemap when there is a site.

@@ -2,6 +2,7 @@
 // routes/islands/manifest arrive as maps statically imported at build time.
 
 import { resolveSite } from "./seo.mjs";
+import { compileI18n } from "./i18n.mjs";
 import { h, options } from "preact";
 import { handleRequest } from "./handler.mjs";
 import { wrapIsland } from "./island-directive.mjs";
@@ -85,6 +86,7 @@ function installIslandHook(registry, liveRegistry, live) {
 ///   sessionModule    : the compiled session.ts (dist/server/session.js) when the app has one
 ///   trailingSlash    : nowaki.config `trailingSlash` when it isn't "ignore" (canonical / sitemap URLs)
 ///   basePath         : nowaki.config `basePath` ("/app"), when set
+///   routing          : the routing config (dist/server/routing.json), for i18n
 /// Returns `(request, bindings?, front?) => Promise<Response>`; `bindings` (the Worker's `env`) adds
 /// its string vars and secrets to process.env for validating env.ts. `front` comes from the
 /// worker's nowaki.config routing (front.mjs): `{ routePath, headers }`, the path to route by and
@@ -105,6 +107,7 @@ export function createFetchHandler({
   sessionModule,
   trailingSlash,
   basePath,
+  routing,
 }) {
   setBasePath(basePath);
   const assetBase = `${basePath ?? ""}/_nowaki/`;
@@ -144,6 +147,8 @@ export function createFetchHandler({
     site: resolveSite(site),
     trailingSlash,
     fonts: fonts ?? null,
+    // i18n from the routing config (null without it; handler.mjs checks it once per request).
+    i18n: compileI18n(routing),
     routeTable: () => routeTable,
     importModule: (key) => modules[key],
     ensureIslands: () => {},

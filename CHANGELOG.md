@@ -110,6 +110,30 @@ milestone's worth of work; the codename is noted per entry.
   types `env` and `import.meta.env` from the schemas. Public names must start
   with `PUBLIC_` and server names must not. New core API:
   `NowakiCore::set_public_env`.
+- **i18n routing.** With `i18n: { locales: ["en", "ja"], defaultLocale: "en" }`
+  in nowaki.config, every locale except the default is a URL prefix
+  (`/ja/about`); the default has none (`/about`), and `/en/about` redirects
+  (308) to `/about`. Routes stay locale-agnostic: the prefix is taken off before
+  routing, so middleware, layouts and the 404 page see `/about`, while
+  `ctx.url` keeps the browser's URL. With `prefixDefaultLocale: true` the
+  default locale is prefixed too, an unprefixed page is a 404 (API and file
+  routes still answer), and `/` redirects (307) to `/en` until locale
+  detection lands. `ctx.locale` and `getLocale()` (from `@nowaki-dev/runtime`
+  or `/navigation`, in components and islands too) give the locale;
+  `localePath(path, locale)` and `<Link locale="ja">` build localized links.
+  Pages get `<html lang>` from the locale unless they set one, and, when the
+  site URL is set (`site` / `NOWAKI_SITE`; hreflang needs absolute URLs),
+  `<link rel="alternate" hreflang>` for every locale plus `x-default`; the
+  generated sitemap.xml lists every locale with `xhtml:link` alternates. In
+  content collections, a first-level directory named after a locale
+  (`content/blog/ja/hello.md`) becomes `entry.locale` and leaves the slug;
+  `getCollection` / `getEntry` return the current locale's entries (and those
+  outside any locale directory) unless given `{ locale: "ja" }` or
+  `{ locale: "*" }`. Prerendering and the ISR warm-up cover every locale:
+  `staticPaths` runs once per locale (given `{ locale }`), the static adapter
+  writes each locale under its prefix with its own `404.html`, and `_redirects`
+  sends the default-locale prefix to the unprefixed URLs. Server functions and
+  live events have no locale. Without `i18n`, a request pays one null check.
 ### Changed
 - **`trailingSlash` also shapes static output and page URLs.** With `"never"`, the static
   adapter writes `about.html` instead of `about/index.html`, and canonical URLs, the default

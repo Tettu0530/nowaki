@@ -23,6 +23,7 @@ import { indexPublic, lookupPublic } from "./public-files.mjs";
 import { resolveSite } from "./seo.mjs";
 import { requestOrigin } from "./origin.mjs";
 import { compileRules } from "./rules.mjs";
+import { compileI18n } from "./i18n.mjs";
 import { frontHeaders, frontStep } from "./front.mjs";
 import { setBasePath } from "./base-path.mjs";
 
@@ -269,6 +270,8 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
   const rules = routing ? compileRules(routing) : null;
   // Canonical / sitemap URLs follow the policy (seo.mjs pagePath).
   if (rules) env.trailingSlash = rules.trailing;
+  // i18n: null without it (handler.mjs checks it once per request).
+  env.i18n = compileI18n(routing);
 
   const handle = async (req, res) => {
     // Set before the response's own headers, which override any of these by name.

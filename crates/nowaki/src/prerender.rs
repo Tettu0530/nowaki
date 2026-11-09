@@ -3,7 +3,7 @@ use std::process::Stdio;
 
 use anyhow::{anyhow, Context, Result};
 use futures_util::StreamExt;
-use nowaki_core::rules::TrailingSlash;
+use nowaki_core::rules::{I18nConfig, TrailingSlash};
 use nowaki_core::NowakiCore;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -31,7 +31,7 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         "[nowaki] build: client {} / server {} modules",
         report.modules, report.server_modules
     );
-    crate::content::build(&root, &root.join("dist"))?;
+    crate::content::build(&root, &root.join("dist"), &config)?;
     crate::site::write(&root.join("dist"), &config)?;
     crate::fonts::build_dist(&root, &root.join("dist"), &config)?;
     crate::check_route_budgets(&core, &report, &client)?;
@@ -108,14 +108,17 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         }
     });
 
-    let mut pages: Vec<(String, PathBuf)> =
-        nowaki_core::routes::enumerate_static_prerender_urls(&root.join("dist/server/routes"))?
-            .into_iter()
-            .map(|url| {
-                let file = out_file_for(&out, &url, trailing);
-                (url, file)
-            })
-            .collect();
+    let i18n = read_i18n(&routing_file);
+    let mut pages: Vec<(String, PathBuf)> = locale_urls(
+        i18n.as_ref(),
+        nowaki_core::routes::enumerate_static_prerender_urls(&root.join("dist/server/routes"))?,
+    )
+    .into_iter()
+    .map(|url| {
+        let file = out_file_for(&out, &url, trailing);
+        (url, file)
+    })
+    .collect();
     for (url, file, page) in dynamic_pages? {
         let file = if page {
             page_file(&file, trailing)
@@ -220,6 +223,20 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             std::fs::write(out.join("404.html"), resp.text().await?)?;
         }
+        // i18n: one per locale directory, rendered in that locale.
+        for (url, file) in locale_404s(i18n.as_ref()) {
+            let resp = client
+                .get(format!("http://127.0.0.1:{port}{}", request_path(&url)))
+                .send()
+                .await?;
+            if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                let file = out.join(file);
+                if let Some(parent) = file.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(file, resp.text().await?)?;
+            }
+        }
     }
 
     // The SPA router fetches this once; a static host has no server to answer it.
@@ -268,10 +285,11 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     for w in &host.warnings {
         eprintln!("[nowaki] static output: {w}");
     }
-    if !own_redirects.is_empty() || !host.redirects.is_empty() {
+    let locale_redirects = locale_redirects(routing.i18n.as_ref(), &routing.base_path);
+    if !own_redirects.is_empty() || !host.redirects.is_empty() || !locale_redirects.is_empty() {
         std::fs::write(
             out.join("_redirects"),
-            format!("{own_redirects}{}", host.redirects),
+            format!("{own_redirects}{}{locale_redirects}", host.redirects),
         )?;
     }
     // The host serves the output at basePath, so its paths carry it.
@@ -440,6 +458,63 @@ fn page_file(file: &str, trailing: TrailingSlash) -> String {
             format!("{dir}.html")
         }
         _ => file.to_string(),
+    }
+}
+
+/// i18n: the locale settings of the routing config, if any.
+fn read_i18n(routing_file: &Path) -> Option<I18nConfig> {
+    let text = std::fs::read_to_string(routing_file).ok()?;
+    serde_json::from_str::<nowaki_core::rules::RoutingConfig>(&text)
+        .ok()?
+        .i18n
+}
+
+/// i18n: each page URL in every locale, in config order (`/about` → `/about`, `/ja/about`).
+fn locale_urls(i18n: Option<&I18nConfig>, urls: Vec<String>) -> Vec<String> {
+    let Some(i18n) = i18n else {
+        return urls;
+    };
+    urls.iter()
+        .flat_map(|url| i18n.locales.iter().map(move |l| locale_url(i18n, url, l)))
+        .collect()
+}
+
+/// A route path (no locale in it) as `locale`'s URL: the default locale has no prefix unless
+/// `prefixDefaultLocale`. The runtime's `localePathFor` (server/i18n.mjs) builds the same URLs;
+/// tests/fixtures/i18n-cases.json drives both.
+fn locale_url(i18n: &I18nConfig, url: &str, locale: &str) -> String {
+    if locale == i18n.default_locale && !i18n.prefix_default_locale {
+        url.to_string()
+    } else if url == "/" {
+        format!("/{locale}")
+    } else {
+        format!("/{locale}{url}")
+    }
+}
+
+/// i18n: the 404 page of each locale directory, as (request path, file under the output dir).
+/// The unprefixed default locale's is the top-level 404.html.
+fn locale_404s(i18n: Option<&I18nConfig>) -> Vec<(String, String)> {
+    let Some(i18n) = i18n else {
+        return Vec::new();
+    };
+    i18n.locales
+        .iter()
+        .filter(|l| **l != i18n.default_locale || i18n.prefix_default_locale)
+        .map(|l| (format!("/{l}/404"), format!("{l}/404.html")))
+        .collect()
+}
+
+/// i18n: `_redirects` lines sending the default locale's prefix to the unprefixed URL (308), as the
+/// servers do. None with `prefixDefaultLocale`.
+fn locale_redirects(i18n: Option<&I18nConfig>, base: &str) -> String {
+    match i18n {
+        Some(i18n) if !i18n.prefix_default_locale => {
+            let l = &i18n.default_locale;
+            let root = if base.is_empty() { "/" } else { base };
+            format!("{base}/{l} {root} 308\n{base}/{l}/* {base}/:splat 308\n")
+        }
+        _ => String::new(),
     }
 }
 
@@ -724,5 +799,71 @@ mod tests {
             "blog/a b/index.html"
         );
         assert_eq!(page_file("index.html", TrailingSlash::Never), "index.html");
+    }
+
+    fn i18n(json: &str) -> I18nConfig {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn locale_urls_follow_the_shared_fixture() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/i18n-cases.json")).unwrap();
+        let mut n = 0;
+        for case in fixture["localePath"].as_array().unwrap() {
+            // JS-only cases: paths that already carry a locale, a query, or aren't route paths.
+            if case["js"] == true {
+                continue;
+            }
+            let config = i18n(&fixture["configs"][case["config"].as_str().unwrap()].to_string());
+            let got = locale_url(
+                &config,
+                case["path"].as_str().unwrap(),
+                case["locale"].as_str().unwrap(),
+            );
+            assert_eq!(got, case["expected"].as_str().unwrap(), "{case}");
+            n += 1;
+        }
+        assert!(n >= 10);
+    }
+
+    #[test]
+    fn locale_expansion_404s_and_redirects() {
+        let plain = i18n(r#"{"locales":["en","ja"],"defaultLocale":"en"}"#);
+        assert_eq!(
+            locale_urls(Some(&plain), vec!["/".into(), "/about".into()]),
+            ["/", "/ja", "/about", "/ja/about"]
+        );
+        assert_eq!(
+            locale_urls(None, vec!["/about".into()]),
+            ["/about".to_string()]
+        );
+        assert_eq!(
+            locale_404s(Some(&plain)),
+            [("/ja/404".to_string(), "ja/404.html".to_string())]
+        );
+        assert!(locale_404s(None).is_empty());
+        assert_eq!(
+            locale_redirects(Some(&plain), ""),
+            "/en / 308\n/en/* /:splat 308\n"
+        );
+        assert_eq!(
+            locale_redirects(Some(&plain), "/app"),
+            "/app/en /app 308\n/app/en/* /app/:splat 308\n"
+        );
+        let prefixed =
+            i18n(r#"{"locales":["en","ja"],"defaultLocale":"en","prefixDefaultLocale":true}"#);
+        assert_eq!(locale_404s(Some(&prefixed)).len(), 2);
+        assert!(locale_redirects(Some(&prefixed), "").is_empty());
+        assert!(locale_redirects(None, "").is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("routing.json");
+        assert!(read_i18n(&file).is_none());
+        std::fs::write(
+            &file,
+            r#"{"i18n":{"locales":["en","ja"],"defaultLocale":"en"}}"#,
+        )
+        .unwrap();
+        assert_eq!(read_i18n(&file).unwrap().locales, ["en", "ja"]);
     }
 }

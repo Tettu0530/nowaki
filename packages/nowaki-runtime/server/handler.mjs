@@ -7,7 +7,9 @@ import { renderToReadableStream } from "preact-render-to-string/stream";
 
 import { matchRoute, prefixDepth, routeUnderPrefix, underPrefix } from "./router.mjs";
 import { mergeAttrs } from "./document.mjs";
-import { mergeMeta, robotsTxt, seoTags, sitemapXml } from "./seo.mjs";
+import { hreflangTags, mergeMeta, robotsTxt, seoTags, sitemapXml } from "./seo.mjs";
+import { browserPathFor, clientI18n, localeAlternates, localeGroups, splitLocale } from "./i18n.mjs";
+import { localeState, runWithLocale } from "./i18n-context.mjs";
 import { sitemapUrls } from "./isr-urls.mjs";
 import { makeContext } from "./context.mjs";
 import { dispatchServerFn, runWithContext, SERVER_FN_PATH } from "./functions.mjs";
@@ -37,12 +39,21 @@ const JSON_CT = { "content-type": "application/json; charset=utf-8" };
 ///   renderError(err) -> { status, headers, body } (500 page differs between dev/prod)
 ///   onError(err, ctx) (optional) -> called for every error that becomes a 500 page
 ///   live (optional) -> { lookup(name, version), render } for POST /__nowaki/live-event
-export async function handleRequest(env, info) {
+// Not async itself: the request's promise is routeRequest's, so an app without i18n pays this one
+// check and no extra async frame.
+export function handleRequest(env, info) {
+  return env.i18n ? localizedRequest(env, info) : routeRequest(env, info);
+}
+
+// `localized` ({ path, match }) comes from localizedRequest, which has split the locale off the
+// route path and matched the rest already.
+async function routeRequest(env, info, localized) {
   const { method, url, version } = info;
   const table = await env.routeTable(version);
   // What routing, middleware and the 404 see; ctx.url stays the URL the browser asked for.
-  const path = resolveRequestPath(env, info, url);
-  const match = matchRoute(table.routes, path);
+  let path, match;
+  if (localized) ({ path, match } = localized);
+  else match = matchRoute(table.routes, (path = resolveRequestPath(env, info, url)));
   const ctx = makeContext({ ...info, params: match?.params ?? {} });
   // The site's URL (NOWAKI_SITE / nowaki.config `site`), for absolute links in feeds and the like.
   // Parsed on first read: most requests never look at it.
@@ -82,7 +93,9 @@ export async function handleRequest(env, info) {
       // file (served before this) provides them.
       if (env.site && (method === "GET" || method === "HEAD")) {
         if (path === "/sitemap.xml") {
-          const body = sitemapXml(env.site, await sitemapUrls(env, version), { trailingSlash: env.trailingSlash, staticOutput: env.staticOutput === true });
+          const i18n = env.i18n;
+          const alternates = i18n ? (paths) => localeGroups(i18n, paths) : undefined;
+          const body = sitemapXml(env.site, await sitemapUrls(env, version), { trailingSlash: env.trailingSlash, staticOutput: env.staticOutput === true, alternates });
           return finalize(ctx, { status: 200, headers: { "content-type": "application/xml; charset=utf-8" }, body }, env, table, version);
         }
         if (path === "/robots.txt") {
@@ -122,11 +135,83 @@ export async function handleRequest(env, info) {
   }
 }
 
-// The path the request is routed by. Identity for now; rewrites, basePath and i18n prefixes will
-// map the browser's path to the route's here. `info.routePath` lets a front that already resolved
-// it pass it in.
+// The path the request is routed by: the browser's path, or `info.routePath` when a front already
+// resolved it (basePath removed, a rewrite).
 function resolveRequestPath(env, info, url) {
   return info.routePath ?? url.pathname;
+}
+
+// i18n (nowaki.config `i18n`): the locale prefix comes off the route path, and the rest of the
+// request runs with the locale as getLocale() (i18n-context.mjs) and `ctx.locale`. A default-locale
+// prefix (`/en/about` without `prefixDefaultLocale`) redirects (308) to the unprefixed URL; with
+// `prefixDefaultLocale`, an unprefixed page is a 404 (API and file routes still answer) and `/`
+// redirects (307) to the default locale's root.
+async function localizedRequest(env, info) {
+  const { url } = info;
+  const routed = resolveRequestPath(env, info, url);
+  // Framework endpoints (RPC, live events, boundaries) have no locale.
+  if (routed.startsWith("/__nowaki/")) return routeRequest(env, info);
+  const i18n = env.i18n;
+  const s = splitLocale(i18n, routed);
+  // sitemap.xml / robots.txt exist once, at the root.
+  if (s.prefixed && (s.path === "/sitemap.xml" || s.path === "/robots.txt")) return routeRequest(env, info);
+  // The browser path's part in front of the route path (basePath), or null when a rewrite changed
+  // the path: no redirect then, and no alternates (they would name the internal path).
+  const prefix = routed === url.pathname ? "" : i18n.base && url.pathname === (routed === "/" ? i18n.base : i18n.base + routed) ? i18n.base : null;
+  if (prefix !== null && s.prefixed && s.locale === i18n.defaultLocale && !i18n.prefixDefault) {
+    // The base back in front and the trailing-slash policy applied (the bare base for `/`, or
+    // `<base>/` under "always"), so the redirect lands on the canonical URL in one hop.
+    const loc = browserPathFor(prefix === i18n.base ? i18n : { ...i18n, base: prefix }, s.path) + url.search;
+    // `/en//evil.com` must not become a protocol-relative redirect.
+    if (!/^\/[/\\]/.test(loc)) return { status: 308, headers: { location: loc } };
+  }
+  if (prefix !== null && !s.prefixed && i18n.prefixDefault && s.path === "/") {
+    return { status: 307, headers: { location: browserPathFor(prefix === i18n.base ? i18n : { ...i18n, base: prefix }, `/${i18n.defaultLocale}`) + url.search } };
+  }
+  const table = await env.routeTable(info.version);
+  let match = matchRoute(table.routes, s.path);
+  if (match && !s.prefixed && i18n.prefixDefault && !match.isApi) match = null;
+  const state = { locale: s.locale, i18n, path: s.path, prefix };
+  return runWithLocale(state, () => routeRequest(localizedEnv(env), { ...info, locale: s.locale }, { path: s.path, match }));
+}
+
+// The env of a localized request: documents get `<html lang>` from the locale (unless the page set
+// one), the client's i18n settings (`data-nowaki-i18n`, for localePath / getLocale in islands) and
+// hreflang alternates. One per env, made on its first localized request.
+const localized = new WeakMap();
+function localizedEnv(env) {
+  let out = localized.get(env);
+  if (!out) {
+    out = Object.create(env);
+    out.renderDocument = (args) => env.renderDocument({ ...args, meta: localeMeta(env, args.mod, args.meta) });
+    if (typeof env.renderShell === "function") {
+      out.renderShell = (args) => env.renderShell({ ...args, meta: localeMeta(env, args.mod, args.meta) });
+    }
+    localized.set(env, out);
+  }
+  return out;
+}
+
+function localeMeta(env, mod, meta) {
+  const st = localeState();
+  if (!st) return meta;
+  const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+  const next = { ...(meta ?? {}) };
+  if (typeof next.lang !== "string" && typeof mod?.lang !== "string") next.lang = st.locale;
+  const html = isObj(next.htmlAttrs) ? next.htmlAttrs : isObj(mod?.htmlAttrs) ? mod.htmlAttrs : {};
+  next.htmlAttrs = { ...html, "data-nowaki-i18n": clientI18n(st.i18n, st.locale) };
+  // hreflang needs absolute URLs, so only with a site URL: one built from the request's Host
+  // could end up in a shared (ISR, CDN) copy of the page.
+  if (st.prefix !== null && env.site) {
+    const tags = hreflangTags(localeAlternates(st.i18n, st.path), st.i18n.defaultLocale, {
+      site: env.site,
+      trailingSlash: env.trailingSlash,
+      staticOutput: env.staticOutput === true,
+    });
+    const head = typeof next.head === "string" ? next.head : typeof mod?.head === "string" ? mod.head : "";
+    next.head = head ? `${head}\n${tags}` : tags;
+  }
+  return next;
 }
 
 const FORBIDDEN = { status: 403, headers: { "content-type": "text/plain; charset=utf-8" }, body: "Forbidden" };
