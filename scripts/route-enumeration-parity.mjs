@@ -1,5 +1,5 @@
-// Prints sorted page URL patterns and parallel-route slot patterns from scanRoutes, for parity
-// with nowaki-core::routes (page_url_patterns, slot_route_patterns).
+// Prints sorted page URL patterns and parallel-route slot patterns (intercept targets included)
+// from scanRoutes, for parity with nowaki-core::routes (page_url_patterns, slot_route_patterns).
 // Usage: node scripts/route-enumeration-parity.mjs [appRoot]
 // stdout: JSON { pages: string[], slots: string[] }
 
@@ -35,6 +35,7 @@ for (const slot of table.slots) {
   const name = `${slot.ownerDir}/@${slot.name}`;
   for (const r of slot.routes) slots.push(`${name} ${urlFromSegments(r.segments)}`);
   if (slot.default) slots.push(`${name} default`);
+  for (const i of slot.intercepts) if (i.pattern) slots.push(`${name} intercept ${i.pattern}`);
 }
 slots.sort();
 process.stdout.write(`${JSON.stringify({ pages, slots })}\n`);

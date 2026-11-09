@@ -125,6 +125,9 @@ if (typeof document !== "undefined") {
   if (routerSrc) {
     let loading = null;
     const load = () => (loading ??= import(routerSrc).catch(() => {}));
+    // A reload of an entry the router made (or keyed): back / forward to the router's other
+    // entries only change the URL, so the router has to be there to load them.
+    if (history.state?.nowaki) load();
     // Same rules as the router's own link check (router.js internalAnchor).
     const link = (target) => {
       const a = target?.closest?.("a");

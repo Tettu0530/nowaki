@@ -4,12 +4,13 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { scanRoutes, matchRoute, underPrefix, routeUnderPrefix, isRouteGroup, stripRouteGroups } from "../packages/nowaki-runtime/server/router.mjs";
+import { scanRoutes, matchRoute, underPrefix, routeUnderPrefix, isRouteGroup, stripRouteGroups, interceptTarget } from "../packages/nowaki-runtime/server/router.mjs";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
+import { matchBoundary } from "../packages/nowaki-runtime/client/router-core.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const app = path.join(ROOT, "examples/hello");
@@ -74,9 +75,9 @@ eq(
   "layouts: root + nested /blog + the (marketing) group + /photos (owns @modal)",
 );
 eq(
-  table.slots.map((s) => [s.ownerDir, s.name, s.routes.map((r) => path.basename(r.file)), path.basename(s.default ?? ""), s.intercepts.map((i) => i.rel)]),
-  [["/photos", "modal", ["[id].tsx"], "default.tsx", ["(.)[id].tsx"]]],
-  "examples/hello: photos/@modal with a route, a default and a recorded intercept",
+  table.slots.map((s) => [s.ownerDir, s.name, s.routes.map((r) => path.basename(r.file)), path.basename(s.default ?? ""), s.intercepts.map((i) => [i.rel, i.pattern])]),
+  [["/photos", "modal", ["[id].tsx"], "default.tsx", [["(.)[id].tsx", "/photos/[id]"]]]],
+  "examples/hello: photos/@modal with a route, a default and an intercept of /photos/[id]",
 );
 eq(snap(table, "/photos/1"), { file: "[id].tsx", params: { id: "1" }, isApi: false }, "/photos/1 → photos/[id] (not the slot file)");
 eq(table.routes.some((r) => r.file.includes("@modal")), false, "slot files are never routes");
@@ -234,6 +235,16 @@ eq(stripRouteGroups("/(.)/x"), "/(.)/x", "(.) stays literal");
     [["", ""], ["/docs"]],
     "boundaries are sent to the client with groups stripped",
   );
+  eq(
+    [bounds.loading.map((b) => b.routes ?? null), bounds.error.map((b) => b.routes)],
+    [[null, ["/api/ping", "!/docs/guide", "/dashboard", "/docs/[slug]"]], [["!/docs/guide", "/docs/[slug]"]]],
+    "a group's boundaries list its routes in matching order, and the competing routes outside it marked \"!\"",
+  );
+  eq(
+    [matchBoundary(bounds.loading, "/dashboard")?.html, matchBoundary(bounds.loading, "/about")?.html, matchBoundary(bounds.error, "/docs/guide")],
+    ["<p>app loading</p>", "<p>root loading</p>", null],
+    "client: the group's loading boundary for its routes, the root one elsewhere; /docs/guide (another group) gets no docs error",
+  );
   await rm(dir, { recursive: true, force: true });
 
   const clash = async (files) => {
@@ -324,26 +335,29 @@ eq(stripRouteGroups("/(.)/x"), "/(.)/x", "(.) stays literal");
     return { status: r.status, body: String(r.body ?? ""), headers: r.headers };
   };
   const slot = (name, inner) => `<nowaki-slot name="${name}" style="display:contents">${inner}</nowaki-slot>`;
+  // @modal has an intercepting file: its wrapper says which URLs the router may ask it for.
+  const modal = (inner) =>
+    `<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/@modal" data-nowaki-intercepts="[&quot;/photo/[id]&quot;]">${inner}</nowaki-slot>`;
   eq(
     (await get("/")).body,
-    `|<div id="root"><p>home</p>${slot("modal", "<p>modal default</p>")}empty=null</div>`,
+    `|<div id="root"><p>home</p>${modal("<p>modal default</p>")}empty=null</div>`,
     "no slot route matches: the default renders; a slot without a default is null",
   );
   const photo = await get("/photo/7");
   eq(
     photo.body,
-    `|<div id="root"><p>photo page</p>${slot("modal", '<i>slot {&quot;pid&quot;:&quot;7&quot;} 7 /photo/7</i>')}empty=null</div>`,
+    `|<div id="root"><p>photo page</p>${modal('<i>slot {&quot;pid&quot;:&quot;7&quot;} 7 /photo/7</i>')}empty=null</div>`,
     "the slot route matching the URL renders with its own params and loader; slots add no meta",
   );
   eq(photo.headers["x-slot"], "1", "a slot loader's ctx writes reach the response");
   eq(
     (await get("/about")).body,
-    `|<div id="root"><p>about</p>${slot("modal", "<p>modal default</p>")}${slot("empty", "<p>empty about</p>")}</div>`,
+    `|<div id="root"><p>about</p>${modal("<p>modal default</p>")}${slot("empty", "<p>empty about</p>")}</div>`,
     "each slot resolves independently",
   );
   eq(
     (await get("/shop/hat")).body,
-    `|<div id="root"><div id="shop"><p>item</p>${slot("cart", "<b>cart hat</b>")}</div>${slot("modal", "<p>modal default</p>")}empty=null</div>`,
+    `|<div id="root"><div id="shop"><p>item</p>${slot("cart", "<b>cart hat</b>")}</div>${modal("<p>modal default</p>")}empty=null</div>`,
     "a slot in a group dir matches the URL with the group left out, below its owner's URL",
   );
   eq(
@@ -352,6 +366,91 @@ eq(stripRouteGroups("/(.)/x"), "/(.)/x", "(.) stays literal");
     "slots match the route path (rewrites), not the browser path",
   );
   eq((await get("/photo/%zz")).status, 404, "a malformed path is still a 404");
+  await rm(dir, { recursive: true, force: true });
+}
+
+// Intercepting routes: the URL a marker targets, on the fixture nowaki-core's
+// routes::intercept_target runs on too (tests/intercepts.rs).
+{
+  const { cases } = JSON.parse(await readFile(path.join(ROOT, "crates/nowaki-core/tests/fixtures/intercept-cases.json"), "utf8"));
+  for (const c of cases) eq(interceptTarget(c.owner ? c.owner.split("/") : [], (c.inner + ".tsx").split("/")), c.target, `interceptTarget: ${c.name}`);
+}
+
+// Intercepting routes end to end through handleRequest: the fragment the router asks for with
+// x-nowaki-intercept, the empty mount point, Vary on the full page.
+{
+  const dir = await mkdtemp(path.join(os.tmpdir(), "nowaki-intercepts-"));
+  const put = async (rel, src) => {
+    await mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await writeFile(path.join(dir, rel), src);
+  };
+  const runtimeRequire = createRequire(path.join(ROOT, "packages/nowaki-runtime/server/handler.mjs"));
+  const preact = JSON.stringify(pathToFileURL(path.join(path.dirname(runtimeRequire.resolve("preact/package.json")), "dist/preact.mjs")).href);
+  const page = (text) => `import { h } from ${preact};\nexport default () => h("p", null, ${JSON.stringify(text)});\n`;
+  await put("routes/_layout.js", `import { h } from ${preact};\nexport default (p) => h("div", null, p.children, p.slots.modal);\n`);
+  await put("routes/index.js", page("gallery"));
+  await put("routes/photo/[id].js", `import { h } from ${preact};\nexport const revalidate = 60;\nexport default ({ params }) => h("h1", null, "photo " + params.id);\n`);
+  await put("routes/about.js", page("about"));
+  await put(
+    "routes/@modal/(.)photo/[id].js",
+    `import { h } from ${preact};\nexport const scripts = ["./m.js"];\nexport const loader = (ctx) => "caption " + ctx.params.id;\nexport default ({ data, params, url }) => h("aside", null, data + " " + params.id + " " + url.pathname);\n`,
+  );
+  await put("routes/(g)/shop/_layout.js", `import { h } from ${preact};\nexport default (p) => h("section", null, p.children, p.slots.cart);\n`);
+  await put("routes/(g)/shop/index.js", page("shop"));
+  await put("routes/(g)/shop/@cart/(.)item/[x].js", page("cart item"));
+  const t = await scanRoutes(dir);
+  const env = {
+    routeTable: async () => t,
+    importModule: async (file) => import(pathToFileURL(file).href),
+    ensureIslands: async () => {},
+    renderDocument: ({ body }) => body,
+    renderError: (err) => ({ status: 500, headers: {}, body: String(err?.stack ?? err) }),
+    routeCss: async (file) => (file.includes("(.)photo") ? ["/site.css", "/modal.css"] : ["/site.css"]),
+    routeScripts: async (file, mod) => (mod?.scripts ?? []).map((s) => ({ src: `/m.${s.length}.js`, preload: ["/dep.js"] })),
+  };
+  const get = async (p, headers = {}, method = "GET") => {
+    const r = await handleRequest(env, { method, url: new URL("http://x" + p), headers, version: 1 });
+    return { status: r.status, body: String(r.body ?? ""), headers: r.headers };
+  };
+  const mount = `<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/@modal" data-nowaki-intercepts="[&quot;/photo/[id]&quot;]"></nowaki-slot>`;
+  eq((await get("/")).body, `<div><p>gallery</p>${mount}</div>`, "a slot with an intercepting file and nothing to render is an empty mount point");
+  const full = await get("/photo/3");
+  eq(full.body, `<div><h1>photo 3</h1>${mount}</div>`, "without the header the intercepted URL renders the full page");
+  eq(full.headers.vary, "X-Nowaki-Intercept", "the full page of an intercepted URL varies on x-nowaki-intercept");
+  eq(full.headers["x-nowaki-revalidate"], "60", "it stays an ISR page");
+  eq((await get("/about")).headers.vary, undefined, "a URL nothing intercepts gets no Vary");
+  const frag = await get("/photo/3?x=1", { "x-nowaki-intercept": "/@modal" });
+  eq(
+    frag.body,
+    '<template data-nowaki-head><link rel="stylesheet" href="/site.css" /><link rel="stylesheet" href="/modal.css" /><link rel="modulepreload" href="/dep.js" /><script type="module" src="/m.6.js" data-nowaki-script></script></template><aside>caption 3 3 /photo/3</aside>',
+    "x-nowaki-intercept renders the intercepting file alone, with its loader, params, CSS and page scripts",
+  );
+  eq(
+    [frag.status, frag.headers["x-nowaki-slot"], frag.headers["cache-control"], frag.headers.vary, frag.headers["x-nowaki-revalidate"]],
+    [200, "modal", "private, no-store", "X-Nowaki-Intercept", undefined],
+    "the fragment says so (x-nowaki-slot) and is never cached",
+  );
+  eq((await get("/about", { "x-nowaki-intercept": "/@modal" })).body, `<div><p>about</p>${mount}</div>`, "a URL the slot doesn't intercept: the full page");
+  eq((await get("/photo/3", { "x-nowaki-intercept": "/@other" })).body.startsWith("<div><h1>photo 3"), true, "an unknown slot id: the full page");
+  eq((await get("/photo/3", { "x-nowaki-intercept": "/@modal" }, "POST")).body.startsWith("<div><h1>photo 3"), true, "only GET asks for a fragment");
+  const shop = await get("/shop");
+  eq(
+    shop.body.includes('data-nowaki-slot="/(g)/shop/@cart" data-nowaki-intercepts="[&quot;/shop/item/[x]&quot;]"'),
+    true,
+    "a slot owned in a group: its id is its directory, its patterns are URLs",
+  );
+  eq(
+    (await get("/shop/item/9", { "x-nowaki-intercept": encodeURI("/(g)/shop/@cart") })).body.endsWith("<p>cart item</p>"),
+    true,
+    "the group-owned slot's fragment",
+  );
+  globalThis.__nowakiBase = "/app";
+  eq(
+    (await get("/")).body.includes("data-nowaki-intercepts=\"[&quot;/app/photo/[id]&quot;]\""),
+    true,
+    "patterns are browser paths: basePath in front",
+  );
+  globalThis.__nowakiBase = "";
   await rm(dir, { recursive: true, force: true });
 }
 

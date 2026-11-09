@@ -5,7 +5,8 @@ import { h } from "preact";
 import { renderToStringAsync } from "preact-render-to-string";
 import { renderToReadableStream } from "preact-render-to-string/stream";
 
-import { matchRoute, matchSlot, pathParts, prefixDepth, routeUnderPrefix, underPrefix } from "./router.mjs";
+import { matchIntercept, matchRoute, matchSlot, pathParts, prefixDepth, routeUnderPrefix, underPrefix } from "./router.mjs";
+import { basePath } from "./base-path.mjs";
 import { mergeAttrs } from "./document.mjs";
 import { hreflangTags, mergeMeta, robotsTxt, seoTags, sitemapXml } from "./seo.mjs";
 import { browserPathFor, clientI18n, localeAlternates, localeGroups, splitLocale } from "./i18n.mjs";
@@ -88,6 +89,15 @@ async function routeRequest(env, info, localized) {
     const short = await runMiddleware(env, table, ctx, version, path, match);
     if (short) return finalize(ctx, short, env, table, version);
 
+    // Intercepting routes: the client router asks for a slot's fragment with x-nowaki-intercept.
+    // An app without slots pays the length check.
+    const intercepts = table.slots?.length ? interceptIndex(table) : null;
+    if (intercepts && method === "GET") {
+      const id = rawHeader(info)("x-nowaki-intercept");
+      const frag = id ? await renderIntercept(env, intercepts.get(id), ctx, version, path) : null;
+      if (frag) return finalize(ctx, frag, env, table, version);
+    }
+
     if (!match) {
       // With a site URL, sitemap.xml and robots.txt are generated unless a route or a public/
       // file (served before this) provides them.
@@ -128,7 +138,8 @@ async function routeRequest(env, info, localized) {
       ctx.actionData = out; // data → re-render the page
     }
 
-    return finalize(ctx, await renderRoute(env, table, match, mod, ctx, version, path), env, table, version);
+    const page = await renderRoute(env, table, match, mod, ctx, version, path);
+    return finalize(ctx, intercepts ? varyIntercept(intercepts, path, page) : page, env, table, version);
   } catch (err) {
     if (ctx._redirect) return finalize(ctx, ctx._redirect, env, table, version); // throw path of ctx.redirect()
     return finalize(ctx, await render500(env, table, ctx, version, err), env, table, version);
@@ -422,7 +433,9 @@ async function renderRoute(env, table, match, mod, ctx, version, path) {
       "x-nowaki-vary-query": vary.query ? "1" : "0",
     };
   }
-  return { status: 200, headers, body: env.renderDocument({ mod, body, meta }) };
+  // A slot that intercepts URLs needs the client router: the page ships the runtime without islands.
+  const doc = slots && slots.some((l) => l?.some((s) => s.slot.intercepts?.some((i) => i.segments))) ? { ...meta, router: true } : meta;
+  return { status: 200, headers, body: env.renderDocument({ mod, body, meta: doc }) };
 }
 
 function isrSeconds(mod) {
@@ -460,7 +473,8 @@ async function renderBoundaries(env, table, version) {
       if (typeof mod.default !== "function") return null;
       const html = await renderToStringAsync(h(mod.default, props));
       // The client matches boundaries by URL, so route groups are left out of the prefix.
-      return { prefix: entry.urlPrefix ?? entry.prefix, html };
+      if (entry.urlPrefix === undefined || entry.urlPrefix === entry.prefix) return { prefix: entry.prefix, html };
+      return { prefix: entry.urlPrefix, html, routes: groupRoutes(table, entry.prefix) };
     } catch {
       return null; // a failing boundary must not break everything
     }
@@ -476,6 +490,46 @@ async function renderBoundaries(env, table, version) {
     )
   ).filter(Boolean);
   return { status: 200, headers: JSON_CT, body: JSON.stringify({ loading, error }) };
+}
+
+// Which URLs a route group's boundary (in directory `prefix`) is for, as the client router reads
+// it (router-core.js matchBoundary): the URL patterns of the routes inside the group, and, marked
+// "!", those of routes outside it that can serve some of the same URLs, in matching order. The
+// first pattern a URL matches decides. Routes that never compete with the group's aren't listed.
+function groupRoutes(table, prefix) {
+  const routes = table.routes ?? [];
+  const mine = routes.filter((r) => routeUnderPrefix(r, prefix));
+  const out = [];
+  for (const r of routes) {
+    if (mine.includes(r)) out.push(segmentsPattern(r.segments));
+    else if (mine.some((m) => segmentsOverlap(m.segments, r.segments))) out.push("!" + segmentsPattern(r.segments));
+  }
+  return out;
+}
+
+// A route's URL pattern as written ("/blog/[slug]", "/files/[...path]").
+function segmentsPattern(segments) {
+  return "/" + segments.map((s) => (s.lit !== undefined ? s.lit : s.rest ? `[...${s.param}]` : `[${s.param}]${s.suffix ?? ""}`)).join("/");
+}
+
+// Can one URL match both segment lists?
+function segmentsOverlap(a, b) {
+  for (let i = 0; ; i++) {
+    const x = a[i];
+    const y = b[i];
+    // A catch-all needs one segment or more, so one list ending first means no common URL.
+    if (!x || !y) return !x && !y;
+    if (x.rest || y.rest) return true;
+    if (x.lit !== undefined && y.lit !== undefined) {
+      if (x.lit !== y.lit) return false;
+    } else if (x.lit !== undefined || y.lit !== undefined) {
+      const lit = x.lit ?? y.lit;
+      const suffix = (x.lit !== undefined ? y : x).suffix;
+      if (suffix && (lit.length <= suffix.length || !lit.endsWith(suffix))) return false;
+    } else if (x.suffix && y.suffix && !x.suffix.endsWith(y.suffix) && !y.suffix.endsWith(x.suffix)) {
+      return false;
+    }
+  }
 }
 
 async function resolveMeta(mod, info) {
@@ -608,11 +662,15 @@ async function wrapLayouts(env, table, file, node, ctx, version, slots) {
 
 // One layout's slots: name → its node wrapped in <nowaki-slot name>, or null when the slot has
 // nothing to render (no matching file and no default). Loaders of sibling slots run together.
+// A slot with intercepting files always gets its wrapper (empty when it renders nothing): the
+// client router swaps fragments into it, and its attributes tell the router which URLs to ask for.
 async function renderSlots(env, resolved, ctx, version) {
   const out = {};
   await Promise.all(
-    resolved.map(async ({ name, hit }) => {
-      out[name] = null;
+    resolved.map(async ({ slot, hit }) => {
+      const name = slot.name;
+      const attrs = slot.intercepts?.length ? interceptAttrs(slot) : null;
+      out[name] = attrs ? h("nowaki-slot", attrs) : null;
       if (!hit) return;
       const smod = await env.importModule(hit.file, version);
       const Slot = smod.default;
@@ -620,10 +678,88 @@ async function renderSlots(env, resolved, ctx, version) {
       // A slot route has its own params (its URL pattern); a default sees the page's.
       const sctx = hit.params ? slotContext(ctx, hit.params) : ctx;
       const data = smod.loader ? await smod.loader(sctx) : undefined;
-      out[name] = h("nowaki-slot", { name, style: "display:contents" }, h(Slot, { data, params: sctx.params, url: ctx.url }));
+      out[name] = h("nowaki-slot", attrs ?? { name, style: "display:contents" }, h(Slot, { data, params: sctx.params, url: ctx.url }));
     }),
   );
   return out;
+}
+
+// The opaque id the router sends back in x-nowaki-intercept: the slot's directory, ASCII-safe.
+const slotId = (slot) => encodeURI(`${slot.ownerDir}/@${slot.name}`);
+
+// The wrapper attributes of a slot with intercepting files: its id, and the URL patterns they
+// take over as the browser sees them (basePath and the request's locale prefix in front), so the
+// client matches location paths as they are. Once per slot and prefix.
+const slotAttrs = new WeakMap();
+function interceptAttrs(slot) {
+  const st = localeState();
+  const prefix = basePath() + (st && (st.locale !== st.i18n.defaultLocale || st.i18n.prefixDefault) ? `/${st.locale}` : "");
+  let byPrefix = slotAttrs.get(slot);
+  if (!byPrefix) slotAttrs.set(slot, (byPrefix = new Map()));
+  let attrs = byPrefix.get(prefix);
+  if (attrs === undefined) {
+    const patterns = slot.intercepts.filter((i) => i.pattern).map((i) => prefix + i.pattern);
+    attrs = patterns.length
+      ? { name: slot.name, style: "display:contents", "data-nowaki-slot": slotId(slot), "data-nowaki-intercepts": JSON.stringify(patterns) }
+      : null;
+    byPrefix.set(prefix, attrs);
+  }
+  return attrs;
+}
+
+// Slots with a servable intercepting file by id, or null when there are none: once per table.
+const intercepting = new WeakMap();
+function interceptIndex(table) {
+  let index = intercepting.get(table);
+  if (index === undefined) {
+    const slots = table.slots.filter((s) => s.intercepts?.some((i) => i.segments));
+    index = slots.length ? new Map(slots.map((s) => [slotId(s), s])) : null;
+    intercepting.set(table, index);
+  }
+  return index;
+}
+
+// A full page at a URL some slot intercepts differs from the fragment the router gets there, so
+// caches keep them apart.
+function varyIntercept(index, path, result) {
+  const parts = pathParts(path);
+  let hit = false;
+  for (const slot of index.values()) if ((hit = matchIntercept(slot, parts) !== null)) break;
+  if (!hit) return result;
+  const headers = { ...(result.headers ?? {}) };
+  const key = Object.keys(headers).find((k) => k.toLowerCase() === "vary");
+  headers[key ?? "vary"] = key ? `${headers[key]}, X-Nowaki-Intercept` : "X-Nowaki-Intercept";
+  return { ...result, headers };
+}
+
+// The fragment an intercepting file renders for the client router: the slot's new content after
+// a <template data-nowaki-head> holding the file's stylesheets and page scripts. Never cached
+// (`private, no-store`; the `nowaki start` ISR cache skips requests with x-nowaki-intercept), and
+// x-nowaki-slot tells the router it got a fragment. null when nothing in the slot intercepts the
+// path: the request then renders the full page.
+async function renderIntercept(env, slot, ctx, version, path) {
+  const hit = slot ? matchIntercept(slot, pathParts(path)) : null;
+  if (!hit) return null;
+  const mod = await env.importModule(hit.file, version);
+  if (typeof mod.default !== "function") return null;
+  await env.ensureIslands(version);
+  const data = mod.loader ? await mod.loader(slotContext(ctx, hit.params)) : undefined;
+  const body = await renderToStringAsync(h(mod.default, { data, params: hit.params, url: ctx.url }));
+  const esc = (v) => String(v).replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`);
+  const tags = [];
+  for (const href of (typeof env.routeCss === "function" ? await env.routeCss(hit.file, version) : null) ?? []) {
+    tags.push(`<link rel="stylesheet" href="${esc(href)}" />`);
+  }
+  for (const s of (typeof env.routeScripts === "function" ? await env.routeScripts(hit.file, mod, version) : null) ?? []) {
+    if (!s?.src) continue;
+    for (const p of s.preload ?? []) tags.push(`<link rel="modulepreload" href="${esc(p)}" />`);
+    tags.push(`<script type="module" src="${esc(s.src)}" data-nowaki-script></script>`);
+  }
+  return {
+    status: 200,
+    headers: { ...HTML, "cache-control": "private, no-store", vary: "X-Nowaki-Intercept", "x-nowaki-slot": slot.name },
+    body: `<template data-nowaki-head>${tags.join("")}</template>${body}`,
+  };
 }
 
 // The request's context with other params. Everything else (writes included) goes to ctx itself.
@@ -640,7 +776,7 @@ function resolveSlots(table, file, path) {
   const owners = slotOwners(table, file);
   if (!owners) return null;
   const parts = pathParts(path);
-  return owners.map((slots) => slots && slots.map((slot) => ({ name: slot.name, hit: matchSlot(slot, parts) })));
+  return owners.map((slots) => slots && slots.map((slot) => ({ slot, hit: matchSlot(slot, parts) })));
 }
 
 function renderedSlotFiles(slots) {

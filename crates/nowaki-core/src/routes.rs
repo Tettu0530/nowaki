@@ -233,10 +233,12 @@ pub fn page_url_patterns(routes_dir: &Path) -> Result<Vec<String>> {
 }
 
 /// The files of every parallel-route slot under `routes/`, as `"<owner dir>/@<name> <URL pattern>"`
-/// (`"/@modal /photo/[id]"`, owner dir `""` for `routes/`) or `"<owner dir>/@<name> default"`,
-/// sorted. A slot file's pattern is its owner directory's URL followed by its own path. Files
-/// starting with `_`, `loading` / `error`, nested slots, intercepting routes and nested
-/// `default`s are left out, as router.mjs `scanRoutes` leaves them out of a slot's routes.
+/// (`"/@modal /photo/[id]"`, owner dir `""` for `routes/`), `"<owner dir>/@<name> default"` or,
+/// for an intercepting file, `"<owner dir>/@<name> intercept <target pattern>"`
+/// (`intercept_target`), sorted. A slot file's pattern is its owner directory's URL followed by
+/// its own path. Files starting with `_`, `loading` / `error`, file route names, nested slots,
+/// intercepting files without a target and nested `default`s are left out, as router.mjs
+/// `scanRoutes` leaves them out of a slot's routes and intercepts.
 pub fn slot_route_patterns(routes_dir: &Path) -> Result<Vec<String>> {
     let mut files = walk_routes_dir(routes_dir)?;
     files.sort();
@@ -256,9 +258,7 @@ pub fn slot_route_patterns(routes_dir: &Path) -> Result<Vec<String>> {
         let base = file_base_name(&stem);
         if parts[at].len() < 2
             || inner.is_empty()
-            || inner
-                .iter()
-                .any(|p| p.starts_with('@') || is_intercept_segment(p))
+            || inner.iter().any(|p| p.starts_with('@'))
             || is_convention_source(base)
             || is_file_route_stem(base)
         {
@@ -269,6 +269,12 @@ pub fn slot_route_patterns(routes_dir: &Path) -> Result<Vec<String>> {
             .map(|p| format!("/{p}"))
             .collect::<String>();
         let slot = format!("{owner}/{}", parts[at]);
+        if inner.iter().any(|p| is_intercept_segment(p)) {
+            if let Some(target) = intercept_target(&parts[..at], inner) {
+                out.push(format!("{slot} intercept {target}"));
+            }
+            continue;
+        }
         if base == "default" {
             if inner.len() == 1 {
                 out.push(format!("{slot} default"));
@@ -280,6 +286,52 @@ pub fn slot_route_patterns(routes_dir: &Path) -> Result<Vec<String>> {
     }
     out.sort();
     Ok(out)
+}
+
+/// The URL pattern an intercepting slot file takes over (`/photo/[id]`), or None when its marker
+/// climbs above `routes/` or the path has more than one marker. `owner` is the path to the slot
+/// directory and `inner` the file's stem inside it, both split on `/` (route groups still in).
+/// The marker counts URL segments from the directory holding it (groups and slots don't count):
+/// `(.)` the same level, `(..)` one up (repeatable), `(...)` the root. Matches router.mjs
+/// `interceptTarget`.
+pub fn intercept_target(owner: &[&str], inner: &[&str]) -> Option<String> {
+    let k = inner.iter().position(|p| is_intercept_segment(p))?;
+    if inner[k + 1..].iter().any(|p| is_intercept_segment(p)) {
+        return None;
+    }
+    let mut base: Vec<&str> = owner
+        .iter()
+        .chain(&inner[..k])
+        .copied()
+        .filter(|p| !is_route_group(p))
+        .collect();
+    let mut name = inner[k];
+    if let Some(rest) = name.strip_prefix("(...)") {
+        base.clear();
+        name = rest;
+    } else if let Some(rest) = name.strip_prefix("(.)") {
+        name = rest;
+    } else {
+        while let Some(rest) = name.strip_prefix("(..)") {
+            base.pop()?;
+            name = rest;
+        }
+    }
+    if name.is_empty() {
+        return None;
+    }
+    let mut out = base;
+    out.push(name);
+    out.extend(
+        inner[k + 1..]
+            .iter()
+            .copied()
+            .filter(|p| !is_route_group(p)),
+    );
+    if out.last() == Some(&"index") {
+        out.pop();
+    }
+    Some(format!("/{}", out.join("/")))
 }
 
 /// Fails when two route files serve the same URL because of route groups (`(a)/about.tsx` and
@@ -616,6 +668,10 @@ mod tests {
             "@modal/feed.xml.ts",
             "(shop)/[org]/@cart/index.tsx",
             "(shop)/[org]/@cart/(g)/items.tsx",
+            "(shop)/[org]/@cart/(g)/(..)up/[id].tsx",
+            "(shop)/[org]/@cart/(..)(..)too-far.tsx",
+            "(shop)/[org]/@cart/(...)top/index.tsx",
+            "(shop)/[org]/@cart/(.)a/(.)b.tsx",
             "@x.tsx",
             "feed/(..)photo/[id].tsx",
         ] {
@@ -632,8 +688,11 @@ mod tests {
             vec![
                 "/(shop)/[org]/@cart /[org]".to_string(),
                 "/(shop)/[org]/@cart /[org]/items".to_string(),
+                "/(shop)/[org]/@cart intercept /top".to_string(),
+                "/(shop)/[org]/@cart intercept /up/[id]".to_string(),
                 "/@modal /photo/[id]".to_string(),
                 "/@modal default".to_string(),
+                "/@modal intercept /photo/[id]".to_string(),
             ]
         );
         check_url_conflicts(&routes).expect("no conflict");

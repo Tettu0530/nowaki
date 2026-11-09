@@ -4,7 +4,8 @@
 // generated into a temp directory (linked to examples/hello's node_modules).
 // A second app ("combo", on --port + 1) composes i18n with basePath "/app", trailingSlash
 // "never" and a parallel-route slot: prefixed URLs, canonical / hreflang / sitemap, the locale
-// redirect, static file names and _redirects, and the slot under a locale.
+// redirect, static file names and _redirects, and the slot (with an intercepting route) under a
+// locale.
 //   node scripts/i18n-e2e.mjs <mode>... [--port 4990]
 // Modes: start (`nowaki start`), dev (`nowaki dev`), node (node adapter), cloudflare (the worker's
 // fetch, called in Node), static (prerender output). NOWAKI_BIN overrides the binary (default
@@ -98,6 +99,8 @@ export default function Photo({ params }) { return <h1>{\`PHOTO \${params.id} \$
 export const loader = (ctx) => ({ id: ctx.params.id });
 export default function Modal({ data }) { return <aside>{\`MODAL \${data.id} \${getLocale()}\`}</aside>; }\n`,
   "routes/photos/@modal/default.tsx": `export default function NoModal() { return <p>NOMODAL</p>; }\n`,
+  "routes/photos/@modal/(.)[id].tsx": `import { getLocale } from "@nowaki-dev/runtime";
+export default function Intercepted({ params }) { return <aside>{\`INTERCEPTED \${params.id} \${getLocale()}\`}</aside>; }\n`,
 };
 
 async function comboChecks(label, req) {
@@ -126,11 +129,14 @@ async function comboChecks(label, req) {
   r = await req("/app/ja");
   check(t("/app/ja is the locale's home"), r.status === 200 && r.body.includes("HOME ja"), `${r.status}`);
   r = await req("/app/ja/photos/1");
-  check(t("slot renders under base + locale"), r.status === 200 && r.body.includes("PHOTO 1 ja") && /<nowaki-slot name="modal" style="display:contents"><aside>MODAL 1 ja<\/aside><\/nowaki-slot>/.test(r.body), `${r.status} ${r.body.slice(0, 600)}`);
+  check(t("slot renders under base + locale"), r.status === 200 && r.body.includes("PHOTO 1 ja") && /<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="\/photos\/@modal" data-nowaki-intercepts="\[&quot;\/app\/ja\/photos\/\[id\]&quot;\]"><aside>MODAL 1 ja<\/aside><\/nowaki-slot>/.test(r.body), `${r.status} ${r.body.slice(0, 600)}`);
   r = await req("/app/ja/photos");
   check(t("slot default under base + locale"), r.status === 200 && r.body.includes("PHOTOS") && r.body.includes("<p>NOMODAL</p>"), `${r.status} ${r.body.slice(0, 400)}`);
   r = await req("/app/photos/1");
   check(t("slot renders under the base in the default locale"), r.status === 200 && r.body.includes("MODAL 1 en"), `${r.status}`);
+  check(t("the default locale's intercept patterns carry the base only"), r.body.includes('data-nowaki-intercepts="[&quot;/app/photos/[id]&quot;]"'), r.body.match(/<nowaki-slot[^>]*>/)?.[0]);
+  r = await req("/app/ja/photos/1", { headers: { "x-nowaki-intercept": "/photos/@modal" } });
+  check(t("intercepting route under base + locale: the fragment"), r.status === 200 && r.headers["x-nowaki-slot"] === "modal" && r.body.endsWith("<aside>INTERCEPTED 1 ja</aside>"), `${r.status} ${r.body.slice(-200)}`);
   r = await req("/app/sitemap.xml");
   check(
     t("sitemap: base + locale, no trailing slashes, alternates"),
@@ -169,8 +175,8 @@ async function workerClient(dir) {
       return existsSync(file) && !file.endsWith(path.sep) ? new Response(readFileSync(file)) : new Response("missing", { status: 404 });
     },
   };
-  return async (p) => {
-    const res = await worker.fetch(new Request(`https://app.example${p}`, { redirect: "manual" }), { ASSETS });
+  return async (p, { headers = {} } = {}) => {
+    const res = await worker.fetch(new Request(`https://app.example${p}`, { redirect: "manual", headers }), { ASSETS });
     return { status: res.status, headers: Object.fromEntries(res.headers), body: await res.text() };
   };
 }

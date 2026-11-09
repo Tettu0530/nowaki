@@ -20,8 +20,7 @@ milestone's worth of work; the codename is noted per entry.
   page's, and it adds no `meta`. Slot files are never routes of their own: they're left out of
   typegen, prerendering and URL conflict checks; a page's JS budget counts the islands of every
   slot file its layouts can render. Files starting with `_` and nested slots inside a slot are
-  ignored. Intercepting routes (a segment starting with `(.)`, `(..)` or `(...)`) are recorded
-  but not served yet. Apps without slots pay one length check per request.
+  ignored (intercepting routes: see below). Apps without slots pay one length check per request.
 - **Route groups.** A directory named `(name)` under `routes/` groups files
   without adding a URL segment: `routes/(marketing)/about.tsx` serves `/about`.
   The group's `_layout`, `loading` and `error` apply to the files inside it.
@@ -30,9 +29,8 @@ milestone's worth of work; the codename is noted per entry.
   by URL. Two files serving the same URL because of groups
   (`(a)/about.tsx` and `(b)/about.tsx`) fail the build and show an error in
   dev. Names starting with `.` (`(.)`, `(..)`) are reserved. On client
-  navigation, a group's `loading` / `error` boundary is matched by its URL
-  prefix (the group left out), so it can also show for URLs outside the group;
-  a boundary outside any group wins at the same prefix.
+  navigation, a group's `loading` / `error` boundary shows for the routes inside
+  the group (and wins over one outside it at the same URL prefix).
   The Cloudflare worker now also serves `loading` / `error` boundaries.
 - **Remote images in `<Image>`.** `import hero from "https://images.example.com/photos/a.jpg?image"`
   is fetched at build time and optimized like a local `?image` import (AVIF + fallback widths,
@@ -145,6 +143,25 @@ milestone's worth of work; the codename is noted per entry.
   writes each locale under its prefix with its own `404.html`, and `_redirects`
   sends the default-locale prefix to the unprefixed URLs. Server functions and
   live events have no locale. Without `i18n`, a request pays one null check.
+- **Intercepting routes, and the client router's slot mode.** A file in a parallel-route slot
+  whose path has a `(.)`, `(..)` or `(...)` segment (`routes/@modal/(.)photo/[id].tsx`) takes
+  over that URL on client navigation from a page its slot is on: clicking `<a href="/photo/1">`
+  in the gallery fetches just that file (with its loader, CSS and page scripts) and swaps it into
+  `<nowaki-slot name="modal">`; the URL becomes `/photo/1`, the gallery and its islands stay.
+  Back closes it (the slot's previous content comes back as it was), forward reopens it, and a
+  reload or a direct visit renders the full `routes/photo/[id].tsx` page. The marker counts URL
+  segments from its directory (groups and slots don't count): `(.)` the same level, `(..)` one
+  up, `(...)` the root. A slot with intercepting files always renders its `<nowaki-slot>` element
+  (empty when it has nothing to show), carrying the URL patterns it intercepts as the browser sees
+  them (basePath and locale prefix included). The fragment response is `private, no-store`, the
+  `nowaki start` ISR cache never answers or stores it, and full pages at intercepted URLs send
+  `Vary: X-Nowaki-Intercept`. Live islands inside a fragment join the page's live connection when
+  the page already loaded `live.js`. A page whose layouts own such a slot loads the islands runtime
+  (and so the router) even without islands, and a page reloaded on a history entry the router
+  made loads the router at once, so back and forward after a reload still work. Intercepting files
+  outside a slot are still recorded only.
+  Pages without an intercepting slot render the same bytes as before; apps without slots pay
+  only the existing length check per request.
 ### Changed
 - **`trailingSlash` also shapes static output and page URLs.** With `"never"`, the static
   adapter writes `about.html` instead of `about/index.html`, and canonical URLs, the default

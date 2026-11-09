@@ -277,7 +277,7 @@ code locations and CI coverage.
   "combo" app composes i18n with basePath, trailingSlash "never" and a parallel-route slot).
 - **Parallel routes (`routes/…/@name/`)** — JS: `server/router.mjs` `scanRoutes` collects
   `slots: [{ ownerDir, name, routes, default, intercepts }]` (slot files are never in `routes`;
-  intercepting `(.)x` files are recorded in `slot.intercepts` / `table.intercepts`, not served),
+  intercepting `(.)x` files go to `slot.intercepts`; outside a slot, `table.intercepts`, not served),
   `matchSlot`; `handler.mjs` `resolveSlots` (owners cached per table + file in `slotOwners`, one
   length check without slots), `wrapLayouts` / `renderSlots` pass `slots` to the owner layout;
   `withRouteCss` / `withScripts` take the rendered slot files. Rust: `routes.rs` `is_slot_rel`,
@@ -285,6 +285,20 @@ code locations and CI coverage.
   in `crates/nowaki/tests/route_js_parity.rs`); `budget.rs` `slot_files_for`. The worker routeTable
   carries `slots` (`edge-build.mjs`). Tests: `scripts/router-test.mjs`, `scripts/handler-test.mjs`,
   `examples/hello/routes/photos/`.
+- **Intercepting routes (`@slot/(.)x`)** — the URL a file takes over: `router.mjs`
+  `interceptTarget` / Rust `routes.rs` `intercept_target`, both run on
+  `crates/nowaki-core/tests/fixtures/intercept-cases.json` (`slot_route_patterns` lists them for
+  the parity test). Server (`handler.mjs`): `interceptAttrs` (a slot with intercepts always renders
+  its `<nowaki-slot>`, with `data-nowaki-slot` = its id and `data-nowaki-intercepts` = the
+  patterns as browser paths, base + locale prefix in front), `renderIntercept` (GET with
+  `x-nowaki-intercept: <slot id>` → the fragment: `<template data-nowaki-head>` + the file,
+  `private, no-store`, `x-nowaki-slot`), `varyIntercept` (`Vary: X-Nowaki-Intercept` on the full
+  page); all behind `table.slots?.length` and the per-table `interceptIndex`. `start.rs`
+  `isr_eligible` keeps those requests out of the ISR cache; `forward.rs` lets the header through.
+  Client: `client/router.js` `interceptFor` / `apply` / `saveSlots` / `restoreSlots`,
+  `router-core.js` `matchPattern`. Group boundaries carry `routes` (`groupRoutes`) for the
+  client's `matchBoundary`. Tests: `scripts/router-test.mjs`, `scripts/router-cache-test.mjs`,
+  `scripts/slot-browser-test.mjs` (Chrome: start, dev, `NOWAKI_CSP=enforce`, basePath + locale).
 - **Page scripts (`export const scripts`)** — read from the AST in
   `crates/nowaki-core/src/page_scripts.rs`, emitted as client entries by
   `build.rs` `build_route_scripts` (manifest `routeScripts` per module and
