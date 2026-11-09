@@ -54,16 +54,27 @@ pub fn load(file: &Path) -> Result<Option<Arc<Front>>> {
     })))
 }
 
-/// Framework URLs no rule applies to: `/__nowaki/*` endpoints and `/_nowaki/*` assets, which
-/// are served at the root until asset URLs carry basePath.
-fn bypassed(path: &str) -> bool {
+/// Framework URLs at the root no rule applies to: `/__nowaki/*` endpoints (they also answer under
+/// basePath, see [`Front::framework_path`]) and, without a basePath, `/_nowaki/*` assets. Under a
+/// basePath the assets live at `<base>/_nowaki/*` only.
+fn bypassed(path: &str, base: &str) -> bool {
+    path.starts_with("/__nowaki/")
+        || path == "/__nowaki"
+        || (base.is_empty() && path.starts_with("/_nowaki/"))
+}
+
+fn is_framework(path: &str) -> bool {
     path.starts_with("/_nowaki/") || path.starts_with("/__nowaki/") || path == "/__nowaki"
 }
 
 impl Front {
     pub fn apply(&self, method: &Method, uri: &Uri) -> Step {
         let path = uri.path();
-        if bypassed(path) {
+        // Ahead of the rules: a catch-all rewrite or the trailing-slash policy must never move them.
+        if let Some(p) = self.framework_path(path) {
+            return Step::Continue(Some(p.to_string()));
+        }
+        if bypassed(path, self.rules.base_path()) {
             return Step::Continue(None);
         }
         match self.rules.apply(method.as_str(), path) {
@@ -75,6 +86,26 @@ impl Front {
                 Step::Respond((StatusCode::NOT_FOUND, "not found").into_response())
             }
         }
+    }
+
+    /// Under basePath, a framework URL below it (`<base>/_nowaki/*` assets, `<base>/__nowaki/*`
+    /// endpoints) as the root path the server answers it at.
+    pub fn framework_path<'a>(&self, path: &'a str) -> Option<&'a str> {
+        let base = self.rules.base_path();
+        if base.is_empty() {
+            return None;
+        }
+        path.strip_prefix(base).filter(|rest| is_framework(rest))
+    }
+
+    /// nowaki.config `basePath` (`""` without one).
+    pub fn base_path(&self) -> &str {
+        self.rules.base_path()
+    }
+
+    /// Whether a basePath is set (the [`base_layer`] is installed only then).
+    pub fn has_base(&self) -> bool {
+        !self.rules.base_path().is_empty()
     }
 
     /// Whether any `headers` rule exists (the response layer is installed only then).
@@ -129,6 +160,32 @@ pub async fn headers_layer(State(front): State<Arc<Front>>, req: Request, next: 
     let mut resp = next.run(req).await;
     front.fill_headers(&path, resp.headers_mut());
     resp
+}
+
+/// Under basePath, moves `<base>/__nowaki/*` requests to `/__nowaki/*` before routing, so the
+/// endpoints the client reaches under the base (server functions, the live socket, boundaries,
+/// HMR) are the same handlers, behind the same checks (`forward::is_internal_path` included), as
+/// at the root. Wraps the whole router: a `Router::layer` runs after routing.
+pub async fn base_layer(State(front): State<Arc<Front>>, mut req: Request, next: Next) -> Response {
+    if let Some(p) = front
+        .framework_path(req.uri().path())
+        .filter(|p| p.starts_with("/__nowaki"))
+    {
+        let pq = match req.uri().query() {
+            Some(q) => format!("{p}?{q}"),
+            None => p.to_string(),
+        };
+        let mut parts = req.uri().clone().into_parts();
+        match pq.parse() {
+            Ok(v) => parts.path_and_query = Some(v),
+            Err(_) => return (StatusCode::BAD_REQUEST, "bad request").into_response(),
+        }
+        match Uri::from_parts(parts) {
+            Ok(uri) => *req.uri_mut() = uri,
+            Err(_) => return (StatusCode::BAD_REQUEST, "bad request").into_response(),
+        }
+    }
+    next.run(req).await
 }
 
 /// The request's query goes along to the redirect target (after one the destination wrote, before
@@ -292,13 +349,65 @@ mod tests {
             Some("/about/".into())
         );
         assert_eq!(location(step(&f, Method::GET, "/about")).0, 404);
-        // Framework URLs are never matched (assets stay at the root for now).
-        assert_eq!(route(step(&f, Method::GET, "/_nowaki/x.js")), None);
+        // Assets live under the base only; endpoints answer at the root and under the base.
+        assert_eq!(location(step(&f, Method::GET, "/_nowaki/x.js")).0, 404);
         assert_eq!(route(step(&f, Method::POST, "/__nowaki/fn")), None);
         assert_eq!(
             route(step(&f, Method::GET, "/app/_nowaki/x.js")),
             Some("/_nowaki/x.js".into())
         );
+        assert_eq!(
+            route(step(&f, Method::POST, "/app/__nowaki/fn")),
+            Some("/__nowaki/fn".into())
+        );
+        assert_eq!(f.framework_path("/app/__nowaki"), Some("/__nowaki"));
+        assert_eq!(f.framework_path("/app/_nowakix"), None);
+        assert_eq!(f.framework_path("/apple/_nowaki/x.js"), None);
+        assert!(f.has_base());
+    }
+
+    #[test]
+    fn framework_urls_skip_the_rules() {
+        let f = front(
+            r#"{"basePath":"/app","trailingSlash":"always",
+                "rewrites":[{"source":"/[...all]","destination":"/catch/[...all]"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            route(step(&f, Method::GET, "/app/_nowaki/runtime.js")),
+            Some("/_nowaki/runtime.js".into())
+        );
+        assert_eq!(
+            route(step(&f, Method::GET, "/app/__nowaki/boundaries")),
+            Some("/__nowaki/boundaries".into())
+        );
+        let f = front(r#"{"redirects":[{"source":"/a","destination":"/b"}]}"#).unwrap();
+        assert!(!f.has_base());
+        assert_eq!(f.framework_path("/_nowaki/x.js"), None);
+        assert_eq!(route(step(&f, Method::GET, "/_nowaki/x.js")), None);
+    }
+
+    #[tokio::test]
+    async fn the_base_layer_moves_endpoints_to_the_root() {
+        use axum::routing::get;
+        use tower_layer::Layer;
+        use tower_service::Service;
+        let f = front(r#"{"basePath":"/app"}"#).unwrap();
+        let router = axum::Router::new()
+            .route("/__nowaki/live", get(|| async { "live" }))
+            .fallback(|uri: Uri| async move { uri.to_string() });
+        let mut svc = axum::middleware::from_fn_with_state(f, base_layer).layer(router);
+        for (uri, want) in [
+            ("/app/__nowaki/live", "live"),
+            ("/app/__nowaki/fn?x=1", "/__nowaki/fn?x=1"),
+            ("/app/_nowaki/a.js", "/app/_nowaki/a.js"),
+            ("/app/about", "/app/about"),
+        ] {
+            let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+            let resp = svc.call(req).await.unwrap();
+            let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+            assert_eq!(bytes, want, "{uri}");
+        }
     }
 
     #[test]

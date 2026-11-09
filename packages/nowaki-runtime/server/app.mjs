@@ -23,7 +23,9 @@ import { indexPublic, lookupPublic } from "./public-files.mjs";
 import { resolveSite } from "./seo.mjs";
 import { requestOrigin } from "./origin.mjs";
 import { compileRules } from "./rules.mjs";
+import { compileI18n } from "./i18n.mjs";
 import { frontHeaders, frontStep } from "./front.mjs";
+import { setBasePath } from "./base-path.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
 // Bun and Deno don't implement Node's module.register; their SSR keeps the old behavior.
@@ -101,6 +103,15 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
   });
 
   const manifest = JSON.parse(await readFile(path.join(clientDir, "manifest.json"), "utf8"));
+  // nowaki.config routing (dist/server/routing.json, written only when there is one). Read before
+  // the island registry: basePath decides where the client files are served.
+  const routing = await readFile(path.join(serverDir, "routing.json"), "utf8").then(JSON.parse, (e) => {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  });
+  const base = routing?.basePath ?? "";
+  setBasePath(base);
+  const assetBase = `${base}/_nowaki/`;
 
   const registry = new Map();
   for (const [name, file] of Object.entries(manifest.islands ?? {})) {
@@ -108,7 +119,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
       pathToFileURL(path.join(serverDir, "islands", `${name}.js`)).href
     );
     if (typeof mod.default === "function") {
-      registry.set(mod.default, { name, src: `/_nowaki/${file}` });
+      registry.set(mod.default, { name, src: `${assetBase}${file}` });
     }
   }
 
@@ -229,18 +240,18 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
       : null,
     // `nowaki prerender` sets NOWAKI_PRERENDER=1 on its temporary server: the pages become static
     // files, so live islands get no live.js (it could never reach a server).
-    renderDocument: (args) => prodDocument(manifest, args, { live: process.env.NOWAKI_PRERENDER !== "1" }),
-    renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta),
+    renderDocument: (args) => prodDocument(manifest, args, { live: process.env.NOWAKI_PRERENDER !== "1", assetBase }),
+    renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta, { assetBase }),
     // Page scripts from the build (manifest.routeScripts per route / layout module).
     routeScripts: (file) =>
       memo(scriptsByFile, file, () =>
         (manifest.routeScripts?.[moduleKey(file)] ?? []).map((f) => ({
-          src: `/_nowaki/${f}`,
-          preload: (manifest.scriptPreload?.[f] ?? []).map((d) => `/_nowaki/${d}`),
+          src: `${assetBase}${f}`,
+          preload: (manifest.scriptPreload?.[f] ?? []).map((d) => `${assetBase}${d}`),
         })),
       ),
     // Route / layout CSS from the build (manifest.routeCss, keyed by server module).
-    routeCss: (file) => memo(cssByFile, file, () => (manifest.routeCss?.[moduleKey(file)] ?? []).map((f) => `/_nowaki/${f}`)),
+    routeCss: (file) => memo(cssByFile, file, () => (manifest.routeCss?.[moduleKey(file)] ?? []).map((f) => `${assetBase}${f}`)),
     // render500 has already logged it.
     renderError: () => {
       return {
@@ -254,15 +265,13 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
 
   // dist/public next to dist/client unless given.
   const publicFiles = await indexPublic(publicDir ?? path.join(clientDir, "..", "public"));
-  // nowaki.config routing (dist/server/routing.json, written only when there is one): null
-  // without it, so a request pays one check. An invalid file stops the server here.
-  const rules = await readFile(path.join(serverDir, "routing.json"), "utf8").then(
-    (t) => compileRules(JSON.parse(t)),
-    (e) => {
-      if (e.code === "ENOENT") return null;
-      throw e;
-    },
-  );
+  // The compiled routing rules: null without a routing config, so a request pays one check. An
+  // invalid file stops the server here.
+  const rules = routing ? compileRules(routing) : null;
+  // Canonical / sitemap URLs follow the policy (seo.mjs pagePath).
+  if (rules) env.trailingSlash = rules.trailing;
+  // i18n: null without it (handler.mjs checks it once per request).
+  env.i18n = compileI18n(routing);
 
   const handle = async (req, res) => {
     // Set before the response's own headers, which override any of these by name.
@@ -283,7 +292,10 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
           res.writeHead(404, { "content-type": "text/plain; charset=utf-8" }).end("not found");
           return;
         }
-        if (step) pathname = routePath = step.routePath;
+        // A framework URL under basePath is served as the root one (`url` too: the handler
+        // dispatches /__nowaki/* endpoints by it).
+        if (step?.internal) pathname = url.pathname = step.routePath;
+        else if (step) pathname = routePath = step.routePath;
       }
 
       if (pathname.startsWith("/_nowaki/")) {

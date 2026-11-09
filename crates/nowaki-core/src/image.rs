@@ -281,6 +281,18 @@ pub fn write_variant(
     ext: &str,
     bytes: &[u8],
 ) -> Result<String> {
+    write_variant_at(out_dir, "/_nowaki/", stem, width, ext, bytes)
+}
+
+/// [`write_variant`] with the URL under `base` (`NowakiCore::asset_base`, like `/app/_nowaki/`).
+pub fn write_variant_at(
+    out_dir: &Path,
+    base: &str,
+    stem: &str,
+    width: u32,
+    ext: &str,
+    bytes: &[u8],
+) -> Result<String> {
     // Every caller gets a name `nowaki start` serves (Markdown content images included).
     let stem = crate::build::sanitize_name(stem);
     let name = format!("{stem}-{width}.{:08x}.{ext}", xxh3_64(bytes) as u32);
@@ -289,7 +301,7 @@ pub fn write_variant(
     if !path.exists() {
         std::fs::write(&path, bytes)?;
     }
-    Ok(format!("/_nowaki/{name}"))
+    Ok(format!("{base}{name}"))
 }
 
 /// The `<picture>` HTML `<Image>` renders for `set` (Markdown images use this; keep the two in

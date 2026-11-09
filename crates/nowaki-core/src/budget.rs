@@ -20,7 +20,10 @@ use oxc::ast::ast::{
 };
 
 use crate::build::ClientInfo;
-use crate::routes::{is_convention_source, is_endpoint_rel, stem_from_rel, url_pattern_from_stem};
+use crate::routes::{
+    is_convention_source, is_endpoint_rel, is_slot_or_intercept_rel, stem_from_rel,
+    url_pattern_from_stem,
+};
 use crate::NowakiCore;
 
 #[derive(Debug, Clone)]
@@ -109,13 +112,14 @@ pub fn route_first_load(
             continue;
         };
         let base = stem.rsplit('/').next().unwrap_or(&stem);
-        if is_convention_source(base) || is_endpoint_rel(&rel) {
+        if is_convention_source(base) || is_endpoint_rel(&rel) || is_slot_or_intercept_rel(&rel) {
             continue;
         }
 
+        let slot_files = slot_files_for(&routes_dir, &rel);
         let mut reach: HashSet<PathBuf> = crate::chunk::collect_app_modules(core, &path);
-        for layout in layouts_for(&routes_dir, &rel) {
-            reach.extend(crate::chunk::collect_app_modules(core, &layout));
+        for wrapper in layouts_for(&routes_dir, &rel).iter().chain(&slot_files) {
+            reach.extend(crate::chunk::collect_app_modules(core, wrapper));
         }
         let mut client_islands = BTreeSet::new();
         let mut has_live = false;
@@ -159,6 +163,7 @@ pub fn route_first_load(
         }
         let mut modules: Vec<String> = layouts_for(&routes_dir, &rel)
             .iter()
+            .chain(&slot_files)
             .filter_map(|l| l.strip_prefix(&routes_dir).ok())
             .filter_map(|l| stem_from_rel(&l.to_string_lossy().replace('\\', "/")))
             .collect();
@@ -215,6 +220,48 @@ pub fn layouts_for(routes_dir: &Path, rel: &str) -> Vec<PathBuf> {
             if is_layout && crate::is_transformable(&p) {
                 out.push(p);
             }
+        }
+    }
+    out
+}
+
+/// Files of the parallel-route slots (`@name/` directories) in every directory from `routes/` down
+/// to the route's own, the ones its layouts can render. Which one renders depends on the URL, so
+/// a page's budget counts them all (an upper bound). Files starting with `_` aren't rendered.
+pub fn slot_files_for(routes_dir: &Path, rel: &str) -> Vec<PathBuf> {
+    let mut dir = routes_dir.to_path_buf();
+    let parts: Vec<&str> = rel.split('/').collect();
+    let mut dirs = vec![dir.clone()];
+    for part in &parts[..parts.len().saturating_sub(1)] {
+        dir = dir.join(part);
+        dirs.push(dir.clone());
+    }
+    let mut out = Vec::new();
+    for d in dirs {
+        let Ok(entries) = fs::read_dir(&d) else {
+            continue;
+        };
+        let mut slots: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.is_dir()
+                    && p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.len() > 1 && n.starts_with('@'))
+            })
+            .collect();
+        slots.sort();
+        for slot in slots {
+            let mut files = crate::routes::walk_routes_dir(&slot).unwrap_or_default();
+            files.sort();
+            out.extend(files.into_iter().filter(|p| {
+                crate::is_transformable(p)
+                    && !p
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.starts_with('_'))
+            }));
         }
     }
     out
@@ -404,5 +451,46 @@ mod tests {
         got.sort();
         assert_eq!(got, ["_layout.tsx", "blog/_layout.tsx"]);
         assert_eq!(layouts_for(r, "about.tsx").len(), 1);
+    }
+
+    #[test]
+    fn finds_slot_files_of_every_dir_above() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        for f in [
+            "@modal/default.tsx",
+            "@modal/photo/[id].tsx",
+            "@modal/_layout.tsx",
+            "@modal/notes.md",
+            "blog/@side/index.tsx",
+            "blog/post.tsx",
+            "other/@x/default.tsx",
+        ] {
+            let p = r.join(f);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, "").unwrap();
+        }
+        let rel = |v: Vec<PathBuf>| -> Vec<String> {
+            v.into_iter()
+                .map(|p| {
+                    p.strip_prefix(r)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                })
+                .collect()
+        };
+        assert_eq!(
+            rel(slot_files_for(r, "blog/post.tsx")),
+            [
+                "@modal/default.tsx",
+                "@modal/photo/[id].tsx",
+                "blog/@side/index.tsx"
+            ]
+        );
+        assert_eq!(
+            rel(slot_files_for(r, "about.tsx")),
+            ["@modal/default.tsx", "@modal/photo/[id].tsx"]
+        );
     }
 }

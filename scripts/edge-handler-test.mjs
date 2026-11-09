@@ -63,6 +63,9 @@ check("fonts: preload + stylesheet on the edge", /<link rel="preload" href="\/_n
 const pricing = await req("/pricing");
 check("a route-group page on the edge: its layout and middleware",
   pricing.status === 200 && (await pricing.text()).includes('<div data-group="marketing"><main') && pricing.headers.get("x-route-group") === "marketing");
+const photo = await (await req("/photos/1")).text();
+check("parallel routes on the edge: the slot file matching the URL, its CSS", photo.includes('<nowaki-slot name="modal" style="display:contents"><aside id="photo-modal"') && /\/_nowaki\/modal\.[0-9a-f]+\.css/.test(photo));
+check("parallel routes on the edge: the slot default", (await (await req("/photos")).text()).includes('<nowaki-slot name="modal" style="display:contents"><p id="modal-default">'));
 const bounds = await (await req("/__nowaki/boundaries")).json();
 check("loading / error boundaries on the edge", bounds.loading.length > 0 && bounds.error.length > 0);
 const mdxPage = await (await req("/guide")).text();

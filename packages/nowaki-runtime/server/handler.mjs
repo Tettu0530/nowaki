@@ -5,9 +5,11 @@ import { h } from "preact";
 import { renderToStringAsync } from "preact-render-to-string";
 import { renderToReadableStream } from "preact-render-to-string/stream";
 
-import { matchRoute, prefixDepth, routeUnderPrefix, underPrefix } from "./router.mjs";
+import { matchRoute, matchSlot, pathParts, prefixDepth, routeUnderPrefix, underPrefix } from "./router.mjs";
 import { mergeAttrs } from "./document.mjs";
-import { mergeMeta, robotsTxt, seoTags, sitemapXml } from "./seo.mjs";
+import { hreflangTags, mergeMeta, robotsTxt, seoTags, sitemapXml } from "./seo.mjs";
+import { browserPathFor, clientI18n, localeAlternates, localeGroups, splitLocale } from "./i18n.mjs";
+import { localeState, runWithLocale } from "./i18n-context.mjs";
 import { sitemapUrls } from "./isr-urls.mjs";
 import { makeContext } from "./context.mjs";
 import { dispatchServerFn, runWithContext, SERVER_FN_PATH } from "./functions.mjs";
@@ -37,12 +39,21 @@ const JSON_CT = { "content-type": "application/json; charset=utf-8" };
 ///   renderError(err) -> { status, headers, body } (500 page differs between dev/prod)
 ///   onError(err, ctx) (optional) -> called for every error that becomes a 500 page
 ///   live (optional) -> { lookup(name, version), render } for POST /__nowaki/live-event
-export async function handleRequest(env, info) {
+// Not async itself: the request's promise is routeRequest's, so an app without i18n pays this one
+// check and no extra async frame.
+export function handleRequest(env, info) {
+  return env.i18n ? localizedRequest(env, info) : routeRequest(env, info);
+}
+
+// `localized` ({ path, match }) comes from localizedRequest, which has split the locale off the
+// route path and matched the rest already.
+async function routeRequest(env, info, localized) {
   const { method, url, version } = info;
   const table = await env.routeTable(version);
   // What routing, middleware and the 404 see; ctx.url stays the URL the browser asked for.
-  const path = resolveRequestPath(env, info, url);
-  const match = matchRoute(table.routes, path);
+  let path, match;
+  if (localized) ({ path, match } = localized);
+  else match = matchRoute(table.routes, (path = resolveRequestPath(env, info, url)));
   const ctx = makeContext({ ...info, params: match?.params ?? {} });
   // The site's URL (NOWAKI_SITE / nowaki.config `site`), for absolute links in feeds and the like.
   // Parsed on first read: most requests never look at it.
@@ -82,7 +93,9 @@ export async function handleRequest(env, info) {
       // file (served before this) provides them.
       if (env.site && (method === "GET" || method === "HEAD")) {
         if (path === "/sitemap.xml") {
-          const body = sitemapXml(env.site, await sitemapUrls(env, version), { staticOutput: env.staticOutput === true });
+          const i18n = env.i18n;
+          const alternates = i18n ? (paths) => localeGroups(i18n, paths) : undefined;
+          const body = sitemapXml(env.site, await sitemapUrls(env, version), { trailingSlash: env.trailingSlash, staticOutput: env.staticOutput === true, alternates });
           return finalize(ctx, { status: 200, headers: { "content-type": "application/xml; charset=utf-8" }, body }, env, table, version);
         }
         if (path === "/robots.txt") {
@@ -115,18 +128,91 @@ export async function handleRequest(env, info) {
       ctx.actionData = out; // data → re-render the page
     }
 
-    return finalize(ctx, await renderRoute(env, table, match, mod, ctx, version), env, table, version);
+    return finalize(ctx, await renderRoute(env, table, match, mod, ctx, version, path), env, table, version);
   } catch (err) {
     if (ctx._redirect) return finalize(ctx, ctx._redirect, env, table, version); // throw path of ctx.redirect()
     return finalize(ctx, await render500(env, table, ctx, version, err), env, table, version);
   }
 }
 
-// The path the request is routed by. Identity for now; rewrites, basePath and i18n prefixes will
-// map the browser's path to the route's here. `info.routePath` lets a front that already resolved
-// it pass it in.
+// The path the request is routed by: the browser's path, or `info.routePath` when a front already
+// resolved it (basePath removed, a rewrite).
 function resolveRequestPath(env, info, url) {
   return info.routePath ?? url.pathname;
+}
+
+// i18n (nowaki.config `i18n`): the locale prefix comes off the route path, and the rest of the
+// request runs with the locale as getLocale() (i18n-context.mjs) and `ctx.locale`. A default-locale
+// prefix (`/en/about` without `prefixDefaultLocale`) redirects (308) to the unprefixed URL; with
+// `prefixDefaultLocale`, an unprefixed page is a 404 (API and file routes still answer) and `/`
+// redirects (307) to the default locale's root.
+async function localizedRequest(env, info) {
+  const { url } = info;
+  const routed = resolveRequestPath(env, info, url);
+  // Framework endpoints (RPC, live events, boundaries) have no locale.
+  if (routed.startsWith("/__nowaki/")) return routeRequest(env, info);
+  const i18n = env.i18n;
+  const s = splitLocale(i18n, routed);
+  // sitemap.xml / robots.txt exist once, at the root.
+  if (s.prefixed && (s.path === "/sitemap.xml" || s.path === "/robots.txt")) return routeRequest(env, info);
+  // The browser path's part in front of the route path (basePath), or null when a rewrite changed
+  // the path: no redirect then, and no alternates (they would name the internal path).
+  // The base's root is `/app`, or `/app/` under trailingSlash "always".
+  const prefix = routed === url.pathname ? "" : i18n.base && (url.pathname === i18n.base + routed || (routed === "/" && url.pathname === i18n.base)) ? i18n.base : null;
+  if (prefix !== null && s.prefixed && s.locale === i18n.defaultLocale && !i18n.prefixDefault) {
+    // The base back in front and the trailing-slash policy applied (the bare base for `/`, or
+    // `<base>/` under "always"), so the redirect lands on the canonical URL in one hop.
+    const loc = browserPathFor(prefix === i18n.base ? i18n : { ...i18n, base: prefix }, s.path) + url.search;
+    // `/en//evil.com` must not become a protocol-relative redirect.
+    if (!/^\/[/\\]/.test(loc)) return { status: 308, headers: { location: loc } };
+  }
+  if (prefix !== null && !s.prefixed && i18n.prefixDefault && s.path === "/") {
+    return { status: 307, headers: { location: browserPathFor(prefix === i18n.base ? i18n : { ...i18n, base: prefix }, `/${i18n.defaultLocale}`) + url.search } };
+  }
+  const table = await env.routeTable(info.version);
+  let match = matchRoute(table.routes, s.path);
+  if (match && !s.prefixed && i18n.prefixDefault && !match.isApi) match = null;
+  const state = { locale: s.locale, i18n, path: s.path, prefix };
+  return runWithLocale(state, () => routeRequest(localizedEnv(env), { ...info, locale: s.locale }, { path: s.path, match }));
+}
+
+// The env of a localized request: documents get `<html lang>` from the locale (unless the page set
+// one), the client's i18n settings (`data-nowaki-i18n`, for localePath / getLocale in islands) and
+// hreflang alternates. One per env, made on its first localized request.
+const localized = new WeakMap();
+function localizedEnv(env) {
+  let out = localized.get(env);
+  if (!out) {
+    out = Object.create(env);
+    out.renderDocument = (args) => env.renderDocument({ ...args, meta: localeMeta(env, args.mod, args.meta) });
+    if (typeof env.renderShell === "function") {
+      out.renderShell = (args) => env.renderShell({ ...args, meta: localeMeta(env, args.mod, args.meta) });
+    }
+    localized.set(env, out);
+  }
+  return out;
+}
+
+function localeMeta(env, mod, meta) {
+  const st = localeState();
+  if (!st) return meta;
+  const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+  const next = { ...(meta ?? {}) };
+  if (typeof next.lang !== "string" && typeof mod?.lang !== "string") next.lang = st.locale;
+  const html = isObj(next.htmlAttrs) ? next.htmlAttrs : isObj(mod?.htmlAttrs) ? mod.htmlAttrs : {};
+  next.htmlAttrs = { ...html, "data-nowaki-i18n": clientI18n(st.i18n, st.locale) };
+  // hreflang needs absolute URLs, so only with a site URL: one built from the request's Host
+  // could end up in a shared (ISR, CDN) copy of the page.
+  if (st.prefix !== null && env.site) {
+    const tags = hreflangTags(localeAlternates(st.i18n, st.path), st.i18n.defaultLocale, {
+      site: env.site,
+      trailingSlash: env.trailingSlash,
+      staticOutput: env.staticOutput === true,
+    });
+    const head = typeof next.head === "string" ? next.head : typeof mod?.head === "string" ? mod.head : "";
+    next.head = head ? `${head}\n${tags}` : tags;
+  }
+  return next;
 }
 
 const FORBIDDEN = { status: 403, headers: { "content-type": "text/plain; charset=utf-8" }, body: "Forbidden" };
@@ -272,17 +358,19 @@ function pickMethodHandler(mod, method) {
   return null;
 }
 
-async function renderRoute(env, table, match, mod, ctx, version) {
+async function renderRoute(env, table, match, mod, ctx, version, path) {
   await env.ensureIslands(version);
   const Page = mod.default;
   if (typeof Page !== "function") {
     throw new Error(`Route does not default-export a component: ${ctx.url.pathname}`);
   }
+  const slots = resolveSlots(table, match.file, path);
+  const slotFiles = slots ? renderedSlotFiles(slots) : undefined;
   // `streaming = "early"`: the shell goes out before any loader runs (TTFB doesn't wait for data).
   // The trade-off: once it's sent, the status and headers are fixed, so `meta` only sees the static
   // exports, and a loader redirect or error is handled inside the stream (see earlyDocument).
   if (mod.streaming === "early" && typeof env.renderShell === "function") {
-    const meta = await withDocAttrs(env, table, match.file, mod, version, withFonts(env, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data: undefined, params: ctx.params, url: ctx.url }))))));
+    const meta = await withDocAttrs(env, table, match.file, mod, version, withFonts(env, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data: undefined, params: ctx.params, url: ctx.url }), slotFiles)), slotFiles)));
     const { head, tail } = env.renderShell({ mod, meta });
     const revalidate = isrSeconds(mod);
     return {
@@ -292,7 +380,7 @@ async function renderRoute(env, table, match, mod, ctx, version) {
       headers: revalidate ? { ...HTML, "cache-control": "private, no-cache" } : HTML,
       stream: earlyDocument(head, tail, {
         node: async () => {
-          const n = await routeNode(env, table, match, mod, ctx, version);
+          const n = await routeNode(env, table, match, mod, ctx, version, slots);
           if (ctx._redirect) throw ctx._redirect; // `return ctx.redirect(…)` from a loader
           return n;
         },
@@ -301,8 +389,8 @@ async function renderRoute(env, table, match, mod, ctx, version) {
     };
   }
   const data = mod.loader ? await mod.loader(ctx) : undefined;
-  const meta = await withDocAttrs(env, table, match.file, mod, version, withFonts(env, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data, params: ctx.params, url: ctx.url }))))));
-  const node = await wrapLayouts(env, table, match.file, h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url }), ctx, version);
+  const meta = await withDocAttrs(env, table, match.file, mod, version, withFonts(env, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data, params: ctx.params, url: ctx.url }), slotFiles)), slotFiles)));
+  const node = await wrapLayouts(env, table, match.file, h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url }), ctx, version, slots);
 
   // With a shared Cache-Control, CDNs do ISR as-is. The `nowaki start` Rust front
   // reads x-nowaki-revalidate and caches in memory.
@@ -428,7 +516,7 @@ async function withSeo(env, table, file, mod, version, ctx, meta) {
   if (layouts.length === 0 && !own && layoutHeads.length === 0) return meta;
   const merged = mergeMeta(...layouts, own);
   const title = (typeof meta?.title === "string" ? meta.title : undefined) ?? merged.title ?? mod?.title;
-  const tags = [seoTags(merged, { title, pathname: ctx.url.pathname, origin: ctx.url.origin, site: env.site, staticOutput: env.staticOutput === true }), ...layoutHeads]
+  const tags = [seoTags(merged, { title, pathname: ctx.url.pathname, origin: ctx.url.origin, site: env.site, trailingSlash: env.trailingSlash, staticOutput: env.staticOutput === true }), ...layoutHeads]
     .filter(Boolean)
     .join("\n");
   const next = { ...(meta ?? {}) };
@@ -445,12 +533,15 @@ async function withSeo(env, table, file, mod, version, ctx, meta) {
 // <script> tags with preloads for their chunks, at the end of the page's head region so the
 // stylesheets come first and the SPA router can load them on navigation. `env.routeScripts(file,
 // mod, version)` returns [{ src, preload }] (the build's manifest, or the dev server's URLs).
-async function withScripts(env, table, file, mod, version, meta) {
+// `slotFiles`: the parallel-route slot files the page renders, after the page.
+async function withScripts(env, table, file, mod, version, meta, slotFiles) {
   if (typeof env.routeScripts !== "function" || !file) return meta;
   const esc = (h) => String(h).replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`);
   const seen = new Set();
   const tags = [];
-  for (const f of [...layoutChain(table, file), file]) {
+  const files = [...layoutChain(table, file), file];
+  if (slotFiles) files.push(...slotFiles);
+  for (const f of files) {
     const m = f === file ? mod : await env.importModule(f, version);
     for (const s of (await env.routeScripts(f, m, version)) ?? []) {
       if (!s?.src || seen.has(s.src)) continue;
@@ -492,22 +583,90 @@ async function withDocAttrs(env, table, file, mod, version, meta) {
 }
 
 // The page wrapped in its layouts, with every loader run (route first, then layouts leaf → root).
-async function routeNode(env, table, match, mod, ctx, version) {
+async function routeNode(env, table, match, mod, ctx, version, slots) {
   const data = mod.loader ? await mod.loader(ctx) : undefined;
-  return wrapLayouts(env, table, match.file, h(mod.default, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url }), ctx, version);
+  return wrapLayouts(env, table, match.file, h(mod.default, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url }), ctx, version, slots);
 }
 
+const NO_SLOTS = Object.freeze({});
+
 // Wraps the page node in the file's layouts, leaf → root, running each layout's loader in turn.
-async function wrapLayouts(env, table, file, node, ctx, version) {
+// `slots` (resolveSlots, aligned with the layout chain) holds what each layout's @slots render;
+// a layout's slots render (their loaders run) just before its own loader.
+async function wrapLayouts(env, table, file, node, ctx, version, slots) {
   const layouts = layoutChain(table, file);
   for (let i = layouts.length - 1; i >= 0; i--) {
     const lmod = await env.importModule(layouts[i], version);
     const Layout = lmod.default;
     if (typeof Layout !== "function") continue;
+    const slotNodes = slots?.[i] ? await renderSlots(env, slots[i], ctx, version) : NO_SLOTS;
     const ldata = lmod.loader ? await lmod.loader(ctx) : undefined;
-    node = h(Layout, { data: ldata, params: ctx.params, url: ctx.url, children: node });
+    node = h(Layout, { data: ldata, params: ctx.params, url: ctx.url, slots: slotNodes, children: node });
   }
   return node;
+}
+
+// One layout's slots: name → its node wrapped in <nowaki-slot name>, or null when the slot has
+// nothing to render (no matching file and no default). Loaders of sibling slots run together.
+async function renderSlots(env, resolved, ctx, version) {
+  const out = {};
+  await Promise.all(
+    resolved.map(async ({ name, hit }) => {
+      out[name] = null;
+      if (!hit) return;
+      const smod = await env.importModule(hit.file, version);
+      const Slot = smod.default;
+      if (typeof Slot !== "function") return;
+      // A slot route has its own params (its URL pattern); a default sees the page's.
+      const sctx = hit.params ? slotContext(ctx, hit.params) : ctx;
+      const data = smod.loader ? await smod.loader(sctx) : undefined;
+      out[name] = h("nowaki-slot", { name, style: "display:contents" }, h(Slot, { data, params: sctx.params, url: ctx.url }));
+    }),
+  );
+  return out;
+}
+
+// The request's context with other params. Everything else (writes included) goes to ctx itself.
+function slotContext(ctx, params) {
+  return new Proxy(ctx, { get: (target, prop) => (prop === "params" ? params : target[prop]) });
+}
+
+// What every @slot owned by a layout in the file's chain renders for this request path, as an
+// array aligned with layoutChain (null where a layout owns no slots): [{ name, hit }] with hit
+// from matchSlot. null when no layout in the chain owns a slot. An app without slots pays the one
+// length check.
+function resolveSlots(table, file, path) {
+  if (!table.slots?.length) return null;
+  const owners = slotOwners(table, file);
+  if (!owners) return null;
+  const parts = pathParts(path);
+  return owners.map((slots) => slots && slots.map((slot) => ({ name: slot.name, hit: matchSlot(slot, parts) })));
+}
+
+function renderedSlotFiles(slots) {
+  const files = [];
+  for (const layout of slots) for (const s of layout ?? []) if (s.hit) files.push(s.hit.file);
+  return files.length ? files : undefined;
+}
+
+// The slots of each layout in a file's chain (aligned with layoutChain, null for a layout without
+// any), or null when none has slots: once per route table and file, like layoutChain. A slot
+// belongs to the _layout in the directory holding its @name directory.
+const slotChains = new WeakMap();
+function slotOwners(table, file) {
+  let byFile = slotChains.get(table);
+  if (!byFile) slotChains.set(table, (byFile = new Map()));
+  let owners = byFile.get(file);
+  if (owners === undefined) {
+    const prefixOf = new Map((table.layouts ?? []).map((l) => [l.file, l.prefix]));
+    const chain = layoutChain(table, file).map((lf) => {
+      const own = table.slots.filter((s) => s.ownerDir === prefixOf.get(lf));
+      return own.length ? own : null;
+    });
+    owners = chain.some(Boolean) ? chain : null;
+    byFile.set(file, owners);
+  }
+  return owners;
 }
 
 // After an early shell, a redirect becomes a client-side `location.replace`, and an error renders
@@ -669,8 +828,16 @@ function responseToResult(res) {
 // Stylesheets for the CSS the route (and its layouts) imports: `env.routeCss(file, version)`
 // returns their URLs (the build's `routeCss`, or the dev server's). They go first in the page's
 // head, so `head` / `meta` styles still win, and the SPA router swaps them with the head.
-async function withRouteCss(env, file, mod, version, meta) {
-  const hrefs = typeof env.routeCss === "function" && file ? await env.routeCss(file, version) : null;
+// `slotFiles`: the parallel-route slot files the page renders; their stylesheets follow the page's.
+async function withRouteCss(env, file, mod, version, meta, slotFiles) {
+  let hrefs = typeof env.routeCss === "function" && file ? await env.routeCss(file, version) : null;
+  if (slotFiles && typeof env.routeCss === "function") {
+    const all = Array.isArray(hrefs) ? [...hrefs] : [];
+    for (const f of slotFiles) {
+      for (const href of (await env.routeCss(f, version)) ?? []) if (!all.includes(href)) all.push(href);
+    }
+    hrefs = all;
+  }
   if (!Array.isArray(hrefs) || hrefs.length === 0) return meta;
   const links = hrefs.map((h) => `<link rel="stylesheet" href="${String(h).replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`)}" />`).join("\n");
   const own = typeof meta?.head === "string" ? meta.head : typeof mod?.head === "string" ? mod.head : "";

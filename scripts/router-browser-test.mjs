@@ -1,9 +1,14 @@
 // Client router behavior test in a real browser (Chrome).
 // Runs in CI (browser job) and locally. Drives Chrome directly over CDP (no puppeteer).
 // Usage: BASE=http://127.0.0.1:8233 node scripts/router-browser-test.mjs
+// For an app built with nowaki.config `basePath`, put the base in BASE
+// (BASE=http://127.0.0.1:8233/app): the paths below are then checked under it.
 import { spawn } from "node:child_process";
 
-const BASE = process.env.BASE || "http://127.0.0.1:8233";
+const BASE = (process.env.BASE || "http://127.0.0.1:8233").replace(/\/$/, "");
+// The basePath in BASE ("" without one). In the page, __P is it and __path() the path without it.
+const P = new URL(BASE).pathname.replace(/\/$/, "");
+const PRELUDE = `const __P = ${JSON.stringify(P)}; const __path = () => (__P && location.pathname.startsWith(__P) ? location.pathname.slice(__P.length) || "/" : location.pathname);`;
 const CHROME =
   process.env.CHROME ||
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -47,7 +52,8 @@ class CDP {
   }
   async evalAsync(expr) {
     const r = await this.send("Runtime.evaluate", {
-      expression: `(async () => { ${expr} })()`,
+      // Paths in the checks are route paths: under a basePath, links get it and locations lose it.
+      expression: `(async () => { ${PRELUDE} ${expr.replaceAll("location.pathname", "__path()").replaceAll("a.href=href;", "a.href=href.startsWith('/')?__P+href:href;")} })()`,
       awaitPromise: true,
       returnByValue: true,
     });
@@ -226,7 +232,7 @@ try {
     scrollTo(0, 500); return true;`);
   await sleep(100);
   const anchorFetches = () =>
-    cdp.evalAsync(`return performance.getEntriesByType('resource').filter((e) => new URL(e.name).pathname === '/anchors' && e.initiatorType === 'fetch').length;`);
+    cdp.evalAsync(`return performance.getEntriesByType('resource').filter((e) => new URL(e.name).pathname === __P + '/anchors' && e.initiatorType === 'fetch').length;`);
   const fetches0 = await anchorFetches();
   const url0 = await cdp.evalAsync(`return location.pathname + location.hash;`);
   await cdp.evalAsync(`document.querySelector('a[href="#three"]').click(); return true;`);
@@ -307,6 +313,21 @@ try {
              error: !!document.querySelector('[data-testid="error"], [data-nowaki-reset]') };`);
   check(`a cross-origin redirect is a full navigation (${JSON.stringify(away)})`,
     away.origin !== new URL(BASE).origin && away.path === "/about" && /About/.test(away.h1) && !away.error);
+
+  // Under a basePath, a same-origin link outside it belongs to another app: a full load.
+  if (P) {
+    await cdp.send("Page.navigate", { url: BASE + "/" });
+    await sleep(800);
+    await cdp.evalAsync(`
+      window.__nav = (href) => { const a=document.createElement('a'); a.href=href; a.textContent=href; document.body.appendChild(a); a.click(); };
+      return true;`);
+    await cdp.evalAsync(`window.__nav('/about'); return true;`);
+    await sleep(500);
+    await cdp.evalAsync(`window.__marker = 1; window.__nav(location.origin + '/outside-base'); return true;`);
+    await sleep(1000);
+    const outside = await cdp.evalAsync(`return { path: location.pathname, marker: window.__marker ?? null };`);
+    check(`a link outside basePath is a full load (${JSON.stringify(outside)})`, outside.path === "/outside-base" && outside.marker === null);
+  }
 
   console.log(`\n${failures === 0 ? "BROWSER ROUTER TEST PASSED" : `BROWSER ROUTER TEST FAILED (${failures})`}`);
 } catch (err) {
