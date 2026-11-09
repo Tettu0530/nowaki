@@ -9,7 +9,7 @@
 // binary (default target/debug/nowaki).
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -97,8 +97,24 @@ function makeApp(name, config) {
     mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
     writeFileSync(path.join(dir, file), text);
   }
-  symlinkSync(path.join(ROOT, "examples/hello/node_modules"), path.join(dir, "node_modules"), "junction");
+  linkModules(path.join(ROOT, "examples/hello/node_modules"), path.join(dir, "node_modules"));
   return dir;
+}
+
+// Each package is linked to its real directory by an absolute junction. Linking the whole
+// node_modules isn't enough on Windows: pnpm's entries are relative links, which `nowaki dev`
+// can't follow through an outer junction (it reported the runtime missing).
+function linkModules(from, to) {
+  mkdirSync(to, { recursive: true });
+  for (const name of readdirSync(from)) {
+    if (name === ".bin" || name === ".cache") continue;
+    const src = path.join(from, name);
+    if (name.startsWith("@") && statSync(src).isDirectory() && !lstatSync(src).isSymbolicLink()) {
+      linkModules(src, path.join(to, name));
+      continue;
+    }
+    symlinkSync(realpathSync(src), path.join(to, name), "junction");
+  }
 }
 
 function build(dir, adapter) {

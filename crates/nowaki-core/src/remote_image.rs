@@ -642,10 +642,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("big.png");
         image::RgbImage::new(4, 4).save(&file).unwrap();
-        let f = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&file)
-            .unwrap();
+        // Write access, not append: Windows refuses set_len on an append-only handle.
+        let f = std::fs::OpenOptions::new().write(true).open(&file).unwrap();
         f.set_len(MAX_BYTES + 1).unwrap();
         let err = validate(&file).unwrap_err().to_string();
         assert!(err.contains("larger than 20 MB"), "{err}");
