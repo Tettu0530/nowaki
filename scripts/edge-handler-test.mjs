@@ -120,5 +120,15 @@ check("NOWAKI_CSP=enforce: every script/style carries the response nonce",
   Boolean(nonce) && tags.length > 0 && tags.every((t) => t.includes(`nonce="${nonce}"`)));
 delete process.env.NOWAKI_CSP;
 
+// nowaki.config redirects / rewrites (examples/hello), applied before the Assets binding.
+const moved = await req("/old-docs/guide?x=1", { redirect: "manual" });
+check("config redirect on the edge keeps the query and the security headers",
+  moved.status === 308 && moved.headers.get("location") === "/guide?x=1" && secure(moved));
+const evil = await req("/go/%2F%2Fevil.com", { redirect: "manual" });
+check("config redirect capture can't leave the site on the edge", evil.headers.get("location") === "/%2F%2Fevil.com");
+check("config rewrite renders the destination on the edge", (await (await req("/p/hello")).text()).includes("Post: hello"));
+const forged = await (await req("/about", { headers: { "x-nowaki-route-path": "/env" } })).text();
+check("client x-nowaki-route-path is ignored on the edge", forged.includes("<h1>About</h1>") && !forged.includes("token length"));
+
 console.log(failures ? `\nEDGE HANDLER TEST FAILED (${failures})` : "\nEDGE HANDLER TEST PASSED");
 process.exit(failures ? 1 : 0);

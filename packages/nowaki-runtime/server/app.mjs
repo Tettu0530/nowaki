@@ -21,6 +21,8 @@ import { liveProps, warnIfEphemeralLiveKey } from "./live-sign.mjs";
 import { indexPublic, lookupPublic } from "./public-files.mjs";
 import { resolveSite } from "./seo.mjs";
 import { requestOrigin } from "./origin.mjs";
+import { compileRules } from "./rules.mjs";
+import { frontHeaders, frontStep } from "./front.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
 // Bun and Deno don't implement Node's module.register; their SSR keeps the old behavior.
@@ -244,15 +246,40 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
 
   // dist/public next to dist/client unless given.
   const publicFiles = await indexPublic(publicDir ?? path.join(clientDir, "..", "public"));
+  // nowaki.config routing (dist/server/routing.json, written only when there is one): null
+  // without it, so a request pays one check. An invalid file stops the server here.
+  const rules = await readFile(path.join(serverDir, "routing.json"), "utf8").then(
+    (t) => compileRules(JSON.parse(t)),
+    (e) => {
+      if (e.code === "ENOENT") return null;
+      throw e;
+    },
+  );
 
   const handle = async (req, res) => {
     // Set before the response's own headers, which override any of these by name.
     for (const [k, v] of missingSecurityHeaders(() => false)) res.setHeader(k, v);
     try {
       const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
+      let pathname = url.pathname;
+      let routePath;
+      if (rules) {
+        // Config headers replace the security defaults set above and lose to the response's own.
+        for (const [k, v] of frontHeaders(rules, pathname)) res.setHeader(k, v);
+        const step = frontStep(rules, req.method, url);
+        if (step?.redirect) {
+          res.writeHead(step.redirect.status, { location: step.redirect.location }).end();
+          return;
+        }
+        if (step?.notFound) {
+          res.writeHead(404, { "content-type": "text/plain; charset=utf-8" }).end("not found");
+          return;
+        }
+        if (step) pathname = routePath = step.routePath;
+      }
 
-      if (url.pathname.startsWith("/_nowaki/")) {
-        const name = path.basename(url.pathname); // basename prevents traversal
+      if (pathname.startsWith("/_nowaki/")) {
+        const name = path.basename(pathname); // basename prevents traversal
         try {
           const data = await readFile(path.join(clientDir, name));
           const ext = name.split(".").pop();
@@ -268,9 +295,9 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
       }
 
       // public/ files win over routes at the same path. `no-cache` + ETag: the names aren't hashed.
-      const pub = (req.method === "GET" || req.method === "HEAD") && lookupPublic(publicFiles, url.pathname);
+      const pub = (req.method === "GET" || req.method === "HEAD") && lookupPublic(publicFiles, pathname);
       if (pub) {
-        const headers = { "content-type": contentTypeOf(url.pathname), "cache-control": "public, no-cache", etag: pub.etag };
+        const headers = { "content-type": contentTypeOf(pathname), "cache-control": "public, no-cache", etag: pub.etag };
         const inm = req.headers["if-none-match"];
         if (inm && inm.split(",").some((t) => t.trim() === pub.etag || t.trim() === "*")) {
           res.writeHead(304, headers).end();
@@ -291,6 +318,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
         url,
         version: "prod",
         req,
+        routePath,
       });
       await sendResult(res, applyCsp(result));
     } catch (err) {

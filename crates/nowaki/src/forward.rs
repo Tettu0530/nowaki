@@ -26,7 +26,8 @@ pub fn is_internal_path(path: &str) -> bool {
     })
 }
 
-/// `x-nowaki-*` request headers the browser runtime sends on purpose; every other one is internal.
+/// `x-nowaki-*` request headers the browser runtime sends on purpose; every other one is internal
+/// (`x-nowaki-route-path` among them: the front sets it after this filter, `front.rs`).
 const CLIENT_NOWAKI_HEADERS: [&str; 3] = ["x-nowaki-rpc", "x-nowaki-nav", "x-nowaki-live"];
 
 pub fn trust_proxy() -> bool {
@@ -173,6 +174,8 @@ mod tests {
             "x-nowaki-page",
             "x-nowaki-vary",
             "x-nowaki-revalidate",
+            // Set by the front for rewrites / basePath; a client value would pick the route.
+            crate::front::ROUTE_PATH_HEADER,
         ] {
             assert!(
                 !passes(&HeaderName::from_static(n), false),

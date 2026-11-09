@@ -80,7 +80,9 @@ const server = createServer(async (req, res) => {
   }
   try {
     const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
-    const result = await handleRequest(env, { method: req.method, url, version: "prod", req });
+    // The Rust front sets x-nowaki-route-path for a rewrite or basePath (and drops a client's own).
+    const routePath = req.headers["x-nowaki-route-path"];
+    const result = await handleRequest(env, { method: req.method, url, version: "prod", req, routePath });
     const b = result.body;
     if (b && typeof b === "object" && b.__nowakiPage) {
       // Keep response headers (cookies etc.) and tell Rust to assemble the HTML via x-nowaki-page.

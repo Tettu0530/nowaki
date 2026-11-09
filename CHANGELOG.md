@@ -31,7 +31,24 @@ milestone's worth of work; the codename is noted per entry.
   `.nowaki/routing.json`). A redirect or rewrite destination that could leave
   the site (`//host`, `/\host`, a capture in an external host), a source or
   destination under `/__nowaki/`, and CR / LF / NUL in a header value fail the
-  build. No server applies these rules yet.
+  build.
+- **`redirects`, `rewrites`, `headers`, `basePath` and `trailingSlash` are
+  applied** by `nowaki start`, `nowaki dev`, the node / bun / deno / vercel
+  adapters and the Cloudflare worker, in this order: basePath, trailing slash
+  (GET / HEAD, 308), redirects, rewrites, then `/_nowaki/` assets, `public/`
+  files and routes. A redirect keeps the request's query and gets the security
+  headers. A rewrite is internal: the page renders the destination route while
+  `ctx.url` stays the URL the browser asked for. Config headers go on every
+  response (pages, ISR hits, assets, `public/` files, redirects, 404s) unless
+  the route set the same header; they replace the default security headers of
+  the same name. They don't apply to `/__nowaki/*` endpoints. On Vercel,
+  redirects and headers are also emitted as platform routes in `config.json`.
+  The static adapter writes `_redirects` (rewrites as 200 rules) and appends
+  the headers to `_headers`, warning about rules a static host can't express.
+  For now `basePath` only removes the prefix from requests (and 404s anything
+  outside it); asset URLs and links don't carry it yet, and `/_nowaki/*` and
+  `/__nowaki/*` stay at the root. Without a routing config nothing changes per
+  request.
 - **Markdoc** via the new `@nowaki-dev/markdoc` plugin. With
   `markdoc({ components, tags, nodes })` in `plugins`, a `.mdoc` file compiles to a Preact module
   at build and dev time. The module exports the rendered document, `frontmatter` and `headings`,

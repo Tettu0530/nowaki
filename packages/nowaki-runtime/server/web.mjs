@@ -12,7 +12,9 @@ import { setContent, validateContent } from "./content-store.mjs";
 import { initServerEnv } from "./env-schema.mjs";
 import { setServerEnv } from "./env-server.mjs";
 
-export function resultToResponse(result) {
+/// `defaults`: [name, value] pairs (nowaki.config `headers`) set when the result doesn't set them,
+/// before the security headers, so they win over those.
+export function resultToResponse(result, defaults) {
   const headers = new Headers();
   for (const [k, v] of Object.entries(result.headers ?? {})) {
     if (Array.isArray(v)) {
@@ -21,6 +23,7 @@ export function resultToResponse(result) {
       headers.set(k, String(v));
     }
   }
+  if (defaults) for (const [k, v] of defaults) if (!headers.has(k)) headers.set(k, v);
   const body = result.stream ?? result.body ?? "";
   return withSecurityHeaders(new Response(body, { status: result.status ?? 200, headers }));
 }
@@ -77,8 +80,10 @@ function installIslandHook(registry, liveRegistry, live) {
 ///                      in by the worker entry so this module never imports node:crypto itself.
 ///   envModule        : the compiled env.ts (dist/server/env.js) when the app has one
 ///   envPublic        : the public values the build inlined (dist/server/env-public.json)
-/// Returns `(request, bindings?) => Promise<Response>`; `bindings` (the Worker's `env`) adds its
-/// string vars and secrets to process.env for validating env.ts.
+/// Returns `(request, bindings?, front?) => Promise<Response>`; `bindings` (the Worker's `env`) adds
+/// its string vars and secrets to process.env for validating env.ts. `front` comes from the
+/// worker's nowaki.config routing (front.mjs): `{ routePath, headers }`, the path to route by and
+/// the config headers for the response.
 export function createFetchHandler({
   manifest,
   modules,
@@ -162,7 +167,7 @@ export function createFetchHandler({
   let envReady = null;
   if (!envPending) setServerEnv(null);
 
-  return async (request, bindings) => {
+  return async (request, bindings, front) => {
     if (envPending) {
       envReady ??= initServerEnv(envModule, envSource(bindings), envPublic).catch((err) => {
         console.error(err?.message ?? err);
@@ -187,7 +192,8 @@ export function createFetchHandler({
       version: "prod",
       headers,
       readBody: async () => new Uint8Array(await request.arrayBuffer()),
+      routePath: front?.routePath,
     });
-    return resultToResponse(applyCsp(result));
+    return resultToResponse(applyCsp(result), front?.headers);
   };
 }

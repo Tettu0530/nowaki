@@ -225,6 +225,12 @@ code locations and CI coverage.
   group-free `urlPrefix` for the client). Rust: `routes.rs` `strip_route_groups` (in
   `url_pattern_from_stem`) and `check_url_conflicts` (called by `build_with_client`). Layout /
   CSS lookups stay on physical dirs. Tests: `scripts/router-test.mjs`, `routes.rs` units.
+  through `server/segments.mjs`. Applied at the fronts by `crates/nowaki/src/front.rs`
+  (`start.rs` `handle`, `dev.rs` `serve_or_proxy`, the headers layer; the route path reaches the
+  sidecars in `x-nowaki-route-path` → `info.routePath`) and `server/front.mjs` (`app.mjs` `handle`,
+  the worker `fetch` from `edge-build.mjs`); Vercel platform routes from `server/vercel-routes.mjs`,
+  static `_redirects` / `_headers` from `prerender.rs`. Without a routing config each front does
+  one null check. Tests: `scripts/rules-front-test.mjs`, `scripts/rules-e2e.mjs` (every front).
 - **Page scripts (`export const scripts`)** — read from the AST in
   `crates/nowaki-core/src/page_scripts.rs`, emitted as client entries by
   `build.rs` `build_route_scripts` (manifest `routeScripts` per module and

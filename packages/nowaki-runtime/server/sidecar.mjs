@@ -332,6 +332,8 @@ const server = createServer(async (req, res) => {
       url,
       version,
       req,
+      // Set by the Rust front for a rewrite or basePath (a client's own value never gets here).
+      routePath: req.headers["x-nowaki-route-path"],
     });
     await sendResult(res, result);
   } catch (err) {
