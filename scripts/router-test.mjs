@@ -181,6 +181,15 @@ eq(stripParallelSlots("/gallery/@panel"), "/gallery", "@slot stripped from a pre
 eq(stripRouteUrlPrefix("/(a)/gallery/@panel"), "/gallery", "groups and @slots stripped together");
 eq(snap(table, "/parallel"), { file: "index.tsx", params: {}, isApi: false }, "/parallel → parallel/index (children)");
 eq(snap(table, "/parallel/detail"), { file: "detail.tsx", params: {}, isApi: false }, "/parallel/detail (children)");
+eq(
+  matchRoute(table.routes, "/parallel/detail")?.file.includes("@aside"),
+  true,
+  "matchRoute(routes[]) sees @slot files — handler must call matchRoute(table)",
+);
+{
+  const primary = matchRoute(table, "/parallel/detail");
+  eq(Boolean(primary?.file && !primary.file.replace(/\\/g, "/").includes("/@aside/")), true, "matchRoute(table) is children-only");
+}
 
 // Route groups end to end: URL, layout / middleware / boundary containment, collisions.
 {

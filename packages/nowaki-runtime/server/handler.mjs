@@ -49,7 +49,7 @@ export async function handleRequest(env, info) {
   const table = await env.routeTable(version);
   // What routing, middleware and the 404 see; ctx.url stays the URL the browser asked for.
   const path = resolveRequestPath(env, info, url);
-  const match = matchRoute(table.routes, path);
+  const match = matchRoute(table, path);
   const ctx = makeContext({ ...info, params: match?.params ?? {} });
   // The site's URL (NOWAKI_SITE / nowaki.config `site`), for absolute links in feeds and the like.
   // Parsed on first read: most requests never look at it.
