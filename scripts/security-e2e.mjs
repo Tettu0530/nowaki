@@ -121,6 +121,7 @@ async function multipartFormGuards(b) {
       origin: b,
     },
     body: "",
+    timeoutMs: 5000,
   });
   check("multipart Content-Length over limit (413)", huge.status === 413);
   const bad = await fetch(`${b}/api/upload`, {
@@ -266,16 +267,26 @@ async function liveEventGate(b) {
 }
 
 // Raw request (path sent verbatim): { status, headers, body }.
-function raw(b, path, { method = "GET", headers = {}, body } = {}) {
+function raw(b, path, { method = "GET", headers = {}, body, timeoutMs } = {}) {
   const u = new URL(b);
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
     const req = http.request({ host: u.hostname, port: u.port, path, method, headers }, (res) => {
       let text = "";
       res.setEncoding("utf8");
       res.on("data", (c) => (text += c));
-      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: text }));
+      res.on("end", () => finish({ status: res.statusCode, headers: res.headers, body: text }));
     });
-    req.on("error", () => resolve({ status: 0, headers: {}, body: "" }));
+    req.on("error", () => finish({ status: 0, headers: {}, body: "" }));
+    if (timeoutMs) req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      finish({ status: 0, headers: {}, body: "" });
+    });
     if (body !== undefined) req.write(body);
     req.end();
   });

@@ -164,6 +164,25 @@ check(
 }
 
 {
+  let destroyed = false;
+  const req = new EventEmitter();
+  req.destroy = () => {
+    destroyed = true;
+  };
+  req.headers = { "content-type": "multipart/form-data; boundary=x", "content-length": String(FORM_BODY_LIMIT + 1) };
+  const ctx = makeContext({
+    url: new URL("http://127.0.0.1/upload"),
+    method: "POST",
+    headers: req.headers,
+    req,
+  });
+  check(
+    "content-length over limit destroys the unread body",
+    await rejects(() => ctx.formData(), /exceeds.*byte limit/) && destroyed,
+  );
+}
+
+{
   const ctx = makeContext({
     url: new URL("http://127.0.0.1/upload"),
     method: "POST",

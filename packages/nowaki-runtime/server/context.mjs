@@ -102,6 +102,7 @@ export function makeContext(info) {
       if (isMultipartFormData(ct)) {
         const len = Number(reqHeaders["content-length"]);
         if (Number.isFinite(len) && len > FORM_BODY_LIMIT) {
+          abortUnreadBody(req);
           throw new RequestBodyError(`multipart body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
         }
       }
@@ -196,6 +197,12 @@ function serializeCookie(name, value, opts) {
   if (opts.secure) s += "; Secure";
   s += `; SameSite=${opts.sameSite ?? "Lax"}`;
   return s;
+}
+
+function abortUnreadBody(req) {
+  if (!req) return;
+  if (typeof req.destroy === "function") req.destroy();
+  else if (typeof req.resume === "function") req.resume();
 }
 
 function readBodyNode(req, maxBytes) {
