@@ -102,7 +102,7 @@ export function makeContext(info) {
       if (isMultipartFormData(ct)) {
         const len = Number(reqHeaders["content-length"]);
         if (Number.isFinite(len) && len > FORM_BODY_LIMIT) {
-          abortUnreadBody(req);
+          discardUnreadBody(req);
           throw new RequestBodyError(`multipart body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
         }
       }
@@ -199,10 +199,14 @@ function serializeCookie(name, value, opts) {
   return s;
 }
 
+// Oversized Content-Length: drain the socket without destroying it so the 413 can still be sent.
+function discardUnreadBody(req) {
+  if (req && typeof req.resume === "function") req.resume();
+}
+
 function abortUnreadBody(req) {
-  if (!req) return;
-  if (typeof req.destroy === "function") req.destroy();
-  else if (typeof req.resume === "function") req.resume();
+  if (req && typeof req.destroy === "function") req.destroy();
+  else discardUnreadBody(req);
 }
 
 function readBodyNode(req, maxBytes) {
@@ -224,7 +228,7 @@ function readBodyNode(req, maxBytes) {
     req.on("data", (c) => {
       total += c.length;
       if (maxBytes !== undefined && total > maxBytes) {
-        if (typeof req.destroy === "function") req.destroy();
+        abortUnreadBody(req);
         fail(
           new RequestBodyError(`multipart body exceeds ${maxBytes} byte limit`, { status: 413 }),
         );

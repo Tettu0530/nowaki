@@ -164,10 +164,10 @@ check(
 }
 
 {
-  let destroyed = false;
+  let resumed = false;
   const req = new EventEmitter();
-  req.destroy = () => {
-    destroyed = true;
+  req.resume = () => {
+    resumed = true;
   };
   req.headers = { "content-type": "multipart/form-data; boundary=x", "content-length": String(FORM_BODY_LIMIT + 1) };
   const ctx = makeContext({
@@ -177,8 +177,8 @@ check(
     req,
   });
   check(
-    "content-length over limit destroys the unread body",
-    await rejects(() => ctx.formData(), /exceeds.*byte limit/) && destroyed,
+    "content-length over limit drains the unread body",
+    await rejects(() => ctx.formData(), /exceeds.*byte limit/) && resumed,
   );
 }
 
