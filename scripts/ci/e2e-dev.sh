@@ -172,6 +172,9 @@ curl -sf $B/sitemap.xml | grep -q '<loc>https://hello.nowaki.dev/docs/intro</loc
 ! curl -sf $B/sitemap.xml | grep -qE '/boom<|/secret<|/api/|feed.xml'
 curl -sf $B/robots.txt | grep -q 'User-agent'   # public/robots.txt wins over the generated one
 curl -sf $B/feed.xml | grep -q '<link>https://hello.nowaki.dev/docs/intro</link>'
+# nowaki.config headers in dev (the Rust front, before routes)
+curl -sI "$B/docs/intro" | tr -d '\r' | grep -qi '^x-hello-routing: config'
+curl -sI "$B/api/hello" | tr -d '\r' | grep -qi '^cache-control: no-store'
 node scripts/seo-unit-test.mjs
 # page scripts: a module <script> per listed module, served as JS (dev: its own URL)
 curl -sf $B/scripted | grep -q '<script type="module" src="/scripts/stamp.ts" data-nowaki-script></script>'
