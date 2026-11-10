@@ -201,14 +201,14 @@ check(
 
 check(
   "filename* with language tag",
-  decodeFilenameStar("UTF-8'ja'%E3%81%82%E3%81%84.jpg") === "あい.jpg",
+  decodeFilenameStar("UTF-8'ja'%E3%81%82%E3%81%84.jpg") === "\u3042\u3044.jpg",
 );
 check(
   "filename* ISO-8859-1",
   decodeFilenameStar("ISO-8859-1''%E9%2Etxt") === "\u00e9.txt",
 );
 check(
-  "filename* default charset (empty → UTF-8)",
+  "filename* default charset (empty, UTF-8 default)",
   decodeFilenameStar("''%C2%A9.png") === "\u00a9.png",
 );
 check("filename* invalid % escape", decodeFilenameStar("UTF-8''%E") === null);
@@ -232,7 +232,10 @@ check(
     ),
     "multipart/form-data; boundary=p",
   );
-  check("multipart: filename* wins over filename", fd.get("f") instanceof File && fd.get("f").name === "日本.txt");
+  check(
+    "multipart: filename* wins over filename",
+    fd.get("f") instanceof File && fd.get("f").name === "\u65e5\u672c.txt",
+  );
 }
 
 {

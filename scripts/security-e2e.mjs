@@ -111,14 +111,16 @@ async function multipartFormGuards(b) {
   });
   const json = await ok.json().catch(() => ({}));
   check("multipart upload round trip (file + field)", ok.status === 200 && json.hasFile && json.name === "t.txt" && json.field === "hi");
-  const huge = await fetch(`${b}/api/upload`, {
+  // fetch refuses a Content-Length / body length mismatch (undici); use raw http like the limits in
+  // context.mjs expect (oversized Content-Length rejected before the body is read).
+  const huge = await raw(b, "/api/upload", {
     method: "POST",
     headers: {
       "content-type": `multipart/form-data; boundary=${boundary}`,
       "content-length": String(FORM_BODY_LIMIT + 1),
       origin: b,
     },
-    body: "--x",
+    body: "",
   });
   check("multipart Content-Length over limit (413)", huge.status === 413);
   const bad = await fetch(`${b}/api/upload`, {
@@ -264,16 +266,17 @@ async function liveEventGate(b) {
 }
 
 // Raw request (path sent verbatim): { status, headers, body }.
-function raw(b, path, { method = "GET", headers = {} } = {}) {
+function raw(b, path, { method = "GET", headers = {}, body } = {}) {
   const u = new URL(b);
   return new Promise((resolve) => {
     const req = http.request({ host: u.hostname, port: u.port, path, method, headers }, (res) => {
-      let body = "";
+      let text = "";
       res.setEncoding("utf8");
-      res.on("data", (c) => (body += c));
-      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body }));
+      res.on("data", (c) => (text += c));
+      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: text }));
     });
     req.on("error", () => resolve({ status: 0, headers: {}, body: "" }));
+    if (body !== undefined) req.write(body);
     req.end();
   });
 }
