@@ -375,6 +375,7 @@ pub fn build_server(
 
     let server_assets = ServerAssets {
         client_dir: dist.join("client"),
+        asset_base: core.asset_base(),
         urls: Mutex::new(assets.clone()),
     };
     // Server modules are independent (no naming dependencies), so transform them in parallel with rayon.
@@ -462,6 +463,8 @@ fn with_js_suffix(rel: &str) -> String {
 /// import, which are emitted to dist/client on first use (rayon threads share this).
 struct ServerAssets {
     client_dir: PathBuf,
+    /// `NowakiCore::asset_base`.
+    asset_base: String,
     urls: Mutex<HashMap<PathBuf, String>>,
 }
 
@@ -481,7 +484,14 @@ impl ServerAssets {
             .and_then(Path::parent)
             .unwrap_or(Path::new("."));
         let set = crate::image::build_set(root, &file, q, |stem, w, ext, bytes| {
-            crate::image::write_variant(&self.client_dir, &sanitize_name(stem), w, ext, bytes)
+            crate::image::write_variant_at(
+                &self.client_dir,
+                &self.asset_base,
+                &sanitize_name(stem),
+                w,
+                ext,
+                bytes,
+            )
         })?;
         let code = set.module();
         self.urls
@@ -497,7 +507,7 @@ impl ServerAssets {
             return Ok(url.clone());
         }
         let (name, _, _) = write_asset(abs, &self.client_dir)?;
-        let url = format!("/_nowaki/{name}");
+        let url = format!("{}{name}", self.asset_base);
         urls.insert(abs.to_path_buf(), url.clone());
         Ok(url)
     }
@@ -756,7 +766,14 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
     if let Some(q) = query.as_deref().and_then(crate::image::image_query) {
         let set = crate::image::build_set(&core.root, &file, &q, |stem, w, ext, bytes| {
             ctx.asset_out += bytes.len() as u64;
-            crate::image::write_variant(out_dir, &sanitize_name(stem), w, ext, bytes)
+            crate::image::write_variant_at(
+                out_dir,
+                &core.asset_base(),
+                &sanitize_name(stem),
+                w,
+                ext,
+                bytes,
+            )
         })?;
         ctx.asset_in += fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
         let code = set.module();
@@ -780,7 +797,7 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
         ctx.asset_out += size_out;
         let stem = output_stem(abs, "asset");
         let out_ext = asset_name.rsplit('.').next().unwrap_or("bin");
-        let url = format!("/_nowaki/{asset_name}");
+        let url = format!("{}{asset_name}", core.asset_base());
         ctx.assets.insert(abs.to_path_buf(), url.clone());
         let code = format!("export default \"{url}\";\n");
         let mod_hash = xxh3_64(code.as_bytes()) as u32;
@@ -827,7 +844,7 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
         ctx.visiting.remove(abs);
         let key = crate::server_fn::module_key(&core.root, abs);
         let exports = crate::server_fn::collect_exports(abs, &source)?;
-        let code = crate::server_fn::client_proxy(&key, &exports);
+        let code = crate::server_fn::client_proxy_at(&key, &exports, &core.server_fn_path());
         let stem = output_stem(abs, "module");
         let hash = xxh3_64(code.as_bytes()) as u32;
         let filename = format!("{stem}.{hash:08x}.js");

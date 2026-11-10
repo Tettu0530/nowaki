@@ -44,7 +44,30 @@ pub fn load_client_defines(root: &Path) -> Vec<(String, String)> {
     defines.push(("import.meta.env.PROD".to_string(), is_prod.to_string()));
     // React-ecosystem libraries branch on this; left as-is it throws `process is not defined`.
     defines.push(("process.env.NODE_ENV".to_string(), format!("{mode:?}")));
+    set_base_url(&mut defines, "");
     defines
+}
+
+const BASE_URL: &str = "import.meta.env.BASE_URL";
+/// The same value for the runtime's classic-script client files (client/live.js), which can't
+/// name `import.meta`.
+const RUNTIME_BASE_URL: &str = "__NOWAKI_BASE_URL__";
+
+/// Sets `import.meta.env.BASE_URL` to `<base>/` (`base` is a checked basePath, `""` at the root).
+pub(crate) fn set_base_url(defines: &mut Vec<(String, String)>, base: &str) {
+    defines.retain(|(k, _)| k != BASE_URL && k != RUNTIME_BASE_URL);
+    let value = format!("{:?}", format!("{base}/"));
+    defines.push((RUNTIME_BASE_URL.to_string(), value.clone()));
+    defines.push((BASE_URL.to_string(), value));
+}
+
+/// The value of `import.meta.env.BASE_URL` in `defines` (`/` when unset).
+pub(crate) fn base_url(defines: &[(String, String)]) -> String {
+    defines
+        .iter()
+        .find(|(k, _)| k == BASE_URL)
+        .and_then(|(_, v)| serde_json::from_str::<String>(v).ok())
+        .unwrap_or_else(|| "/".to_string())
 }
 
 /// The app's environment schema: `env.ts` (or `.mts` / `.js` / `.mjs`) at the root, if any.

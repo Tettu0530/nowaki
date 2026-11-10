@@ -176,6 +176,18 @@ curl -s -D - -o /dev/null http://127.0.0.1:3300/pricing | grep -qi '^x-route-gro
 ! curl -s -D - -o /dev/null http://127.0.0.1:3300/about | grep -qi '^x-route-group'
 ! curl -s -D - -o /dev/null http://127.0.0.1:3300/no-such-page | grep -qi '^x-route-group'
 test "$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3300/(marketing)/pricing')" = 404
+# parallel routes: photos/@modal renders beside the page (its [id] file on /photos/1, default on /photos)
+curl -sf http://127.0.0.1:3300/photos/1 | grep -q '<h1 id="photo-page">photo 1</h1>.*<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><aside id="photo-modal" class="photo-modal">modal 1: caption of 1</aside></nowaki-slot>'
+curl -sf http://127.0.0.1:3300/photos | grep -q '<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><p id="modal-default">no photo open</p></nowaki-slot>'
+! curl -sf http://127.0.0.1:3300/photos/1 | grep -q 'photo-intercepted'
+test "$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3300/photos/@modal/1')" = 404
+# intercepting route: the router's x-nowaki-intercept request gets the slot fragment, never cached
+curl -sf -H 'x-nowaki-intercept: /photos/@modal' http://127.0.0.1:3300/photos/1 | grep -q '^<template data-nowaki-head>.*</template><aside id="photo-intercepted">intercepted 1</aside>$'
+curl -s -D - -o /dev/null -H 'x-nowaki-intercept: /photos/@modal' http://127.0.0.1:3300/photos/1 | grep -qi '^x-nowaki-slot: modal'
+curl -s -D - -o /dev/null -H 'x-nowaki-intercept: /photos/@modal' http://127.0.0.1:3300/photos/1 | grep -qi '^cache-control: private, no-store'
+curl -s -D - -o /dev/null http://127.0.0.1:3300/photos/1 | grep -qi '^vary: .*x-nowaki-intercept'
+# the slot file's CSS is linked with the page's
+curl -sf http://127.0.0.1:3300/photos/1 | grep -qE '<link rel="stylesheet" href="/_nowaki/modal\.[0-9a-f]+\.css" />'
 # MDX: a .mdx page (ESM exports, expressions, GFM, an island) and an .mdx content entry
 curl -sf http://127.0.0.1:3300/guide | grep -q '<title>Guide (MDX) — Nowaki</title>'
 curl -sf http://127.0.0.1:3300/guide | grep -q '<h1 id="an-mdx-page">An MDX page</h1>'
@@ -273,6 +285,12 @@ bash scripts/ci/assert-no-orphans.sh $START_PID
 # nowaki.config redirects / rewrites / headers / basePath / trailingSlash at the Rust front
 # (a generated app; listens on 3306 and 3307)
 node scripts/rules-e2e.mjs start --port 3306
+# nowaki.config i18n at the Rust front (generated apps; listen on 3308, 3309 for i18n +
+# basePath + trailingSlash "never" + a slot, and 3310 for locale detection)
+node scripts/i18n-e2e.mjs start --port 3308
+# examples/gallery (the v0.18 exit-criteria app) at the Rust front on 3330, and env.ts stopping
+# `nowaki build` / `nowaki start` without a required variable
+node scripts/gallery-e2e.mjs start env --port 3330
 # Rooms survive a restart: on SIGTERM the sidecar wrote them to .nowaki/live-rooms.json.
 ROOMS=examples/hello/.nowaki/live-rooms.json
 test -f "$ROOMS"

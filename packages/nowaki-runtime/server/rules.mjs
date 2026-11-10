@@ -16,8 +16,17 @@ const TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const DEST_CHARS = /^[!-[\]-~]*$/;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
+/// The cookie remembering a visitor's explicit locale choice; it wins over Accept-Language.
+export const LOCALE_COOKIE = "nowaki_locale";
+// Accept-Language bounds: a longer value counts as absent; ranges past the 32nd are ignored.
+const MAX_ACCEPT_LANGUAGE = 4096;
+const MAX_LANGUAGE_RANGES = 32;
+const LANGUAGE_RANGE = /^(?:\*|[A-Za-z]{1,8}(?:-[A-Za-z0-9]{1,8})*)$/;
+const QVALUE = /^[qQ]=(?:0(?:\.[0-9]{0,3})?|1(?:\.0{0,3})?)$/;
+
 /// Compiles a normalized routing config. Returns null when nothing needs checking per request
-/// (no basePath, trailingSlash "ignore", no rules). Throws on an invalid config.
+/// (no basePath, trailingSlash "ignore", no rules, no locale detection). Throws on an invalid
+/// config.
 export function compileRules(config) {
   const c = config ?? {};
   const base = c.basePath ?? "";
@@ -25,9 +34,9 @@ export function compileRules(config) {
   const redirects = c.redirects ?? [];
   const rewrites = c.rewrites ?? [];
   const headers = c.headers ?? [];
-  if (!base && trailing === "ignore" && !redirects.length && !rewrites.length && !headers.length) {
-    return null;
-  }
+  const detect = c.i18n?.detect === true ? compileDetect(c.i18n) : null;
+  const plain = !base && trailing === "ignore" && !redirects.length && !rewrites.length && !headers.length;
+  if (plain && !detect) return null;
   checkBasePath(base);
   if (!["never", "always", "ignore"].includes(trailing)) {
     throw new Error(`trailingSlash must be "never", "always" or "ignore" (got ${JSON.stringify(trailing)})`);
@@ -35,6 +44,9 @@ export function compileRules(config) {
   return {
     base,
     trailing,
+    detect,
+    // Locale detection alone: applyRules passes every request through.
+    plain,
     redirects: compileSet(redirects, "redirects", (r, segs) => {
       const status = r.status ?? 307;
       if (!REDIRECT_STATUS.has(status)) throw new Error(`redirect status must be 301, 302, 303, 307 or 308 (got ${status})`);
@@ -60,7 +72,7 @@ export function compileRules(config) {
 /// { notFound: true } (outside basePath). `path` is the raw (percent-encoded) pathname. A
 /// redirect's location doesn't carry the request's query; the caller appends it.
 export function applyRules(rules, method, path) {
-  if (!rules) return { pass: path };
+  if (!rules || rules.plain) return { pass: path };
   const strip = stripBase(rules, path);
   if (!strip) return { notFound: true };
   const { p, bare } = strip;
@@ -113,11 +125,96 @@ export function ruleHeaders(rules, path) {
   return out;
 }
 
+/// Whether negotiateLocale answers this request: `i18n.detect` is on and it is a GET or HEAD for
+/// the site's root (`/`, or basePath with or without its trailing slash).
+export function negotiates(rules, method, path) {
+  if (!rules?.detect || (method !== "GET" && method !== "HEAD")) return false;
+  return stripBase(rules, path)?.p === "/";
+}
+
+/// Accept-Language detection for the site's root (`i18n.detect`): null when it doesn't apply
+/// (negotiates), { stay: true } to serve the root (the default locale), or { redirect: { status:
+/// 307, location } } to the chosen locale's root. A `nowaki_locale` cookie naming a configured
+/// locale decides; otherwise the best configured locale for `acceptLanguage` (RFC 9110 q-values;
+/// an exact tag, then the range's primary subtag, then a bare range matching a locale's primary
+/// subtag), else the default. The location is built from config strings only. Fronts run this
+/// after applyRules passes the request; either way the response varies on Accept-Language and
+/// Cookie.
+export function negotiateLocale(rules, method, path, acceptLanguage, cookie) {
+  if (!negotiates(rules, method, path)) return null;
+  const d = rules.detect;
+  let chosen = -1;
+  const fromCookie = cookie ? localeCookie(cookie) : undefined;
+  if (fromCookie !== undefined) chosen = d.locales.indexOf(fromCookie);
+  if (chosen < 0 && acceptLanguage) chosen = bestLocale(d, acceptLanguage);
+  if (chosen < 0) chosen = d.default;
+  if (chosen === d.default && !d.prefixDefault) return { stay: true };
+  return { redirect: { status: 307, location: browserPath(rules, `/${d.locales[chosen]}`, false) } };
+}
+
 /// encodeURIComponent, with "." and ".." escaped so a capture can't step up a directory.
 export function encodeSegment(s) {
   if (s === ".") return "%2E";
   if (s === "..") return "%2E%2E";
   return encodeURIComponent(s);
+}
+
+function compileDetect(i18n) {
+  const locales = i18n.locales ?? [];
+  // The locales end up in a Location header: plain tags only (site-config.mjs checks the shape).
+  for (const l of locales) {
+    if (typeof l !== "string" || !/^[A-Za-z0-9-]+$/.test(l)) throw new Error(`i18n.locales: ${JSON.stringify(l)} is not a locale tag`);
+  }
+  const def = locales.indexOf(i18n.defaultLocale);
+  if (def < 0) throw new Error(`i18n.defaultLocale must be one of i18n.locales (got ${JSON.stringify(i18n.defaultLocale)})`);
+  return { locales: [...locales], lower: locales.map((l) => l.toLowerCase()), default: def, prefixDefault: i18n.prefixDefaultLocale === true };
+}
+
+// The first `nowaki_locale` value of a Cookie header.
+function localeCookie(cookie) {
+  for (const pair of cookie.split(";")) {
+    const eq = pair.indexOf("=");
+    if (eq >= 0 && pair.slice(0, eq).trim() === LOCALE_COOKIE) return pair.slice(eq + 1).trim();
+  }
+  return undefined;
+}
+
+// One language range: [lowercased range, q in thousandths], or null when malformed.
+function languageRange(part) {
+  const bits = part.split(";");
+  if (bits.length > 2) return null;
+  const range = bits[0].trim();
+  let q = 1000;
+  if (bits.length === 2) {
+    const w = bits[1].trim();
+    if (!QVALUE.test(w)) return null;
+    q = Math.round(Number(w.slice(2)) * 1000);
+  }
+  return LANGUAGE_RANGE.test(range) ? [range.toLowerCase(), q] : null;
+}
+
+// The configured locale (an index) an Accept-Language value prefers, or -1.
+function bestLocale(d, header) {
+  if (header.length > MAX_ACCEPT_LANGUAGE) return -1;
+  const parsed = header.split(",").slice(0, MAX_LANGUAGE_RANGES).map(languageRange).filter(Boolean);
+  // q=0 means "not acceptable": the locale it names exactly is never chosen.
+  const allowed = d.lower.map((l) => !parsed.some(([r, q]) => q === 0 && r === l));
+  // Array.prototype.sort is stable: equal weights keep the header's order.
+  const ranges = parsed.filter(([, q]) => q > 0).sort((a, b) => b[1] - a[1]);
+  const find = (pred) => d.lower.findIndex((l, i) => allowed[i] && pred(l));
+  for (const [range] of ranges) {
+    if (range === "*") {
+      const i = allowed[d.default] ? d.default : find(() => true);
+      if (i >= 0) return i;
+      continue;
+    }
+    const primary = range.split("-")[0];
+    let i = find((l) => l === range);
+    if (i < 0) i = find((l) => l === primary);
+    if (i < 0 && primary === range) i = find((l) => l.split("-")[0] === primary);
+    if (i >= 0) return i;
+  }
+  return -1;
 }
 
 function stripBase(rules, path) {

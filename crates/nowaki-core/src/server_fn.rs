@@ -192,6 +192,17 @@ pub fn unvalidated_exports(abs: &Path, source: &str) -> Result<Vec<String>> {
 /// Generates the client proxy source for a server module (a dependency-free leaf).
 /// Each export is an async function that does `fetch(SERVER_FN_PATH)`. The implementation never reaches the client.
 pub fn client_proxy(module_key: &str, exports: &[String]) -> String {
+    client_proxy_at(module_key, exports, SERVER_FN_PATH)
+}
+
+/// The server function endpoint for the `import.meta.env.BASE_URL` in `defines`.
+pub(crate) fn fn_path(defines: &[(String, String)]) -> String {
+    format!("{}__nowaki/fn", crate::env::base_url(defines))
+}
+
+/// [`client_proxy`] posting to `path` instead of [`SERVER_FN_PATH`] (under nowaki.config
+/// `basePath`: `<base>/__nowaki/fn`).
+pub fn client_proxy_at(module_key: &str, exports: &[String], path: &str) -> String {
     let mut out = String::new();
     out.push_str(
         "// nowaki: client proxy for a \"use server\" module (the implementation stays on the server).\n",
@@ -215,7 +226,6 @@ fn.toString = () => \"__nowaki_action:\" + id;\n  \
 fn.__nowakiId = id;\n  \
 return fn;\n\
 }};\n",
-        path = SERVER_FN_PATH,
     ));
     for ex in exports {
         let id = server_fn_id(module_key, ex);

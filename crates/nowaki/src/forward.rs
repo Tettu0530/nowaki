@@ -28,7 +28,12 @@ pub fn is_internal_path(path: &str) -> bool {
 
 /// `x-nowaki-*` request headers the browser runtime sends on purpose; every other one is internal
 /// (`x-nowaki-route-path` among them: the front sets it after this filter, `front.rs`).
-const CLIENT_NOWAKI_HEADERS: [&str; 3] = ["x-nowaki-rpc", "x-nowaki-nav", "x-nowaki-live"];
+const CLIENT_NOWAKI_HEADERS: [&str; 4] = [
+    "x-nowaki-rpc",
+    "x-nowaki-nav",
+    "x-nowaki-live",
+    "x-nowaki-intercept",
+];
 
 pub fn trust_proxy() -> bool {
     static TRUST: OnceLock<bool> = OnceLock::new();
@@ -163,6 +168,7 @@ mod tests {
             "x-nowaki-rpc",
             "x-nowaki-nav",
             "x-nowaki-live",
+            "x-nowaki-intercept",
             "content-type",
             "cookie",
             "origin",

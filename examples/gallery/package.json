@@ -1,0 +1,11 @@
+{
+  "name": "gallery",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@nowaki-dev/runtime": "workspace:*",
+    "preact": "^11.2.0",
+    "preact-render-to-string": "^6.8.2",
+    "zod": "^4.6.7"
+  }
+}

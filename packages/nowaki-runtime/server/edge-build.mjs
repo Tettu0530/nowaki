@@ -32,6 +32,13 @@ const hasSession = await readFile(path.join(serverDir, "session.js")).then(() =>
 const envPublicJson = hasEnv ? await readFile(path.join(serverDir, "env-public.json"), "utf8").catch(() => null) : null;
 // nowaki.config routing, inlined; without it the worker imports and checks nothing for it.
 const routingJson = await readFile(path.join(serverDir, "routing.json"), "utf8").catch(() => null);
+const routingConfig = routingJson ? JSON.parse(routingJson) : null;
+const trailingSlash = routingConfig?.trailingSlash;
+// basePath: client files and public/ go under it in the assets directory, so the platform serves
+// them at the URL the pages use.
+const basePath = routingConfig?.basePath ?? "";
+// i18n reaches the handler through the routing config (it adds no front rule).
+const i18nRouting = routingConfig?.i18n ? routingJson.trim() : null;
 
 const keyOf = (abs) => path.relative(serverDir, abs).split(path.sep).join("/");
 // specifiers relative to dist/worker/index.js
@@ -73,6 +80,23 @@ const routeTable = {
     prefix: b.prefix,
     urlPrefix: b.urlPrefix,
     file: (addModule(b.file), keyOf(b.file)),
+  })),
+  // Parallel-route slots. Intercepting files without a target are listed, not imported.
+  slots: table.slots.map((s) => ({
+    ownerDir: s.ownerDir,
+    name: s.name,
+    routes: s.routes.map((r) => ({
+      file: (addModule(r.file), keyOf(r.file)),
+      segments: r.segments,
+      specificity: r.specificity,
+      rest: r.rest,
+    })),
+    default: s.default ? (addModule(s.default), keyOf(s.default)) : null,
+    intercepts: s.intercepts.map((i) =>
+      i.segments
+        ? { file: (addModule(i.file), keyOf(i.file)), rel: i.rel, pattern: i.pattern, segments: i.segments, specificity: i.specificity, rest: i.rest }
+        : { file: keyOf(i.file), rel: i.rel },
+    ),
   })),
   notFound: table.notFound ? (addModule(table.notFound), keyOf(table.notFound)) : null,
   errorRoute: table.errorRoute ? (addModule(table.errorRoute), keyOf(table.errorRoute)) : null,
@@ -147,7 +171,7 @@ const handler = createFetchHandler({
   islandComponents,
   liveIslands,
   routeTable,
-  serverFunctions,${site ? `\n  site: ${JSON.stringify(site)},` : ""}${fontsJson ? `\n  fonts: ${fontsJson.trim()},` : ""}${contentRaw ? "\n  content," : ""}${hasEnv ? "\n  envModule," : ""}${hasSession ? "\n  sessionModule," : ""}${envPublicJson ? `\n  envPublic: ${envPublicJson.trim()},` : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}
+  serverFunctions,${site ? `\n  site: ${JSON.stringify(site)},` : ""}${trailingSlash ? `\n  trailingSlash: ${JSON.stringify(trailingSlash)},` : ""}${fontsJson ? `\n  fonts: ${fontsJson.trim()},` : ""}${contentRaw ? "\n  content," : ""}${hasEnv ? "\n  envModule," : ""}${hasSession ? "\n  sessionModule," : ""}${envPublicJson ? `\n  envPublic: ${envPublicJson.trim()},` : ""}${basePath ? `\n  basePath: ${JSON.stringify(basePath)},` : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}${i18nRouting ? `\n  routing: ${i18nRouting},` : ""}
 });
 
 // public/ files by decoded URL path; they win over routes at the same path.
@@ -179,17 +203,17 @@ function plainFetch() {
 `;
 }
 
-/// The worker's fetch with nowaki.config routing: basePath, trailingSlash, redirects and rewrites
-/// run first (before the Assets binding), and the config headers go on every response.
+/// The worker's fetch with nowaki.config routing: basePath, trailingSlash, redirects, rewrites and
+/// locale detection (i18n.detect) run first (before the Assets binding), and the config headers go
+/// on every response.
 function routedFetch(routing) {
   return `import { compileRules } from "@nowaki-dev/runtime/server/rules.mjs";
-import { frontHeaders, frontStep, withHeaderDefaults } from "@nowaki-dev/runtime/server/front.mjs";
+import { frontHeaders, frontLocale, frontStep, withHeaderDefaults, withVary } from "@nowaki-dev/runtime/server/front.mjs";
 const rules = compileRules(${routing});
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    let routePath = url.pathname;
     const headers = rules ? frontHeaders(rules, url.pathname) : [];
     const step = rules && frontStep(rules, request.method, url);
     if (step?.redirect) {
@@ -200,16 +224,30 @@ export default {
       const r = new Response("not found", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
       return withSecurityHeaders(withHeaderDefaults(r, headers));
     }
-    if (step) routePath = step.routePath;
-    // Static files go to the Assets binding (dist/worker/assets: dist/client under _nowaki/, and
-    // public/ at the top), looked up by the route path.
-    if (env.ASSETS && (routePath.startsWith("/_nowaki/") || ((request.method === "GET" || request.method === "HEAD") && isPublic(routePath)))) {
-      const asset = routePath === url.pathname ? request : new Request(new URL(routePath + url.search, url), request);
-      return withSecurityHeaders(withHeaderDefaults(await env.ASSETS.fetch(asset), headers));
+    // i18n.detect: Accept-Language / the nowaki_locale cookie on the root; the response varies on them.
+    const locale = rules?.detect ? frontLocale(rules, request.method, url, request.headers.get("accept-language"), request.headers.get("cookie")) : null;
+    if (locale?.redirect) {
+      const r = new Response(null, { status: locale.redirect.status, headers: { ...locale.headers, location: locale.redirect.location } });
+      return withSecurityHeaders(withHeaderDefaults(r, headers));
     }
-    return handler(request, env, { routePath: step ? routePath : undefined, headers });
+    const response = await serve(request, env, url, step, headers);
+    return locale ? withVary(response) : response;
   },
 };
+
+async function serve(request, env, url, step, headers) {
+  const routePath = step ? step.routePath : url.pathname;
+  // Static files go to the Assets binding (dist/worker/assets: dist/client under
+  // <basePath>/_nowaki/, and public/ under basePath), looked up by the route path.
+  if (env.ASSETS && (routePath.startsWith("/_nowaki/") || ((request.method === "GET" || request.method === "HEAD") && isPublic(routePath)))) {
+    const assetPath = (rules?.base ?? "") + routePath;
+    const asset = assetPath === url.pathname ? request : new Request(new URL(assetPath + url.search, url), request);
+    return withSecurityHeaders(withHeaderDefaults(await env.ASSETS.fetch(asset), headers));
+  }
+  // A /__nowaki/* endpoint under basePath: the handler dispatches it by the root URL.
+  if (step?.internal) return handler(new Request(new URL(routePath + url.search, url), request), env, { headers });
+  return handler(request, env, { routePath: step ? routePath : undefined, headers });
+}
 `;
 }
 
@@ -235,8 +273,9 @@ for (const name of await readdir(workerDir).catch(() => [])) {
 }
 await mkdir(workerDir, { recursive: true });
 await writeFile(path.join(workerDir, "index.js"), worker);
-// The Assets binding serves one directory: dist/client under _nowaki/, public/ files at the top.
-const assetsDir = path.join(workerDir, "assets");
+// The Assets binding serves one directory: dist/client under _nowaki/, public/ files at the top
+// (both under basePath when there is one).
+const assetsDir = path.join(workerDir, "assets", ...basePath.split("/").filter(Boolean));
 await cp(clientDir, path.join(assetsDir, "_nowaki"), { recursive: true });
 for (const [url, { file }] of publicIndex) {
   const to = path.join(assetsDir, ...url.split("/").filter(Boolean));

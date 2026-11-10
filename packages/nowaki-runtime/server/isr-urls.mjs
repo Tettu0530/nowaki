@@ -2,6 +2,9 @@
 // `staticPaths` entry (routes without it are skipped). Used for the ISR warm-up (`isrUrls`) and the
 // generated sitemap.xml (`sitemapUrls`).
 
+import { localePathFor } from "./i18n.mjs";
+import { runWithLocale } from "./i18n-context.mjs";
+
 /// Pages whose module passes `keep(mod)`, at most `max`.
 export async function pageUrls(env, { keep, max = Infinity, version, label = "page list" } = {}) {
   const { routes } = await env.routeTable(version);
@@ -15,13 +18,17 @@ export async function pageUrls(env, { keep, max = Infinity, version, label = "pa
       continue; // the first real request reports it
     }
     if (!keep(mod)) continue;
+    if (env.i18n) {
+      await localeUrls(env.i18n, route, mod, urls, max, label);
+      continue;
+    }
     if (!route.segments.some((s) => s.param)) {
       urls.add(urlOf(route, {}));
       continue;
     }
     let list = mod.staticPaths;
     try {
-      if (typeof list === "function") list = await list();
+      if (typeof list === "function") list = await list({});
     } catch (err) {
       console.warn(`[nowaki] ${label}: staticPaths of ${route.file} failed: ${err?.message ?? err}`);
       continue;
@@ -34,6 +41,28 @@ export async function pageUrls(env, { keep, max = Infinity, version, label = "pa
     }
   }
   return [...urls];
+}
+
+// i18n: a page's URL in every locale (`/about`, `/ja/about`). A dynamic route's staticPaths runs
+// once per locale, given `{ locale }` and with it as getLocale() (getCollection returns that
+// locale's entries).
+async function localeUrls(i18n, route, mod, urls, max, label) {
+  const dynamic = route.segments.some((s) => s.param);
+  for (const locale of i18n.locales) {
+    let list = dynamic ? mod.staticPaths : [{}];
+    try {
+      if (typeof list === "function") list = await runWithLocale({ locale, i18n }, () => list({ locale }));
+    } catch (err) {
+      console.warn(`[nowaki] ${label}: staticPaths of ${route.file} (${locale}) failed: ${err?.message ?? err}`);
+      continue;
+    }
+    if (!Array.isArray(list)) continue;
+    for (const params of list) {
+      const url = urlOf(route, params ?? {});
+      if (url) urls.add(localePathFor(i18n, url, locale));
+      if (urls.size >= max) return;
+    }
+  }
 }
 
 /// The URLs of ISR pages (`export const revalidate` > 0): `nowaki start` renders each one once at

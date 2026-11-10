@@ -1,7 +1,7 @@
 //! nowaki_core::rules against the fixture that scripts/rules-test.mjs runs on server/rules.mjs:
 //! the Rust fronts and the JS adapters must route a request the same way.
 
-use nowaki_core::rules::{Outcome, RoutingConfig, Rules};
+use nowaki_core::rules::{Negotiated, Outcome, RoutingConfig, Rules};
 use serde_json::{json, Value};
 
 fn outcome_json(o: &Outcome) -> Value {
@@ -12,6 +12,16 @@ fn outcome_json(o: &Outcome) -> Value {
         Outcome::Rewrite(p) => json!({ "rewrite": p }),
         Outcome::Pass(p) => json!({ "pass": p }),
         Outcome::NotFound => json!({ "notFound": true }),
+    }
+}
+
+fn negotiated_json(n: Option<Negotiated>) -> Value {
+    match n {
+        None => Value::Null,
+        Some(Negotiated::Stay) => json!({ "stay": true }),
+        Some(Negotiated::Redirect(location)) => {
+            json!({ "redirect": { "status": 307, "location": location } })
+        }
     }
 }
 
@@ -47,6 +57,21 @@ fn shared_fixture() {
                     "{name}: {method} {path}: got {got}, want {}",
                     req["expect"]
                 ));
+            }
+            if let Some(want) = req.get("negotiate") {
+                let got = negotiated_json(rules.negotiate(
+                    method,
+                    path,
+                    req["acceptLanguage"].as_str(),
+                    req["cookie"].as_str(),
+                ));
+                checked += 1;
+                if &got != want {
+                    failures.push(format!(
+                        "{name}: negotiate {method} {path} {:?} {:?}: got {got}, want {want}",
+                        req["acceptLanguage"], req["cookie"]
+                    ));
+                }
             }
             if let Some(want) = req.get("headers") {
                 let got: Vec<Value> = rules

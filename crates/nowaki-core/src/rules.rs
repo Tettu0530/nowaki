@@ -99,6 +99,24 @@ pub enum Outcome {
     NotFound,
 }
 
+/// What `i18n.detect` does with a request for the site's root ([`Rules::negotiate`]). Either way
+/// the response varies on `Accept-Language` and `Cookie`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Negotiated {
+    /// Serve the root as it is (the default locale's page).
+    Stay,
+    /// Redirect (307) to the chosen locale's root, a browser path built from config strings only.
+    Redirect(String),
+}
+
+/// The cookie remembering a visitor's explicit locale choice; it wins over `Accept-Language`.
+pub const LOCALE_COOKIE: &str = "nowaki_locale";
+
+/// Longest `Accept-Language` value read; a longer one counts as absent.
+const MAX_ACCEPT_LANGUAGE: usize = 4096;
+/// Language ranges read from `Accept-Language`; the rest are ignored.
+const MAX_LANGUAGE_RANGES: usize = 32;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Seg {
     Lit(String),
@@ -163,6 +181,17 @@ pub struct Rules {
     redirects: RuleSet<Redirect>,
     rewrites: RuleSet<Destination>,
     headers: Vec<HeaderSet>,
+    detect: Option<Detect>,
+}
+
+/// `i18n` with `detect: true`.
+#[derive(Debug, Clone)]
+struct Detect {
+    locales: Vec<String>,
+    /// `locales`, lowercased, for matching language ranges.
+    lower: Vec<String>,
+    default: usize,
+    prefix_default: bool,
 }
 
 impl Rules {
@@ -202,22 +231,75 @@ impl Rules {
             }
             headers.push((segs, pairs));
         }
+        let detect = match &config.i18n {
+            Some(i18n) if i18n.detect => Some(compile_detect(i18n)?),
+            _ => None,
+        };
         Ok(Rules {
             base,
             trailing: config.trailing_slash,
             redirects,
             rewrites,
             headers,
+            detect,
         })
     }
 
-    /// Nothing to check per request: no basePath, `trailingSlash: "ignore"`, no rules.
+    /// Nothing to check per request: no basePath, `trailingSlash: "ignore"`, no rules, no locale
+    /// detection.
     pub fn is_empty(&self) -> bool {
+        self.no_rules() && self.detect.is_none()
+    }
+
+    fn no_rules(&self) -> bool {
         self.base.is_empty()
             && self.trailing == TrailingSlash::Ignore
             && self.redirects.rules.is_empty()
             && self.rewrites.rules.is_empty()
             && self.headers.is_empty()
+    }
+
+    /// Whether `i18n.detect` is on.
+    pub fn detects(&self) -> bool {
+        self.detect.is_some()
+    }
+
+    /// Whether [`Rules::negotiate`] answers this request: `i18n.detect` is on and it is a GET or
+    /// HEAD for the site's root (`/`, or basePath with or without its trailing slash).
+    pub fn negotiates(&self, method: &str, path: &str) -> bool {
+        self.detect.is_some()
+            && (method == "GET" || method == "HEAD")
+            && self.strip_base(path).is_some_and(|(p, _)| p == "/")
+    }
+
+    /// Accept-Language detection for the site's root (`i18n.detect`); `None` when it doesn't apply
+    /// ([`Rules::negotiates`]). A `nowaki_locale` cookie naming a configured locale decides;
+    /// otherwise the best configured locale for `accept_language` (RFC 9110 q-values; an exact
+    /// tag, then the range's primary subtag, then a bare range matching a locale's primary subtag),
+    /// else the default locale. The default locale stays at the root unless
+    /// `prefixDefaultLocale`; any other gets a redirect to `<base>/<locale>` shaped by the
+    /// trailing-slash policy. Fronts run this after [`Rules::apply`] passes the request.
+    pub fn negotiate(
+        &self,
+        method: &str,
+        path: &str,
+        accept_language: Option<&str>,
+        cookie: Option<&str>,
+    ) -> Option<Negotiated> {
+        if !self.negotiates(method, path) {
+            return None;
+        }
+        let d = self.detect.as_ref()?;
+        let chosen = cookie
+            .and_then(locale_cookie)
+            .and_then(|v| d.locales.iter().position(|l| l == v))
+            .or_else(|| accept_language.and_then(|h| best_locale(d, h)))
+            .unwrap_or(d.default);
+        if chosen == d.default && !d.prefix_default {
+            return Some(Negotiated::Stay);
+        }
+        let path = format!("/{}", d.locales[chosen]);
+        Some(Negotiated::Redirect(self.browser_path(&path, false)))
     }
 
     pub fn base_path(&self) -> &str {
@@ -227,7 +309,7 @@ impl Rules {
     /// Applies basePath, the trailing-slash policy, then the first matching redirect, then the
     /// first matching rewrite. `path` is the raw (percent-encoded) request path.
     pub fn apply(&self, method: &str, path: &str) -> Outcome {
-        if self.is_empty() {
+        if self.no_rules() {
             return Outcome::Pass(path.to_string());
         }
         let Some((p, bare)) = self.strip_base(path) else {
@@ -534,6 +616,128 @@ fn guard(outcome: Outcome) -> Outcome {
     outcome
 }
 
+fn compile_detect(i18n: &I18nConfig) -> Result<Detect, String> {
+    // The locales end up in a Location header: plain tags only (site-config.mjs checks the shape).
+    for l in &i18n.locales {
+        if l.is_empty() || !l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+            return Err(format!("i18n.locales: {l:?} is not a locale tag"));
+        }
+    }
+    let default = i18n
+        .locales
+        .iter()
+        .position(|l| *l == i18n.default_locale)
+        .ok_or_else(|| {
+            format!(
+                "i18n.defaultLocale must be one of i18n.locales (got {:?})",
+                i18n.default_locale
+            )
+        })?;
+    Ok(Detect {
+        locales: i18n.locales.clone(),
+        lower: i18n
+            .locales
+            .iter()
+            .map(|l| l.to_ascii_lowercase())
+            .collect(),
+        default,
+        prefix_default: i18n.prefix_default_locale,
+    })
+}
+
+/// The first `nowaki_locale` value of a Cookie header.
+fn locale_cookie(cookie: &str) -> Option<&str> {
+    cookie.split(';').find_map(|pair| {
+        let (name, value) = pair.split_once('=')?;
+        (name.trim() == LOCALE_COOKIE).then(|| value.trim())
+    })
+}
+
+/// One language range of an Accept-Language value (RFC 9110 12.5.4): `*` or `1*8ALPHA *("-"
+/// 1*8alphanum)`, lowercased, with an optional `;q=` weight in thousandths. `None` when malformed.
+fn language_range(part: &str) -> Option<(String, u16)> {
+    let mut it = part.split(';');
+    let range = it.next()?.trim();
+    let q = match it.next() {
+        None => 1000,
+        Some(w) => qvalue(w.trim())?,
+    };
+    if it.next().is_some() {
+        return None;
+    }
+    let ok = range == "*"
+        || range.split('-').enumerate().all(|(i, sub)| {
+            (1..=8).contains(&sub.len())
+                && sub.bytes().all(|b| {
+                    if i == 0 {
+                        b.is_ascii_alphabetic()
+                    } else {
+                        b.is_ascii_alphanumeric()
+                    }
+                })
+        });
+    ok.then(|| (range.to_ascii_lowercase(), q))
+}
+
+/// `q=` qvalue (`0`, `0.5`, `1.000`) in thousandths.
+fn qvalue(w: &str) -> Option<u16> {
+    let v = w.strip_prefix("q=").or_else(|| w.strip_prefix("Q="))?;
+    let (int, frac) = v.split_once('.').unwrap_or((v, ""));
+    if frac.len() > 3 || !frac.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let digits = |s: &str| s.bytes().fold(0u16, |n, b| n * 10 + u16::from(b - b'0'));
+    let frac = digits(frac) * 10u16.pow(3 - frac.len() as u32);
+    match int {
+        "0" => Some(frac),
+        "1" if frac == 0 => Some(1000),
+        _ => None,
+    }
+}
+
+/// The configured locale (an index) an Accept-Language value prefers, or `None`.
+fn best_locale(d: &Detect, header: &str) -> Option<usize> {
+    if header.len() > MAX_ACCEPT_LANGUAGE {
+        return None;
+    }
+    let mut ranges: Vec<(String, u16)> = header
+        .split(',')
+        .take(MAX_LANGUAGE_RANGES)
+        .filter_map(language_range)
+        .collect();
+    // q=0 means "not acceptable": the locale it names exactly is never chosen.
+    let excluded = |i: usize| ranges.iter().any(|(r, q)| *q == 0 && *r == d.lower[i]);
+    let allowed: Vec<bool> = (0..d.locales.len()).map(|i| !excluded(i)).collect();
+    ranges.retain(|(_, q)| *q > 0);
+    // Stable: equal weights keep the header's order.
+    ranges.sort_by_key(|r| std::cmp::Reverse(r.1));
+    let find =
+        |pred: &dyn Fn(&str) -> bool| (0..d.lower.len()).find(|&i| allowed[i] && pred(&d.lower[i]));
+    for (range, _) in &ranges {
+        if range == "*" {
+            if allowed[d.default] {
+                return Some(d.default);
+            }
+            if let Some(i) = find(&|_| true) {
+                return Some(i);
+            }
+            continue;
+        }
+        let primary = range.split('-').next().unwrap_or(range);
+        let hit = find(&|l| l == range)
+            .or_else(|| find(&|l| l == primary))
+            .or_else(|| {
+                (primary == range)
+                    .then(|| find(&|l| l.split('-').next() == Some(primary)))
+                    .flatten()
+            });
+        if hit.is_some() {
+            return hit;
+        }
+    }
+    None
+}
+
 fn is_token(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b)
 }
@@ -542,7 +746,7 @@ fn is_control(c: char) -> bool {
     c < ' ' || c == '\u{7f}'
 }
 
-fn check_base_path(base: &str) -> Result<(), String> {
+pub(crate) fn check_base_path(base: &str) -> Result<(), String> {
     if base.is_empty() {
         return Ok(());
     }
@@ -806,5 +1010,43 @@ mod tests {
                 location: "/p/b".into()
             }
         );
+    }
+
+    #[test]
+    fn accept_language_parsing_is_bounded() {
+        let r = rules(r#"{"i18n":{"locales":["en","ja"],"defaultLocale":"en","detect":true}}"#);
+        let ja = Some(Negotiated::Redirect("/ja".into()));
+        assert_eq!(r.negotiate("GET", "/", Some("ja"), None), ja);
+        // A range past the 32nd is never read.
+        let many = format!("{}ja", "fr,".repeat(MAX_LANGUAGE_RANGES));
+        assert_eq!(
+            r.negotiate("GET", "/", Some(&many), None),
+            Some(Negotiated::Stay)
+        );
+        let fits = format!("{}ja", "fr,".repeat(MAX_LANGUAGE_RANGES - 1));
+        assert_eq!(r.negotiate("GET", "/", Some(&fits), None), ja);
+        // An oversized header counts as absent.
+        let long = format!("ja,{}", "x".repeat(MAX_ACCEPT_LANGUAGE));
+        assert_eq!(
+            r.negotiate("GET", "/", Some(&long), None),
+            Some(Negotiated::Stay)
+        );
+        assert!(!r.is_empty());
+        assert_eq!(r.apply("GET", "/a/"), Outcome::Pass("/a/".into()));
+    }
+
+    #[test]
+    fn qvalues() {
+        assert_eq!(qvalue("q=1"), Some(1000));
+        assert_eq!(qvalue("q=1."), Some(1000));
+        assert_eq!(qvalue("q=0.5"), Some(500));
+        assert_eq!(qvalue("q=0.05"), Some(50));
+        assert_eq!(qvalue("Q=0.001"), Some(1));
+        assert_eq!(qvalue("q=0"), Some(0));
+        assert_eq!(qvalue("q=1.001"), None);
+        assert_eq!(qvalue("q=0.0001"), None);
+        assert_eq!(qvalue("q=-1"), None);
+        assert_eq!(qvalue("q=0.x"), None);
+        assert_eq!(qvalue("q = 1"), None);
     }
 }
