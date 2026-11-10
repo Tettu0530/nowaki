@@ -15,11 +15,59 @@ node scripts/create-nowaki-test.mjs
 (cd packages/nowaki-runtime && npm pack --silent --pack-destination "$WORK" >/dev/null)
 TARBALL=$(ls "$WORK"/nowaki-dev-runtime-*.tgz)
 
+# Type-check the scaffolded app with skipLibCheck off, using the shipped tsconfig.json and
+# type files plus a probe that imports a `?image` asset, a plain asset, a CSS module, reads
+# import.meta.env, and passes attributes to <Image>. tsc comes from $TSC, else from `tsc` on
+# PATH; in CI (CI=true) a pinned typescript is installed into the app. Skipped otherwise.
+typecheck() {
+  local app=$1 tsc=${TSC:-}
+  if [ -z "$tsc" ] && command -v tsc >/dev/null 2>&1; then tsc=tsc; fi
+  if [ -z "$tsc" ] && [ "${CI:-}" = true ]; then
+    (cd "$app" && npm install --no-save --no-audit --no-fund --loglevel=error typescript@5.9.3)
+    tsc="$app/node_modules/.bin/tsc"
+  fi
+  if [ -z "$tsc" ]; then
+    echo "skip: type-check of $(basename "$app") (no tsc; set TSC=/path/to/tsc)"
+    return 0
+  fi
+  mkdir -p "$app/components"
+  printf 'x' > "$app/components/probe.png"
+  printf '.box { color: red; }\n' > "$app/components/probe.module.css"
+  cat > "$app/components/TypesProbe.tsx" <<'TSX'
+import hero from "./probe.png?image";
+import heroUrl from "./probe.png";
+import styles from "./probe.module.css";
+import { Image } from "@nowaki-dev/runtime/image";
+
+const greeting: string | undefined = import.meta.env.PUBLIC_X;
+const base: string = import.meta.env.BASE_URL;
+
+export function TypesProbe() {
+  return (
+    <div class={styles.box} data-greeting={greeting} data-base={base}>
+      <Image src={hero} alt="hero" class="hero" id="hero" fetchpriority="high" loading="eager" width={320} />
+      <Image src={heroUrl} alt="" style={{ objectFit: "cover" }} onClick={(e) => e.currentTarget.alt} />
+    </div>
+  );
+}
+
+export const island = <TypesProbe client:visible client:media="(min-width: 768px)" />;
+
+// @ts-expect-error: <Image> keeps the <img> attribute types, so an unknown one is rejected.
+export const bad = <Image src={hero} alt="" notAnAttribute="x" />;
+TSX
+  printf '{ "extends": "./tsconfig.json", "compilerOptions": { "skipLibCheck": false } }\n' \
+    > "$app/tsconfig.typecheck.json"
+  (cd "$app" && "$tsc" --noEmit -p tsconfig.typecheck.json)
+  rm -f "$app/components/TypesProbe.tsx" "$app/components/probe.png" \
+    "$app/components/probe.module.css" "$app/tsconfig.typecheck.json"
+}
+
 port=3400
 for t in basics minimal; do
   (cd "$WORK" && node "$ROOT/packages/create-nowaki/index.js" "app-$t" -t "$t" -y --no-git --no-install)
   APP="$WORK/app-$t"
-  common="package.json AGENTS.md CLAUDE.md tsconfig.json nowaki-env.d.ts .gitignore .env.example routes/index.tsx"
+  common="package.json AGENTS.md CLAUDE.md tsconfig.json nowaki-env.d.ts nowaki-jsx.d.ts .gitignore .env.example routes/index.tsx"
   if [ "$t" = basics ]; then
     for f in $common routes/_404.tsx routes/api/health.ts; do
       test -f "$APP/$f"
@@ -54,5 +102,7 @@ for t in basics minimal; do
   fi
   kill $PID
   port=$((port + 1))
+
+  typecheck "$APP"
 done
 rm -rf "$WORK"

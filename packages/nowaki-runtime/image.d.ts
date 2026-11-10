@@ -11,7 +11,15 @@ export interface ImageSource {
   sources: { type: string; srcset: string }[];
 }
 
-export type ImageProps = Omit<JSX.HTMLAttributes<HTMLImageElement>, "src" | "srcset" | "width" | "height"> & {
+/**
+ * Every `<img>` attribute (`class`, `id`, `style`, `fetchpriority`, event handlers, ...) is passed
+ * through to the rendered `<img>`. `JSX.IntrinsicElements["img"]` is the `<img>` props type in
+ * both preact 10 and 11 (preact 11 has no `JSX.HTMLAttributes`).
+ */
+export type ImageProps = Omit<
+  JSX.IntrinsicElements["img"],
+  "src" | "srcset" | "alt" | "sizes" | "width" | "height" | "loading" | "decoding"
+> & {
   /**
    * A `?image` import (local, or a remote URL that `images.remotePatterns` allows, fetched at
    * build time), or a plain URL string: rendered as a bare `<img>`, not optimized (set width /

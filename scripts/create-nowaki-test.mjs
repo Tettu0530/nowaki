@@ -30,9 +30,32 @@ try {
     const r = run([name, "-t", template, "-y", "--no-install", "--no-git"], work);
     check(`scaffolds ${template} template`, r.status === 0);
     const app = path.join(work, name);
-    for (const rel of ["package.json", "AGENTS.md", ".gitignore", ".env.example", "routes/index.tsx"]) {
+    for (const rel of [
+      "package.json",
+      "AGENTS.md",
+      ".gitignore",
+      ".env.example",
+      "tsconfig.json",
+      "nowaki-env.d.ts",
+      "nowaki-jsx.d.ts",
+      "routes/index.tsx",
+    ]) {
       check(`${template}: ${rel} exists`, existsSync(path.join(app, rel)));
     }
+    // nowaki-env.d.ts must stay a script (no top-level import / export): as a module its
+    // `declare module "*?image"` wildcards stop being ambient and asset imports fail with TS2307.
+    const ambient = readFileSync(path.join(app, "nowaki-env.d.ts"), "utf8");
+    check(
+      `${template}: nowaki-env.d.ts is not a module`,
+      !/^(import|export)\b/m.test(ambient) && ambient.includes('declare module "*?image"'),
+    );
+    const jsx = readFileSync(path.join(app, "nowaki-jsx.d.ts"), "utf8");
+    check(`${template}: nowaki-jsx.d.ts augments preact`, /^import "preact";$/m.test(jsx) && jsx.includes('declare module "preact"'));
+    const tsconfig = JSON.parse(readFileSync(path.join(app, "tsconfig.json"), "utf8"));
+    check(
+      `${template}: tsconfig includes both type files`,
+      ["nowaki-env.d.ts", "nowaki-jsx.d.ts", ".nowaki/types.d.ts"].every((f) => tsconfig.include.includes(f)),
+    );
     const pkg = JSON.parse(readFileSync(path.join(app, "package.json"), "utf8"));
     check(`${template}: package name normalized`, pkg.name === name);
     if (template === "basics") {

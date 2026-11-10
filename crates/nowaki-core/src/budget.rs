@@ -20,7 +20,10 @@ use oxc::ast::ast::{
 };
 
 use crate::build::ClientInfo;
-use crate::routes::{is_convention_source, is_endpoint_rel, stem_from_rel, url_pattern_from_stem};
+use crate::routes::{
+    is_convention_source, is_endpoint_rel, is_slot_or_intercept_rel, stem_from_rel,
+    url_pattern_from_stem,
+};
 use crate::NowakiCore;
 
 #[derive(Debug, Clone)]
@@ -109,13 +112,14 @@ pub fn route_first_load(
             continue;
         };
         let base = stem.rsplit('/').next().unwrap_or(&stem);
-        if is_convention_source(base) || is_endpoint_rel(&rel) {
+        if is_convention_source(base) || is_endpoint_rel(&rel) || is_slot_or_intercept_rel(&rel) {
             continue;
         }
 
+        let slot_files = slot_files_for(&routes_dir, &rel);
         let mut reach: HashSet<PathBuf> = crate::chunk::collect_app_modules(core, &path);
-        for layout in layouts_for(&routes_dir, &rel) {
-            reach.extend(crate::chunk::collect_app_modules(core, &layout));
+        for wrapper in layouts_for(&routes_dir, &rel).iter().chain(&slot_files) {
+            reach.extend(crate::chunk::collect_app_modules(core, wrapper));
         }
         let mut client_islands = BTreeSet::new();
         let mut has_live = false;
@@ -136,8 +140,12 @@ pub fn route_first_load(
         let source = core.read_source(&path)?;
         let mut chunks: BTreeSet<String> = BTreeSet::new();
         // A streaming page sends its shell before it knows which islands render, so the shell
-        // always loads the islands runtime (document.mjs prodShell), islands or not.
-        if client_islands.is_empty() && is_streaming(&path, &source) {
+        // always loads the islands runtime (document.mjs prodShell), islands or not. So does a page
+        // with an intercepting slot: the client router comes with the runtime.
+        if client_islands.is_empty()
+            && (is_streaming(&path, &source)
+                || renders_intercepting_slot(&routes_dir, &rel, &slot_files))
+        {
             if let Some(rt) = &client.runtime {
                 add_with_preloads(&mut chunks, rt, client);
             }
@@ -159,6 +167,7 @@ pub fn route_first_load(
         }
         let mut modules: Vec<String> = layouts_for(&routes_dir, &rel)
             .iter()
+            .chain(&slot_files)
             .filter_map(|l| l.strip_prefix(&routes_dir).ok())
             .filter_map(|l| stem_from_rel(&l.to_string_lossy().replace('\\', "/")))
             .collect();
@@ -218,6 +227,72 @@ pub fn layouts_for(routes_dir: &Path, rel: &str) -> Vec<PathBuf> {
         }
     }
     out
+}
+
+/// Files of the parallel-route slots (`@name/` directories) in every directory from `routes/` down
+/// to the route's own, the ones its layouts can render. Which one renders depends on the URL, so
+/// a page's budget counts them all (an upper bound). Files starting with `_` aren't rendered.
+pub fn slot_files_for(routes_dir: &Path, rel: &str) -> Vec<PathBuf> {
+    let mut dir = routes_dir.to_path_buf();
+    let parts: Vec<&str> = rel.split('/').collect();
+    let mut dirs = vec![dir.clone()];
+    for part in &parts[..parts.len().saturating_sub(1)] {
+        dir = dir.join(part);
+        dirs.push(dir.clone());
+    }
+    let mut out = Vec::new();
+    for d in dirs {
+        let Ok(entries) = fs::read_dir(&d) else {
+            continue;
+        };
+        let mut slots: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.is_dir()
+                    && p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.len() > 1 && n.starts_with('@'))
+            })
+            .collect();
+        slots.sort();
+        for slot in slots {
+            let mut files = crate::routes::walk_routes_dir(&slot).unwrap_or_default();
+            files.sort();
+            out.extend(files.into_iter().filter(|p| {
+                crate::is_transformable(p)
+                    && !p
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.starts_with('_'))
+            }));
+        }
+    }
+    out
+}
+
+/// Whether a page's layouts own a slot with an intercepting file (`@modal/(.)photo/[id].tsx`, one
+/// with a target): handler.mjs then sets `meta.router`, and the page loads the islands runtime
+/// (and so the client router) without islands. `slot_files` is `slot_files_for(routes_dir, rel)`.
+fn renders_intercepting_slot(routes_dir: &Path, rel: &str, slot_files: &[PathBuf]) -> bool {
+    let layouts = layouts_for(routes_dir, rel);
+    slot_files.iter().any(|f| {
+        let Some(stem) = f
+            .strip_prefix(routes_dir)
+            .ok()
+            .and_then(|r| stem_from_rel(&r.to_string_lossy().replace('\\', "/")))
+        else {
+            return false;
+        };
+        let parts: Vec<&str> = stem.split('/').collect();
+        let Some(at) = parts.iter().position(|p| p.starts_with('@')) else {
+            return false;
+        };
+        let owner = routes_dir.join(parts[..at].join("/"));
+        !crate::routes::is_file_route_stem(&stem)
+            && crate::routes::intercept_target(&parts[..at], &parts[at + 1..]).is_some()
+            && layouts.iter().any(|l| l.parent() == Some(owner.as_path()))
+    })
 }
 
 /// `export const streaming = true` or `"early"` (anything else renders the whole page first).
@@ -404,5 +479,78 @@ mod tests {
         got.sort();
         assert_eq!(got, ["_layout.tsx", "blog/_layout.tsx"]);
         assert_eq!(layouts_for(r, "about.tsx").len(), 1);
+    }
+
+    #[test]
+    fn finds_slot_files_of_every_dir_above() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        for f in [
+            "@modal/default.tsx",
+            "@modal/photo/[id].tsx",
+            "@modal/_layout.tsx",
+            "@modal/notes.md",
+            "blog/@side/index.tsx",
+            "blog/post.tsx",
+            "other/@x/default.tsx",
+        ] {
+            let p = r.join(f);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, "").unwrap();
+        }
+        let rel = |v: Vec<PathBuf>| -> Vec<String> {
+            v.into_iter()
+                .map(|p| {
+                    p.strip_prefix(r)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                })
+                .collect()
+        };
+        assert_eq!(
+            rel(slot_files_for(r, "blog/post.tsx")),
+            [
+                "@modal/default.tsx",
+                "@modal/photo/[id].tsx",
+                "blog/@side/index.tsx"
+            ]
+        );
+        assert_eq!(
+            rel(slot_files_for(r, "about.tsx")),
+            ["@modal/default.tsx", "@modal/photo/[id].tsx"]
+        );
+    }
+
+    #[test]
+    fn an_intercepting_slot_needs_the_runtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        for f in [
+            "_layout.tsx",
+            "index.tsx",
+            "@modal/(.)photo/[id].tsx",
+            "shop/item.tsx",
+            "shop/@cart/(..)(..)too-far.tsx",
+            "blog/post.tsx",
+            "blog/@side/(.)x.tsx",
+        ] {
+            let p = r.join(f);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, "").unwrap();
+        }
+        let needs = |rel: &str| renders_intercepting_slot(r, rel, &slot_files_for(r, rel));
+        assert!(needs("index.tsx"), "the root layout owns @modal");
+        assert!(needs("shop/item.tsx"), "@modal is above it too");
+        fs::remove_file(r.join("_layout.tsx")).unwrap();
+        assert!(
+            !needs("index.tsx"),
+            "no layout owns @modal: it never renders"
+        );
+        assert!(
+            !needs("shop/item.tsx"),
+            "an intercept without a target is not served"
+        );
+        assert!(!needs("blog/post.tsx"), "blog/ has no _layout to own @side");
     }
 }

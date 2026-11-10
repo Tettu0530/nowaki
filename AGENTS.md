@@ -25,6 +25,8 @@ packages/nowaki-runtime/   JS the framework runs: server/ (SSR sidecar, handler,
 packages/create-nowaki, create-nowaki-app   scaffolders (npm create nowaki).
 packages/nowaki-cli   the `nowaki` npm wrapper (prebuilt binary shim).
 examples/hello/       kitchen-sink app used by CLI tests + e2e.
+examples/gallery/     the v0.18 exit-criteria app (basePath, i18n, modal routes, sessions, env.ts);
+                      scripts/gallery-e2e.mjs + gallery-browser-test.mjs.
 benchmarks/           bench.mjs, head-to-head.mjs (Next/Astro), check-regression.mjs,
                       ci-perf.mjs + ci-perf-app/ (CI perf gate: head vs base vs last release,
                       all on the fixed ci-perf-app).
@@ -223,7 +225,9 @@ code locations and CI coverage.
   generated `.nowaki/session-secret`). Tests: `scripts/session-test.mjs`.
 - **SEO** — `packages/nowaki-runtime/server/seo.mjs` (site URL, meta tags, sitemap, robots);
   `handler.mjs` `withSeo` (layout + route meta) and the generated `/sitemap.xml` / `/robots.txt`;
-  page URLs from `server/isr-urls.mjs` `pageUrls`. The site comes from `crates/nowaki/src/site.rs`
+  page URLs from `server/isr-urls.mjs` `pageUrls`, shaped by `pagePath` per `trailingSlash`
+  (`env.trailingSlash`; the static output files from `prerender.rs` `out_file_for` match it).
+  The site comes from `crates/nowaki/src/site.rs`
   (`dist/server/site.json`, via `server/site-config.mjs`), `NOWAKI_SITE` winning. Unit checks:
   `scripts/seo-unit-test.mjs`.
 - **Routing config (`basePath`, `trailingSlash`, `redirects`, `rewrites`, `headers`)** —
@@ -245,6 +249,66 @@ code locations and CI coverage.
   the worker `fetch` from `edge-build.mjs`); Vercel platform routes from `server/vercel-routes.mjs`,
   static `_redirects` / `_headers` from `prerender.rs`. Without a routing config each front does
   one null check. Tests: `scripts/rules-front-test.mjs`, `scripts/rules-e2e.mjs` (every front).
+- **`basePath`** — build: `NowakiCore::set_base_path` (asset URLs via `asset_base()`, the server
+  function proxy path, the `import.meta.env.BASE_URL` define, plus `__NOWAKI_BASE_URL__` for the
+  classic-script `client/live.js`), set by `site::configure`; fonts and content images read
+  `site::asset_base()`. Runtime: `server/base-path.mjs` (`globalThis.__nowakiBase`, `withBase`)
+  set by `app.mjs` / `web.mjs` / dev `sidecar.mjs`, used by `<Link>`, `ctx.redirect`, `seo.mjs`,
+  the session cookie Path; asset hrefs from `assetBase` in `app.mjs` / `web.mjs` / `document.mjs`
+  and `Manifest.asset_base` in `start.rs`. Fronts: `<base>/_nowaki/*` and `<base>/__nowaki/*`
+  skip the rules (`front.rs` `framework_path`, `front.mjs` `frontStep` `internal`), and
+  `front.rs` `base_layer` wraps the router in start / dev so `<base>/__nowaki/*` reaches the
+  root handlers. Client: every base-dependent line compares `BASE_URL` with `"/"`, so it folds
+  away without a base (keep it that way: no-base output must stay byte-identical). Adapters:
+  `edge-build.mjs` / `vercel-build.mjs` place static files under the base. Tests:
+  `crates/nowaki-core/tests/base_path.rs`, `scripts/rules-e2e.mjs` (config B), `seo-unit-test`,
+  `session-test`, `router-browser-test.mjs` with `BASE=http://host:port/app`.
+- **i18n (`i18n` in nowaki.config)** — locale prefixes, `localePath` and the sitemap's alternate
+  groups in `server/i18n.mjs` (runtime-neutral; `navigation.js` uses it in the browser too). The
+  locale comes off the route path in `handler.mjs` `localizedRequest` (one `env.i18n` check per
+  request when off), which runs the request inside `server/i18n-context.mjs` (an
+  AsyncLocalStorage published on `globalThis[Symbol.for("nowaki.locale")]`, so `getLocale()` /
+  `getCollection` never import `node:async_hooks`) and renders through `localizedEnv` (`<html
+  lang>`, `data-nowaki-i18n`, hreflang from `seo.mjs` `hreflangTags`). `env.i18n` is set by
+  `app.mjs`, `web.mjs` (`routing`, passed by `edge-build.mjs`) and dev `sidecar.mjs`
+  (`.nowaki/routing.json`). Content locales: `content.rs` `split_locale` (locales from the routing
+  config). Per-locale URLs: `isr-urls.mjs` `localeUrls`, `static-paths.mjs` `localePages`,
+  `prerender.rs` `locale_urls` / `locale_404s` / `locale_redirects`; `locale_url` and
+  `localePathFor` share `crates/nowaki/tests/fixtures/i18n-cases.json`. Tests:
+  `scripts/i18n-test.mjs`, `scripts/i18n-e2e.mjs` (start, dev, node, cloudflare, static; its
+  "combo" app composes i18n with basePath, trailingSlash "never" and a parallel-route slot).
+  Locale detection (`i18n.detect`, `/` only): `Rules::negotiate` / `negotiateLocale` in the
+  shared rules engines (the rules fixture's `negotiate` cases), run before the ISR lookup by
+  `front.rs` `headers_layer` (installed only when `has_response_layer`) and `front.mjs`
+  `frontLocale` (`app.mjs` `handle`, the worker `fetch`); `Vary: Accept-Language, Cookie` on every
+  root response. The `nowaki_locale` cookie comes from `navigation.js` `setLocale`, also called by
+  `<Link locale>`'s click handler (inside islands; nothing in `client/islands.js`, so apps without
+  i18n ship no extra bytes); static output only warns
+  (`prerender.rs` `static_host_rules`).
+- **Parallel routes (`routes/…/@name/`)** — JS: `server/router.mjs` `scanRoutes` collects
+  `slots: [{ ownerDir, name, routes, default, intercepts }]` (slot files are never in `routes`;
+  intercepting `(.)x` files go to `slot.intercepts`; outside a slot, `table.intercepts`, not served),
+  `matchSlot`; `handler.mjs` `resolveSlots` (owners cached per table + file in `slotOwners`, one
+  length check without slots), `wrapLayouts` / `renderSlots` pass `slots` to the owner layout;
+  `withRouteCss` / `withScripts` take the rendered slot files. Rust: `routes.rs` `is_slot_rel`,
+  `is_intercept_segment`, `slot_route_patterns` (parity with `scripts/route-enumeration-parity.mjs`
+  in `crates/nowaki/tests/route_js_parity.rs`); `budget.rs` `slot_files_for`. The worker routeTable
+  carries `slots` (`edge-build.mjs`). Tests: `scripts/router-test.mjs`, `scripts/handler-test.mjs`,
+  `examples/hello/routes/photos/`.
+- **Intercepting routes (`@slot/(.)x`)** — the URL a file takes over: `router.mjs`
+  `interceptTarget` / Rust `routes.rs` `intercept_target`, both run on
+  `crates/nowaki-core/tests/fixtures/intercept-cases.json` (`slot_route_patterns` lists them for
+  the parity test). Server (`handler.mjs`): `interceptAttrs` (a slot with intercepts always renders
+  its `<nowaki-slot>`, with `data-nowaki-slot` = its id and `data-nowaki-intercepts` = the
+  patterns as browser paths, base + locale prefix in front), `renderIntercept` (GET with
+  `x-nowaki-intercept: <slot id>` → the fragment: `<template data-nowaki-head>` + the file,
+  `private, no-store`, `x-nowaki-slot`), `varyIntercept` (`Vary: X-Nowaki-Intercept` on the full
+  page); all behind `table.slots?.length` and the per-table `interceptIndex`. `start.rs`
+  `isr_eligible` keeps those requests out of the ISR cache; `forward.rs` lets the header through.
+  Client: `client/router.js` `interceptFor` / `apply` / `saveSlots` / `restoreSlots`,
+  `router-core.js` `matchPattern`. Group boundaries carry `routes` (`groupRoutes`) for the
+  client's `matchBoundary`. Tests: `scripts/router-test.mjs`, `scripts/router-cache-test.mjs`,
+  `scripts/slot-browser-test.mjs` (Chrome: start, dev, `NOWAKI_CSP=enforce`, basePath + locale).
 - **Page scripts (`export const scripts`)** — read from the AST in
   `crates/nowaki-core/src/page_scripts.rs`, emitted as client entries by
   `build.rs` `build_route_scripts` (manifest `routeScripts` per module and

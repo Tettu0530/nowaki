@@ -23,13 +23,19 @@ await rm(outputDir, { recursive: true, force: true });
 await mkdir(funcDir, { recursive: true });
 await mkdir(staticDir, { recursive: true });
 
-// dist/client/* → static/_nowaki/* (served by Vercel)
-await cp(clientDir, path.join(staticDir, "_nowaki"), { recursive: true });
-// dist/public/* → static/* (public/ files at their own path; the filesystem handler serves them
-// ahead of the function, so they win over routes at the same path)
+// nowaki.config routing (dist/server/routing.json, only when there is one).
+const routing = await readFile(path.join(serverDir, "routing.json"), "utf8").then(JSON.parse, () => null);
+// basePath: static files go under it, where the pages reference them.
+const basePath = routing?.basePath ?? "";
+const baseDir = path.join(staticDir, ...basePath.split("/").filter(Boolean));
+
+// dist/client/* → static/<basePath>/_nowaki/* (served by Vercel)
+await cp(clientDir, path.join(baseDir, "_nowaki"), { recursive: true });
+// dist/public/* → static/<basePath>/* (public/ files at their own path; the filesystem handler
+// serves them ahead of the function, so they win over routes at the same path)
 const publicIndex = await indexPublic(path.join(clientDir, "..", "public"));
 for (const [url, { file }] of publicIndex) {
-  const to = path.join(staticDir, ...url.split("/").filter(Boolean));
+  const to = path.join(baseDir, ...url.split("/").filter(Boolean));
   await mkdir(path.dirname(to), { recursive: true });
   await cp(file, to);
 }
@@ -74,10 +80,7 @@ await writeFile(
 
 // nowaki.config routing: redirects and headers as platform routes; the function (app.mjs) runs
 // the same rules for everything (rewrites, basePath, trailingSlash, redirects left to it).
-const rules = await readFile(path.join(serverDir, "routing.json"), "utf8").then(
-  (t) => compileRules(JSON.parse(t)),
-  () => null,
-);
+const rules = routing ? compileRules(routing) : null;
 // A rewrite to a public/ file is answered by the function, which has no public/ of its own: copy
 // those files into it (its default public dir, next to client/).
 for (const rule of rules?.rewrites.rules ?? []) {
@@ -107,7 +110,7 @@ const config = {
     {
       // Static files skip the function, so they get the default security headers here; pages get
       // them from app.mjs inside the function.
-      src: "/_nowaki/(.*)",
+      src: `^${escapeRe(basePath)}/_nowaki/(.*)`,
       headers: {
         "cache-control": "public, max-age=31536000, immutable",
         ...Object.fromEntries(missingSecurityHeaders(() => false)),
@@ -128,8 +131,7 @@ await writeFile(path.join(outputDir, "config.json"), JSON.stringify(config, null
 /// Routes adding the security headers to public/ files, matched by exact path (100 per route to
 /// keep each pattern short).
 function publicRoutes() {
-  const esc = (u) => u.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const paths = [...publicIndex.keys()].map((u) => esc(encodeURI(u)));
+  const paths = [...publicIndex.keys()].map((u) => escapeRe(encodeURI(basePath + u)));
   const out = [];
   for (let i = 0; i < paths.length; i += 100) {
     out.push({
@@ -139,6 +141,10 @@ function publicRoutes() {
     });
   }
   return out;
+}
+
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 console.log(`[nowaki] vercel adapter: .vercel/output ready (static + index.func) → ${outputDir}`);
