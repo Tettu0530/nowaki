@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use comrak::nodes::NodeValue;
 use comrak::{format_html_with_plugins, parse_document, Arena, Options};
+use nowaki_core::remote_image::RemoteImages;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -27,7 +28,12 @@ pub struct Heading {
 #[derive(Debug, Serialize)]
 pub struct Entry {
     /// File path under the collection, without extension (`posts/hello` for `posts/hello.md`).
+    /// With i18n, without the locale directory (`hello` for `ja/hello.md`).
     pub slug: String,
+    /// With i18n: the locale of the collection's first-level directory the entry is in
+    /// (`content/blog/ja/hello.md` → `ja`); none for an entry outside a locale directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
     /// The source file, relative to the app root (POSIX separators), for error messages.
     pub file: String,
     /// Frontmatter (Markdown) or the file's contents (data entries), not yet validated.
@@ -51,7 +57,10 @@ pub struct Entry {
 /// One Markdown image to turn into a `<picture>` (see `collect`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageRef {
+    /// The image file (for a remote image, its cached download, set by `fill_images`).
     pub abs: PathBuf,
+    /// A remote image `images.remotePatterns` allows: its URL.
+    pub remote: Option<String>,
     pub alt: String,
     pub title: String,
 }
@@ -69,8 +78,6 @@ pub fn enabled(root: &Path) -> bool {
         .any(|f| dir.join(f).is_file())
 }
 
-/// Reads every collection under `content/`. Each sub-directory is a collection; files directly in
-/// `content/` (the config) are not entries.
 /// Where a Markdown entry's local images (`![alt](./hero.jpg)`) go: `nowaki dev` points them at
 /// `/__nowaki/image` (encoded on request); a build writes the variants into `dist/client`.
 #[derive(Clone)]
@@ -79,7 +86,29 @@ pub enum Images {
     Build(PathBuf),
 }
 
-pub fn collect(root: &Path, images: &Images) -> Result<BTreeMap<String, Vec<Entry>>> {
+/// Reads every collection under `content/`. Each sub-directory is a collection; files directly in
+/// `content/` (the config) are not entries. With i18n `locales`, a collection's first-level directory named after one is the entries'
+/// `locale`, and not part of their slugs.
+pub fn collect(
+    root: &Path,
+    images: &Images,
+    locales: &[String],
+) -> Result<BTreeMap<String, Vec<Entry>>> {
+    collect_with(
+        root,
+        images,
+        crate::remote_images::current().as_deref(),
+        locales,
+    )
+}
+
+/// [`collect`] with the remote image settings (None: remote images stay plain `<img>`).
+fn collect_with(
+    root: &Path,
+    images: &Images,
+    remote: Option<&RemoteImages>,
+    locales: &[String],
+) -> Result<BTreeMap<String, Vec<Entry>>> {
     let dir = root.join("content");
     let mut out = BTreeMap::new();
     let Ok(read) = std::fs::read_dir(&dir) else {
@@ -109,16 +138,16 @@ pub fn collect(root: &Path, images: &Images) -> Result<BTreeMap<String, Vec<Entr
         use rayon::prelude::*;
         let read: Vec<Result<Option<Entry>>> = files
             .par_iter()
-            .map(|path| read_entry(root, &coll, path))
+            .map(|path| read_entry(root, &coll, path, remote, locales))
             .collect();
         for e in read {
             if let Some(e) = e? {
                 entries.push(e);
             }
         }
-        entries.sort_by(|a, b| a.slug.cmp(&b.slug));
+        entries.sort_by(|a, b| (&a.slug, &a.locale).cmp(&(&b.slug, &b.locale)));
         for w in entries.windows(2) {
-            if w[0].slug == w[1].slug {
+            if w[0].slug == w[1].slug && w[0].locale == w[1].locale {
                 return Err(anyhow!(
                     "content/{name}: two entries have the slug \"{}\" ({} and {})",
                     w[0].slug,
@@ -129,13 +158,13 @@ pub fn collect(root: &Path, images: &Images) -> Result<BTreeMap<String, Vec<Entr
         }
         out.insert(name, entries);
     }
-    fill_images(root, &mut out, images)?;
+    fill_images(root, &mut out, images, remote)?;
     Ok(out)
 }
 
 /// Writes `<out_dir>/index.json`. Returns the number of entries.
-pub fn write(root: &Path, out_dir: &Path, images: &Images) -> Result<usize> {
-    let all = collect(root, images)?;
+pub fn write(root: &Path, out_dir: &Path, images: &Images, locales: &[String]) -> Result<usize> {
+    let all = collect(root, images, locales)?;
     let n = all.values().map(Vec::len).sum();
     std::fs::create_dir_all(out_dir)?;
     std::fs::write(out_dir.join("index.json"), serde_json::to_string(&all)?)?;
@@ -145,7 +174,8 @@ pub fn write(root: &Path, out_dir: &Path, images: &Images) -> Result<usize> {
 /// `nowaki build` / `prerender`: writes `dist/server/content/index.json` (content/config is
 /// compiled with the other server modules) and validates every entry in Node. Fails the build on
 /// an invalid entry, listing each one.
-pub fn build(root: &Path, dist: &Path) -> Result<()> {
+/// `config` is nowaki.config as `site::config` read it (its i18n locales split the entries).
+pub fn build(root: &Path, dist: &Path, config: &Value) -> Result<()> {
     if !enabled(root) {
         return Ok(());
     }
@@ -153,6 +183,7 @@ pub fn build(root: &Path, dist: &Path) -> Result<()> {
         root,
         &dist.join("server/content"),
         &Images::Build(dist.join("client")),
+        &locales(config.get("routing")),
     )?;
     let script = root.join("node_modules/@nowaki-dev/runtime/server/content-check.mjs");
     if !script.exists() {
@@ -172,6 +203,30 @@ pub fn build(root: &Path, dist: &Path) -> Result<()> {
     }
     println!("[nowaki] content: {n} entries checked");
     Ok(())
+}
+
+/// The i18n locales of a routing config (`dist/server/routing.json`, `.nowaki/routing.json`, or
+/// `routing` from `site::config`); empty without i18n.
+pub fn locales(routing: Option<&Value>) -> Vec<String> {
+    routing
+        .and_then(|r| r.pointer("/i18n/locales"))
+        .and_then(Value::as_array)
+        .map(|l| {
+            l.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A slug's locale directory, when it starts with one of `locales` (and has more after it).
+fn split_locale(slug: String, locales: &[String]) -> (Option<String>, String) {
+    match slug.split_once('/') {
+        Some((first, rest)) if !rest.is_empty() && locales.iter().any(|l| l == first) => {
+            (Some(first.to_string()), rest.to_string())
+        }
+        _ => (None, slug),
+    }
 }
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -203,15 +258,24 @@ fn rel(root: &Path, p: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
+fn read_entry(
+    root: &Path,
+    coll: &Path,
+    path: &Path,
+    remote: Option<&RemoteImages>,
+    locales: &[String],
+) -> Result<Option<Entry>> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     let file = rel(root, path);
-    let slug = {
-        let r = rel(coll, path);
-        r.rsplit_once('.').map(|(s, _)| s.to_string()).unwrap_or(r)
-    };
+    let (locale, slug) = split_locale(
+        {
+            let r = rel(coll, path);
+            r.rsplit_once('.').map(|(s, _)| s.to_string()).unwrap_or(r)
+        },
+        locales,
+    );
     let text = || std::fs::read_to_string(path).with_context(|| format!("failed to read {file}"));
-    Ok(Some(match ext {
+    let mut entry = match ext {
         "md" | "markdown" => {
             let src = text()?;
             let (front, body) = split_frontmatter(&src);
@@ -221,11 +285,16 @@ fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
             // is read (building inside this parallel read could wait on itself, see collect).
             let mut image_refs = Vec::new();
             let mut image = |url: &str, alt: &str, title: &str| -> Result<Option<String>> {
-                let Some(abs) = local_image_path(dir, url)? else {
-                    return Ok(None);
+                let (abs, remote_url) = match remote_image_url(&file, url, remote) {
+                    Some(u) => (PathBuf::new(), Some(u)),
+                    None => match local_image_path(dir, url)? {
+                        Some(abs) => (abs, None),
+                        None => return Ok(None),
+                    },
                 };
                 image_refs.push(ImageRef {
                     abs,
+                    remote: remote_url,
                     alt: alt.to_string(),
                     title: title.to_string(),
                 });
@@ -234,6 +303,7 @@ fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
             let (html, headings) =
                 render_markdown_with(body, &mut image).map_err(|e| anyhow!("{file}: {e:#}"))?;
             Entry {
+                locale: None,
                 slug,
                 file,
                 data,
@@ -259,6 +329,7 @@ fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
                 .collect();
             let module = file.rsplit_once('.').map(|(stem, _)| format!("{stem}.js"));
             Entry {
+                locale: None,
                 slug,
                 file,
                 data,
@@ -277,6 +348,7 @@ fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
             let data = frontmatter_data(&file, front)?;
             let module = file.rsplit_once('.').map(|(stem, _)| format!("{stem}.js"));
             Entry {
+                locale: None,
                 slug,
                 file,
                 data,
@@ -288,6 +360,7 @@ fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
             }
         }
         "json" => Entry {
+            locale: None,
             data: serde_json::from_str(&text()?).map_err(|e| anyhow!("{file}: {e}"))?,
             slug,
             file,
@@ -298,6 +371,7 @@ fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
             image_refs: Vec::new(),
         },
         "yaml" | "yml" => Entry {
+            locale: None,
             data: yaml_to_json(&text()?).map_err(|e| anyhow!("{file}: {e}"))?,
             slug,
             file,
@@ -308,7 +382,9 @@ fn read_entry(root: &Path, coll: &Path, path: &Path) -> Result<Option<Entry>> {
             image_refs: Vec::new(),
         },
         _ => return Ok(None),
-    }))
+    };
+    entry.locale = locale;
+    Ok(Some(entry))
 }
 
 /// A Markdown / MDX entry's frontmatter, by its fence.
@@ -478,6 +554,25 @@ fn local_image_path(dir: &Path, url: &str) -> Result<Option<PathBuf>> {
     Ok(Some(dunce::canonicalize(&abs).unwrap_or(abs)))
 }
 
+/// A remote Markdown image (`![alt](https://…)`) that `images.remotePatterns` allows: its URL,
+/// to go through the image pipeline. Other remote images stay as Markdown wrote them, with a
+/// warning when remote patterns are configured.
+fn remote_image_url(file: &str, url: &str, remote: Option<&RemoteImages>) -> Option<String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return None;
+    }
+    let remote = remote?;
+    if remote.allowed(url) {
+        return Some(url.to_string());
+    }
+    if !remote.patterns().is_empty() {
+        eprintln!(
+            "[nowaki] warning: {file}: remote image {url} doesn't match images.remotePatterns; it stays a plain <img>"
+        );
+    }
+    None
+}
+
 /// The image set for a file: dev URLs, or the variants written into dist/client.
 fn image_set(root: &Path, abs: &Path, images: &Images) -> Result<nowaki_core::image::ImageSet> {
     let q = nowaki_core::image::ImageQuery::default();
@@ -485,7 +580,8 @@ fn image_set(root: &Path, abs: &Path, images: &Images) -> Result<nowaki_core::im
         Images::Dev => nowaki_core::image::dev_set(root, abs, &q),
         Images::Build(client_dir) => {
             nowaki_core::image::build_set(root, abs, &q, |stem, w, ext, bytes| {
-                nowaki_core::image::write_variant(client_dir, stem, w, ext, bytes)
+                let base = crate::site::asset_base();
+                nowaki_core::image::write_variant_at(client_dir, base, stem, w, ext, bytes)
             })
         }
     }
@@ -495,8 +591,36 @@ fn image_set(root: &Path, abs: &Path, images: &Images) -> Result<nowaki_core::im
 /// entry's placeholders for its `<picture>`. This runs after the entries are read, outside that
 /// parallel loop: building an image (its own parallel variants) while other entries wait on the
 /// same file deadlocked rayon, whose waiting worker picks up one of those entries.
-fn fill_images(root: &Path, all: &mut BTreeMap<String, Vec<Entry>>, images: &Images) -> Result<()> {
+fn fill_images(
+    root: &Path,
+    all: &mut BTreeMap<String, Vec<Entry>>,
+    images: &Images,
+    remote: Option<&RemoteImages>,
+) -> Result<()> {
     use rayon::prelude::*;
+    // Remote images first, downloading every miss in one go.
+    let mut urls: Vec<String> = all
+        .values()
+        .flatten()
+        .flat_map(|e| e.image_refs.iter().filter_map(|r| r.remote.clone()))
+        .collect();
+    urls.sort();
+    urls.dedup();
+    if let (Some(remote), false) = (remote, urls.is_empty()) {
+        let mut files = std::collections::HashMap::new();
+        for (url, file) in urls.iter().zip(remote.ensure(&urls)) {
+            files.insert(url.clone(), file?);
+        }
+        for r in all
+            .values_mut()
+            .flatten()
+            .flat_map(|e| e.image_refs.iter_mut())
+        {
+            if let Some(url) = &r.remote {
+                r.abs = files[url].clone();
+            }
+        }
+    }
     let mut files: Vec<PathBuf> = all
         .values()
         .flatten()
@@ -627,6 +751,7 @@ pub fn render_markdown_with(md: &str, image: &mut ImageHtml) -> Result<(String, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn splits_yaml_frontmatter() {
@@ -735,7 +860,7 @@ mod tests {
             "+++\r\ntitle = \"x\"\r\ndate = 2026-13-45\r\n+++\r\nbody\r\n",
         )
         .unwrap();
-        let err = collect(r, &Images::Dev).unwrap_err().to_string();
+        let err = collect(r, &Images::Dev, &[]).unwrap_err().to_string();
         assert!(err.contains("content/blog/x.md:3: frontmatter: "), "{err}");
     }
 
@@ -754,7 +879,7 @@ mod tests {
             "+++\ntitle = \"B\"\n+++\n# B\n",
         )
         .unwrap();
-        let all = collect(r, &Images::Dev).unwrap();
+        let all = collect(r, &Images::Dev, &[]).unwrap();
         let [a, b] = &all["blog"][..] else {
             panic!("{:?}", all["blog"]);
         };
@@ -837,7 +962,7 @@ mod tests {
         )
         .unwrap();
         let client = dir.path().join("dist/client");
-        let all = collect(dir.path(), &Images::Build(client.clone())).unwrap();
+        let all = collect(dir.path(), &Images::Build(client.clone()), &[]).unwrap();
         let html = all["docs"][0].html.clone().unwrap();
         assert!(
             html.contains("<picture><source type=\"image/avif\" srcset=\"/_nowaki/a_b-640."),
@@ -856,7 +981,7 @@ mod tests {
         assert!(std::fs::read_dir(&client).unwrap().count() >= 4);
 
         std::fs::write(dir.path().join("content/docs/b.md"), "![x](./nope.png)\n").unwrap();
-        let err = collect(dir.path(), &Images::Build(client))
+        let err = collect(dir.path(), &Images::Build(client), &[])
             .unwrap_err()
             .to_string();
         assert!(
@@ -881,7 +1006,12 @@ mod tests {
             )
             .unwrap();
         }
-        let all = collect(dir.path(), &Images::Build(dir.path().join("dist/client"))).unwrap();
+        let all = collect(
+            dir.path(),
+            &Images::Build(dir.path().join("dist/client")),
+            &[],
+        )
+        .unwrap();
         assert_eq!(all["docs"].len(), 64);
         assert!(all["docs"]
             .iter()
@@ -928,7 +1058,7 @@ mod tests {
         std::fs::write(r.join("content/blog/notes.txt"), "ignored").unwrap();
         std::fs::write(r.join("content/authors/tettu.json"), "{\"name\":\"Tettu\"}").unwrap();
         assert!(enabled(r));
-        let all = collect(r, &Images::Dev).unwrap();
+        let all = collect(r, &Images::Dev, &[]).unwrap();
         let blog: Vec<_> = all["blog"].iter().map(|e| e.slug.as_str()).collect();
         assert_eq!(blog, ["2026/a", "b"]);
         assert_eq!(all["blog"][0].file, "content/blog/2026/a.md");
@@ -937,7 +1067,7 @@ mod tests {
         assert!(all["authors"][0].html.is_none());
 
         std::fs::write(r.join("content/blog/b.json"), "{}").unwrap();
-        let err = collect(r, &Images::Dev).unwrap_err().to_string();
+        let err = collect(r, &Images::Dev, &[]).unwrap_err().to_string();
         assert!(err.contains("two entries have the slug \"b\""), "{err}");
     }
 
@@ -947,7 +1077,7 @@ mod tests {
         let r = dir.path();
         std::fs::create_dir_all(r.join("content/blog")).unwrap();
         std::fs::write(r.join("content/blog/x.md"), "---\ntitle: [oops\n---\n").unwrap();
-        let err = collect(r, &Images::Dev).unwrap_err().to_string();
+        let err = collect(r, &Images::Dev, &[]).unwrap_err().to_string();
         assert!(err.contains("content/blog/x.md: frontmatter"), "{err}");
     }
 
@@ -984,7 +1114,7 @@ mod tests {
             "+++\r\ntitle = \"B\"\r\n+++\r\n# B\r\n",
         )
         .unwrap();
-        let all = collect(r, &Images::Dev).unwrap();
+        let all = collect(r, &Images::Dev, &[]).unwrap();
         let [a, b] = &all["docs"][..] else {
             panic!("{:?}", all["docs"]);
         };
@@ -997,5 +1127,123 @@ mod tests {
         assert!(a.html.is_none() && a.headings.is_none());
         assert_eq!(b.data, serde_json::json!({ "title": "B" }));
         assert_eq!(b.module.as_deref(), Some("content/docs/b.js"));
+    }
+
+    /// Writes a small PNG for every request, counting fetcher calls.
+    struct FakeFetch(std::sync::atomic::AtomicUsize);
+
+    impl nowaki_core::RemoteFetch for FakeFetch {
+        fn fetch(
+            &self,
+            _: &[nowaki_core::RemotePattern],
+            reqs: &[nowaki_core::remote_image::RemoteRequest],
+        ) -> Vec<Result<()>> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            reqs.iter()
+                .map(|r| {
+                    std::fs::create_dir_all(&r.dir)?;
+                    let file = format!("{}.png", r.stem);
+                    let png = Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("../../examples/hello/photo.png");
+                    std::fs::copy(png, r.dir.join(&file))?;
+                    std::fs::write(
+                        r.dir.join("meta.json"),
+                        serde_json::json!({ "url": r.url, "file": file }).to_string(),
+                    )?;
+                    Ok(())
+                })
+                .collect()
+        }
+    }
+
+    #[test]
+    fn allowed_remote_markdown_images_become_pictures_in_one_fetch() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("content/docs")).unwrap();
+        let md = "![a](https://img.test/p/a.png) ![b](https://img.test/p/b.png)\n\n![other](https://other.test/c.png)\n";
+        std::fs::write(dir.path().join("content/docs/a.md"), md).unwrap();
+        std::fs::write(dir.path().join("content/docs/b.md"), md).unwrap();
+        let fetch = Arc::new(FakeFetch(Default::default()));
+        let patterns = vec![nowaki_core::RemotePattern {
+            protocol: None,
+            hostname: "img.test".into(),
+            port: None,
+            pathname: Some("/p/**".into()),
+        }];
+        let remote = RemoteImages::new(dir.path().to_path_buf(), patterns, Some(fetch.clone()));
+        let client = dir.path().join("dist/client");
+        let all = collect_with(dir.path(), &Images::Build(client), Some(&remote), &[]).unwrap();
+        assert_eq!(fetch.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let html = all["docs"][0].html.clone().unwrap();
+        assert!(html.contains("srcset=\"/_nowaki/a-256."), "{html}");
+        assert!(
+            html.contains("width=\"256\" height=\"256\" alt=\"a\""),
+            "{html}"
+        );
+        assert!(
+            html.contains("<img src=\"https://other.test/c.png\""),
+            "{html}"
+        );
+        // Cached: no fetch the second time.
+        let remote = RemoteImages::new(
+            dir.path().to_path_buf(),
+            remote.patterns().to_vec(),
+            Some(fetch.clone()),
+        );
+        collect_with(dir.path(), &Images::Dev, Some(&remote), &[]).unwrap();
+        assert_eq!(fetch.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_locale_directory_becomes_the_entry_locale() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        std::fs::create_dir_all(r.join("content/blog/ja/2026")).unwrap();
+        std::fs::create_dir_all(r.join("content/blog/en")).unwrap();
+        std::fs::write(r.join("content/blog/en/hello.md"), "# Hello").unwrap();
+        std::fs::write(r.join("content/blog/ja/hello.md"), "# Hi").unwrap();
+        std::fs::write(r.join("content/blog/ja/2026/a.md"), "# A").unwrap();
+        std::fs::write(r.join("content/blog/shared.md"), "# S").unwrap();
+        // Not a configured locale: an ordinary directory.
+        std::fs::create_dir_all(r.join("content/blog/fr")).unwrap();
+        std::fs::write(r.join("content/blog/fr/x.md"), "# X").unwrap();
+        let locales = vec!["en".to_string(), "ja".to_string()];
+        let all = collect(r, &Images::Dev, &locales).unwrap();
+        let got: Vec<_> = all["blog"]
+            .iter()
+            .map(|e| (e.slug.as_str(), e.locale.as_deref()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("2026/a", Some("ja")),
+                ("fr/x", None),
+                ("hello", Some("en")),
+                ("hello", Some("ja")),
+                ("shared", None)
+            ]
+        );
+        let json = serde_json::to_value(&all["blog"][0]).unwrap();
+        assert_eq!(json["locale"], "ja");
+        assert!(serde_json::to_value(&all["blog"][1])
+            .unwrap()
+            .get("locale")
+            .is_none());
+        // Without i18n the directory stays in the slug.
+        let plain = collect(r, &Images::Dev, &[]).unwrap();
+        assert!(plain["blog"].iter().any(|e| e.slug == "ja/hello"));
+        // The same slug twice in one locale is still an error.
+        std::fs::write(r.join("content/blog/ja/hello.json"), "{}").unwrap();
+        let err = collect(r, &Images::Dev, &locales).unwrap_err().to_string();
+        assert!(err.contains("two entries have the slug \"hello\""), "{err}");
+        assert_eq!(
+            locales_of(r#"{"i18n":{"locales":["en","ja"],"defaultLocale":"en"}}"#),
+            ["en", "ja"]
+        );
+        assert!(locales_of("{}").is_empty());
+    }
+
+    fn locales_of(json: &str) -> Vec<String> {
+        locales(Some(&serde_json::from_str(json).unwrap()))
     }
 }

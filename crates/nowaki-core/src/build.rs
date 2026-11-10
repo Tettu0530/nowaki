@@ -338,6 +338,14 @@ pub fn build_server(
     if let Some(env_file) = crate::env::env_file(&core.root) {
         files.push(env_file);
     }
+    // session.ts at the app root: the session options the server loads (dist/server/session.js).
+    if let Some(session_file) = ["session.ts", "session.mts", "session.js", "session.mjs"]
+        .iter()
+        .map(|f| core.root.join(f))
+        .find(|p| p.is_file())
+    {
+        files.push(session_file);
+    }
     // Plus every app module those import from anywhere else in the app (`data/`, `sections/`,
     // `utils/`, …): the conventional folders are entry points, not the whole server graph.
     // One walk over the whole graph: every module is parsed once, however many entries reach it.
@@ -367,6 +375,7 @@ pub fn build_server(
 
     let server_assets = ServerAssets {
         client_dir: dist.join("client"),
+        asset_base: core.asset_base(),
         urls: Mutex::new(assets.clone()),
     };
     // Server modules are independent (no naming dependencies), so transform them in parallel with rayon.
@@ -454,6 +463,8 @@ fn with_js_suffix(rel: &str) -> String {
 /// import, which are emitted to dist/client on first use (rayon threads share this).
 struct ServerAssets {
     client_dir: PathBuf,
+    /// `NowakiCore::asset_base`.
+    asset_base: String,
     urls: Mutex<HashMap<PathBuf, String>>,
 }
 
@@ -473,7 +484,14 @@ impl ServerAssets {
             .and_then(Path::parent)
             .unwrap_or(Path::new("."));
         let set = crate::image::build_set(root, &file, q, |stem, w, ext, bytes| {
-            crate::image::write_variant(&self.client_dir, &sanitize_name(stem), w, ext, bytes)
+            crate::image::write_variant_at(
+                &self.client_dir,
+                &self.asset_base,
+                &sanitize_name(stem),
+                w,
+                ext,
+                bytes,
+            )
         })?;
         let code = set.module();
         self.urls
@@ -489,7 +507,7 @@ impl ServerAssets {
             return Ok(url.clone());
         }
         let (name, _, _) = write_asset(abs, &self.client_dir)?;
-        let url = format!("/_nowaki/{name}");
+        let url = format!("{}{name}", self.asset_base);
         urls.insert(abs.to_path_buf(), url.clone());
         Ok(url)
     }
@@ -577,9 +595,17 @@ fn transform_for_server(
             continue;
         }
         // Assets: the hashed URL the client build emitted, or emit it now (server-only imports).
-        if !spec.starts_with('/') && !spec.contains("://") && !spec.starts_with("data:") {
-            if let Ok(resolution) = core.resolver.resolve(dir, spec) {
-                let full = resolution.full_path();
+        // A remote `?image` resolves to its cached download.
+        let remote = core
+            .resolve_remote_image(spec)
+            .transpose()
+            .with_context(|| path.display().to_string())?;
+        if remote.is_some()
+            || (!spec.starts_with('/') && !spec.contains("://") && !spec.starts_with("data:"))
+        {
+            if let Some(full) =
+                remote.or_else(|| core.resolver.resolve(dir, spec).ok().map(|r| r.full_path()))
+            {
                 // `./hero.jpg?image`: the image set module (see image.rs).
                 let (file, query) = crate::image::split_query(&full);
                 if let Some(q) = query.as_deref().and_then(crate::image::image_query) {
@@ -740,7 +766,14 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
     if let Some(q) = query.as_deref().and_then(crate::image::image_query) {
         let set = crate::image::build_set(&core.root, &file, &q, |stem, w, ext, bytes| {
             ctx.asset_out += bytes.len() as u64;
-            crate::image::write_variant(out_dir, &sanitize_name(stem), w, ext, bytes)
+            crate::image::write_variant_at(
+                out_dir,
+                &core.asset_base(),
+                &sanitize_name(stem),
+                w,
+                ext,
+                bytes,
+            )
         })?;
         ctx.asset_in += fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
         let code = set.module();
@@ -764,7 +797,7 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
         ctx.asset_out += size_out;
         let stem = output_stem(abs, "asset");
         let out_ext = asset_name.rsplit('.').next().unwrap_or("bin");
-        let url = format!("/_nowaki/{asset_name}");
+        let url = format!("{}{asset_name}", core.asset_base());
         ctx.assets.insert(abs.to_path_buf(), url.clone());
         let code = format!("export default \"{url}\";\n");
         let mod_hash = xxh3_64(code.as_bytes()) as u32;
@@ -811,7 +844,7 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
         ctx.visiting.remove(abs);
         let key = crate::server_fn::module_key(&core.root, abs);
         let exports = crate::server_fn::collect_exports(abs, &source)?;
-        let code = crate::server_fn::client_proxy(&key, &exports);
+        let code = crate::server_fn::client_proxy_at(&key, &exports, &core.server_fn_path());
         let stem = output_stem(abs, "module");
         let hash = xxh3_64(code.as_bytes()) as u32;
         let filename = format!("{stem}.{hash:08x}.js");
@@ -1072,10 +1105,17 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
             lit.raw = None;
         }
         let spec = lit.value.as_str();
-        if spec.starts_with('/') || spec.contains("://") || spec.starts_with("data:") {
+        let remote = core
+            .resolve_remote_image(spec)
+            .transpose()
+            .with_context(|| path.display().to_string())?;
+        if remote.is_none()
+            && (spec.starts_with('/') || spec.contains("://") || spec.starts_with("data:"))
+        {
             continue;
         }
-        let abs_path = crate::resolve::client_runtime_alias(&core.root, spec)
+        let abs_path = remote
+            .or_else(|| crate::resolve::client_runtime_alias(&core.root, spec))
             .or_else(|| core.resolve_spec(dir, spec))
             .ok_or_else(|| anyhow!("failed to resolve {spec} (from {})", dir.display()))?;
         let placeholder = format!("__NOWAKI_DEP_{}__", deps.len());

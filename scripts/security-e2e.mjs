@@ -2,7 +2,8 @@
 //   node scripts/security-e2e.mjs dev  <devBase>  <appRoot>
 //   node scripts/security-e2e.mjs prod <prodBase>
 // Covers (dev + prod unless noted): RPC CSRF, CSWSH, forged live state, the live-event POST gate, server functions,
-//         cross-site writes, default headers. Dev only: arbitrary file read (@fs/ssr-module/.env/
+//         cross-site writes, sessions (cross-site read-only, forged cookies), default headers, config redirects (open redirects, CRLF, the internal
+//         x-nowaki-route-path header). Dev only: arbitrary file read (@fs/ssr-module/.env/
 //         virtual ..), the HMR socket. Prod only: generic 500s, ISR isolation and query-flood
 //         collapsing, /_nowaki/* basename static serving (path traversal).
 
@@ -119,6 +120,37 @@ async function crossSiteWritesRejected(b) {
     (await send("/api/hello", { origin: "http://evil.test" })) === 200);
 }
 
+// Sessions (routes/api/session.ts): a cross-site POST carrying a valid session cookie sees an empty,
+// read-only session and can't write; a forged or tampered cookie reads as empty.
+async function sessionGuards(b) {
+  const post = (body, h = {}) =>
+    fetch(`${b}/api/session`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: b, ...h },
+      body,
+    });
+  const login = await post("op=login&user=alice");
+  const setCookie = login.headers.get("set-cookie") ?? "";
+  const cookie = setCookie.split(";")[0];
+  check("session: same-site login sets an HttpOnly SameSite=Lax cookie",
+    /^hello_session=v1\./.test(cookie) && /HttpOnly/.test(setCookie) && /SameSite=Lax/.test(setCookie));
+  const me = await (await fetch(`${b}/api/session`, { headers: { cookie } })).json();
+  check("session: the cookie reads back", me.user === "alice");
+  const evil = await post("op=login&user=mallory", { cookie, origin: "http://evil.test" });
+  const ej = await evil.json();
+  check("session: cross-site POST sees an empty session", ej.user === null && ej.readOnly === true);
+  check("session: cross-site POST can't write (read-only, no cookie)",
+    /read-only on a cross-site request/.test(String(ej.wrote)) && !evil.headers.get("set-cookie"));
+  const still = await (await fetch(`${b}/api/session`, { headers: { cookie } })).json();
+  check("session: the victim's session is unchanged", still.user === "alice");
+  const value = cookie.slice(cookie.indexOf("=") + 1);
+  const flipped = value.slice(0, 12) + (value[12] === "A" ? "B" : "A") + value.slice(13);
+  const tampered = await (await fetch(`${b}/api/session`, { headers: { cookie: `hello_session=${flipped}` } })).json();
+  check("session: a tampered cookie reads as empty", tampered.user === null);
+  const forged = await (await fetch(`${b}/api/session`, { headers: { cookie: "hello_session=v1.eyJkIjp7InVzZXIiOiJhZG1pbiJ9fQ" } })).json();
+  check("session: a forged cookie reads as empty", forged.user === null);
+}
+
 // Default security headers on pages, 404s, and static assets (both modes) and on ISR hits (prod).
 async function securityHeadersPresent(b, paths) {
   for (const p of paths) {
@@ -202,6 +234,56 @@ async function liveEventGate(b) {
   check(`internal /__nowaki/live-render not reachable (${internal.status})`, internal.status === 404);
 }
 
+// Raw request (path sent verbatim): { status, headers, body }.
+function raw(b, path, { method = "GET", headers = {} } = {}) {
+  const u = new URL(b);
+  return new Promise((resolve) => {
+    const req = http.request({ host: u.hostname, port: u.port, path, method, headers }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => (body += c));
+      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body }));
+    });
+    req.on("error", () => resolve({ status: 0, headers: {}, body: "" }));
+    req.end();
+  });
+}
+
+// nowaki.config redirects in examples/hello (`/old-docs/[...rest]` → `/[...rest]`, `/go/[to]` →
+// `/[to]`, rewrite `/p/[slug]` → `/blog/[slug]`): a capture can't make the Location leave the site
+// or add a header, redirects carry the security headers, and a client can't pick the route
+// through the internal x-nowaki-route-path header.
+async function configRoutingSafe(b) {
+  const offSite = (loc) => loc === undefined || /^\/\/|^\/\\|^[a-z][a-z0-9+.-]*:/i.test(loc);
+  for (const [p, want] of [
+    ["/old-docs//evil.com", "/evil.com"],
+    ["/old-docs/%2F%2Fevil.com", "/%2F%2Fevil.com"],
+    ["/old-docs/%5Cevil.com", "/%5Cevil.com"],
+    ["/go/%2F%2Fevil.com", "/%2F%2Fevil.com"],
+    ["/go/%5C%5Cevil.com", "/%5C%5Cevil.com"],
+    ["/go/https:%2F%2Fevil.com", "/https%3A%2F%2Fevil.com"],
+    ["/go/..", "/%2E%2E"],
+  ]) {
+    const r = await raw(b, p);
+    check(`redirect ${p} stays on the site (${r.status} → ${r.headers.location})`, r.status >= 300 && r.status < 400 && r.headers.location === want && !offSite(r.headers.location));
+  }
+  // A raw backslash may be refused outright; if it's redirected, the target must stay on the site.
+  const bs = await raw(b, "/old-docs/\\evil.com");
+  check(`redirect /old-docs/\\evil.com stays on the site (${bs.status} → ${bs.headers.location})`, bs.status >= 400 || !offSite(bs.headers.location));
+  const crlf = await raw(b, "/go/a%0D%0ASet-Cookie:%20pwned=1");
+  check("encoded CRLF in a capture stays encoded (no injected header)",
+    crlf.status === 307 && crlf.headers.location === "/a%0D%0ASet-Cookie%3A%20pwned%3D1" && !crlf.headers["set-cookie"]);
+  const q = await raw(b, "/old-docs/guide?x=1");
+  check(`redirect keeps the query and carries the security headers (${q.headers.location})`,
+    q.status === 308 && q.headers.location === "/guide?x=1" && q.headers["x-content-type-options"] === "nosniff" && q.headers["x-frame-options"] === "SAMEORIGIN");
+  const rw = await raw(b, "/p/hello");
+  check("rewrite renders the destination route", rw.status === 200 && rw.body.includes("Post: hello"));
+  const forged = await raw(b, "/about", { headers: { "x-nowaki-route-path": "/env" } });
+  check("client x-nowaki-route-path can't pick the route", forged.status === 200 && !forged.body.includes("token length") && forged.body.includes("<h1>About</h1>"));
+  const forged404 = await raw(b, "/nope-404", { headers: { "x-nowaki-route-path": "/about" } });
+  check("client x-nowaki-route-path can't turn a 404 into a page", forged404.status === 404);
+}
+
 if (mode === "dev") {
   const enc = encodeURIComponent;
   // Arbitrary file read surface (canonicalize + allow-root + deny + transformable gates)
@@ -246,7 +328,9 @@ if (mode === "dev") {
   await forwardedHostIgnored(base);
   await serverFnHardening(base, mode);
   await crossSiteWritesRejected(base);
+  await sessionGuards(base);
   await securityHeadersPresent(base, ["/", "/nope"]);
+  await configRoutingSafe(base);
 
   // CSWSH (Origin check on WS upgrade)
   check("CSWSH /__nowaki/live cross-origin upgrade rejected (403)",

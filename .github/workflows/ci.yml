@@ -87,7 +87,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
         with:
           tool: cargo-audit,cargo-deny
       - run: cargo audit
@@ -121,6 +121,8 @@ jobs:
         run: node scripts/router-test.mjs
       - name: Routing rules (redirects / rewrites / headers / basePath; shared fixture with nowaki-core)
         run: node scripts/rules-test.mjs
+      - name: Routing rules at the JS fronts (front.mjs, Vercel routes against the shared fixture)
+        run: node scripts/rules-front-test.mjs
       - name: Client router-cache unit test (matchBoundary + Router Cache TTL/LRU)
         run: node scripts/router-cache-test.mjs
       - name: SSG staticPaths expansion
@@ -141,12 +143,18 @@ jobs:
         run: node scripts/loader-hooks-test.mjs
       - name: Request handler (layouts, routePath, commit hook)
         run: node scripts/handler-test.mjs
+      - name: i18n (locale split and localePath against the shared fixture, hreflang, per-locale content)
+        run: node scripts/i18n-test.mjs
+      - name: Sessions (encryption, tampering, expiry, key rotation, store mode, CSRF read-only)
+        run: node scripts/session-test.mjs
       - name: Live session hub (join/event, queue, timeout, cap, presence)
         run: node scripts/live-hub-test.mjs
       - name: Markdoc plugin (compile, validation errors, escaping, frontmatter)
         run: node --test "packages/nowaki-markdoc/test/*.test.mjs"
       - name: Typed env (env.ts schema, build / start / worker refusal, client import guard)
         run: node scripts/env-schema-test.mjs
+      - name: Remote images (allow-list fixture, SSRF limits, build + dev against a local server)
+        run: node scripts/images-fetch-test.mjs
       - name: nowaki upgrade (command surface + non-app guard)
         run: bash scripts/ci/e2e-upgrade.sh
       - name: Typed routes (typegen)
@@ -200,6 +208,14 @@ jobs:
           PORT=8243 node examples/hello/dist/server/index.mjs &
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8243/ >/dev/null && break; sleep 1; done
           BASE=http://127.0.0.1:8243 EXPECT=post node scripts/live-browser-test.mjs
+          # Intercepting routes (a modal gallery): start, dev, an enforced CSP, basePath + locale.
+          node scripts/slot-browser-test.mjs start dev csp combo --port 8250
+          # i18n.detect: a click on <Link locale> in an island sets the nowaki_locale cookie, and
+          # the next / follows it (a generated app on 8251).
+          PORT=8251 node scripts/locale-browser-test.mjs
+          # examples/gallery, the v0.18 exit criteria: modal on navigation, full page on reload,
+          # under /gallery in ja, the language switcher's cookie, sign-in and sign-out (8252).
+          node scripts/gallery-browser-test.mjs --port 8252
 
   jetstream-load:
     name: Jetstream load (1000 connections)
@@ -406,31 +422,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           install: "false"
-      - name: Assemble host package + resolve through JS shim
-        run: |
-          node scripts/build-npm.mjs linux-x64-gnu
-          # Build a layout equivalent to a real install (real files), then --version via the wrapper shim
-          ROOT=$(mktemp -d)
-          mkdir -p "$ROOT/node_modules/nowaki" "$ROOT/node_modules/@nowaki-dev"
-          cp packages/nowaki-cli/package.json "$ROOT/node_modules/nowaki/"
-          cp -R packages/nowaki-cli/bin packages/nowaki-cli/lib "$ROOT/node_modules/nowaki/"
-          cp -R packages/nowaki-cli/npm/linux-x64-gnu "$ROOT/node_modules/@nowaki-dev/cli-linux-x64-gnu"
-          VER=$(node -p "require('./packages/nowaki-cli/package.json').version")
-          OUT=$(node "$ROOT/node_modules/nowaki/bin/nowaki.js" --version)
-          echo "shim output: '$OUT' (expected 'nowaki $VER')"
-          test "$OUT" = "nowaki $VER"
-          # the exit code comes through (clap exits 2 on an unknown flag)
-          set +e; node "$ROOT/node_modules/nowaki/bin/nowaki.js" --no-such-flag 2>/dev/null; CODE=$?; set -e
-          test "$CODE" = 2
-          # the shim's own process becomes the binary (process.execve; no resident Node, #91):
-          # a stand-in binary that prints its PID must print the PID node was started with
-          BIN="$ROOT/node_modules/@nowaki-dev/cli-linux-x64-gnu/bin/nowaki"
-          test -f "$BIN"
-          printf '#!/bin/sh\necho $$\n' > "$BIN"
-          node "$ROOT/node_modules/nowaki/bin/nowaki.js" > "$ROOT/pid.txt" &
-          NODE_PID=$!; wait $NODE_PID
-          echo "node pid $NODE_PID, binary pid $(cat "$ROOT/pid.txt")"
-          test "$(cat "$ROOT/pid.txt")" = "$NODE_PID"
+      - run: node scripts/npm-cli-shim-test.mjs
 
   docs:
     name: Docs (links, typos, English-only)

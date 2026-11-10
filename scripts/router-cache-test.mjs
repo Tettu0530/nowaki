@@ -1,7 +1,7 @@
 // Unit tests for the client router's pure logic (router-core.js).
-// No DOM dependency, so it runs as-is in Node (matchBoundary / createPageCache).
+// No DOM dependency, so it runs as-is in Node (matchBoundary / matchPattern / createPageCache).
 import assert from "node:assert/strict";
-import { matchBoundary, createPageCache } from "../packages/nowaki-runtime/client/router-core.js";
+import { matchBoundary, matchPattern, createPageCache } from "../packages/nowaki-runtime/client/router-core.js";
 
 let passed = 0;
 const ok = (label, cond) => {
@@ -45,6 +45,29 @@ ok(
   "exact pathname matches boundary without requiring a child segment",
   matchBoundary([{ prefix: "/exact", html: "exact" }], "/exact").html === "exact",
 );
+
+// A route group's boundary (routes/(app)/loading.tsx: prefix "") lists its routes, and only those
+// get it: /about, served by routes/about.tsx outside the group, gets the root one.
+const grouped = [
+  { prefix: "", html: "root" },
+  { prefix: "", html: "app", routes: ["/dashboard", "/projects/[id]"] },
+];
+ok("a group boundary applies to its own routes", matchBoundary(grouped, "/projects/7").html === "app");
+ok("a group boundary skips URLs outside the group", matchBoundary(grouped, "/about").html === "root");
+ok("no boundary outside the group without a root one", matchBoundary(grouped.slice(1), "/about") === null);
+const docs = [{ prefix: "/docs", html: "docs", routes: ["!/docs/guide", "/docs/[slug]"] }];
+ok("a URL a more specific route outside the group serves isn't the group's", matchBoundary(docs, "/docs/guide") === null);
+ok("the group's [slug] route still gets it", matchBoundary(docs, "/docs/intro")?.html === "docs");
+
+// matchPattern: a whole URL path against a route pattern (intercepting routes).
+ok("matchPattern: param", matchPattern("/photo/[id]", "/photo/1"));
+ok("matchPattern: not a prefix match", !matchPattern("/photo/[id]", "/photo/1/x") && !matchPattern("/photo/[id]", "/photo"));
+ok("matchPattern: trailing slash ignored", matchPattern("/app/photo/[id]", "/app/photo/1/"));
+ok("matchPattern: catch-all needs one segment", matchPattern("/docs/[...r]", "/docs/a/b") && !matchPattern("/docs/[...r]", "/docs"));
+ok("matchPattern: suffix", matchPattern("/og/[c].png", "/og/x.png") && !matchPattern("/og/[c].png", "/og/x"));
+ok("matchPattern: literals compared decoded", matchPattern("/caf\u00e9/[id]", "/caf%C3%A9/1"));
+ok("matchPattern: root", matchPattern("/", "/") && !matchPattern("/", "/a"));
+ok("matchPattern: malformed escape is no match", !matchPattern("/[id]", "/50%"));
 
 // createPageCache: advance time with a controllable now
 let t = 0;

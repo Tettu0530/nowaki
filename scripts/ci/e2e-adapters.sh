@@ -8,6 +8,8 @@ cd "$(dirname "$0")/../.."
 # seen, trace every command so the log shows where one stopped.
 curl() { command curl --max-time 30 "$@"; }
 if [ "${RUNNER_OS:-}" = Windows ]; then set -x; fi
+# ctx.session (routes/api/session.ts) needs a secret in production.
+export NOWAKI_SESSION_SECRET="${NOWAKI_SESSION_SECRET:-e2e-session-secret-0123456789abcdef}"
 
 # node adapter: build emits a self-contained server entry runnable WITHOUT the nowaki binary
 ./target/debug/nowaki build examples/hello --adapter node
@@ -41,6 +43,12 @@ grep -q "Couldn't display this page" /tmp/nowaki-early-fail.html
 ! grep -q 'the data source is down' /tmp/nowaki-early-fail.html   # no message in production
 curl -s 'http://127.0.0.1:3310/stream-early?go=1' | grep -q 'location.replace("/about")'
 curl -sf http://127.0.0.1:3310/api/hello | grep -q '"hello":"nowaki"'
+# sessions on the node adapter: session.ts compiled to dist/server/session.js, the cookie round-trips
+test -f examples/hello/dist/server/session.js
+SESSION_COOKIE=$(curl -s -D - -o /dev/null -XPOST -H 'origin: http://127.0.0.1:3310' -d 'op=login&user=node' http://127.0.0.1:3310/api/session | tr -d '\r' | awk 'tolower($1)=="set-cookie:" {print $2}' | cut -d';' -f1)
+echo "$SESSION_COOKIE" | grep -q '^hello_session=v1\.'
+curl -sf -H "cookie: $SESSION_COOKIE" http://127.0.0.1:3310/api/session | grep -q '"user":"node"'
+curl -sf -XPOST -H 'origin: http://evil.test' -H "cookie: $SESSION_COOKIE" -d 'op=inc' http://127.0.0.1:3310/api/session | grep -q '"user":null,"n":0,"readOnly":true'
 # typed env on the node adapter: env.ts validated at startup, read by the loader
 curl -sf http://127.0.0.1:3310/env | grep -q 'token length 15'
 curl -sf http://127.0.0.1:3310/env | grep -q 'id="env-badge">Hello from env.ts x4<'
@@ -51,6 +59,13 @@ curl -s -D - -o /dev/null http://127.0.0.1:3310/og/intro.png | grep -qi '^conten
 curl -sf http://127.0.0.1:3310/og/intro.png | head -c 4 | od -An -c | grep -q 'P   N   G'
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3310/og/nope.png)" = 404
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3310/og/intro.jpg)" = 404
+# route groups on the node adapter
+curl -sf http://127.0.0.1:3310/pricing | grep -q '<div data-group="marketing"><main'
+curl -s -D - -o /dev/null http://127.0.0.1:3310/pricing | grep -qi '^x-route-group: marketing'
+# parallel routes on the node adapter
+curl -sf http://127.0.0.1:3310/photos/1 | grep -q '<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><aside id="photo-modal"'
+curl -sf -H 'x-nowaki-intercept: /photos/@modal' http://127.0.0.1:3310/photos/1 | grep -q '<aside id="photo-intercepted">intercepted 1</aside>$'
+curl -sf http://127.0.0.1:3310/photos | grep -q '<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><p id="modal-default">'
 # fonts on the node adapter (dist/server/fonts.json)
 curl -sf http://127.0.0.1:3310/about | grep -qE '<link rel="stylesheet" href="/_nowaki/fonts\.[0-9a-f]+\.css" />'
 # MDX entries render from their compiled module on the node adapter
@@ -110,6 +125,12 @@ pkill -f 'node index.mjs' 2>/dev/null || true
 ./target/debug/nowaki build examples/hello --adapter static
 test -f examples/hello/dist/static/index.html
 test -f examples/hello/dist/static/about/index.html
+grep -q '<div data-group="marketing"><main' examples/hello/dist/static/pricing/index.html
+! test -e 'examples/hello/dist/static/(marketing)'
+# parallel routes in static output: slots render into the pages; slot files are not pages
+grep -q '<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><p id="modal-default">' examples/hello/dist/static/photos/index.html
+grep -q '<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><aside id="photo-modal"' examples/hello/dist/static/photos/1/index.html
+! test -e 'examples/hello/dist/static/photos/@modal'
 # dynamic routes listed by `export const staticPaths` (including a catch-all), and 404.html
 grep -q 'Post: hello' examples/hello/dist/static/blog/hello/index.html
 grep -q 'Post: nowaki' examples/hello/dist/static/blog/nowaki/index.html
@@ -160,6 +181,14 @@ grep -q '<body class="site styled-page"' examples/hello/dist/static/styled/index
 # public/ files at their own path in the static output, dotfiles left out
 grep -q 'User-agent' examples/hello/dist/static/robots.txt
 grep -q 'hello from public' "examples/hello/dist/static/media/hello world.txt"
+# nowaki.config redirects and rewrites become _redirects rules
+grep -qx '/old-docs/\* /:splat 308' examples/hello/dist/static/_redirects
+grep -qx '/p/:slug /blog/:slug 200' examples/hello/dist/static/_redirects
+# nowaki.config headers become extra rules in _headers (after security defaults)
+grep -q '/docs/\*' examples/hello/dist/static/_headers
+grep -qi 'x-hello-routing: config' examples/hello/dist/static/_headers
+grep -q '/api/\*' examples/hello/dist/static/_headers
+grep -qi 'cache-control: no-store' examples/hello/dist/static/_headers
 test -f examples/hello/dist/static/.well-known/security.txt
 ! test -e examples/hello/dist/static/.hidden
 # cloudflare (edge) adapter: generates a bundled fetch-handler worker + wrangler config
@@ -201,3 +230,12 @@ curl -sf http://127.0.0.1:3320/api/hello | grep -q '"hello":"nowaki"'
 curl -sf http://127.0.0.1:3320/docs/intro | grep -q '<h2 id="why-content-collections"'   # content on vercel
 curl -sf http://127.0.0.1:3320/nav | grep -q 'href="/blog/hello"'
 kill $VERCEL_PID
+# nowaki.config redirects / rewrites / headers / basePath / trailingSlash on the node, cloudflare,
+# vercel and static adapters (a generated app; the servers listen on 3313 and 3314)
+node scripts/rules-e2e.mjs node cloudflare vercel static --port 3313
+# nowaki.config i18n on the node and cloudflare adapters and in static output (listens on 3315,
+# 3316 for i18n + basePath + trailingSlash "never" + a slot, and 3317 for locale detection)
+node scripts/i18n-e2e.mjs node cloudflare static --port 3315
+# examples/gallery on the node adapter (3331) and the cloudflare worker, and what static output
+# can serve of it
+node scripts/gallery-e2e.mjs node cloudflare static --port 3331

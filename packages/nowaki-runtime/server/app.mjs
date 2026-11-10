@@ -17,10 +17,15 @@ import { prodDocument, prodShell } from "./document.mjs";
 import { liveInitialState, liveRender, liveTopics, liveView } from "./live.mjs";
 import { loadContent } from "./content-load.mjs";
 import { initServerEnv } from "./env-schema.mjs";
+import { configureSessions, sessionConfigOf } from "./session.mjs";
 import { liveProps, warnIfEphemeralLiveKey } from "./live-sign.mjs";
 import { indexPublic, lookupPublic } from "./public-files.mjs";
 import { resolveSite } from "./seo.mjs";
 import { requestOrigin } from "./origin.mjs";
+import { compileRules } from "./rules.mjs";
+import { compileI18n } from "./i18n.mjs";
+import { LOCALE_VARY, frontHeaders, frontLocale, frontStep, withVaryHeaders } from "./front.mjs";
+import { setBasePath } from "./base-path.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
 // Bun and Deno don't implement Node's module.register; their SSR keeps the old behavior.
@@ -89,8 +94,24 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
     ? await readFile(path.join(serverDir, "env-public.json"), "utf8").then(JSON.parse, () => undefined)
     : undefined;
   await initServerEnv(envModule, process.env, envPublic);
+  // session.ts (dist/server/session.js), when the app has one; ctx.session uses the defaults otherwise.
+  const sessionFile = path.join(serverDir, "session.js");
+  const sessionModule = await access(sessionFile).then(() => import(pathToFileURL(sessionFile).href), () => null);
+  configureSessions({
+    config: sessionModule ? sessionConfigOf(sessionModule) : null,
+    prerender: process.env.NOWAKI_PRERENDER === "1",
+  });
 
   const manifest = JSON.parse(await readFile(path.join(clientDir, "manifest.json"), "utf8"));
+  // nowaki.config routing (dist/server/routing.json, written only when there is one). Read before
+  // the island registry: basePath decides where the client files are served.
+  const routing = await readFile(path.join(serverDir, "routing.json"), "utf8").then(JSON.parse, (e) => {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  });
+  const base = routing?.basePath ?? "";
+  setBasePath(base);
+  const assetBase = `${base}/_nowaki/`;
 
   const registry = new Map();
   for (const [name, file] of Object.entries(manifest.islands ?? {})) {
@@ -98,7 +119,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
       pathToFileURL(path.join(serverDir, "islands", `${name}.js`)).href
     );
     if (typeof mod.default === "function") {
-      registry.set(mod.default, { name, src: `/_nowaki/${file}` });
+      registry.set(mod.default, { name, src: `${assetBase}${file}` });
     }
   }
 
@@ -219,18 +240,18 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
       : null,
     // `nowaki prerender` sets NOWAKI_PRERENDER=1 on its temporary server: the pages become static
     // files, so live islands get no live.js (it could never reach a server).
-    renderDocument: (args) => prodDocument(manifest, args, { live: process.env.NOWAKI_PRERENDER !== "1" }),
-    renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta),
+    renderDocument: (args) => prodDocument(manifest, args, { live: process.env.NOWAKI_PRERENDER !== "1", assetBase }),
+    renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta, { assetBase }),
     // Page scripts from the build (manifest.routeScripts per route / layout module).
     routeScripts: (file) =>
       memo(scriptsByFile, file, () =>
         (manifest.routeScripts?.[moduleKey(file)] ?? []).map((f) => ({
-          src: `/_nowaki/${f}`,
-          preload: (manifest.scriptPreload?.[f] ?? []).map((d) => `/_nowaki/${d}`),
+          src: `${assetBase}${f}`,
+          preload: (manifest.scriptPreload?.[f] ?? []).map((d) => `${assetBase}${d}`),
         })),
       ),
     // Route / layout CSS from the build (manifest.routeCss, keyed by server module).
-    routeCss: (file) => memo(cssByFile, file, () => (manifest.routeCss?.[moduleKey(file)] ?? []).map((f) => `/_nowaki/${f}`)),
+    routeCss: (file) => memo(cssByFile, file, () => (manifest.routeCss?.[moduleKey(file)] ?? []).map((f) => `${assetBase}${f}`)),
     // render500 has already logged it.
     renderError: () => {
       return {
@@ -244,15 +265,52 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
 
   // dist/public next to dist/client unless given.
   const publicFiles = await indexPublic(publicDir ?? path.join(clientDir, "..", "public"));
+  // The compiled routing rules: null without a routing config, so a request pays one check. An
+  // invalid file stops the server here.
+  const rules = routing ? compileRules(routing) : null;
+  // Canonical / sitemap URLs follow the policy (seo.mjs pagePath).
+  if (rules) env.trailingSlash = rules.trailing;
+  // i18n: null without it (handler.mjs checks it once per request).
+  env.i18n = compileI18n(routing);
 
   const handle = async (req, res) => {
     // Set before the response's own headers, which override any of these by name.
     for (const [k, v] of missingSecurityHeaders(() => false)) res.setHeader(k, v);
     try {
       const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
+      let pathname = url.pathname;
+      let routePath;
+      let localeVary = false;
+      if (rules) {
+        // Config headers replace the security defaults set above and lose to the response's own.
+        for (const [k, v] of frontHeaders(rules, pathname)) res.setHeader(k, v);
+        const step = frontStep(rules, req.method, url);
+        if (step?.redirect) {
+          res.writeHead(step.redirect.status, { location: step.redirect.location }).end();
+          return;
+        }
+        if (step?.notFound) {
+          res.writeHead(404, { "content-type": "text/plain; charset=utf-8" }).end("not found");
+          return;
+        }
+        // A framework URL under basePath is served as the root one (`url` too: the handler
+        // dispatches /__nowaki/* endpoints by it).
+        if (step?.internal) pathname = url.pathname = step.routePath;
+        else if (step) pathname = routePath = step.routePath;
+        // i18n.detect: Accept-Language / the nowaki_locale cookie on the root, ahead of any cache.
+        const locale = rules.detect && frontLocale(rules, req.method, url, req.headers["accept-language"], req.headers.cookie);
+        if (locale?.redirect) {
+          res.writeHead(locale.redirect.status, { ...locale.headers, location: locale.redirect.location }).end();
+          return;
+        }
+        if (locale) {
+          localeVary = true;
+          res.setHeader("vary", LOCALE_VARY);
+        }
+      }
 
-      if (url.pathname.startsWith("/_nowaki/")) {
-        const name = path.basename(url.pathname); // basename prevents traversal
+      if (pathname.startsWith("/_nowaki/")) {
+        const name = path.basename(pathname); // basename prevents traversal
         try {
           const data = await readFile(path.join(clientDir, name));
           const ext = name.split(".").pop();
@@ -268,9 +326,9 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
       }
 
       // public/ files win over routes at the same path. `no-cache` + ETag: the names aren't hashed.
-      const pub = (req.method === "GET" || req.method === "HEAD") && lookupPublic(publicFiles, url.pathname);
+      const pub = (req.method === "GET" || req.method === "HEAD") && lookupPublic(publicFiles, pathname);
       if (pub) {
-        const headers = { "content-type": contentTypeOf(url.pathname), "cache-control": "public, no-cache", etag: pub.etag };
+        const headers = { "content-type": contentTypeOf(pathname), "cache-control": "public, no-cache", etag: pub.etag };
         const inm = req.headers["if-none-match"];
         if (inm && inm.split(",").some((t) => t.trim() === pub.etag || t.trim() === "*")) {
           res.writeHead(304, headers).end();
@@ -291,7 +349,9 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
         url,
         version: "prod",
         req,
+        routePath,
       });
+      if (localeVary) result.headers = withVaryHeaders(result.headers);
       await sendResult(res, applyCsp(result));
     } catch (err) {
       console.error("[nowaki]", err);

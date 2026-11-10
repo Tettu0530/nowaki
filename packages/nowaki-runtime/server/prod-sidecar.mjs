@@ -25,7 +25,7 @@ const { env, liveRegistry } = await createApp({
 // Pages return body+meta markers instead of final HTML. Streaming bypasses the markers.
 env.renderDocument = ({ mod, body, meta }) => {
   const m = pageMeta(meta, mod);
-  return { __nowakiPage: true, body, title: m.title, head: m.head, lang: m.lang, htmlAttrs: m.htmlAttrs, bodyAttrs: m.bodyAttrs };
+  return { __nowakiPage: true, body, title: m.title, head: m.head, lang: m.lang, htmlAttrs: m.htmlAttrs, bodyAttrs: m.bodyAttrs, router: meta?.router === true };
 };
 
 const server = createServer(async (req, res) => {
@@ -80,7 +80,9 @@ const server = createServer(async (req, res) => {
   }
   try {
     const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
-    const result = await handleRequest(env, { method: req.method, url, version: "prod", req });
+    // The Rust front sets x-nowaki-route-path for a rewrite or basePath (and drops a client's own).
+    const routePath = req.headers["x-nowaki-route-path"];
+    const result = await handleRequest(env, { method: req.method, url, version: "prod", req, routePath });
     const b = result.body;
     if (b && typeof b === "object" && b.__nowakiPage) {
       // Keep response headers (cookies etc.) and tell Rust to assemble the HTML via x-nowaki-page.
@@ -89,7 +91,7 @@ const server = createServer(async (req, res) => {
         "content-type": "application/json; charset=utf-8",
         "x-nowaki-page": "1",
       });
-      res.end(JSON.stringify({ body: b.body, title: b.title, head: b.head, lang: b.lang, htmlAttrs: b.htmlAttrs, bodyAttrs: b.bodyAttrs }));
+      res.end(JSON.stringify({ body: b.body, title: b.title, head: b.head, lang: b.lang, htmlAttrs: b.htmlAttrs, bodyAttrs: b.bodyAttrs, router: b.router || undefined }));
     } else {
       res.writeHead(result.status ?? 200, result.headers ?? {});
       if (result.stream) {

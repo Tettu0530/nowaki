@@ -1,6 +1,6 @@
 {
   "name": "@nowaki-dev/runtime",
-  "version": "0.16.3",
+  "version": "0.17.0",
   "description": "Runtime for Nowaki — islands hydration client, SSR sidecar, and Node loader hooks",
   "license": "MIT",
   "author": "Tettu0530",
@@ -33,7 +33,9 @@
     "image.d.ts",
     "env.js",
     "env.d.ts",
-    "env-server.d.ts"
+    "env-server.d.ts",
+    "session.js",
+    "session.d.ts"
   ],
   "exports": {
     ".": {
@@ -60,6 +62,10 @@
       "types": "./env-server.d.ts",
       "default": "./server/env-server.mjs"
     },
+    "./session": {
+      "types": "./session.d.ts",
+      "default": "./session.js"
+    },
     "./client/*": "./client/*",
     "./server/*": "./server/*"
   },
@@ -68,7 +74,7 @@
     "preact-render-to-string": "^6.8.2"
   },
   "devDependencies": {
-    "preact": "^11.1.1",
+    "preact": "^11.2.0",
     "preact-render-to-string": "^6.8.2"
   },
   "engines": {

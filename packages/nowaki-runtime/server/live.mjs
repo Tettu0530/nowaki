@@ -58,7 +58,8 @@ export function liveView(mod, state) {
 
 /// The request context for live handlers, from the headers the Rust front captured at the WebSocket
 /// upgrade (cookie, authorization, accept-language, user-agent, public host). Cookies set after the
-/// socket opened are seen after the next reconnect.
+/// socket opened are seen after the next reconnect. Its session is read-only: a live render has no
+/// response to carry a Set-Cookie.
 export function liveContext(request) {
   if (!request || typeof request !== "object") return null;
   const headers = {};
@@ -67,7 +68,7 @@ export function liveContext(request) {
   }
   const proto = headers["x-forwarded-proto"] === "https" ? "https" : "http";
   const url = new URL("/__nowaki/live", `${proto}://${headers["x-forwarded-host"] ?? "localhost"}`);
-  return makeContext({ url, method: "POST", headers, readBody: async () => new Uint8Array() });
+  return makeContext({ url, method: "POST", headers, readBody: async () => new Uint8Array(), sessionMode: "live" });
 }
 
 /// Whether a live render can be reused for every connection that asked for the same one: a
