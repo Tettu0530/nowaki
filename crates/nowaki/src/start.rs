@@ -921,6 +921,12 @@ async fn proxy(
     let url = format!("http://127.0.0.1:{}{}", state.sidecar_port, path_q);
     let method = req.method().clone();
     let headers = req.headers().clone();
+
+    if crate::form_body::multipart_content_length_over_limit(&headers) {
+        let (status, body) = crate::form_body::multipart_payload_too_large();
+        return (status, body).into_response();
+    }
+
     let body = match axum::body::to_bytes(req.into_body(), 16 * 1024 * 1024).await {
         Ok(b) => b,
         Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),

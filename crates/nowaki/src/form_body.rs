@@ -1,0 +1,102 @@
+//! Mirrors `packages/nowaki-runtime/server/multipart.mjs` `FORM_BODY_LIMIT` for the Rust front.
+//! Rejects oversized `multipart/form-data` before buffering the body so a lying `Content-Length`
+//! cannot hold the proxy until the client times out.
+
+use std::sync::OnceLock;
+
+use axum::http::{header, HeaderMap, StatusCode};
+
+const DEFAULT_LIMIT: u64 = 10 * 1024 * 1024;
+
+pub fn form_body_limit() -> u64 {
+    static LIMIT: OnceLock<u64> = OnceLock::new();
+    *LIMIT.get_or_init(|| {
+        std::env::var("NOWAKI_FORM_BODY_LIMIT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(DEFAULT_LIMIT)
+    })
+}
+
+fn is_multipart_form_data(ct: &str) -> bool {
+    const PREFIX: &str = "multipart/form-data";
+    let bytes = ct.as_bytes();
+    if bytes.len() < PREFIX.len() {
+        return false;
+    }
+    if !bytes[..PREFIX.len()].eq_ignore_ascii_case(PREFIX.as_bytes()) {
+        return false;
+    }
+    if bytes.len() == PREFIX.len() {
+        return true;
+    }
+    let b = bytes[PREFIX.len()];
+    !b.is_ascii_alphanumeric() && b != b'_'
+}
+
+/// True when `Content-Length` exceeds the multipart cap (same gate as `ctx.formData()` on Node).
+pub fn multipart_content_length_over_limit(headers: &HeaderMap) -> bool {
+    let ct = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if !is_multipart_form_data(ct) {
+        return false;
+    }
+    let len = headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok());
+    len.is_some_and(|n| n > form_body_limit())
+}
+
+pub fn multipart_payload_too_large() -> (StatusCode, &'static str) {
+    (StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    fn map(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.append(
+                axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                HeaderValue::from_str(v).unwrap(),
+            );
+        }
+        h
+    }
+
+    #[test]
+    fn multipart_over_limit() {
+        let limit = form_body_limit();
+        let h = map(&[
+            ("content-type", "multipart/form-data; boundary=x"),
+            ("content-length", &(limit + 1).to_string()),
+        ]);
+        assert!(multipart_content_length_over_limit(&h));
+    }
+
+    #[test]
+    fn multipart_at_limit_ok() {
+        let limit = form_body_limit();
+        let h = map(&[
+            ("content-type", "multipart/form-data; boundary=x"),
+            ("content-length", &limit.to_string()),
+        ]);
+        assert!(!multipart_content_length_over_limit(&h));
+    }
+
+    #[test]
+    fn non_multipart_ignored() {
+        let h = map(&[
+            ("content-type", "application/json"),
+            ("content-length", "999999999"),
+        ]);
+        assert!(!multipart_content_length_over_limit(&h));
+    }
+}
