@@ -62,7 +62,11 @@ pub fn transform_file_with_inputs(
     if mode == Mode::Browser && crate::server_fn::has_use_server(source) {
         let key = crate::server_fn::module_key(root, path);
         let exports = crate::server_fn::collect_exports(path, source)?;
-        return Ok((crate::server_fn::client_proxy(&key, &exports), Vec::new()));
+        let fn_path = crate::server_fn::fn_path(client_defines);
+        return Ok((
+            crate::server_fn::client_proxy_at(&key, &exports, &fn_path),
+            Vec::new(),
+        ));
     }
     // The dev browser asking for `@nowaki-dev/runtime/env/server`: a module that throws, so the
     // page shows the error instead of loading server values (the build refuses it outright).

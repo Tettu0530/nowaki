@@ -2,7 +2,10 @@
 // /__nowaki/live WebSocket or, per event, POST /__nowaki/live-event. Transport: the app's
 // <meta name="nowaki-live" content="ws|post"> wins; then the server's data-live-transport on this
 // script (adapters without a WS endpoint say "post"); otherwise WS, with POST for any event sent
-// while the socket isn't open. If nothing works, the initial SSR stays intact.
+// while the socket isn't open. If nothing works, the initial SSR stays intact.//
+// __NOWAKI_BASE_URL__ is import.meta.env.BASE_URL (nowaki.config basePath + "/"), inlined at build
+// under a name that keeps this file a classic script (an `import.meta` would make it a module and
+// change its minified output for every app).
 
 const MAX_RETRIES = 8;
 
@@ -75,7 +78,7 @@ function connect() {
 
   const open = () => {
     timer = null;
-    const sock = new WebSocket(`${proto}://${location.host}/__nowaki/live`);
+    const sock = new WebSocket(`${proto}://${location.host}${__NOWAKI_BASE_URL__}__nowaki/live`);
     ws = sock;
     sock.onopen = () => {
       if (sock !== ws) return;
@@ -150,7 +153,7 @@ function connect() {
   const post = (el, handler, payload) => {
     chain = chain.then(async () => {
       try {
-        const r = await fetch("/__nowaki/live-event", {
+        const r = await fetch(__NOWAKI_BASE_URL__ + "__nowaki/live-event", {
           method: "POST",
           headers: { "content-type": "application/json", "x-nowaki-live": "1" },
           body: JSON.stringify({

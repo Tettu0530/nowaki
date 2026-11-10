@@ -14,11 +14,26 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/nowaki-runtime
       preact:
-        specifier: ^11.1.1
-        version: 11.1.1(preact-render-to-string@6.8.2)
+        specifier: ^11.2.0
+        version: 11.2.0(preact-render-to-string@6.8.2)
       preact-render-to-string:
         specifier: ^6.8.2
-        version: 6.8.2(preact@11.1.1)
+        version: 6.8.2(preact@11.2.0)
+
+  examples/gallery:
+    dependencies:
+      '@nowaki-dev/runtime':
+        specifier: workspace:*
+        version: link:../../packages/nowaki-runtime
+      preact:
+        specifier: ^11.2.0
+        version: 11.2.0(preact-render-to-string@6.8.2)
+      preact-render-to-string:
+        specifier: ^6.8.2
+        version: 6.8.2(preact@11.2.0)
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
 
   examples/hello:
     dependencies:
@@ -30,13 +45,13 @@ importers:
         version: link:../../packages/nowaki-runtime
       '@tsrx/preact':
         specifier: ^0.3.5
-        version: 0.3.5(preact@11.1.1)
+        version: 0.3.5(preact@11.2.0)
       preact:
-        specifier: ^11.1.1
-        version: 11.1.1(preact-render-to-string@6.8.2)
+        specifier: ^11.2.0
+        version: 11.2.0(preact-render-to-string@6.8.2)
       preact-render-to-string:
         specifier: ^6.8.2
-        version: 6.8.2(preact@11.1.1)
+        version: 6.8.2(preact@11.2.0)
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -46,7 +61,7 @@ importers:
   packages/create-nowaki-app:
     dependencies:
       create-nowaki:
-        specifier: ^0.18.3
+        specifier: ^0.19.0
         version: link:../create-nowaki
 
   packages/nowaki-markdoc:
@@ -56,20 +71,20 @@ importers:
         version: 0.5.11
     devDependencies:
       preact:
-        specifier: ^11.1.1
-        version: 11.1.1(preact-render-to-string@6.8.2)
+        specifier: ^11.2.0
+        version: 11.2.0(preact-render-to-string@6.8.2)
       preact-render-to-string:
         specifier: ^6.8.2
-        version: 6.8.2(preact@11.1.1)
+        version: 6.8.2(preact@11.2.0)
 
   packages/nowaki-runtime:
     devDependencies:
       preact:
-        specifier: ^11.1.1
-        version: 11.1.1(preact-render-to-string@6.8.2)
+        specifier: ^11.2.0
+        version: 11.2.0(preact-render-to-string@6.8.2)
       preact-render-to-string:
         specifier: ^6.8.2
-        version: 6.8.2(preact@11.1.1)
+        version: 6.8.2(preact@11.2.0)
 
 packages:
 
@@ -144,8 +159,8 @@ packages:
     peerDependencies:
       preact: '>=10 || >= 11.0.0-0'
 
-  preact@11.1.1:
-    resolution: {integrity: sha512-vpFVfai437pbuLri7XVeslCPfrEZX6Z1S2gV+MOFrA/kji+NKUXvH7y01EnVjA1guLigfkVp77Sqipd4SIllCg==}
+  preact@11.2.0:
+    resolution: {integrity: sha512-/HfHI/7N84e6GrWBJ3J280z3mLaRJiDcSvj/A+y/4AbLnND/1UlGHe1sR6oYuTGwId0nP7dqDU9OnLxMPZ7xBg==}
     peerDependencies:
       preact-render-to-string: '>=6.7.0'
     peerDependenciesMeta:
@@ -189,17 +204,17 @@ snapshots:
     transitivePeerDependencies:
       - '@typescript-eslint/types'
 
-  '@tsrx/preact-runtime@0.1.12(preact@11.1.1)':
+  '@tsrx/preact-runtime@0.1.12(preact@11.2.0)':
     dependencies:
       '@tsrx/runtime': 0.2.4
-      preact: 11.1.1(preact-render-to-string@6.8.2)
+      preact: 11.2.0(preact-render-to-string@6.8.2)
 
-  '@tsrx/preact@0.3.5(preact@11.1.1)':
+  '@tsrx/preact@0.3.5(preact@11.2.0)':
     dependencies:
       '@tsrx/core': 0.5.5
-      '@tsrx/preact-runtime': 0.1.12(preact@11.1.1)
+      '@tsrx/preact-runtime': 0.1.12(preact@11.2.0)
       esrap: 2.4.0
-      preact: 11.1.1(preact-render-to-string@6.8.2)
+      preact: 11.2.0(preact-render-to-string@6.8.2)
       zimmerframe: 1.1.4
     transitivePeerDependencies:
       - '@typescript-eslint/types'
@@ -226,13 +241,13 @@ snapshots:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  preact-render-to-string@6.8.2(preact@11.1.1):
+  preact-render-to-string@6.8.2(preact@11.2.0):
     dependencies:
-      preact: 11.1.1(preact-render-to-string@6.8.2)
+      preact: 11.2.0(preact-render-to-string@6.8.2)
 
-  preact@11.1.1(preact-render-to-string@6.8.2):
+  preact@11.2.0(preact-render-to-string@6.8.2):
     optionalDependencies:
-      preact-render-to-string: 6.8.2(preact@11.1.1)
+      preact-render-to-string: 6.8.2(preact@11.2.0)
 
   resolve-pkg-maps@1.0.0: {}
 

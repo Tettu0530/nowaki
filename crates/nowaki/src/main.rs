@@ -142,6 +142,7 @@ fn main() -> anyhow::Result<()> {
             // env.ts: validated before the build, which inlines its public values.
             env_schema::finish(env_check, &mut core)?;
             remote_images::configure(&mut core, &root, &config)?;
+            site::configure(&mut core, &config)?;
             let started = std::time::Instant::now();
             let (report, client) = core.build_with_client(&dist)?;
             let client_js_kb = ui::dir_js_kb(&report.out_dir);
@@ -155,7 +156,7 @@ fn main() -> anyhow::Result<()> {
                 report.asset_in,
                 report.asset_out,
             );
-            content::build(&root, &dist)?;
+            content::build(&root, &dist, &config)?;
             site::write(&dist, &config)?;
             fonts::build_dist(&root, &dist, &config)?;
             check_route_budgets(&core, &report, &client)?;

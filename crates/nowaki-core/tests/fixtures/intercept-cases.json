@@ -1,0 +1,17 @@
+{
+  "about": "Intercepting routes: the URL pattern a file in a slot takes over. `owner` is the path to the @slot directory, `inner` the file's stem inside it (route groups still in); `target` null = no target. Run by crates/nowaki-core/tests/intercepts.rs (routes::intercept_target) and scripts/router-test.mjs (router.mjs interceptTarget).",
+  "cases": [
+    { "name": "(.) is the owner's level", "owner": "", "inner": "(.)photo/[id]", "target": "/photo/[id]" },
+    { "name": "(.) below a nested owner", "owner": "photos", "inner": "(.)[id]", "target": "/photos/[id]" },
+    { "name": "(..) climbs one URL segment; groups don't count", "owner": "(shop)/[org]", "inner": "(g)/(..)up/[id]", "target": "/up/[id]" },
+    { "name": "(..)(..) climbs two", "owner": "a/b/c", "inner": "(..)(..)x", "target": "/a/x" },
+    { "name": "(..) above routes/ has no target", "owner": "(shop)/[org]", "inner": "(..)(..)too-far", "target": null },
+    { "name": "(...) is the root; index is the directory", "owner": "(shop)/[org]", "inner": "(...)top/index", "target": "/top" },
+    { "name": "(...)index is the root", "owner": "", "inner": "(...)index", "target": "/" },
+    { "name": "two markers have no target", "owner": "a", "inner": "(.)x/(.)y", "target": null },
+    { "name": "a marker deeper in the slot counts from its own directory", "owner": "feed", "inner": "sub/(..)photo", "target": "/feed/photo" },
+    { "name": "a bare marker directory has no target", "owner": "a", "inner": "(.)/x", "target": null },
+    { "name": "groups after the marker are left out", "owner": "", "inner": "(.)shop/(sale)/[...rest]", "target": "/shop/[...rest]" },
+    { "name": "a suffixed param keeps its suffix", "owner": "og", "inner": "(.)[card].png", "target": "/og/[card].png" }
+  ]
+}

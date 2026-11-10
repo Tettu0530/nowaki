@@ -14,12 +14,19 @@ export function contentState() {
   return globalThis[KEY] ?? null;
 }
 
+const LOCALE = Symbol.for("nowaki.locale");
+
+/// The request's locale with i18n (server/i18n-context.mjs publishes the reader), else undefined.
+export function currentLocale() {
+  return globalThis[LOCALE]?.()?.locale;
+}
+
 const pathOf = (issue) => {
   const keys = (issue.path ?? []).map((p) => (typeof p === "object" && p !== null ? p.key : p));
   return keys.length ? `${keys.join(".")}: ` : "";
 };
 
-/// raw: `{ name: [{ slug, file, data, body?, html?, headings? }] }` (from Rust); config: the
+/// raw: `{ name: [{ slug, file, locale?, data, body?, html?, headings? }] }` (from Rust); config: the
 /// module namespace of content/config. Returns `{ collections, errors }`; an entry whose data
 /// fails its schema is left out and reported as `<file>: <field>: <message>`.
 /// `loadModule(entry)` imports an MDX entry's compiled module (its `module` field, set by the

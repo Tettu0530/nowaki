@@ -31,6 +31,9 @@ struct Manifest {
     islands: HashMap<String, String>,
     #[serde(default)]
     preload: HashMap<String, Vec<String>>,
+    /// Where the files above are served: `/_nowaki/`, or `<basePath>/_nowaki/`.
+    #[serde(skip)]
+    asset_base: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -45,6 +48,10 @@ struct PageMeta {
     html_attrs: String,
     #[serde(default, rename = "bodyAttrs")]
     body_attrs: String,
+    /// A slot on the page intercepts URLs (handler.mjs): it gets the islands runtime, and so the
+    /// client router, even without islands.
+    #[serde(default)]
+    router: bool,
 }
 
 struct ProdState {
@@ -164,7 +171,11 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
 
     let front = crate::front::load(&root.join("dist/server/routing.json"))?;
     let manifest_text = std::fs::read_to_string(client_dir.join("manifest.json"))?;
-    let manifest: Manifest = serde_json::from_str(&manifest_text).unwrap_or_default();
+    let mut manifest: Manifest = serde_json::from_str(&manifest_text).unwrap_or_default();
+    manifest.asset_base = match &front {
+        Some(f) => format!("{}/_nowaki/", f.base_path()),
+        None => "/_nowaki/".to_string(),
+    };
 
     let host = if expose {
         "0.0.0.0".to_string()
@@ -188,12 +199,13 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
     });
 
     let warm_state = state.clone();
+    let base = front.clone().filter(|f| f.has_base());
     let mut app = Router::new()
         .route("/__nowaki/live", get(live_ws))
         .fallback(any(handle))
         .with_state(state);
     // Inside the security-headers layer, so a rule's header wins over a default one.
-    if let Some(front) = front.filter(|f| f.has_headers()) {
+    if let Some(front) = front.filter(|f| f.has_response_layer()) {
         app = app.layer(axum::middleware::from_fn_with_state(
             front,
             crate::front::headers_layer,
@@ -220,12 +232,34 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
     }
     // The sidecar lives outside the shared state (request tasks hold that), so it is killed here on shutdown.
     tokio::select! {
-        r = std::future::IntoFuture::into_future(axum::serve(listener, app)) => r?,
+        r = serve(listener, app, base) => r?,
         _ = crate::shutdown::signal() => {}
     }
     // SIGTERM first: the sidecar writes Jetstream rooms to disk before it exits.
     crate::shutdown::stop_child(&mut child, std::time::Duration::from_secs(3)).await;
     Ok(())
+}
+
+/// Serves `app`, behind the basePath layer when there is a basePath (none otherwise: the common
+/// case keeps the plain router).
+async fn serve(
+    listener: tokio::net::TcpListener,
+    app: Router,
+    base: Option<Arc<crate::front::Front>>,
+) -> std::io::Result<()> {
+    use tower_layer::Layer;
+    match base {
+        None => axum::serve(listener, app).await,
+        Some(front) => {
+            let app =
+                axum::middleware::from_fn_with_state(front, crate::front::base_layer).layer(app);
+            axum::serve(
+                listener,
+                axum::ServiceExt::<Request>::into_make_service(app),
+            )
+            .await
+        }
+    }
 }
 
 async fn live_ws(
@@ -260,6 +294,16 @@ fn prod_ws_origin_ok(headers: &axum::http::HeaderMap) -> bool {
     }
 }
 
+/// Sent by the client router for an intercepting route's fragment (handler.mjs `renderIntercept`).
+const INTERCEPT_HEADER: &str = "x-nowaki-intercept";
+
+/// Whether the ISR cache may answer (and store) a request: GETs, except the client router asking for
+/// an intercepting slot's fragment. The ISR key is the path, so a cached full page must not answer
+/// that request, and the fragment must not be stored.
+fn isr_eligible(method: &Method, headers: &axum::http::HeaderMap) -> bool {
+    *method == Method::GET && !headers.contains_key(INTERCEPT_HEADER)
+}
+
 async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
     let path = req.uri().path().to_string();
     if crate::forward::is_internal_path(&path) {
@@ -285,7 +329,7 @@ async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
             return serve_public(file, req.headers()).await;
         }
     }
-    if req.method() == Method::GET {
+    if isr_eligible(req.method(), req.headers()) {
         let pathname = isr_path(&path, route_path.as_deref());
         let query = req.uri().query().map(|q| q.to_string());
         let spec = state
@@ -973,8 +1017,9 @@ async fn proxy(
 
 /// Rust port of prodDocument (JS). Islands are picked from <nowaki-island name="..."> in the body.
 fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
+    let base = &manifest.asset_base;
     let island_names = scan_island_names(&meta.body);
-    let has_islands = !island_names.is_empty() && manifest.runtime.is_some();
+    let has_islands = (!island_names.is_empty() || meta.router) && manifest.runtime.is_some();
 
     let mut preload_files: Vec<String> = Vec::new();
     if has_islands {
@@ -1001,17 +1046,17 @@ fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
     }
     let preload = preload_files
         .iter()
-        .map(|f| format!("<link rel=\"modulepreload\" href=\"/_nowaki/{f}\" />"))
+        .map(|f| format!("<link rel=\"modulepreload\" href=\"{base}{f}\" />"))
         .collect::<Vec<_>>()
         .join("\n");
     let runtime_script = if has_islands {
         // Put the lazy router chunk's URL in data-router (islands.js imports it when idle).
         let data_router = match &manifest.router_runtime {
-            Some(r) => format!(" data-router=\"/_nowaki/{r}\""),
+            Some(r) => format!(" data-router=\"{base}{r}\""),
             None => String::new(),
         };
         format!(
-            "<script id=\"nowaki-runtime\" type=\"module\" src=\"/_nowaki/{}\"{data_router}></script>",
+            "<script id=\"nowaki-runtime\" type=\"module\" src=\"{base}{}\"{data_router}></script>",
             manifest.runtime.as_ref().unwrap()
         )
     } else {
@@ -1020,7 +1065,7 @@ fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
     let live_script = if meta.body.contains("<nowaki-live") {
         match &manifest.live_runtime {
             Some(f) => {
-                format!("<script id=\"nowaki-live\" type=\"module\" src=\"/_nowaki/{f}\"></script>")
+                format!("<script id=\"nowaki-live\" type=\"module\" src=\"{base}{f}\"></script>")
             }
             None => String::new(),
         }
@@ -1219,5 +1264,15 @@ mod tests {
         assert!(!public_etag("text/html; charset=utf-8", Mode::Enforce));
         assert!(!public_etag("text/html; charset=utf-8", Mode::ReportOnly));
         assert!(public_etag("text/css; charset=utf-8", Mode::Enforce));
+    }
+
+    #[test]
+    fn intercept_requests_skip_the_isr_cache() {
+        assert!(isr_eligible(&Method::GET, &header_map(&[])));
+        assert!(!isr_eligible(&Method::POST, &header_map(&[])));
+        assert!(!isr_eligible(
+            &Method::GET,
+            &header_map(&[("x-nowaki-intercept", b"/@modal")])
+        ));
     }
 }

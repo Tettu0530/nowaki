@@ -10,6 +10,8 @@
 // comma-separated, rotate keys: the first one encrypts / signs, every one decrypts / verifies, and
 // a cookie read with an older one is reissued with the first.
 
+import { basePath } from "./base-path.mjs";
+
 const VERSION = "v1";
 const MAX_COOKIE = 4096;
 const MIN_SECRET = 32;
@@ -286,7 +288,8 @@ export function createSession(ctx, mode) {
   }
 
   const secure = () => ctx.url.protocol === "https:";
-  const cookieOpts = (age) => ({ maxAge: age, path: "/", httpOnly: true, secure: secure(), sameSite: "Lax" });
+  // Scoped to basePath, so apps sharing a host under different bases keep separate sessions.
+  const cookieOpts = (age) => ({ maxAge: age, path: basePath() || "/", httpOnly: true, secure: secure(), sameSite: "Lax" });
 
   // Cookie-store only: the cookie for `data` must fit the browser limit (name=value ≤ 4096 bytes).
   function checkSize() {
