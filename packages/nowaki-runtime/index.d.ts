@@ -94,8 +94,13 @@ export interface LoaderContext {
 
   /** Gets a request header (case-insensitive). */
   get(name: string): string | undefined;
-  /** Reads an application/x-www-form-urlencoded body as URLSearchParams. */
-  formData(): Promise<URLSearchParams>;
+  /**
+   * Reads the request body as form fields: `application/x-www-form-urlencoded` →
+   * `URLSearchParams`, `multipart/form-data` → `FormData`. Oversized or malformed multipart bodies
+   * throw before user code runs (413/400). File parts are `File` — use `instanceof File` on
+   * `form.get("field")`; text parts are strings.
+   */
+  formData(): Promise<URLSearchParams | FormData>;
   /** Reads the request body as a string. */
   bodyText(): Promise<string>;
   /** Reads the request body as JSON. */

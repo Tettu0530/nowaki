@@ -13,6 +13,7 @@ import { browserPathFor, clientI18n, localeAlternates, localeGroups, splitLocale
 import { localeState, runWithLocale } from "./i18n-context.mjs";
 import { sitemapUrls } from "./isr-urls.mjs";
 import { makeContext } from "./context.mjs";
+import { requestBodyResult } from "./request-body.mjs";
 import { dispatchServerFn, runWithContext, SERVER_FN_PATH } from "./functions.mjs";
 import { isCrossSite } from "./origin.mjs";
 import { dispatchLiveEvent, LIVE_EVENT_PATH } from "./live-event.mjs";
@@ -142,6 +143,8 @@ async function routeRequest(env, info, localized) {
     return finalize(ctx, intercepts ? varyIntercept(intercepts, path, page) : page, env, table, version);
   } catch (err) {
     if (ctx._redirect) return finalize(ctx, ctx._redirect, env, table, version); // throw path of ctx.redirect()
+    const bodyErr = requestBodyResult(err, { dev: env.dev === true, json: Boolean(match?.isApi) });
+    if (bodyErr) return finalize(ctx, bodyErr, env, table, version);
     return finalize(ctx, await render500(env, table, ctx, version, err), env, table, version);
   }
 }

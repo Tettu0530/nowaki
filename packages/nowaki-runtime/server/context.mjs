@@ -2,6 +2,8 @@
 
 import { createSession } from "./session.mjs";
 import { withBase } from "./base-path.mjs";
+import { FORM_BODY_LIMIT, isMultipartFormData, parseMultipartBody } from "./multipart.mjs";
+import { RequestBodyError } from "./request-body.mjs";
 
 export function makeContext(info) {
   const { url, params = {}, method = "GET", req } = info;
@@ -96,8 +98,18 @@ export function makeContext(info) {
     },
     async formData() {
       reqAccessed = true; // depends on body/Content-Type → no shared ISR cache (prevents per-user mixups)
-      const buf = await readBodyFn();
-      return parseFormBody(buf, reqHeaders["content-type"] ?? "");
+      const ct = reqHeaders["content-type"] ?? "";
+      if (isMultipartFormData(ct)) {
+        const len = Number(reqHeaders["content-length"]);
+        if (Number.isFinite(len) && len > FORM_BODY_LIMIT) {
+          throw new RequestBodyError(`multipart body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
+        }
+      }
+      const buf =
+        isMultipartFormData(ct) && req && typeof req.on === "function"
+          ? await readBodyNode(req, FORM_BODY_LIMIT)
+          : await readBodyFn();
+      return parseFormBody(buf, ct);
     },
     async bodyText() {
       reqAccessed = true;
@@ -186,13 +198,35 @@ function serializeCookie(name, value, opts) {
   return s;
 }
 
-function readBodyNode(req) {
+function readBodyNode(req, maxBytes) {
   return new Promise((resolve, reject) => {
     if (!req || typeof req.on !== "function") return resolve(new Uint8Array(0));
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
+    let total = 0;
+    let settled = false;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    };
+    const finish = (buf) => {
+      if (settled) return;
+      settled = true;
+      resolve(buf);
+    };
+    req.on("data", (c) => {
+      total += c.length;
+      if (maxBytes !== undefined && total > maxBytes) {
+        if (typeof req.destroy === "function") req.destroy();
+        fail(
+          new RequestBodyError(`multipart body exceeds ${maxBytes} byte limit`, { status: 413 }),
+        );
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => finish(Buffer.concat(chunks)));
+    req.on("error", fail);
   });
 }
 
@@ -203,9 +237,8 @@ function decodeBody(buf) {
 }
 
 function parseFormBody(buf, contentType) {
-  const text = decodeBody(buf);
-  if (contentType.includes("multipart/form-data")) {
-    throw new Error("multipart/form-data is not supported yet (use urlencoded)");
+  if (isMultipartFormData(contentType)) {
+    return parseMultipartBody(buf, contentType);
   }
-  return new URLSearchParams(text);
+  return new URLSearchParams(decodeBody(buf));
 }

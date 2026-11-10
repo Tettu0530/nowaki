@@ -100,6 +100,35 @@ async function serverFnHardening(b, m) {
 }
 
 // Page actions reject cross-site non-GET requests by default; API routes warn unless they opt in.
+async function multipartFormGuards(b) {
+  const { FORM_BODY_LIMIT } = await import("../packages/nowaki-runtime/server/multipart.mjs");
+  const boundary = "nowakie2e";
+  const body = `--${boundary}\r\nContent-Disposition: form-data; name="note"\r\n\r\nhi\r\n--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="t.txt"\r\nContent-Type: text/plain\r\n\r\nok\r\n--${boundary}--\r\n`;
+  const ok = await fetch(`${b}/api/upload`, {
+    method: "POST",
+    headers: { "content-type": `multipart/form-data; boundary=${boundary}`, origin: b },
+    body,
+  });
+  const json = await ok.json().catch(() => ({}));
+  check("multipart upload round trip (file + field)", ok.status === 200 && json.hasFile && json.name === "t.txt" && json.field === "hi");
+  const huge = await fetch(`${b}/api/upload`, {
+    method: "POST",
+    headers: {
+      "content-type": `multipart/form-data; boundary=${boundary}`,
+      "content-length": String(FORM_BODY_LIMIT + 1),
+      origin: b,
+    },
+    body: "--x",
+  });
+  check("multipart Content-Length over limit (413)", huge.status === 413);
+  const bad = await fetch(`${b}/api/upload`, {
+    method: "POST",
+    headers: { "content-type": "multipart/form-data; boundary=missing", origin: b },
+    body: "not multipart",
+  });
+  check("multipart malformed body (400)", bad.status === 400);
+}
+
 async function crossSiteWritesRejected(b) {
   const send = (path, h) =>
     fetch(`${b}${path}`, {
@@ -328,6 +357,7 @@ if (mode === "dev") {
   await forwardedHostIgnored(base);
   await serverFnHardening(base, mode);
   await crossSiteWritesRejected(base);
+  await multipartFormGuards(base);
   await sessionGuards(base);
   await securityHeadersPresent(base, ["/", "/nope"]);
   await configRoutingSafe(base);

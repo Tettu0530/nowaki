@@ -10,6 +10,13 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **`multipart/form-data` in `ctx.formData()`.** Actions, API routes, and middleware can read file
+  uploads from a `FormData` body (`File` parts keep `name`, `type`, and bytes). The whole body is
+  buffered (same as urlencoded today) with a default cap of 10 MiB (`NOWAKI_FORM_BODY_LIMIT`);
+  oversized `Content-Length` is rejected before the body is read (Node), and over-limit streamed
+  reads abort; limits and malformed bodies map to **413** / **400** instead of a generic 500.
+
 ## [0.18.0] — 2026-11-10 · "Sirocco": routing for real apps
 
 Packages: `nowaki` / `nowaki-core` 0.18.0 (crates.io, npm), `@nowaki-dev/runtime`
