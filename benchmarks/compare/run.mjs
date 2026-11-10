@@ -25,7 +25,7 @@ import { posts } from "./lib/content.mjs";
 import { FRAMEWORKS, ORDER } from "./lib/frameworks.mjs";
 import { serve } from "./lib/serve.mjs";
 import { MARK_CONTACT, MARK_STATS } from "./lib/features.mjs";
-import { MARK_HOME, MARK_POST } from "./lib/templates.mjs";
+import { MARK_HOME, MARK_POST, V018_BASE } from "./lib/templates.mjs";
 
 const HERE = import.meta.dirname;
 const RESULTS = process.env.COMPARE_RESULTS ? path.resolve(process.env.COMPARE_RESULTS) : path.join(HERE, "results");
@@ -48,15 +48,35 @@ const pages = Number(arg("pages", 10));
 const islands = Number(arg("islands", 1));
 const RUNS = Number(arg("runs", 10));
 const only = new Set(arg("only", "dev,static,server").split(","));
+// Nowaki 0.18 features (as in prod.mjs --v018). The browser pages of the static run do not follow
+// basePath, so a basePath run measures dev and server only.
+const v018List = (arg("v018", "") || "").split(",").filter(Boolean);
+if (v018List.length && fwName !== "nowaki") throw new Error("--v018 applies to nowaki only");
+const v018 = Object.fromEntries(v018List.map((k) => [k, true]));
+if (v018.basePath && only.has("static")) throw new Error("--v018 basePath: pass --only dev,server");
+const BASE = v018.basePath ? V018_BASE : "";
 
 const dir = path.join(APPS, fwName);
-const bin = path.join(dir, "node_modules/.bin", fw.bin);
+// NOWAKI_BIN: another nowaki binary (a release build of the repo) for A/B runs.
+const bin = fwName === "nowaki" && process.env.NOWAKI_BIN ? path.resolve(process.env.NOWAKI_BIN) : path.join(dir, "node_modules/.bin", fw.bin);
 if (!existsSync(bin)) {
   console.error(`${fw.label} is not installed: pnpm -C benchmarks/compare/apps/${fwName} install --frozen-lockfile`);
   process.exit(2);
 }
-const version = JSON.parse(readFileSync(path.join(dir, "node_modules", fw.versionPkg, "package.json"), "utf8")).version;
-const env = { ...process.env, ...fw.env, FORCE_COLOR: "0", NO_COLOR: "1", CI: "1" };
+const version =
+  fwName === "nowaki" && process.env.NOWAKI_BIN
+    ? spawnSync(bin, ["--version"], { encoding: "utf8" }).stdout.trim().replace(/^nowaki /, "")
+    : JSON.parse(readFileSync(path.join(dir, "node_modules", fw.versionPkg, "package.json"), "utf8")).version;
+const runtimePkg = path.join(dir, "node_modules/@nowaki-dev/runtime/package.json");
+const runtime = fwName === "nowaki" && existsSync(runtimePkg) ? JSON.parse(readFileSync(runtimePkg, "utf8")).version : undefined;
+const env = {
+  ...process.env,
+  ...fw.env,
+  ...(v018.session ? { NOWAKI_SESSION_SECRET: "bench-session-secret-0123456789abcdef0123" } : {}),
+  FORCE_COLOR: "0",
+  NO_COLOR: "1",
+  CI: "1",
+};
 const clean = () => fw.caches.forEach((c) => rmSync(path.join(dir, c), { recursive: true, force: true }));
 const machine = `${os.cpus()[0].model}, ${os.cpus().length} cores, ${Math.round(os.totalmem() / 2 ** 30)} GB, ${os.platform()} ${os.release()}, node ${process.version}`;
 const git = (args) => spawnSync("git", args, { cwd: HERE, encoding: "utf8" }).stdout.trim();
@@ -68,7 +88,7 @@ mkdirSync(RESULTS, { recursive: true });
 const record = (file, row) =>
   appendFileSync(
     path.join(RESULTS, file),
-    `${JSON.stringify({ framework: fwName, label: fw.label, version, pages, islands, ...row, series, at: new Date().toISOString(), machine, commit })}\n`,
+    `${JSON.stringify({ framework: fwName, label: fw.label, version, runtime, v018: v018List, runLabel: arg("label"), pages, islands, ...row, series, at: new Date().toISOString(), machine, commit })}\n`,
   );
 
 // Resolves once nothing accepts connections on the port (the previous server is gone).
@@ -114,9 +134,9 @@ async function devRun() {
   };
   child.stdout.on("data", onData);
   child.stderr.on("data", onData);
-  const firstMs = await firstOk(`http://localhost:${DEV_PORT}/`, MARK_HOME, t0, 120000);
+  const firstMs = await firstOk(`http://localhost:${DEV_PORT}${BASE || "/"}`, MARK_HOME, t0, 120000);
   const t1 = now();
-  const postAt = firstMs == null ? null : await firstOk(`http://localhost:${DEV_PORT}/posts/${oldestSlug}`, MARK_POST, t1, 120000);
+  const postAt = firstMs == null ? null : await firstOk(`http://localhost:${DEV_PORT}${BASE}/posts/${oldestSlug}`, MARK_POST, t1, 120000);
   try {
     process.kill(-child.pid, "SIGKILL");
   } catch {}
@@ -157,7 +177,7 @@ const median = (xs) => {
 
 console.log(`${fw.label} ${version} · ${pages} pages · ${islands} islands · 1+${RUNS} runs · ${machine} · ${commit}`);
 
-if (only.has("dev") || only.has("static")) generate(fwName, { pages, islands, mode: "static" });
+if (only.has("dev") || only.has("static")) generate(fwName, { pages, islands, mode: "static", v018 });
 
 if (only.has("dev")) {
   const rows = [];
@@ -206,7 +226,7 @@ if (only.has("static")) {
 }
 
 if (only.has("server")) {
-  generate(fwName, { pages, islands, mode: "server" });
+  generate(fwName, { pages, islands, mode: "server", v018 });
   const times = [];
   for (let i = 0; i <= RUNS; i++) {
     const ms = buildRun(fw.serverBuild);

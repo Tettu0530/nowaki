@@ -7,12 +7,12 @@ import { TEMPLATES } from "./lib/templates.mjs";
 
 export const APPS = path.join(import.meta.dirname, "apps");
 
-export function generate(fw, { pages, islands, mode, isr = false }) {
+export function generate(fw, { pages, islands, mode, isr = false, v018 = {} }) {
   if (!FRAMEWORKS[fw]) throw new Error(`unknown framework: ${fw}`);
   if (!["static", "server"].includes(mode)) throw new Error(`unknown mode: ${mode}`);
   const dir = path.join(APPS, fw);
   for (const p of FRAMEWORKS[fw].generated) rmSync(path.join(dir, p), { recursive: true, force: true });
-  const files = TEMPLATES[fw]({ pages, islands, mode, isr });
+  const files = TEMPLATES[fw]({ pages, islands, mode, isr, v018 });
   for (const [rel, text] of Object.entries(files)) {
     const file = path.join(dir, rel);
     mkdirSync(path.dirname(file), { recursive: true });

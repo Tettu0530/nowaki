@@ -42,7 +42,58 @@ export default function Island${pad(k)}({ start = 0 }: { start?: number }) {
 `;
 
 // ---------------------------------------------------------------- Nowaki
-function nowaki({ pages, islands, mode, isr }) {
+// Nowaki 0.18 features for the per-feature cost runs (prod.mjs --v018 rules,basePath,...). Only
+// the Nowaki app has them; every option off writes no extra file, as before.
+//   rules     20 config rules: 10 redirects and 5 rewrites that no measured URL matches, and 5
+//             headers rules, one of which matches the post pages
+//   basePath  everything under /app
+//   i18n      en (default, unprefixed) and ja, detect: true
+//   session   session.ts; post pages read ctx.session; /session-start sets a value
+//   env       env.ts with a server and a public variable (checked at build and at startup)
+export const V018_BASE = "/app";
+function nowakiV018(v) {
+  const f = {};
+  const config = {};
+  if (v.basePath) config.basePath = V018_BASE;
+  if (v.i18n) config.i18n = { locales: ["en", "ja"], defaultLocale: "en", detect: true };
+  if (v.rules) {
+    config.redirects = Array.from({ length: 10 }, (_, i) => ({ source: `/old-${i}/[id]`, destination: "/posts/[id]", permanent: true }));
+    config.rewrites = Array.from({ length: 5 }, (_, i) => ({ source: `/r-${i}/[id]`, destination: "/posts/[id]" }));
+    config.headers = [
+      { source: "/posts/[slug]", headers: { "x-bench-rule": "post" } },
+      ...Array.from({ length: 4 }, (_, i) => ({ source: `/h-${i}/[id]`, headers: { "x-bench-rule": String(i) } })),
+    ];
+  }
+  if (Object.keys(config).length) f["nowaki.config.mjs"] = `export default ${JSON.stringify(config, null, 2)};\n`;
+  if (v.session) {
+    f["session.ts"] = `import { defineSession } from "@nowaki-dev/runtime/session";
+
+export default defineSession({ cookieName: "bench_session", maxAge: 60 * 60 });
+`;
+    f["routes/session-start.tsx"] = `export const loader = async (ctx: { session: { set: (k: string, v: unknown) => Promise<void> } }) => {
+  await ctx.session.set("user", "bench");
+  return { ok: true };
+};
+
+export default function SessionStart() {
+  return <main><p>session set</p></main>;
+}
+`;
+  }
+  if (v.env) {
+    f["env.ts"] = `import { defineEnv } from "@nowaki-dev/runtime/env";
+import { z } from "zod";
+
+export default defineEnv({
+  server: { BENCH_SECRET: z.string().default("bench-secret") },
+  public: { PUBLIC_BENCH_TITLE: z.string().default("A blog") },
+});
+`;
+  }
+  return f;
+}
+
+function nowaki({ pages, islands, mode, isr, v018 = {} }) {
   const f = {};
   f["lib/posts.ts"] = postsModule(pages, true);
   f["routes/_layout.tsx"] = `import "../styles/global.css";
@@ -135,11 +186,21 @@ export const title = "Post — Nowaki";
 
 export const staticPaths = () => posts.map((p) => ({ slug: p.slug }));
 ${isr ? "\nexport const revalidate = 60;\n" : ""}
-export const loader = (ctx: Ctx) => {
+${
+  v018.session
+    ? `export const loader = async (ctx: Ctx & { session: { get: (k: string) => Promise<unknown> } }) => {
+  // Reads the session on every post page (the cost under measurement).
+  const user = await ctx.session.get("user");
+  const post = posts.find((p) => p.slug === ctx.params.slug);
+  if (!post) return { post: null, html: "", user };
+  return { post, html: marked.parse(post.body, { async: false }) as string, user };
+};`
+    : `export const loader = (ctx: Ctx) => {
   const post = posts.find((p) => p.slug === ctx.params.slug);
   if (!post) return { post: null, html: "" };
   return { post, html: marked.parse(post.body, { async: false }) as string };
-};
+};`
+}
 
 export default function PostPage({ data }: { data: { post: { title: string; date: string } | null; html: string } }) {
   if (!data.post) return <main><h1>Not found</h1></main>;
@@ -155,6 +216,7 @@ export default function PostPage({ data }: { data: { post: { title: string; date
 `;
   for (const k of range(islands)) f[`islands/Island${pad(k)}.tsx`] = preactIsland(k);
   Object.assign(f, nowakiFeatures({ mode }));
+  Object.assign(f, nowakiV018(v018));
   return f;
 }
 

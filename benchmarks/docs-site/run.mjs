@@ -69,8 +69,10 @@ if (!existsSync(bin)) {
   process.exit(2);
 }
 // pnpm copies the file: runtime and does not refresh the copy, so a stale one would measure
-// old runtime code under the new binary.
-if (fwName === "nowaki") {
+// old runtime code under the new binary. (A release runtime from npm, as an A/B against a
+// published version uses, is not checked.)
+const runtimeSpec = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8")).dependencies?.["@nowaki-dev/runtime"] ?? "";
+if (fwName === "nowaki" && runtimeSpec.startsWith("file:")) {
   const src = path.join(ROOT, "packages/nowaki-runtime");
   const installed = realpathSync(path.join(dir, "node_modules/@nowaki-dev/runtime"));
   const list = (root) => walk(root).filter((x) => !x.path.startsWith("node_modules")).map((x) => x.path).sort();
@@ -88,7 +90,7 @@ const commit = `${git(["rev-parse", "--short", "HEAD"])}${git(["status", "--porc
 const series = new Date().toISOString();
 mkdirSync(RESULTS, { recursive: true });
 const record = (file, row) =>
-  appendFileSync(path.join(RESULTS, file), `${JSON.stringify({ framework: fwName, label: fw.label, version, entries: n, ...row, series, at: new Date().toISOString(), machine, commit })}\n`);
+  appendFileSync(path.join(RESULTS, file), `${JSON.stringify({ framework: fwName, label: fw.label, version, runtime: runtimeSpec || undefined, entries: n, ...row, series, at: new Date().toISOString(), machine, commit })}\n`);
 
 const rm = (list) => list.forEach((p) => rmSync(path.join(dir, p), { recursive: true, force: true }));
 function build() {
