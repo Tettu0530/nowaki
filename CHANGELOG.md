@@ -10,6 +10,34 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-11-10 · "Sirocco": routing for real apps
+
+Packages: `nowaki` / `nowaki-core` 0.18.0 (crates.io, npm), `@nowaki-dev/runtime`
+0.17.0, `@nowaki-dev/markdoc` 0.1.0 (new), `create-nowaki` / `create-nowaki-app`
+0.19.0.
+
+Routing that larger apps expect: route groups, parallel and intercepting routes
+(a modal gallery that is a full page on reload), `redirects` / `rewrites` /
+`headers` in nowaki.config applied by every server and adapter, `basePath` and a
+`trailingSlash` policy, i18n routing with locale detection, sessions, a typed env
+schema, remote images, and Markdoc. `examples/gallery` meets the v0.18 exit
+criteria. Apps that use none of these pay nothing for them: the 0.17.3 → 0.18.0
+benchmark (uncached, ISR, CSP, build, dev) found no regression.
+
+### Upgrade notes
+- **Unknown keys in `nowaki.config` are now an error.** The config is validated at
+  build (and dev) time, so a typo fails instead of being ignored.
+- **Existing apps: copy the new type files from the template.** `nowaki-env.d.ts`
+  is ambient again (asset and `?image` imports type-check) and the preact JSX
+  additions moved to `nowaki-jsx.d.ts`; add both to `tsconfig.json` `include`
+  (see Fixed). `nowaki upgrade` doesn't copy template files.
+- Layouts receive a `slots` prop (an empty object when they own no `@slot`).
+- `staticPaths` receives an argument (`{ locale }` with i18n, `{}` otherwise).
+- Two route files with the same URL shape are an error when one of them is in a
+  `(group)`.
+- A page that reads `ctx.session` can't be prerendered (static output fails with
+  the page named). In production, `ctx.session` needs `NOWAKI_SESSION_SECRET`.
+
 ### Added
 - **`examples/gallery`, the v0.18 exit-criteria app.** A photo gallery under `basePath: "/gallery"`
   in English and Japanese (with `Accept-Language` detection and a `<Link locale>` switcher). A photo
@@ -211,6 +239,22 @@ milestone's worth of work; the codename is noted per entry.
   caught the ~17% throughput regression that runtime 0.16.0 shipped in small
   steps. The release's binary is cached per tag.
 
+### Fixed
+- **Asset and `<Image>` types in scaffolded apps**. The template's
+  `nowaki-env.d.ts` imported `preact`, which made it a module. Its
+  `declare module "*?image"` and other asset wildcards were then invalid
+  augmentations, so `import hero from "./hero.jpg?image"` (and `.png`,
+  `.module.css`, ...) failed with TS2307. The file is now ambient only (asset
+  wildcards, `ImportMetaEnv`, `ImportMeta`). The preact JSX additions for
+  `client:*` moved to a new `nowaki-jsx.d.ts`, and `tsconfig.json` includes
+  both. Existing apps can copy both files and the `include` entry from a new
+  app. `@nowaki-dev/runtime/image` typed `ImageProps` with
+  `JSX.HTMLAttributes`, which preact 11 doesn't export, so `<Image>` lost its
+  `<img>` attribute types under `skipLibCheck: false`. It now uses
+  `JSX.IntrinsicElements["img"]`, which works with preact 10 and 11. The
+  scaffold e2e type-checks a probe file with `tsc --noEmit` and
+  `skipLibCheck: false`.
+
 ## [0.17.3] — 2026-11-09 · patch
 
 Packages: `nowaki` / `nowaki-core` 0.17.3 (crates.io, npm), `@nowaki-dev/runtime`
@@ -228,21 +272,6 @@ update `@nowaki-dev/runtime` to 0.16.3.
   read. On the comparison app's post page (Apple M2, `oha -c 50`), runtime
   0.15.3 served 9,993-10,208 req/s, 0.16.2 served 8,154-8,438, and 0.16.3 serves
   10,136-11,970.
-- **Asset and `<Image>` types in scaffolded apps**. The template's
-  `nowaki-env.d.ts` imported `preact`, which made it a module. Its
-  `declare module "*?image"` and other asset wildcards were then invalid
-  augmentations, so `import hero from "./hero.jpg?image"` (and `.png`,
-  `.module.css`, ...) failed with TS2307. The file is now ambient only (asset
-  wildcards, `ImportMetaEnv`, `ImportMeta`). The preact JSX additions for
-  `client:*` moved to a new `nowaki-jsx.d.ts`, and `tsconfig.json` includes
-  both. Existing apps can copy both files and the `include` entry from a new
-  app. `@nowaki-dev/runtime/image` typed `ImageProps` with
-  `JSX.HTMLAttributes`, which preact 11 doesn't export, so `<Image>` lost its
-  `<img>` attribute types under `skipLibCheck: false`. It now uses
-  `JSX.IntrinsicElements["img"]`, which works with preact 10 and 11. The
-  scaffold e2e type-checks a probe file with `tsc --noEmit` and
-  `skipLibCheck: false`.
-
 ## [0.17.2] — 2026-11-08 · patch
 
 Packages: `nowaki` / `nowaki-core` 0.17.2 (crates.io, npm), `@nowaki-dev/runtime`

@@ -1705,7 +1705,7 @@ dependencies = [
 
 [[package]]
 name = "nowaki"
-version = "0.17.3"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1732,7 +1732,7 @@ dependencies = [
 
 [[package]]
 name = "nowaki-core"
-version = "0.17.3"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "brotli",
