@@ -108,6 +108,7 @@ Each of 5 runs starts the server fresh, warms it up for 3 s at the measured load
 | TTFB / total | 300 sequential GETs over one keep-alive connection, cycling through 90 posts; headers received / body received, p50 and p99 |
 | req/s | `oha` with 50 connections for 10 s: post pages (90 URLs from a file, one picked per request), `/` and `/api/search?q=post%201` separately; successful responses per second. Any error other than requests cut off at the deadline fails the run |
 | idle / peak RSS | the server's whole process tree, after the warm-up / sampled every 100 ms during the post-page load |
+| CPU per request | user + system CPU time of the server's process group during each `oha` run, divided by its successful responses (µs). Other load on the machine moves it far less than req/s, so it is the number to compare when two versions differ by a few percent |
 
 Pages are rendered per request: nothing is cached. `--isr` instead runs the post pages under the
 framework's own ISR, revalidated every 60 s: `export const revalidate = 60` in Nowaki and Next.js
@@ -132,7 +133,25 @@ Notes:
   request, and compresses responses; `oha` sends no `Accept-Encoding`, so req/s is measured on
   uncompressed bodies for every framework.
 - The load generator runs on the same machine. Above roughly 100k req/s (Nowaki's ISR hits) the
-  number is likely bounded by `oha` and the loopback, not the server.
+  number is likely bounded by `oha` and the loopback, not the server. In the v0.18 check, ISR
+  req/s of one build ranged from 48k to 132k across runs while its CPU per request stayed within
+  about ±1 µs of 26 µs; compare CPU per request there.
+
+### Nowaki only: other builds and the 0.18 features
+
+- `NOWAKI_BIN=path` builds and serves the app with that binary in place of the installed CLI (a
+  release build of this repo, for an A/B against a published version). `run.mjs` takes it too.
+  The runtime is whatever the app has installed; to test the repo's, set
+  `"@nowaki-dev/runtime": "file:../../../../packages/nowaki-runtime"` in `apps/nowaki/package.json`
+  and reinstall after `rm -rf node_modules` (pnpm never refreshes a `file:` copy).
+- `--v018 rules,basePath,i18n,session,env` turns 0.18 features on in the generated app (any
+  subset; `nowakiV018` in `lib/templates.mjs`): 20 config rules (10 redirects and 5 rewrites
+  that no measured URL matches, 5 headers rules of which one matches the post pages), basePath
+  `/app`, i18n `en`/`ja` with `detect`, a `session.ts` with post pages reading `ctx.session`,
+  and an `env.ts`. URLs follow the basePath. With `session`, `prod.mjs` takes a cookie from
+  `/session-start` and sends it on every request; `--no-session-cookie` sends none, and
+  `--cookie NAME=VALUE` sends a fixed one (with or without `session.ts`). `run.mjs` measures
+  `--only dev,server` with basePath (its browser pages do not follow the base).
 
 ## Rules
 

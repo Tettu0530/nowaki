@@ -25,7 +25,7 @@ import path from "node:path";
 import { generate, APPS } from "./gen.mjs";
 import { posts } from "./lib/content.mjs";
 import { FRAMEWORKS, ORDER } from "./lib/frameworks.mjs";
-import { MARK_HOME, MARK_POST } from "./lib/templates.mjs";
+import { MARK_HOME, MARK_POST, V018_BASE } from "./lib/templates.mjs";
 
 const HERE = import.meta.dirname;
 const RESULTS = process.env.COMPARE_RESULTS ? path.resolve(process.env.COMPARE_RESULTS) : path.join(HERE, "results");
@@ -40,7 +40,7 @@ const arg = (name, fallback) => {
 const fwName = process.argv[2];
 const fw = FRAMEWORKS[fwName];
 if (!fw) {
-  console.error(`usage: node benchmarks/compare/prod.mjs <${ORDER.join("|")}> [--pages N] [--islands N] [--runs N] [--label L] [--env K=V,...]`);
+  console.error(`usage: node benchmarks/compare/prod.mjs <${ORDER.join("|")}> [--pages N] [--islands N] [--runs N] [--label L] [--env K=V,...] [--isr] [--v018 rules,basePath,i18n,session,env]`);
   process.exit(2);
 }
 const pages = Number(arg("pages", 100));
@@ -54,12 +54,29 @@ const extraEnv = Object.fromEntries(
     .filter(Boolean)
     .map((kv) => kv.split("=")),
 );
+// Nowaki 0.18 features to turn on in the app (comma-separated: rules,basePath,i18n,session,env;
+// see nowakiV018 in lib/templates.mjs). Recorded with each row.
+const v018List = (arg("v018", "") || "").split(",").filter(Boolean);
+const V018_KNOWN = ["rules", "basePath", "i18n", "session", "env"];
+for (const k of v018List) if (!V018_KNOWN.includes(k)) throw new Error(`--v018: unknown feature ${k} (known: ${V018_KNOWN.join(", ")})`);
+if (v018List.length && fwName !== "nowaki") throw new Error("--v018 applies to nowaki only");
+const v018 = Object.fromEntries(v018List.map((k) => [k, true]));
+const BASE = v018.basePath ? V018_BASE : "";
+const HOME_PATH = BASE || "/";
+// Isolating the session's cost: --no-session-cookie keeps session.ts but sends no cookie;
+// --cookie NAME=VALUE sends a fixed cookie on every request (with or without session.ts).
+const sendSessionCookie = !process.argv.includes("--no-session-cookie");
+const fixedCookie = arg("cookie", null);
 
 // How each framework's production server is started (server-mode build output).
 // Nowaki's npm `nowaki` command is a Node shim that spawnSyncs the Rust binary and stays
 // resident (~45 MB); no other framework has such a launcher, so the binary is started directly.
+// NOWAKI_BIN points at another binary (a release build of the repo) for A/B runs; it builds and
+// serves the app in place of the installed CLI.
 const nowakiBinary = () =>
-  createRequire(path.join(APPS, "nowaki/node_modules/nowaki/package.json"))("./lib/resolve.js").resolveBinary();
+  process.env.NOWAKI_BIN
+    ? path.resolve(process.env.NOWAKI_BIN)
+    : createRequire(path.join(APPS, "nowaki/node_modules/nowaki/package.json"))("./lib/resolve.js").resolveBinary();
 const SERVERS = {
   nowaki: { cmd: () => [nowakiBinary(), ["start", ".", "--port", String(PORT)]] },
   astro: { cmd: () => [process.execPath, ["dist/server/entry.mjs"]] },
@@ -69,7 +86,7 @@ const SERVERS = {
 };
 
 const dir = path.join(APPS, fwName);
-const bin = path.join(dir, "node_modules/.bin", fw.bin);
+const bin = fwName === "nowaki" && process.env.NOWAKI_BIN ? nowakiBinary() : path.join(dir, "node_modules/.bin", fw.bin);
 if (!existsSync(bin)) {
   console.error(`${fw.label} is not installed: pnpm -C benchmarks/compare/apps/${fwName} install --frozen-lockfile`);
   process.exit(2);
@@ -78,10 +95,17 @@ if (spawnSync("oha", ["--version"]).status !== 0) {
   console.error("oha is not installed (brew install oha, or cargo install oha)");
   process.exit(2);
 }
-const version = JSON.parse(readFileSync(path.join(dir, "node_modules", fw.versionPkg, "package.json"), "utf8")).version;
+const version =
+  fwName === "nowaki" && process.env.NOWAKI_BIN
+    ? spawnSync(bin, ["--version"], { encoding: "utf8" }).stdout.trim().replace(/^nowaki /, "")
+    : JSON.parse(readFileSync(path.join(dir, "node_modules", fw.versionPkg, "package.json"), "utf8")).version;
+// The runtime the app resolves (Nowaki only).
+const runtimePkg = path.join(dir, "node_modules/@nowaki-dev/runtime/package.json");
+const runtime = fwName === "nowaki" && existsSync(runtimePkg) ? JSON.parse(readFileSync(runtimePkg, "utf8")).version : undefined;
 const env = {
   ...process.env,
   ...fw.env,
+  ...(v018.session ? { NOWAKI_SESSION_SECRET: "bench-session-secret-0123456789abcdef0123" } : {}),
   ...extraEnv,
   NODE_ENV: "production",
   PORT: String(PORT),
@@ -102,15 +126,15 @@ const slugs = posts(pages).map((p) => p.slug);
 // 90 of the posts: the latency loop walks them in order; oha picks one at random per request.
 const pool = slugs.slice(0, Math.min(90, slugs.length));
 // A query that matches (titles are "Post N: ...").
-const API_PATH = "/api/search?q=post%201";
+const API_PATH = `${BASE}/api/search?q=post%201`;
 const urlFile = path.join(os.tmpdir(), `compare-prod-urls-${process.pid}.txt`);
-writeFileSync(urlFile, pool.map((s) => `http://127.0.0.1:${PORT}/posts/${s}`).join("\n") + "\n");
+writeFileSync(urlFile, pool.map((s) => `http://127.0.0.1:${PORT}${BASE}/posts/${s}`).join("\n") + "\n");
 
 mkdirSync(RESULTS, { recursive: true });
 const record = (row) =>
   appendFileSync(
     path.join(RESULTS, "prod.jsonl"),
-    `${JSON.stringify({ framework: fwName, label, fwLabel: fw.label, version, pages, islands, env: extraEnv, isr, ...row, series, at: new Date().toISOString(), machine, commit, oha: ohaVersion })}\n`,
+    `${JSON.stringify({ framework: fwName, label, fwLabel: fw.label, version, runtime, v018: v018List, cookie: fixedCookie ? "fixed" : v018.session && sendSessionCookie ? "session" : "none", pages, islands, env: extraEnv, isr, ...row, series, at: new Date().toISOString(), machine, commit, oha: ohaVersion })}\n`,
   );
 
 function rssTreeMB(pgid) {
@@ -121,6 +145,33 @@ function rssTreeMB(pgid) {
     if (g === pgid) kb += rss;
   }
   return Math.round((kb / 1024) * 10) / 10;
+}
+
+// CPU time (user + system, ms) of every live process in the server's process group: the server
+// and any Node sidecar it starts. Divided by the requests served, it is the server's own cost per
+// request, which other load on the machine moves far less than req/s.
+function cpuTreeMs(pgid) {
+  const out = spawnSync("ps", ["-A", "-o", "pgid=,time="], { encoding: "utf8" }).stdout;
+  let ms = 0;
+  for (const line of out.trim().split("\n")) {
+    const [g, t] = line.trim().split(/\s+/);
+    if (Number(g) !== pgid) continue;
+    // [[dd-]hh:]mm:ss.cc
+    const [days, clock] = t.includes("-") ? t.split("-") : ["0", t];
+    const parts = clock.split(":").map(Number);
+    let sec = 0;
+    for (const x of parts) sec = sec * 60 + x;
+    ms += (Number(days) * 86400 + sec) * 1000;
+  }
+  return ms;
+}
+
+// oha with the server's CPU time per request (µs) added.
+async function ohaCpu(pgid, target, opts, run = oha) {
+  const before = cpuTreeMs(pgid);
+  const res = await run(target, opts);
+  const cpuMs = cpuTreeMs(pgid) - before;
+  return { ...res, cpuMs: Math.round(cpuMs), cpuUsPerReq: Math.round((cpuMs * 1000 * 100) / res.requests) / 100 };
 }
 
 async function portFree() {
@@ -136,15 +187,18 @@ async function portFree() {
   throw new Error(`port ${PORT} still in use`);
 }
 
+// The session cookie (--v018 session): every request carries it, oha's too.
+let cookie = null;
 function get(agent, urlPath) {
   return new Promise((resolve, reject) => {
     const t0 = now();
-    const req = http.get({ host: "127.0.0.1", port: PORT, path: urlPath, agent }, (res) => {
+    const headers = cookie ? { cookie } : {};
+    const req = http.get({ host: "127.0.0.1", port: PORT, path: urlPath, agent, headers }, (res) => {
       const ttfb = now() - t0;
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (c) => (body += c));
-      res.on("end", () => resolve({ status: res.statusCode, ttfb, total: now() - t0, body }));
+      res.on("end", () => resolve({ status: res.statusCode, ttfb, total: now() - t0, body, headers: res.headers }));
     });
     req.on("error", reject);
   });
@@ -159,6 +213,7 @@ const pct = (xs, q) => {
 // `posts: true` reads the 90 post URLs from urlFile (oha picks one per request).
 async function oha(target, { seconds, posts: fromFile }) {
   const args = ["--no-tui", "--output-format", "json", "-c", "50", "-z", `${seconds}s`];
+  if (cookie) args.push("-H", `cookie: ${cookie}`);
   if (fromFile) args.push("--urls-from-file", urlFile);
   else args.push(target);
   const { status, stdout, stderr } = await new Promise((resolve) => {
@@ -189,6 +244,7 @@ async function oha(target, { seconds, posts: fromFile }) {
     p99: Math.round(lat.p99 * 100000) / 100,
     non2xx: all - ok,
     errors,
+    requests: ok,
   };
 }
 
@@ -209,7 +265,7 @@ async function ohaWithPeak(pgid, url, opts) {
 }
 
 console.log(`${label}: ${fw.label} ${version} · ${pages} pages · ${islands} islands · ${RUNS} runs · ${machine} · ${commit}`);
-generate(fwName, { pages, islands, mode: "server", isr });
+generate(fwName, { pages, islands, mode: "server", isr, v018 });
 for (const c of fw.caches) spawnSync("rm", ["-rf", path.join(dir, c)]);
 const build = spawnSync(bin, fw.serverBuild, { cwd: dir, env: { ...env, NODE_ENV: "production" }, encoding: "utf8", maxBuffer: 256 << 20 });
 if (build.status !== 0) {
@@ -229,7 +285,7 @@ for (let run = 1; run <= RUNS; run++) {
     let startMs = null;
     while (now() - t0 < 60000) {
       try {
-        const r = await get(undefined, "/");
+        const r = await get(undefined, HOME_PATH);
         if (r.status === 200 && r.body.includes(MARK_HOME)) {
           startMs = Math.round(now() - t0);
           break;
@@ -238,8 +294,17 @@ for (let run = 1; run <= RUNS; run++) {
       await sleep(20);
     }
     if (startMs == null) throw new Error(`${fw.label} server did not start:\n${stderr.slice(-2000)}`);
-    const check = await get(undefined, `/posts/${pool[0]}`);
-    if (check.status !== 200 || !check.body.includes(MARK_POST)) throw new Error(`${fw.label}: post page did not render`);
+    if (fixedCookie) cookie = fixedCookie;
+    else if (v018.session && sendSessionCookie) {
+      cookie = null;
+      const s = await get(undefined, `${BASE}/session-start`);
+      const set = [].concat(s.headers["set-cookie"] ?? []).find((c) => c.startsWith("bench_session="));
+      if (s.status !== 200 || !set) throw new Error(`${fw.label}: /session-start set no session cookie (${s.status})`);
+      cookie = set.split(";")[0];
+    }
+    const check = await get(undefined, `${BASE}/posts/${pool[0]}`);
+    if (check.status !== 200 || !check.body.includes(MARK_POST)) throw new Error(`${fw.label}: post page did not render (${check.status})`);
+    if (v018.rules && check.headers["x-bench-rule"] !== "post") throw new Error(`${fw.label}: the headers rule did not apply to the post page`);
     const api = await get(undefined, API_PATH);
     let hits = null;
     try {
@@ -256,7 +321,7 @@ for (let run = 1; run <= RUNS; run++) {
     const ttfb = [];
     const total = [];
     for (let i = 0; i < 300; i++) {
-      const r = await get(agent, `/posts/${pool[i % pool.length]}`);
+      const r = await get(agent, `${BASE}/posts/${pool[i % pool.length]}`);
       if (r.status !== 200) throw new Error(`${fw.label}: status ${r.status} in the latency loop`);
       ttfb.push(r.ttfb);
       total.push(r.total);
@@ -264,16 +329,16 @@ for (let run = 1; run <= RUNS; run++) {
     agent.destroy();
     const latency = { ttfbP50: pct(ttfb, 0.5), ttfbP99: pct(ttfb, 0.99), totalP50: pct(total, 0.5), totalP99: pct(total, 0.99) };
 
-    const post = await ohaWithPeak(pgid, null, { seconds: 10, posts: true });
+    const post = await ohaCpu(pgid, null, { seconds: 10, posts: true }, (t, o) => ohaWithPeak(pgid, t, o));
     await sleep(1000);
-    const home = await oha(`http://127.0.0.1:${PORT}/`, { seconds: 10 });
+    const home = await ohaCpu(pgid, `http://127.0.0.1:${PORT}${HOME_PATH}`, { seconds: 10 });
     await sleep(1000);
-    const apiRun = await oha(`http://127.0.0.1:${PORT}${API_PATH}`, { seconds: 10 });
+    const apiRun = await ohaCpu(pgid, `http://127.0.0.1:${PORT}${API_PATH}`, { seconds: 10 });
 
     const row = { run, startMs, idleMB, peakMB: post.peakMB, latency, post, home, api: apiRun };
     record(row);
     console.log(
-      `  run ${run}: start ${startMs} ms · idle ${idleMB} MB · peak ${post.peakMB} MB · ttfb p50 ${latency.ttfbP50} ms (p99 ${latency.ttfbP99}) · total p50 ${latency.totalP50} ms · post ${post.rps} req/s (p99 ${post.p99} ms, non-2xx ${post.non2xx}) · / ${home.rps} req/s (p99 ${home.p99} ms, non-2xx ${home.non2xx}) · api ${apiRun.rps} req/s (p99 ${apiRun.p99} ms)`,
+      `  run ${run}: start ${startMs} ms · idle ${idleMB} MB · peak ${post.peakMB} MB · ttfb p50 ${latency.ttfbP50} ms (p99 ${latency.ttfbP99}) · total p50 ${latency.totalP50} ms · post ${post.rps} req/s (p99 ${post.p99} ms, non-2xx ${post.non2xx}, cpu ${post.cpuUsPerReq} µs/req) · / ${home.rps} req/s (p99 ${home.p99} ms, non-2xx ${home.non2xx}, cpu ${home.cpuUsPerReq} µs/req) · api ${apiRun.rps} req/s (p99 ${apiRun.p99} ms, cpu ${apiRun.cpuUsPerReq} µs/req)`,
     );
   } finally {
     try {

@@ -22,7 +22,7 @@ export const FRAMEWORKS = {
     staticOut: "static-out",
     serverBuild: ["build", "."],
     caches: ["dist", "static-out", ".nowaki", "node_modules/.cache"],
-    generated: ["lib", "routes", "islands"],
+    generated: ["lib", "routes", "islands", "nowaki.config.mjs", "session.ts", "env.ts"],
   },
   astro: {
     label: "Astro",
