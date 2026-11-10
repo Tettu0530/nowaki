@@ -1,5 +1,5 @@
 {
-  "about": "Routing rules (normalized routing.json) and requests with the expected outcome. Read by crates/nowaki-core/tests/rules.rs (Rust) and scripts/rules-test.mjs (server/rules.mjs); both must agree. expect: {redirect:{status,location}} | {rewrite:path} | {pass:path} | {notFound:true}. headers, when present, is the ruleHeaders / Rules::headers result. A case with error:true must fail to compile.",
+  "about": "Routing rules (normalized routing.json) and requests with the expected outcome. Read by crates/nowaki-core/tests/rules.rs (Rust) and scripts/rules-test.mjs (server/rules.mjs); both must agree. expect: {redirect:{status,location}} | {rewrite:path} | {pass:path} | {notFound:true}. headers, when present, is the ruleHeaders / Rules::headers result. A case with error:true must fail to compile. negotiate, when present, is negotiateLocale / Rules::negotiate for the request with its acceptLanguage and cookie headers: null (no detection), {stay:true}, or {redirect:{status,location}}.",
   "cases": [
     {
       "name": "empty config passes everything through",
@@ -242,6 +242,109 @@
         { "path": "/c/", "expect": { "redirect": { "status": 307, "location": "/d" } } }
       ]
     },
+    {
+      "name": "locale detection: Accept-Language q-values, subtags, wildcard",
+      "config": {"i18n": {"locales": ["en", "ja", "pt-BR", "zh-TW"], "defaultLocale": "en", "prefixDefaultLocale": false, "detect": true}},
+      "requests": [
+        {"path": "/", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "ja", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"path": "/", "acceptLanguage": "ja-JP,ja;q=0.9,en;q=0.8", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"path": "/", "acceptLanguage": "en-US,en;q=0.9,ja;q=0.8", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "fr-FR, ja;q=0.5", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"path": "/", "acceptLanguage": "ja;q=0.4, en;q=0.6", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "en;q=0.5, ja;q=0.5, ja-JP", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"path": "/", "acceptLanguage": "pt", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/pt-BR"}}},
+        {"path": "/", "acceptLanguage": "pt-PT", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "ZH-tw", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/zh-TW"}}},
+        {"path": "/", "acceptLanguage": "zh", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/zh-TW"}}},
+        {"path": "/", "acceptLanguage": "zh-CN", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "*", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "*;q=0.5, ja;q=0.6", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"path": "/", "acceptLanguage": "ja;q=0, *", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "en;q=0, *", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"path": "/", "acceptLanguage": "fr, de", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "ja ; q=0.8", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"path": "/", "acceptLanguage": "ja;Q=1.000", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"path": "/", "acceptLanguage": " , ,ja", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"path": "/", "acceptLanguage": "ja;q=2", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "ja;q=0.5000", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "ja;q=.5", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "ja;q=0.5;x=1", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "ja;level=1", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "j@", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "abcdefghi-x", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "ja_JP", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "1a", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "xx-abcdefgh,ja", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"method": "HEAD", "path": "/", "acceptLanguage": "ja", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"method": "POST", "path": "/", "acceptLanguage": "ja", "expect": {"pass": "/"}, "negotiate": null},
+        {"path": "/about", "acceptLanguage": "ja", "expect": {"pass": "/about"}, "negotiate": null},
+        {"path": "/ja", "acceptLanguage": "en", "expect": {"pass": "/ja"}, "negotiate": null},
+        {"path": "//", "acceptLanguage": "ja", "expect": {"pass": "//"}, "negotiate": null}
+      ]
+    },
+    {
+      "name": "locale detection: the nowaki_locale cookie",
+      "config": {"i18n": {"locales": ["en", "ja", "pt-BR"], "defaultLocale": "en", "detect": true}},
+      "requests": [
+        {"path": "/", "cookie": "nowaki_locale=ja", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"path": "/", "acceptLanguage": "ja", "cookie": "a=1; nowaki_locale=en", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "en", "cookie": "nowaki_locale=pt-BR; nowaki_locale=ja", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/pt-BR"}}},
+        {"path": "/", "acceptLanguage": "ja", "cookie": "nowaki_locale=fr", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"path": "/", "cookie": "nowaki_locale=JA", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "en", "cookie": "nowaki_locale=", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "ja", "cookie": "x_nowaki_locale=en", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"path": "/", "cookie": " nowaki_locale = ja ;x=1", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"path": "/", "acceptLanguage": "en", "cookie": "nowaki_locale=%2F%2Fevil.com", "expect": {"pass": "/"}, "negotiate": {"stay": true}}
+      ]
+    },
+    {
+      "name": "locale detection: basePath and trailingSlash always",
+      "config": {"basePath": "/app", "trailingSlash": "always", "i18n": {"locales": ["en", "ja"], "defaultLocale": "en", "detect": true}},
+      "requests": [
+        {"path": "/app/", "acceptLanguage": "ja", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/app/ja/"}}},
+        {"path": "/app", "acceptLanguage": "ja", "expect": {"redirect": {"status": 308, "location": "/app/"}}, "negotiate": {"redirect": {"status": 307, "location": "/app/ja/"}}},
+        {"path": "/app/", "acceptLanguage": "en", "expect": {"pass": "/"}, "negotiate": {"stay": true}},
+        {"path": "/", "acceptLanguage": "ja", "expect": {"notFound": true}, "negotiate": null},
+        {"path": "/app/about/", "acceptLanguage": "ja", "expect": {"pass": "/about/"}, "negotiate": null},
+        {"path": "/apple", "acceptLanguage": "ja", "expect": {"notFound": true}, "negotiate": null}
+      ]
+    },
+    {
+      "name": "locale detection: basePath and trailingSlash never",
+      "config": {"basePath": "/app", "trailingSlash": "never", "i18n": {"locales": ["en", "ja"], "defaultLocale": "en", "detect": true}},
+      "requests": [
+        {"path": "/app", "acceptLanguage": "ja", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/app/ja"}}},
+        {"path": "/app/", "acceptLanguage": "ja", "expect": {"redirect": {"status": 308, "location": "/app"}}, "negotiate": {"redirect": {"status": 307, "location": "/app/ja"}}}
+      ]
+    },
+    {
+      "name": "locale detection: prefixDefaultLocale redirects the default too",
+      "config": {"i18n": {"locales": ["en", "ja"], "defaultLocale": "en", "prefixDefaultLocale": true, "detect": true}},
+      "requests": [
+        {"path": "/", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/en"}}},
+        {"path": "/", "acceptLanguage": "ja", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/ja"}}},
+        {"path": "/", "acceptLanguage": "ja", "cookie": "nowaki_locale=en", "expect": {"pass": "/"}, "negotiate": {"redirect": {"status": 307, "location": "/en"}}},
+        {"path": "/en", "acceptLanguage": "ja", "expect": {"pass": "/en"}, "negotiate": null}
+      ]
+    },
+    {
+      "name": "locale detection is opt-in",
+      "config": {"i18n": {"locales": ["en", "ja"], "defaultLocale": "en", "prefixDefaultLocale": false, "detect": false}},
+      "requests": [
+        {"path": "/", "acceptLanguage": "ja", "expect": {"pass": "/"}, "negotiate": null}
+      ]
+    },
+    {
+      "name": "no i18n: no detection",
+      "config": {"redirects": [{"source": "/a", "destination": "/b", "status": 307}]},
+      "requests": [
+        {"path": "/", "acceptLanguage": "ja", "expect": {"pass": "/"}, "negotiate": null}
+      ]
+    },
+    {"name": "error: detection with a defaultLocale outside locales", "config": {"i18n": {"locales": ["en", "ja"], "defaultLocale": "fr", "detect": true}}, "error": true},
+    {"name": "error: detection with a locale that isn't a plain tag", "config": {"i18n": {"locales": ["en", "ja/../x"], "defaultLocale": "en", "detect": true}}, "error": true},
     { "name": "error: destination param missing from source", "config": { "redirects": [{ "source": "/a/[x]", "destination": "/b/[y]", "status": 307 }] }, "error": true },
     { "name": "error: catch-all used as a single param", "config": { "rewrites": [{ "source": "/a/[...x]", "destination": "/b/[x]" }] }, "error": true },
     { "name": "error: catch-all not last", "config": { "redirects": [{ "source": "/a/[...x]/b", "destination": "/c", "status": 307 }] }, "error": true },

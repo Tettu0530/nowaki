@@ -16,8 +16,14 @@ export interface CollectionDefinition<S extends StandardSchemaV1 = StandardSchem
 
 export interface ContentEntry<D = unknown> {
   collection: string;
-  /** Path under the collection without its extension: `posts/hello`. */
+  /** Path under the collection without its extension: `posts/hello`. With i18n, without the locale directory. */
   slug: string;
+  /**
+   * With `i18n` in nowaki.config: the locale of the collection's first-level directory the entry
+   * is in (`content/blog/ja/hello.md` → `"ja"`). Undefined for an entry outside a locale directory,
+   * which belongs to every locale.
+   */
+  locale?: string;
   /** The source file, relative to the app root. */
   file: string;
   /** The validated frontmatter or data. */
@@ -54,11 +60,29 @@ export type CollectionData<C> = C extends { schema?: infer S }
 export declare function defineCollection<S extends StandardSchemaV1>(
   def: CollectionDefinition<S>,
 ): CollectionDefinition<S>;
+export interface CollectionQuery<D> {
+  /**
+   * i18n: the entries of this locale (and those outside any locale directory), or `"*"` for every
+   * entry. Defaults to the current request's locale (`getLocale()`); without i18n, every entry.
+   */
+  locale?: string;
+  filter?: (entry: ContentEntry<D>) => boolean;
+}
+
+/**
+ * Every entry of a collection, sorted by slug. With i18n, only the current locale's entries and
+ * the locale-less ones, unless `{ locale }` says otherwise.
+ */
 export declare function getCollection<K extends string>(
   name: K,
-  filter?: (entry: ContentEntry<DataOf<K>>) => boolean,
+  filter?: ((entry: ContentEntry<DataOf<K>>) => boolean) | CollectionQuery<DataOf<K>>,
 ): Promise<ContentEntry<DataOf<K>>[]>;
+/**
+ * One entry by slug. With i18n, the current locale's (or `{ locale }`'s), falling back to the
+ * entry outside any locale directory.
+ */
 export declare function getEntry<K extends string>(
   name: K,
   slug: string,
+  options?: { locale?: string },
 ): Promise<ContentEntry<DataOf<K>> | undefined>;

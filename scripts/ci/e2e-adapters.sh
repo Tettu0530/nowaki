@@ -62,6 +62,10 @@ test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3310/og/intro.jp
 # route groups on the node adapter
 curl -sf http://127.0.0.1:3310/pricing | grep -q '<div data-group="marketing"><main'
 curl -s -D - -o /dev/null http://127.0.0.1:3310/pricing | grep -qi '^x-route-group: marketing'
+# parallel routes on the node adapter
+curl -sf http://127.0.0.1:3310/photos/1 | grep -q '<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><aside id="photo-modal"'
+curl -sf -H 'x-nowaki-intercept: /photos/@modal' http://127.0.0.1:3310/photos/1 | grep -q '<aside id="photo-intercepted">intercepted 1</aside>$'
+curl -sf http://127.0.0.1:3310/photos | grep -q '<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><p id="modal-default">'
 # fonts on the node adapter (dist/server/fonts.json)
 curl -sf http://127.0.0.1:3310/about | grep -qE '<link rel="stylesheet" href="/_nowaki/fonts\.[0-9a-f]+\.css" />'
 # MDX entries render from their compiled module on the node adapter
@@ -123,6 +127,10 @@ test -f examples/hello/dist/static/index.html
 test -f examples/hello/dist/static/about/index.html
 grep -q '<div data-group="marketing"><main' examples/hello/dist/static/pricing/index.html
 ! test -e 'examples/hello/dist/static/(marketing)'
+# parallel routes in static output: slots render into the pages; slot files are not pages
+grep -q '<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><p id="modal-default">' examples/hello/dist/static/photos/index.html
+grep -q '<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><aside id="photo-modal"' examples/hello/dist/static/photos/1/index.html
+! test -e 'examples/hello/dist/static/photos/@modal'
 # dynamic routes listed by `export const staticPaths` (including a catch-all), and 404.html
 grep -q 'Post: hello' examples/hello/dist/static/blog/hello/index.html
 grep -q 'Post: nowaki' examples/hello/dist/static/blog/nowaki/index.html
@@ -176,6 +184,11 @@ grep -q 'hello from public' "examples/hello/dist/static/media/hello world.txt"
 # nowaki.config redirects and rewrites become _redirects rules
 grep -qx '/old-docs/\* /:splat 308' examples/hello/dist/static/_redirects
 grep -qx '/p/:slug /blog/:slug 200' examples/hello/dist/static/_redirects
+# nowaki.config headers become extra rules in _headers (after security defaults)
+grep -q '/docs/\*' examples/hello/dist/static/_headers
+grep -qi 'x-hello-routing: config' examples/hello/dist/static/_headers
+grep -q '/api/\*' examples/hello/dist/static/_headers
+grep -qi 'cache-control: no-store' examples/hello/dist/static/_headers
 test -f examples/hello/dist/static/.well-known/security.txt
 ! test -e examples/hello/dist/static/.hidden
 # cloudflare (edge) adapter: generates a bundled fetch-handler worker + wrangler config
@@ -220,3 +233,9 @@ kill $VERCEL_PID
 # nowaki.config redirects / rewrites / headers / basePath / trailingSlash on the node, cloudflare,
 # vercel and static adapters (a generated app; the servers listen on 3313 and 3314)
 node scripts/rules-e2e.mjs node cloudflare vercel static --port 3313
+# nowaki.config i18n on the node and cloudflare adapters and in static output (listens on 3315,
+# 3316 for i18n + basePath + trailingSlash "never" + a slot, and 3317 for locale detection)
+node scripts/i18n-e2e.mjs node cloudflare static --port 3315
+# examples/gallery on the node adapter (3331) and the cloudflare worker, and what static output
+# can serve of it
+node scripts/gallery-e2e.mjs node cloudflare static --port 3331

@@ -127,15 +127,17 @@ Routing features that larger apps and existing Next.js / Remix users expect.
 
 **Exit criteria**: a photo gallery opens a photo in a modal on client navigation and as a full page on reload (intercepting + parallel routes). The same app is served under a `basePath` in two locales, with a signed-in session, and fails to start when a required env var is missing.
 
-- [ ] Markdoc as an official plugin (it runs on the Node side through the plugin host) (moved from v0.17)
-- [ ] Remote images in `<Image>` with an allow-list (fetched and optimized at build time) (moved from v0.17)
-- [ ] Route groups: `(group)` directories that share layouts without adding a URL segment
-- [ ] Parallel routes (`@slot` directories rendered side by side in a layout) and intercepting routes (`(.)photo`, for modals)
-- [ ] Config-level `redirects`, `rewrites`, and `headers` in `nowaki.config.mjs`, applied by the Rust front and every adapter (`_redirects` / `_headers` / Vercel config where the host supports them)
-- [ ] `basePath`, and a `trailingSlash` policy (`"never"` / `"always"` / `"ignore"`, with redirects)
-- [ ] i18n routing: locale prefixes, a default locale, optional `Accept-Language` negotiation, `getLocale()`, `hreflang`, and per-locale content collections
-- [ ] Typed env schema: declare server and `PUBLIC_` variables with a Standard Schema; validated at build and at startup (a missing or malformed value fails fast), with generated types for `import.meta.env` and a server-only `env` that the client build refuses to import
-- [ ] Sessions: `ctx.session` (and `getContext().session`) backed by a signed and encrypted cookie by default, or a pluggable store; rotation on sign-in, expiry, and the same CSRF rules as actions
+**Status**: every item below is on main for 0.18.0. The exit criteria are met by [examples/gallery](examples/gallery) (a modal photo gallery under `/gallery` in English and Japanese, with sign-in and an `env.ts`). CI checks it on `nowaki start`, `nowaki dev`, the node adapter, and the Cloudflare worker (`scripts/gallery-e2e.mjs`), and in Chrome (`scripts/gallery-browser-test.mjs`). Static output serves the pages, redirects, and headers, but not sessions or `Accept-Language` detection.
+
+- [x] Markdoc as an official plugin (it runs on the Node side through the plugin host) (moved from v0.17)
+- [x] Remote images in `<Image>` with an allow-list (fetched and optimized at build time) (moved from v0.17)
+- [x] Route groups: `(group)` directories that share layouts without adding a URL segment
+- [x] Parallel routes (`@slot` directories rendered side by side in a layout) and intercepting routes (`(.)photo`, for modals)
+- [x] Config-level `redirects`, `rewrites`, and `headers` in `nowaki.config.mjs`, applied by the Rust front and every adapter (`_redirects` / `_headers` / Vercel config where the host supports them)
+- [x] `basePath`, and a `trailingSlash` policy (`"never"` / `"always"` / `"ignore"`, with redirects)
+- [x] i18n routing: locale prefixes, a default locale, optional `Accept-Language` negotiation, `getLocale()`, `hreflang`, and per-locale content collections
+- [x] Typed env schema: declare server and `PUBLIC_` variables with a Standard Schema; validated at build and at startup (a missing or malformed value fails fast), with generated types for `import.meta.env` and a server-only `env` that the client build refuses to import
+- [x] Sessions: `ctx.session` (and `getContext().session`) backed by a signed and encrypted cookie by default, or a pluggable store; rotation on sign-in, expiry, and the same CSRF rules as actions
 
 ### v0.19 "Bora": Production and dev experience
 Control over what is cached, smooth navigation, visibility into a running app, and edits that keep their state.

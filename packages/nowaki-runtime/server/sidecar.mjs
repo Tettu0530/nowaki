@@ -9,6 +9,7 @@ import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveSite } from "./seo.mjs";
+import { compileI18n } from "./i18n.mjs";
 import { loadEnv } from "./env.mjs";
 import { requestOrigin } from "./origin.mjs";
 
@@ -106,6 +107,19 @@ async function ensureSession(version) {
   const mod = await env.importModule(sessionFile, version);
   configureSessions({ config: sessionConfigOf(mod), secret: devSessionSecret });
   sessionVersion = version;
+}
+
+// nowaki.config basePath: `nowaki dev` writes .nowaki/routing.json before it serves, after this
+// process starts, so it's read on the first request.
+const { setBasePath } = await import("./base-path.mjs");
+let baseRead = false;
+function ensureBasePath() {
+  baseRead = true;
+  try {
+    setBasePath(JSON.parse(readFileSync(path.join(appRoot, ".nowaki/routing.json"), "utf8")).basePath);
+  } catch {
+    setBasePath("");
+  }
 }
 
 const RUST = `http://127.0.0.1:${process.env.NOWAKI_RUST_PORT ?? "3000"}`;
@@ -212,19 +226,20 @@ async function devInfo(version) {
   return { routes, conventions, islands };
 }
 
-// NOWAKI_SITE, else `site` in nowaki.config (read once; restart dev after changing it).
-const devSite = await (async () => {
+// NOWAKI_SITE, else `site` in nowaki.config, and its `trailingSlash` (read once; restart dev
+// after changing them).
+const devConfig = await (async () => {
   for (const name of ["nowaki.config.mjs", "nowaki.config.js"]) {
     const p = path.join(appRoot, name);
     if (!existsSync(p)) continue;
     try {
       const mod = await import(pathToFileURL(p).href);
-      return (mod.default ?? mod.config ?? {}).site;
+      return mod.default ?? mod.config ?? {};
     } catch (err) {
       console.error(`[nowaki] ${name}: ${err?.message ?? err}`);
     }
   }
-  return undefined;
+  return {};
 })();
 
 // Self-hosted fonts in dev: `nowaki dev` builds them into .nowaki/fonts in the background at
@@ -248,11 +263,27 @@ function devFonts() {
   return fontsCache.value;
 }
 
+// i18n from .nowaki/routing.json, which `nowaki dev` writes before serving (a change needs a
+// restart, like the rest of the routing config): read on the first request.
+let devI18n;
+function readDevI18n() {
+  try {
+    return compileI18n(JSON.parse(readFileSync(path.join(appRoot, ".nowaki/routing.json"), "utf8")));
+  } catch {
+    return null;
+  }
+}
+
 const env = {
   dev: true,
-  site: resolveSite(devSite),
+  site: resolveSite(devConfig.site),
+  trailingSlash: devConfig.trailingSlash,
   get fonts() {
     return devFonts();
+  },
+  get i18n() {
+    if (devI18n === undefined) devI18n = readDevI18n();
+    return devI18n;
   },
   // dev rescans on every request (picks up file changes)
   routeTable: () => scanRoutes(appRoot),
@@ -356,6 +387,7 @@ const server = createServer(async (req, res) => {
   }
   try {
     const version = String(req.headers["x-nowaki-ssr-version"] ?? "0");
+    if (!baseRead) ensureBasePath();
     if (envReady !== true) await ensureEnv(version);
     await ensureContent(version);
     await ensureSession(version);

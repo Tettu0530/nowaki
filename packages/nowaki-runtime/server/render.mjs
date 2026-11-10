@@ -98,11 +98,11 @@ ${devScripts(scripts)}
 }
 
 // Like production (document.mjs), a page without islands gets no islands runtime and so no SPA
-// router: links do full loads in dev too.
+// router (links do full loads in dev too), unless a slot on it intercepts URLs (`meta.router`).
 export function renderDocument({ mod, body, meta }) {
   const { head, tail } = renderShell(
     { mod, meta },
-    { islands: body.includes("<nowaki-island"), live: body.includes("<nowaki-live") },
+    { islands: meta?.router === true || body.includes("<nowaki-island"), live: body.includes("<nowaki-live") },
   );
   return `${head}${body}${tail}`;
 }

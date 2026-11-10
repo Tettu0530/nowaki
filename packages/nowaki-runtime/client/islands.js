@@ -3,6 +3,12 @@
 
 import { h, hydrate, render } from "preact";
 
+// nowaki.config basePath for navigation helpers in islands (<Link>, server/base-path.mjs). The
+// build inlines BASE_URL, so an app without a base keeps none of this.
+if (import.meta.env.BASE_URL !== "/" && typeof window !== "undefined") {
+  window.__nowakiBase = import.meta.env.BASE_URL.slice(0, -1);
+}
+
 // The CSP nonce of the initial response (NOWAKI_CSP). The router and CSS shims stamp it on <style>
 // they insert; read once because client navigation may replace the nonced <script>.
 if (typeof document !== "undefined" && !window.__nowakiNonce) {
@@ -85,7 +91,7 @@ document.addEventListener("submit", async (ev) => {
   let result;
   let error;
   try {
-    const res = await fetch("/__nowaki/fn", {
+    const res = await fetch(import.meta.env.BASE_URL + "__nowaki/fn", {
       method: "POST",
       // x-nowaki-rpc is required by the server's CSRF gate (functions.mjs).
       headers: { "content-type": "application/json", "x-nowaki-rpc": "1" },
@@ -119,6 +125,9 @@ if (typeof document !== "undefined") {
   if (routerSrc) {
     let loading = null;
     const load = () => (loading ??= import(routerSrc).catch(() => {}));
+    // A reload of an entry the router made (or keyed): back / forward to the router's other
+    // entries only change the URL, so the router has to be there to load them.
+    if (history.state?.nowaki) load();
     // Same rules as the router's own link check (router.js internalAnchor).
     const link = (target) => {
       const a = target?.closest?.("a");

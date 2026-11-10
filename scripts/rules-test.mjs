@@ -5,7 +5,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { applyRules, compileRules, ruleHeaders } from "../packages/nowaki-runtime/server/rules.mjs";
+import { applyRules, compileRules, negotiateLocale, ruleHeaders } from "../packages/nowaki-runtime/server/rules.mjs";
 import { normalizeConfig } from "../packages/nowaki-runtime/server/site-config.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -34,11 +34,31 @@ for (const c of fixture.cases) {
     const method = r.method ?? "GET";
     eq(applyRules(rules, method, r.path), r.expect, `${c.name}: ${method} ${r.path}`);
     if (r.headers) eq(ruleHeaders(rules, r.path), r.headers, `${c.name}: headers ${r.path}`);
+    if ("negotiate" in r) {
+      eq(
+        negotiateLocale(rules, method, r.path, r.acceptLanguage, r.cookie),
+        r.negotiate,
+        `${c.name}: negotiate ${method} ${r.path} ${JSON.stringify(r.acceptLanguage ?? null)} ${JSON.stringify(r.cookie ?? null)}`,
+      );
+    }
   }
+}
+
+// Accept-Language bounds (the Rust side has the same unit test).
+{
+  const rules = compileRules({ i18n: { locales: ["en", "ja"], defaultLocale: "en", detect: true } });
+  const neg = (al) => negotiateLocale(rules, "GET", "/", al);
+  eq(neg("ja"), { redirect: { status: 307, location: "/ja" } }, "detect: ja");
+  eq(neg("fr,".repeat(32) + "ja"), { stay: true }, "detect: a range past the 32nd is never read");
+  eq(neg("fr,".repeat(31) + "ja"), { redirect: { status: 307, location: "/ja" } }, "detect: the 32nd range is read");
+  eq(neg("ja," + "x".repeat(4096)), { stay: true }, "detect: an oversized header counts as absent");
+  eq(applyRules(rules, "GET", "/a/"), { pass: "/a/" }, "detect alone: applyRules passes through");
 }
 
 eq(compileRules({}), null, "an empty config compiles to nothing");
 eq(compileRules({ i18n: { locales: ["en"], defaultLocale: "en" } }), null, "i18n alone adds no per-request rule");
+eq(compileRules({ i18n: { locales: ["en"], defaultLocale: "en", detect: false } }), null, "i18n without detect adds no per-request rule");
+eq(compileRules({ i18n: { locales: ["en", "ja"], defaultLocale: "en", detect: true } }) !== null, true, "i18n.detect compiles to rules");
 
 // nowaki.config normalization: what routing.json gets.
 const routing = async (config) => (await normalizeConfig(config)).routing;

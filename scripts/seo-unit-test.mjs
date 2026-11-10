@@ -1,5 +1,8 @@
 // Unit checks for server/seo.mjs (meta tags, sitemap, robots, site URL). No server needed.
-import { mergeMeta, normalizeSite, robotsTxt, seoTags, sitemapXml, staticPagePath } from "../packages/nowaki-runtime/server/seo.mjs";
+import { mergeMeta, normalizeSite, pagePath, robotsTxt, seoTags, sitemapXml, staticPagePath } from "../packages/nowaki-runtime/server/seo.mjs";
+import { basePath, setBasePath, withBase } from "../packages/nowaki-runtime/server/base-path.mjs";
+import { Link } from "../packages/nowaki-runtime/navigation.js";
+import { makeContext } from "../packages/nowaki-runtime/server/context.mjs";
 
 let failures = 0;
 const check = (name, ok) => {
@@ -48,7 +51,53 @@ check("sitemap keeps encoded paths", map.includes("https://example.com/x%20y"));
 check("static output: page URLs get the slash their index.html implies", staticPagePath("/docs/a") === "/docs/a/" && staticPagePath("/") === "/" && staticPagePath("/feed.xml") === "/feed.xml");
 check("static output: canonical with a slash", seoTags({ canonical: true }, { pathname: "/docs/a", site: "https://e.x", staticOutput: true }).includes('href="https://e.x/docs/a/"'));
 check("static output: sitemap with slashes", sitemapXml("https://e.x", ["/", "/docs/a"], { staticOutput: true }).includes("<loc>https://e.x/docs/a/</loc>"));
+const canon = (pathname, opts) => seoTags({ canonical: true, openGraph: {} }, { pathname, site: "https://e.x", ...opts });
+check("ignore on a server: canonical keeps the request's form", canon("/a").includes('href="https://e.x/a"') && canon("/a/").includes('href="https://e.x/a/"'));
+check("ignore: sitemap keeps route paths", sitemapXml("https://e.x", ["/a"]).includes("<loc>https://e.x/a</loc>"));
+check("pagePath: never drops the slash, keeps /", pagePath("/a/", "never") === "/a" && pagePath("/", "never") === "/" && pagePath("/a", "never", true) === "/a");
+check("pagePath: always adds it, not after a file name", pagePath("/a", "always") === "/a/" && pagePath("/feed.xml", "always") === "/feed.xml" && pagePath("/", "always") === "/");
+check("pagePath: ignore keeps it on a server, static output adds it", pagePath("/a") === "/a" && pagePath("/a/") === "/a/" && pagePath("/a", "ignore", true) === "/a/");
+check("never: canonical and og:url without the slash, also in static output", canon("/docs/a/", { trailingSlash: "never" }).includes('href="https://e.x/docs/a"') && canon("/docs/a", { trailingSlash: "never", staticOutput: true }).includes('content="https://e.x/docs/a"'));
+check("always: canonical with the slash on a server", canon("/docs/a", { trailingSlash: "always" }).includes('href="https://e.x/docs/a/"'));
+check("never: sitemap without slashes in static output", sitemapXml("https://e.x", ["/", "/docs/a"], { trailingSlash: "never", staticOutput: true }).includes("<loc>https://e.x/docs/a</loc>"));
+check("always: sitemap with slashes on a server", sitemapXml("https://e.x", ["/", "/docs/a"], { trailingSlash: "always" }).includes("<loc>https://e.x/docs/a/</loc>"));
 check("robots.txt points at the sitemap", robotsTxt("https://example.com") === "User-agent: *\nAllow: /\n\nSitemap: https://example.com/sitemap.xml\n");
+
+// basePath (server/base-path.mjs): canonical, Open Graph and sitemap URLs carry it, and so do
+// <Link> and ctx.redirect.
+check("no basePath: withBase is the identity", withBase("/about") === "/about" && basePath() === "");
+check("no basePath: Link renders the href as written", Link({ href: "/about" }).props.href === "/about");
+setBasePath("/app");
+check("withBase prefixes root-relative paths", withBase("/about") === "/app/about" && withBase("/") === "/app" && withBase("/?q=1") === "/app?q=1" && withBase("/#top") === "/app#top");
+check("withBase leaves the base, URLs and relative paths alone",
+  withBase("/app") === "/app" && withBase("/app/x") === "/app/x" && withBase("/app?x") === "/app?x" && withBase("https://e.x/a") === "https://e.x/a" && withBase("//e.x/a") === "//e.x/a" && withBase("/\\e.x") === "/\\e.x" && withBase("a/b") === "a/b");
+check("withBase: a path that only starts like the base still gets it", withBase("/apple") === "/app/apple");
+check("basePath: canonical: true keeps the request path (it has the base)", seoTags({ canonical: true }, { pathname: "/app/docs", site: "https://e.x" }).includes('href="https://e.x/app/docs"'));
+check("basePath: a canonical path and og:image get the base", (() => {
+  const t = seoTags({ canonical: "/docs", openGraph: { image: "/og.png", url: "https://other.x/p" } }, { pathname: "/app/docs", site: "https://e.x" });
+  return t.includes('href="https://e.x/app/docs"') && t.includes('content="https://e.x/app/og.png"') && t.includes('content="https://other.x/p"');
+})());
+check("basePath: sitemap URLs get the base", sitemapXml("https://e.x", ["/", "/a"]).includes("<loc>https://e.x/app</loc>") && sitemapXml("https://e.x", ["/a"]).includes("<loc>https://e.x/app/a</loc>"));
+check("basePath: robots.txt points at the sitemap under the base", robotsTxt("https://e.x").includes("Sitemap: https://e.x/app/sitemap.xml"));
+check("basePath: Link prefixes, basePath={false} keeps the href", Link({ href: "/about" }).props.href === "/app/about" && Link({ href: "/about", basePath: false }).props.href === "/about" && !("basePath" in Link({ href: "/x", basePath: false }).props));
+{
+  const ctx = makeContext({ url: new URL("http://x/app/a") });
+  check("basePath: ctx.redirect prefixes a root-relative path", ctx.redirect("/login").headers.location === "/app/login" && ctx.redirect("/login", 303).status === 303);
+  check("basePath: ctx.redirect leaves prefixed paths and URLs, and opts out", ctx.redirect("/app/x").headers.location === "/app/x" && ctx.redirect("https://e.x/").headers.location === "https://e.x/" && ctx.redirect("/x", { basePath: false }).headers.location === "/x" && ctx.redirect("/x", 307, { basePath: false }).status === 307);
+}
+// basePath + trailingSlash + i18n alternates together in the sitemap: the base, then the policy,
+// on every loc and xhtml:link (the base's root too).
+{
+  const alternates = () => new Map([["/a", [["en", "/a"], ["ja", "/ja/a"], ["x-default", "/a"]]], ["/ja/a", [["en", "/a"], ["ja", "/ja/a"], ["x-default", "/a"]]]]);
+  const always = sitemapXml("https://e.x", ["/", "/a", "/ja/a"], { trailingSlash: "always", alternates });
+  check("basePath + always: sitemap root is the base with a slash", always.includes("<loc>https://e.x/app/</loc>"), always);
+  check("basePath + always: locs and alternates get base and slash", always.includes("<loc>https://e.x/app/ja/a/</loc>") && always.includes('hreflang="en" href="https://e.x/app/a/"') && always.includes('hreflang="ja" href="https://e.x/app/ja/a/"'), always);
+  const never = sitemapXml("https://e.x", ["/", "/a", "/ja/a"], { trailingSlash: "never", staticOutput: true, alternates });
+  check("basePath + never (static): no slashes anywhere", never.includes("<loc>https://e.x/app</loc>") && never.includes('hreflang="ja" href="https://e.x/app/ja/a"') && !/\/<\/loc>|\/"\/>/.test(never), never);
+  const ignoreStatic = sitemapXml("https://e.x", ["/", "/a"], { staticOutput: true });
+  check("basePath + ignore (static): slashes like index.html", ignoreStatic.includes("<loc>https://e.x/app/</loc>") && ignoreStatic.includes("<loc>https://e.x/app/a/</loc>"), ignoreStatic);
+}
+setBasePath("");
 
 console.log(failures === 0 ? "\nSEO UNIT TEST PASSED" : `\nSEO UNIT TEST FAILED (${failures})`);
 process.exit(failures === 0 ? 0 : 1);

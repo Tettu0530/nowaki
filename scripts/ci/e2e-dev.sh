@@ -35,6 +35,11 @@ curl -sf "$B/islands/Counter.tsx" | grep -q "jsx-runtime"
 for f in islands router live hmr; do
   curl -sf "$B/node_modules/@nowaki-dev/runtime/client/$f.js" >/dev/null
 done
+# navigation.js (Link, getLocale, localePath) and the i18n module it imports load in the browser
+NAV_DEP=$(curl -sf "$B/node_modules/@nowaki-dev/runtime/navigation.js" | grep -oE '"[^"]*server/i18n\.mjs[^"]*"' | head -1 | tr -d '"')
+case "$NAV_DEP" in ./*) NAV_DEP="/node_modules/@nowaki-dev/runtime/${NAV_DEP#./}" ;; esac
+test -n "$NAV_DEP"
+curl -sf "$B$NAV_DEP" | grep -q localePathFor
 # HEAD mirrors GET for app files
 test "$(curl -s -I -o /dev/null -w '%{http_code}' "$B/islands/Counter.tsx")" = 200
 curl -s -I "$B/islands/Counter.tsx" | grep -qi '^content-type: text/javascript'
@@ -126,6 +131,14 @@ curl -sf $B/pricing | grep -q '<div data-group="marketing"><main'
 curl -s -D - -o /dev/null $B/pricing | grep -qi '^x-route-group: marketing'
 ! curl -sf $B/about | grep -q 'data-group="marketing"'
 ! curl -s -D - -o /dev/null $B/no-such-page | grep -qi '^x-route-group'
+# parallel routes: photos/@modal renders beside the page (its [id] file on /photos/1, default on /photos)
+curl -sf $B/photos/1 | grep -q '<h1 id="photo-page">photo 1</h1>.*<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><aside id="photo-modal" class="photo-modal">modal 1: caption of 1</aside></nowaki-slot>'
+curl -sf $B/photos | grep -q '<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><p id="modal-default">no photo open</p></nowaki-slot>'
+! curl -sf $B/photos/1 | grep -q 'photo-intercepted'
+test "$(curl -s -o /dev/null -w '%{http_code}' "$B/photos/@modal/1")" = 404
+# intercepting route: the router's x-nowaki-intercept request gets the slot fragment
+curl -sf -H 'x-nowaki-intercept: /photos/@modal' $B/photos/1 | grep -q '^<template data-nowaki-head>.*</template><aside id="photo-intercepted">intercepted 1</aside>$'
+curl -s -D - -o /dev/null -H 'x-nowaki-intercept: /photos/@modal' $B/photos/1 | grep -qi '^x-nowaki-slot: modal'
 # MDX: a .mdx page (ESM exports, expressions, GFM, an island) and an .mdx content entry
 curl -sf $B/guide | grep -q '<title>Guide (MDX) — Nowaki</title>'
 curl -sf $B/guide | grep -q '<h1 id="an-mdx-page">An MDX page</h1>'
@@ -159,6 +172,9 @@ curl -sf $B/sitemap.xml | grep -q '<loc>https://hello.nowaki.dev/docs/intro</loc
 ! curl -sf $B/sitemap.xml | grep -qE '/boom<|/secret<|/api/|feed.xml'
 curl -sf $B/robots.txt | grep -q 'User-agent'   # public/robots.txt wins over the generated one
 curl -sf $B/feed.xml | grep -q '<link>https://hello.nowaki.dev/docs/intro</link>'
+# nowaki.config headers in dev (the Rust front, before routes)
+curl -sI "$B/docs/intro" | tr -d '\r' | grep -qi '^x-hello-routing: config'
+curl -sI "$B/api/hello" | tr -d '\r' | grep -qi '^cache-control: no-store'
 node scripts/seo-unit-test.mjs
 # page scripts: a module <script> per listed module, served as JS (dev: its own URL)
 curl -sf $B/scripted | grep -q '<script type="module" src="/scripts/stamp.ts" data-nowaki-script></script>'
@@ -296,6 +312,10 @@ bash scripts/ci/assert-no-orphans.sh $SERVER_PID
 
 # nowaki.config redirects / rewrites / headers / basePath / trailingSlash in dev (a generated app)
 node scripts/rules-e2e.mjs dev --port "$((PORT + 8))"
+# nowaki.config i18n in dev (generated apps on PORT+10, PORT+11 and PORT+12)
+node scripts/i18n-e2e.mjs dev --port "$((PORT + 10))"
+# examples/gallery (the v0.18 exit-criteria app) in dev, on PORT+13
+node scripts/gallery-e2e.mjs dev --port "$((PORT + 13))"
 
 # SIGKILL: the dev sidecar and plugin host exit when their stdin pipe closes (exit-with-parent.mjs).
 ./target/debug/nowaki dev examples/hello --port "$((PORT + 7))" &

@@ -41,8 +41,8 @@ export function vercelHeaders(rules) {
       return "/[^/]+" + esc(s.suffix ?? "");
     });
     const body = parts.join("");
-    // Never on the framework's /__nowaki/* endpoints.
-    const src = rules.base ? `^${esc(rules.base)}${body}/?$` : body ? `^(?!/__nowaki/)${body}/?$` : "^/$";
+    // Never on the framework's /__nowaki/* endpoints (the client reaches them under basePath).
+    const src = rules.base ? `^${esc(rules.base)}(?!/__nowaki/)${body}/?$` : body ? `^(?!/__nowaki/)${body}/?$` : "^/$";
     return { src, headers: Object.fromEntries(pairs), continue: true };
   });
 }

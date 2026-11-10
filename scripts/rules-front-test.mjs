@@ -36,9 +36,21 @@ eq(step("/app/go/%2F%2Fevil.com?q=1"), { redirect: { status: 307, location: "/ap
 eq(step("/app/p/1"), { routePath: "/photo/1" }, "frontStep: rewrite");
 eq(step("/app/about"), { routePath: "/about" }, "frontStep: basePath removed");
 eq(step("/about"), { notFound: true }, "frontStep: outside basePath");
-eq(step("/_nowaki/a.js"), null, "frontStep: root assets are never matched");
-eq(step("/__nowaki/fn", "POST"), null, "frontStep: framework endpoints are never matched");
-eq(step("/app/_nowaki/a.js"), { routePath: "/_nowaki/a.js" }, "frontStep: assets under basePath");
+eq(step("/_nowaki/a.js"), { notFound: true }, "frontStep: no root assets under basePath");
+eq(step("/__nowaki/fn", "POST"), null, "frontStep: framework endpoints at the root are never matched");
+eq(step("/app/_nowaki/a.js"), { routePath: "/_nowaki/a.js", internal: true }, "frontStep: assets under basePath");
+eq(step("/app/__nowaki/fn", "POST"), { routePath: "/__nowaki/fn", internal: true }, "frontStep: endpoints under basePath");
+eq(step("/app/__nowakix"), { routePath: "/__nowakix" }, "frontStep: a route that only looks like an endpoint");
+{
+  const catchAll = compileRules({ basePath: "/app", trailingSlash: "always", rewrites: [{ source: "/[...all]", destination: "/c/[...all]" }] });
+  eq(frontStep(catchAll, "GET", new URL("http://x/app/__nowaki/boundaries")), { routePath: "/__nowaki/boundaries", internal: true }, "frontStep: framework URLs skip rewrites and the trailing-slash policy");
+  const noBase = compileRules({ redirects: [{ source: "/a", destination: "/b" }] });
+  eq(frontStep(noBase, "GET", new URL("http://x/_nowaki/a.js")), null, "frontStep: root assets without a basePath");
+  const based = compileRules({ basePath: "/app", headers: [{ source: "/[...all]", headers: [{ key: "cache-control", value: "no-store" }] }] });
+  eq(frontHeaders(based, "/app/__nowaki/fn"), [], "frontHeaders: none on endpoints under basePath");
+  eq(vercelHeaders(based).some((r) => new RegExp(r.src).test("/app/__nowaki/fn")), false, "vercel headers: none on endpoints under basePath");
+  eq(vercelHeaders(based).some((r) => new RegExp(r.src).test("/app/about")), true, "vercel headers: pages under basePath");
+}
 eq(frontStep(compileRules({ redirects: [{ source: "/a", destination: "/b" }] }), "GET", new URL("http://x/c")), null, "frontStep: same path is null");
 {
   const r = withHeaderDefaults(new Response("x", { headers: { "cache-control": "max-age=5" } }), [["cache-control", "no-store"], ["x-a", "1"]]);

@@ -5,5 +5,6 @@ type Ctx = { get: (name: string) => string | undefined; redirect: (to: string) =
 export default function handler(ctx: Ctx) {
   const [name, port] = (ctx.get("x-forwarded-host") ?? ctx.get("host") ?? "").split(":");
   const other = name === "localhost" ? "127.0.0.1" : "localhost";
-  return ctx.redirect(`http://${other}${port ? `:${port}` : ""}/about`);
+  // BASE_URL is nowaki.config `basePath` + "/" ("/" without one).
+  return ctx.redirect(`http://${other}${port ? `:${port}` : ""}${import.meta.env.BASE_URL}about`);
 }
