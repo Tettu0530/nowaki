@@ -418,8 +418,8 @@ pub(crate) struct HmrPlan {
     /// A full reload: config, env, session, content, a removed file, or a module no island or
     /// route imports.
     reload: bool,
-    /// A route, layout or a module a route imports changed (H2 re-renders pages in place; until
-    /// then the client reloads).
+    /// A route, layout or a module a route imports changed (a server-only `lib/` module too): the
+    /// client refetches the page and morphs it in place.
     page: bool,
     /// Stylesheets to replace in place (the changed ones, and the ones that `@import` them).
     css: std::collections::BTreeSet<PathBuf>,
@@ -572,16 +572,13 @@ fn css_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// The HMR messages for a plan, with the log kind of each. Bumps the hot versions of the modules
-/// a `hot` message re-imports.
+/// The HMR messages for a plan, with the log kind of each, in the order the client applies them:
+/// stylesheets, then islands (`hot` bumps the hot versions of the modules it re-imports), then
+/// the page (`page` refetches it; the islands it keeps already run the new code).
 fn hmr_messages(core: &NowakiCore, plan: &HmrPlan) -> Vec<(&'static str, serde_json::Value)> {
     let root = &core.root;
     if plan.reload {
         return vec![("reload", json!({ "type": "reload" }))];
-    }
-    if plan.page {
-        // H2 re-renders the page in place; hmr.js reloads for now.
-        return vec![("page", json!({ "type": "page" }))];
     }
     let mut out = Vec::new();
     if !plan.css.is_empty() {
@@ -598,7 +595,8 @@ fn hmr_messages(core: &NowakiCore, plan: &HmrPlan) -> Vec<(&'static str, serde_j
             .collect();
         out.push(("css", json!({ "type": "css", "files": files })));
     }
-    if !plan.modules.is_empty() {
+    // A change only routes reach (a server-only module) has no island to re-import.
+    if !plan.modules.is_empty() && !(plan.page && plan.islands.is_empty()) {
         for m in &plan.modules {
             core.bump_dev_version(m);
         }
@@ -622,6 +620,9 @@ fn hmr_messages(core: &NowakiCore, plan: &HmrPlan) -> Vec<(&'static str, serde_j
             "hot",
             json!({ "type": "hot", "islands": islands, "modules": modules }),
         ));
+    }
+    if plan.page {
+        out.push(("page", json!({ "type": "page" })));
     }
     out
 }
@@ -1565,10 +1566,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dunce::canonicalize(dir.path()).unwrap();
         let files = [
-            ("routes/index.tsx", "import C from \"../islands/Counter.tsx\";\nimport Shared from \"../components/Shared.tsx\";\nimport \"../styles/a.css\";\nexport default () => <main><C /><Shared /></main>;\n"),
+            ("routes/index.tsx", "import C from \"../islands/Counter.tsx\";\nimport Shared from \"../components/Shared.tsx\";\nimport { rows } from \"../lib/db.ts\";\nimport \"../styles/a.css\";\nexport default () => <main><C /><Shared />{rows}</main>;\n"),
             ("islands/Counter.tsx", "import { label } from \"../lib/label.ts\";\nimport s from \"./S.module.css\";\nexport default function Counter() { return <b class={s.x}>{label}</b>; }\n"),
             ("islands/Other.tsx", "import Shared from \"../components/Shared.tsx\";\nexport default function Other() { return <Shared />; }\n"),
             ("lib/label.ts", "export const label = \"n\";\n"),
+            ("lib/db.ts", "import { conn } from \"./conn.ts\";\nexport const rows = conn;\n"),
+            ("lib/conn.ts", "export const conn = 1;\n"),
             ("components/Shared.tsx", "export default function Shared() { return <i>s</i>; }\n"),
             ("styles/a.css", "@import \"./b.css\";\n.a { color: red; }\n"),
             ("styles/b.css", ".b { color: blue; }\n"),
@@ -1632,11 +1635,12 @@ mod tests {
     }
 
     #[test]
-    fn hmr_plan_routes_server_files_and_removals_reload() {
+    fn hmr_plan_routes_and_server_modules_update_the_page_framework_files_reload() {
         let (_dir, core) = hmr_app();
         let root = core.root.clone();
         let mut graph = HmrGraph::default();
-        // A component a route imports too: the page has to update (H2; a reload until then).
+        // A component an island and a route import: the island is re-imported first, then the
+        // page refetched (it keeps that island, which already runs the new code).
         let plan = plan_changes(
             &core,
             &mut graph,
@@ -1644,9 +1648,44 @@ mod tests {
             false,
         );
         assert!(plan.page && !plan.reload, "{plan:?}");
-        assert_eq!(hmr_messages(&core, &plan)[0].1, json!({ "type": "page" }));
+        assert_eq!(plan.islands, [root.join("islands/Other.tsx")].into());
+        let msgs = hmr_messages(&core, &plan);
+        let kinds: Vec<_> = msgs.iter().map(|(k, _)| *k).collect();
+        assert_eq!(kinds, ["hot", "page"]);
+        assert_eq!(msgs[0].1["islands"][0]["src"], "/islands/Other.tsx");
+        assert_eq!(msgs[1].1, json!({ "type": "page" }));
         let plan = plan_changes(&core, &mut graph, &[root.join("routes/index.tsx")], false);
-        assert!(plan.page, "{plan:?}");
+        assert!(plan.page && plan.islands.is_empty(), "{plan:?}");
+        assert_eq!(
+            hmr_messages(&core, &plan),
+            [("page", json!({ "type": "page" }))]
+        );
+        // Server-only modules only routes reach (directly or through another): a page update,
+        // with no hot versions bumped (the browser never imports them).
+        for lib in ["lib/db.ts", "lib/conn.ts"] {
+            let plan = plan_changes(&core, &mut graph, &[root.join(lib)], false);
+            assert!(
+                plan.page && !plan.reload && plan.islands.is_empty(),
+                "{lib}: {plan:?}"
+            );
+            assert_eq!(
+                hmr_messages(&core, &plan),
+                [("page", json!({ "type": "page" }))]
+            );
+            assert!(core.dev_version(&root.join(lib)).is_none(), "{lib}");
+        }
+        // With a stylesheet in the same batch: the CSS first, then the page.
+        let plan = plan_changes(
+            &core,
+            &mut graph,
+            &[root.join("lib/db.ts"), root.join("styles/b.css")],
+            false,
+        );
+        let kinds: Vec<_> = hmr_messages(&core, &plan)
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        assert_eq!(kinds, ["css", "page"]);
         // Loaded by the framework, not imported: session.ts (and what it imports) reloads.
         let plan = plan_changes(&core, &mut graph, &[root.join("session.ts")], false);
         assert!(plan.reload, "{plan:?}");

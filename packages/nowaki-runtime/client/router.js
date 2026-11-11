@@ -1,7 +1,7 @@
 // Client router. Intercepts internal <a> clicks, fetches the target HTML,
 // swaps the body, and re-hydrates only the new islands (zero-JS pages do full navigations).
 
-import { matchBoundary, matchPattern, createPageCache, shouldTransition } from "./router-core.js";
+import { matchBoundary, matchPattern, createPageCache, shouldTransition, nonceStyles } from "./router-core.js";
 
 // The eager runtime (islands.js) exposes hydrate on window.
 // Not importing islands.js here keeps the router a separate lazy chunk.
@@ -90,12 +90,16 @@ async function fetchPage(url, slot) {
   if (!page || (res.url && new URL(res.url).origin !== location.origin)) return null;
   const html = await res.text();
   return {
-    doc: new DOMParser().parseFromString(html, "text/html"),
+    doc: parse(html),
     finalUrl: res.redirected ? res.url : url.href.split("#")[0],
     status: res.status,
     slot: slot && res.headers.has("x-nowaki-slot"),
   };
 }
+
+// DOMParser's document shares this one's CSP: a <style> with another response's nonce (or none)
+// is a violation as it parses, so each gets this document's nonce first.
+const parse = (html) => new DOMParser().parseFromString(nonceStyles(html, window.__nowakiNonce), "text/html");
 
 // Fetch the SSR HTML for loading/error boundaries once and reuse it.
 function loadBoundaries() {
@@ -333,7 +337,7 @@ function stampNonce(root) {
 function showLoading(boundary) {
   if (boundary) {
     curDoc = null;
-    const tmp = new DOMParser().parseFromString(`<body>${boundary.html}</body>`, "text/html");
+    const tmp = parse(`<body>${boundary.html}</body>`);
     document.body.replaceWith(stampNonce(tmp.body));
   } else {
     showProgressBar();
@@ -346,7 +350,7 @@ async function showError(url, message) {
   const { error } = await loadBoundaries();
   const boundary = matchBoundary(error, import.meta.env.BASE_URL === "/" ? url.pathname : routePath(url.pathname));
   if (boundary) {
-    const tmp = new DOMParser().parseFromString(`<body>${boundary.html}</body>`, "text/html");
+    const tmp = parse(`<body>${boundary.html}</body>`);
     for (const slot of tmp.body.querySelectorAll("[data-nowaki-error]")) slot.textContent = message;
     document.body.replaceWith(stampNonce(tmp.body));
   } else {
@@ -473,6 +477,12 @@ export function installRouter() {
   curKey = historyKey();
   curDoc = location.pathname + location.search;
   loadBoundaries();
+  // `nowaki dev` (client/hmr.js) fires this after an edit: the pages and boundaries fetched before
+  // it are stale.
+  addEventListener("nowaki:hmr", () => {
+    pageCache.clear();
+    boundariesPromise = null;
+  });
 
   document.addEventListener("click", (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {

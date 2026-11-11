@@ -38,11 +38,21 @@ milestone's worth of work; the codename is noted per entry.
   updates without a reload: a stylesheet an island imports is replaced in its `<style>`,
   a linked route / layout stylesheet is swapped once the new one has loaded (no flash,
   nonce-stamped under `NOWAKI_CSP`), and a CSS Module whose class names changed re-imports
-  its islands. Route, layout and server-only edits still reload the page (in-place page
-  updates come later), as do nowaki.config, `env.ts`, `.env` and `session.ts`. The runtime
+  its islands. nowaki.config, `env.ts`, `.env` and `session.ts` still reload. The runtime
   is `client/refresh.js`, written for Nowaki on the public Preact API (Preact 10 and 11, no
   new dependency) on top of oxc's React Refresh transform, which `nowaki-core` applies only
   to dev browser modules of the app (`NowakiCore::set_dev_refresh`). Builds are unchanged.
+- HMR re-renders pages in place. Editing a route, a layout, or a server-only module that only
+  routes import (`lib/db.ts`) refetches the page and morphs it: the text, the head region
+  (`export const head`, route CSS; unchanged nodes stay, so nothing flashes) and `<html>` /
+  `<body>` attributes update, while islands whose `src` and props are unchanged keep their
+  element and state, live islands keep their server state, and the scroll position stays. An
+  island given new props hydrates afresh. With an intercepting slot open (a modal over a
+  list), the slot's fragment is refetched and the modal stays open. `nowaki:page-load` fires
+  after the update, and the client router drops the pages it had cached. A non-200 response
+  (a syntax error shows the error page) falls back to a reload, and the page comes back once
+  the file is fixed. Works under `NOWAKI_CSP=enforce` and a basePath. In the browser test,
+  edit to DOM takes about 55–90 ms.
 - **View Transitions in the client router (opt-in).** `<Link viewTransition>` (or
   `data-nowaki-transition` on an `<a>` or an element around links) runs that navigation inside
   `document.startViewTransition`; `export const viewTransition = true` on a route does it for
@@ -66,6 +76,16 @@ milestone's worth of work; the codename is noted per entry.
   turns some early `return` / `continue` into `if` / `else` and folds a negated `&&`: the
   lazy router chunks shrink by 6 bytes gzip and the live runtime by 11 (first-load JS of the
   size benchmark is unchanged). Source maps map a few more names.
+
+### Fixed
+- **Client navigation under `NOWAKI_CSP=enforce` no longer logs `style-src-elem` violations**
+  for the fetched page's `<style>` (seen going to a page with `export const head` styles).
+  The document `DOMParser` creates shares the page's CSP, and the fetched `<style>` carried
+  the nonce of its own response, so Chrome reported it as it parsed (nothing was blocked on
+  screen, because the router re-stamped the copy it inserted). The router now gives fetched
+  `<style>` tags this document's nonce before parsing; boundary HTML gets it too. The lazy
+  router chunks grow by 101 bytes gzip (with the HMR Router Cache reset); first-load JS is
+  unchanged.
 
 ## [0.18.2] — 2026-11-11 · patch
 

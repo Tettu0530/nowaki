@@ -10,7 +10,7 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { scanRoutes, matchRoute, underPrefix, routeUnderPrefix, isRouteGroup, stripRouteGroups, interceptTarget } from "../packages/nowaki-runtime/server/router.mjs";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
-import { matchBoundary, shouldTransition } from "../packages/nowaki-runtime/client/router-core.js";
+import { matchBoundary, nonceStyles, shouldTransition } from "../packages/nowaki-runtime/client/router-core.js";
 import { pageMeta, prodDocument, prodShell } from "../packages/nowaki-runtime/server/document.mjs";
 import { Link, transitionName } from "../packages/nowaki-runtime/navigation.js";
 
@@ -566,6 +566,18 @@ eq(stripRouteGroups("/(.)/x"), "/(.)/x", "(.) stays literal");
   const ck = await get("/api/me", { cookie: "_ga=50%; sid=a%20b" });
   eq([ck.status, ck.body], [200, "sid:a b ga:50%"], "a malformed cookie keeps its raw value; others decode");
   await rm(dir, { recursive: true, force: true });
+}
+
+// nonceStyles: a fetched page's <style> tags get this document's nonce before DOMParser parses
+// them (the nonce the server injected, or none); scripts and text are left alone.
+{
+  const html = '<style nonce="aa">a{}</style><STYLE nonce="aa" media="x">b{}</STYLE><style>c{}</style><script nonce="aa">1</script><stylex></stylex><p>&lt;style</p>';
+  eq(
+    nonceStyles(html, "me"),
+    '<style nonce="me">a{}</style><style nonce="me" media="x">b{}</STYLE><style nonce="me">c{}</style><script nonce="aa">1</script><stylex></stylex><p>&lt;style</p>',
+    "nonceStyles: every <style> gets this document's nonce",
+  );
+  eq(nonceStyles(html, undefined), html, "nonceStyles: no nonce (no CSP), the HTML as it came");
 }
 
 // View Transitions: when the client router transitions, the route export's document output, and
