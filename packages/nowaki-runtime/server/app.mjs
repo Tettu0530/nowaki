@@ -26,6 +26,7 @@ import { compileRules } from "./rules.mjs";
 import { compileI18n } from "./i18n.mjs";
 import { LOCALE_VARY, frontHeaders, frontLocale, frontStep, withVaryHeaders } from "./front.mjs";
 import { setBasePath } from "./base-path.mjs";
+import { setRevalidateEnv } from "./revalidate.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
 // Bun and Deno don't implement Node's module.register; their SSR keeps the old behavior.
@@ -81,7 +82,9 @@ const contentTypeOf = (name) => {
 
 /// Builds the production app. Pass `clientDir` (dist/client) and `serverDir` (dist/server).
 /// The returned `handle(req, res)` is a node:http-compatible handler (also works under Bun/Deno node compat).
-export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = true } = {}) {
+/// `cdn` (an adapter's CDN, e.g. purge-vercel.mjs `vercelCdn()`): `{ purge, cacheTagHeader }`, the
+/// revalidate*() seams of handler.mjs. Without it ISR pages only send `s-maxage`.
+export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = true, cdn = null } = {}) {
   if (!clientDir || !serverDir) {
     throw new Error("createApp requires clientDir and serverDir");
   }
@@ -272,6 +275,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
   if (rules) env.trailingSlash = rules.trailing;
   // i18n: null without it (handler.mjs checks it once per request).
   env.i18n = compileI18n(routing);
+  wireCdn(env, cdn);
 
   const handle = async (req, res) => {
     // Set before the response's own headers, which override any of these by name.
@@ -361,6 +365,16 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
   };
 
   return { handle, env, manifest, liveRegistry };
+}
+
+// revalidate*(): the adapter's CDN purge and tag header when there is one (Vercel). The env also
+// gives revalidate.mjs the path policy (trailingSlash, i18n) and whether this is static output.
+function wireCdn(env, cdn) {
+  if (cdn) {
+    env.purge = cdn.purge;
+    env.cacheTagHeader = cdn.cacheTagHeader;
+  }
+  setRevalidateEnv(env);
 }
 
 /// Listens via node:http. Shared launcher for adapters and `nowaki start`.

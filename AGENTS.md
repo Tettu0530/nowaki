@@ -194,7 +194,8 @@ code locations and CI coverage.
   request (page actions and API routes now run in `runWithContext`, like server functions and live
   events) collect on `ctx.__purge`; `handler.mjs` `finalize` hands them over before the response
   returns: `x-nowaki-purge` on `nowaki start` (`env.isrStore`, set by `prod-sidecar.mjs`), and the
-  adapter seams `env.purge(entries)` / `env.cacheTagHeader(entries)` (unset for now). Outside a
+  adapter seams `env.purge(entries)` / `env.cacheTagHeader(entries)` (set by `createApp({ cdn })`,
+  Vercel only; see below). Outside a
   request, or after its response was built (`ctx.__purgeClosed`, set only on those wrapped
   requests): a `NOWAKI_PURGE <token>` stdout line (`start.rs::run`) or `env.purge`. ISR renders with tags send
   `x-nowaki-tags` (static arrays cached per module). Rust side: `start.rs` `IsrCache::purge` (one
@@ -202,6 +203,24 @@ code locations and CI coverage.
   content). The store is per process. Dev only records calls (dev-info `revalidations`); static
   output warns. Encoding fixture: `crates/nowaki/tests/fixtures/purge-cases.json` (`start.rs`
   units, `scripts/revalidate-test.mjs`); e2e in `scripts/ci/e2e-prod.sh` (`routes/isr-tagged.tsx`).
+- **CDN purge per adapter** — `server/purge-vercel.mjs` `vercelCdn()`, passed as `createApp({ cdn })`
+  by the function `vercel-build.mjs` generates. ISR renders send `Vercel-Cache-Tag` (`t:<tag>` and
+  `p:<browser path>` through `cdnTag`: percent-encoded, `h:<hash>` past 256 bytes, the same on emit
+  and purge); `purge` lazily imports `@vercel/functions` and calls `dangerouslyDeleteByTag` (16 tags
+  per call, raced against a 2 s timeout), warning once when the package is missing.
+  `vercel-build.mjs` `copyWithDeps` copies the package and its dependencies into the function when
+  the app has it. Behavior per server:
+
+  | Server | Tag header | Purge |
+  | --- | --- | --- |
+  | `nowaki start` | `x-nowaki-tags` (internal) | Rust ISR store, before the response |
+  | vercel | `Vercel-Cache-Tag` | `@vercel/functions` `dangerouslyDeleteByTag`, awaited (2 s cap) |
+  | node / bun / deno | none | warn-once no-op (no cache of their own) |
+  | cloudflare | none | warn-once no-op (the Worker caches nothing yet) |
+  | static | none | warn-once no-op |
+
+  Tests: `scripts/purge-adapters-test.mjs` (mocked package, a generated function on port 5540);
+  `scripts/ci/e2e-adapters.sh` checks the header from the built `examples/hello` function.
 - **Server functions (`"use server"`)** — `crates/nowaki-core/src/server_fn.rs`
   (detect, id, client proxy, discover) + `packages/nowaki-runtime/server/functions.mjs`
   (dispatch + `getContext`). Allowlist: `dist/server/functions.json`.

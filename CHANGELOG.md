@@ -26,8 +26,16 @@ milestone's worth of work; the codename is noted per entry.
   stdout. The ISR cache is per process: to fan a purge out, set `NOWAKI_REVALIDATE_SECRET` and
   send `POST /__nowaki/revalidate` (`Authorization: Bearer <secret>`, JSON `{ paths, tags }`) to
   each instance; the endpoint is off (404) without it. `nowaki dev` has no cache and only records
-  the calls; static output and the deploy adapters ignore them for now (warned once).
+  the calls; static output and the adapters other than vercel ignore them (warned once).
 - Page actions and API routes now run inside the request context, so `getContext()` works there.
+- **CDN purge on Vercel.** On the vercel adapter, ISR pages send `Vercel-Cache-Tag` with their
+  `export const tags` and their own path, and `revalidatePath` / `revalidateTag` delete those
+  tags from Vercel's CDN (`dangerouslyDeleteByTag` from `@vercel/functions`) before the action's
+  response goes out, waiting at most 2 s. Add `@vercel/functions` to the app's dependencies:
+  the build copies it into the function. Without it the tags are still sent (purge them from the
+  dashboard or the REST API) and the first revalidate call warns once. Tags longer than Vercel's
+  256 bytes are sent as a hash. The node, bun, deno and cloudflare adapters and static output
+  have no cache to purge, so the calls stay a no-op there (warned once).
 
 - HMR keeps island state (Fast Refresh). In `nowaki dev`, editing an island, or a module
   that only islands import, swaps the components in place: hook state survives, and a

@@ -349,9 +349,23 @@ export type RouteTags =
  * after the action already shows fresh content. Calls made outside a request, or after its
  * response was sent (a timer, a queue consumer), reach the cache shortly after. The ISR cache lives in each `nowaki start` process;
  * with several instances, fan the purge out with `POST /__nowaki/revalidate` (see
- * `revalidateTag`). Under `nowaki dev` (no cache) calls are only recorded; in static output and on
- * the deploy adapters they are a no-op for now (warned once). Throws a TypeError for a path that
- * isn't root-relative (`/blog`).
+ * `revalidateTag`). Throws a TypeError for a path that isn't root-relative (`/blog`).
+ *
+ * Per server:
+ *
+ * | Server | Cached by | Purge |
+ * | --- | --- | --- |
+ * | `nowaki start` | the Rust front, in memory per process | deleted before the response is sent |
+ * | vercel adapter | Vercel's CDN (ISR pages send `Vercel-Cache-Tag`) | `dangerouslyDeleteByTag` from `@vercel/functions`, awaited up to 2 s before the response; install the package in the app (warned once without it) |
+ * | node / bun / deno adapters | whatever CDN is in front (`s-maxage`) | none: a no-op, warned once; purge that CDN through its API |
+ * | cloudflare adapter | nothing (the Worker caches no page) | none: a no-op, warned once |
+ * | static output | files | none: a no-op, warned once |
+ * | `nowaki dev` | nothing | calls are only recorded |
+ *
+ * On Vercel the path is a cache tag too (`p:<browser path>`, next to `t:<tag>`), so both functions
+ * purge by tag; a tag over 256 bytes is sent as a hash. Make the call inside the request:
+ * `@vercel/functions` purges through the invocation's context, so a call with no request behind
+ * it does nothing, and one made after the response may be cut short when the function suspends.
  * @example revalidatePath("/blog");
  */
 export function revalidatePath(path: string): void;

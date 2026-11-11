@@ -25,6 +25,8 @@ curl -s -D - -o /dev/null -H 'cookie: user=alice' http://127.0.0.1:3310/isr-cook
 ! curl -s -D - -o /dev/null -H 'cookie: user=alice' http://127.0.0.1:3310/isr-cookie | grep -qi '^cache-control:.*s-maxage'
 curl -s -D - -o /dev/null -H 'accept-language: de' http://127.0.0.1:3310/vary | grep -qi '^vary:.*accept-language'
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr | grep -qi '^cache-control: public, s-maxage='
+# no CDN tag header off the vercel adapter (nothing here could purge by it)
+! curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-tagged | grep -qi '^vercel-cache-tag:'
 # an ISR page that sets a cookie is per-user: never shared-cacheable next to Set-Cookie
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-sets-cookie | grep -qi '^set-cookie: visited=1'
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-sets-cookie | grep -qi '^cache-control: private, no-cache'
@@ -237,6 +239,12 @@ curl -sf http://127.0.0.1:3320/ | grep -q "nowaki-island"
 curl -sf http://127.0.0.1:3320/api/hello | grep -q '"hello":"nowaki"'
 curl -sf http://127.0.0.1:3320/docs/intro | grep -q '<h2 id="why-content-collections"'   # content on vercel
 curl -sf http://127.0.0.1:3320/nav | grep -q 'href="/blog/hello"'
+# CDN purge: ISR pages carry Vercel-Cache-Tag (their tags + their path), other pages none
+curl -s -D - -o /dev/null http://127.0.0.1:3320/isr-tagged | grep -qiE '^vercel-cache-tag: t:isr-demo,p:/isr-tagged[[:space:]]*$'
+curl -s -D - -o /dev/null http://127.0.0.1:3320/isr | grep -qiE '^vercel-cache-tag: p:/isr[[:space:]]*$'
+! curl -s -D - -o /dev/null http://127.0.0.1:3320/about | grep -qi '^vercel-cache-tag:'
+# revalidateTag in an action without @vercel/functions installed: a warned no-op, the redirect stands
+curl -s -o /dev/null -w '%{http_code}' -X POST -H 'origin: http://127.0.0.1:3320' -d kind=tag http://127.0.0.1:3320/isr-tagged | grep -q '^303$'
 kill $VERCEL_PID
 # nowaki.config redirects / rewrites / headers / basePath / trailingSlash on the node, cloudflare,
 # vercel and static adapters (a generated app; the servers listen on 3313 and 3314)
