@@ -163,9 +163,15 @@ try {
 
   // <head> styles and <html lang> follow the page on client navigation (and are dropped when leaving)
   // A style injected at runtime (as CSS-in-JS libraries do) is outside the page's head region.
-  await cdp.evalAsync(`const s = document.createElement('style'); s.id = 'runtime-css'; document.head.appendChild(s); return true;`);
+  await cdp.evalAsync(`const s = document.createElement('style'); s.id = 'runtime-css'; s.nonce = window.__nowakiNonce ?? ''; document.head.appendChild(s);
+    window.__cspViolations = []; addEventListener('securitypolicyviolation', (e) => window.__cspViolations.push(e.violatedDirective + ' ' + e.blockedURI));
+    return true;`);
   await cdp.evalAsync(`window.__nav('/styled'); return true;`);
   await sleep(600);
+  // Under NOWAKI_CSP the fetched page's <style> (another response's nonce) is parsed with this
+  // document's nonce, so DOMParser reports nothing.
+  const cspViolations = await cdp.evalAsync(`return window.__cspViolations;`);
+  check(`no CSP violations navigating to /styled (${cspViolations.join(", ")})`, cspViolations.length === 0);
   check("runtime-injected <style> survives client navigation", await cdp.evalAsync(`return !!document.getElementById('runtime-css');`));
   const styled = await cdp.evalAsync(`
     return { path: location.pathname, lang: document.documentElement.lang,
@@ -323,6 +329,7 @@ try {
     window.__nav = (href, attrs = {}) => { const a=document.createElement('a'); a.href=href; a.textContent=href;
       for (const [k, v] of Object.entries(attrs)) a.setAttribute(k, v); document.body.appendChild(a); a.click(); };
     window.__vt = []; window.__loads = [];
+    window.__cspViolations = []; addEventListener('securitypolicyviolation', (e) => window.__cspViolations.push(e.violatedDirective + ' ' + e.blockedURI));
     const orig = Document.prototype.startViewTransition;
     document.startViewTransition = function (arg) { const t = orig.call(this, arg); window.__vt.push(t); return t; };
     document.addEventListener('nowaki:page-load', () => window.__loads.push({ path: location.pathname, h1: document.querySelector('h1')?.id ?? null }));
@@ -422,9 +429,11 @@ try {
   await sleep(700);
   const closed = await cdp.evalAsync(`return { path: location.pathname, modal: !!document.getElementById('photo-intercepted'), list: !!document.getElementById('photos') };`);
   check(`back closes the modal (${JSON.stringify(closed)})`, closed.path === "/photos" && !closed.modal && closed.list);
-  // (Under NOWAKI_CSP every <style> on screen must carry this document's nonce. Chrome also reports the
-  // fetched pages' styles while DOMParser parses them, which predates View Transitions.)
+  // (Under NOWAKI_CSP every <style> on screen must carry this document's nonce, and no fetched page
+  // reported a violation while DOMParser parsed it.)
   check("every <style> on screen has this document's nonce", await cdp.evalAsync(`return [...document.querySelectorAll('style')].every((s) => s.nonce === (window.__nowakiNonce ?? ''));`));
+  const vtViolations = await cdp.evalAsync(`return window.__cspViolations;`);
+  check(`no CSP violations through the View Transition navigations (${vtViolations.join(", ")})`, vtViolations.length === 0);
 
   // Under a basePath, a same-origin link outside it belongs to another app: a full load.
   if (P) {

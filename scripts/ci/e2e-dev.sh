@@ -30,6 +30,10 @@ test -n "$BADGE_CLASS"
 echo "$BADGE_CLASS" > /tmp/nowaki-css-module-badge-class
 ! curl -sf $B/ | grep -qE '/Users/|/home/[^/]+/'
 curl -sf $B/ | grep -q 'data-router=.*client/router.js'
+# Server-Timing is on in dev: the sidecar's middleware / loader / render phases.
+curl -s -o /dev/null -D - $B/ | tr -d '\r' | grep -qiE '^server-timing: mw;dur=[0-9.]+, loader;dur=[0-9.]+, render;dur=[0-9.]+$'
+# /__nowaki/health (the dev sidecar answers it)
+curl -sf $B/__nowaki/health | grep -qx '{"status":"ok"}'
 curl -sf "$B/islands/Counter.tsx" | grep -q "jsx-runtime"
 # the client runtime loads, also when @nowaki-dev/runtime is a workspace symlink out of the app
 for f in islands router live hmr; do

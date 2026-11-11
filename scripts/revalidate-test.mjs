@@ -246,7 +246,7 @@ R.setRevalidateEnv(start);
   const node = makeEnv({});
   R.setRevalidateEnv(node);
   const res = await post(node, "/save");
-  check("no ISR store: a no-op with a warning", !("x-nowaki-purge" in res.headers) && warnings.some((w) => w.includes("only `nowaki start`")));
+  check("no ISR store: a no-op with a warning", !("x-nowaki-purge" in res.headers) && warnings.some((w) => w.includes("this server keeps no ISR cache")));
 }
 
 // --- POST /__nowaki/revalidate ---------------------------------------------------------------------

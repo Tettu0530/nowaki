@@ -26,6 +26,10 @@ import { compileRules } from "./rules.mjs";
 import { compileI18n } from "./i18n.mjs";
 import { LOCALE_VARY, frontHeaders, frontLocale, frontStep, withVaryHeaders } from "./front.mjs";
 import { setBasePath } from "./base-path.mjs";
+import { setRevalidateEnv } from "./revalidate.mjs";
+import { traceFromEnv } from "./trace.mjs";
+import { logError } from "./log.mjs";
+import { HEALTH_BODY, HEALTH_HEADERS, isHealth } from "./health.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
 // Bun and Deno don't implement Node's module.register; their SSR keeps the old behavior.
@@ -81,7 +85,9 @@ const contentTypeOf = (name) => {
 
 /// Builds the production app. Pass `clientDir` (dist/client) and `serverDir` (dist/server).
 /// The returned `handle(req, res)` is a node:http-compatible handler (also works under Bun/Deno node compat).
-export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = true } = {}) {
+/// `cdn` (an adapter's CDN, e.g. purge-vercel.mjs `vercelCdn()`): `{ purge, cacheTagHeader }`, the
+/// revalidate*() seams of handler.mjs. Without it ISR pages only send `s-maxage`.
+export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = true, cdn = null } = {}) {
   if (!clientDir || !serverDir) {
     throw new Error("createApp requires clientDir and serverDir");
   }
@@ -272,6 +278,9 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
   if (rules) env.trailingSlash = rules.trailing;
   // i18n: null without it (handler.mjs checks it once per request).
   env.i18n = compileI18n(routing);
+  wireCdn(env, cdn);
+  // Server-Timing (NOWAKI_SERVER_TIMING=1) and OpenTelemetry (OTEL_*): null when both are off.
+  env.trace = traceFromEnv(process.env, { runtime: globalThis.Bun ? "bun" : globalThis.Deno ? "deno" : "node" });
 
   const handle = async (req, res) => {
     // Set before the response's own headers, which override any of these by name.
@@ -307,6 +316,11 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
           localeVary = true;
           res.setHeader("vary", LOCALE_VARY);
         }
+      }
+
+      if (isHealth(req.method, pathname)) {
+        res.writeHead(200, HEALTH_HEADERS).end(req.method === "HEAD" ? undefined : HEALTH_BODY);
+        return;
       }
 
       if (pathname.startsWith("/_nowaki/")) {
@@ -354,13 +368,23 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
       if (localeVary) result.headers = withVaryHeaders(result.headers);
       await sendResult(res, applyCsp(result));
     } catch (err) {
-      console.error("[nowaki]", err);
+      logError("", err);
       res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
       res.end("Internal Server Error");
     }
   };
 
   return { handle, env, manifest, liveRegistry };
+}
+
+// revalidate*(): the adapter's CDN purge and tag header when there is one (Vercel). The env also
+// gives revalidate.mjs the path policy (trailingSlash, i18n) and whether this is static output.
+function wireCdn(env, cdn) {
+  if (cdn) {
+    env.purge = cdn.purge;
+    env.cacheTagHeader = cdn.cacheTagHeader;
+  }
+  setRevalidateEnv(env);
 }
 
 /// Listens via node:http. Shared launcher for adapters and `nowaki start`.

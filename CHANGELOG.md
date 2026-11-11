@@ -26,8 +26,16 @@ milestone's worth of work; the codename is noted per entry.
   stdout. The ISR cache is per process: to fan a purge out, set `NOWAKI_REVALIDATE_SECRET` and
   send `POST /__nowaki/revalidate` (`Authorization: Bearer <secret>`, JSON `{ paths, tags }`) to
   each instance; the endpoint is off (404) without it. `nowaki dev` has no cache and only records
-  the calls; static output and the deploy adapters ignore them for now (warned once).
+  the calls; static output and the adapters other than vercel ignore them (warned once).
 - Page actions and API routes now run inside the request context, so `getContext()` works there.
+- **CDN purge on Vercel.** On the vercel adapter, ISR pages send `Vercel-Cache-Tag` with their
+  `export const tags` and their own path, and `revalidatePath` / `revalidateTag` delete those
+  tags from Vercel's CDN (`dangerouslyDeleteByTag` from `@vercel/functions`) before the action's
+  response goes out, waiting at most 2 s. Add `@vercel/functions` to the app's dependencies:
+  the build copies it into the function. Without it the tags are still sent (purge them from the
+  dashboard or the REST API) and the first revalidate call warns once. Tags longer than Vercel's
+  256 bytes are sent as a hash. The node, bun, deno and cloudflare adapters and static output
+  have no cache to purge, so the calls stay a no-op there (warned once).
 
 - HMR keeps island state (Fast Refresh). In `nowaki dev`, editing an island, or a module
   that only islands import, swaps the components in place: hook state survives, and a
@@ -38,11 +46,21 @@ milestone's worth of work; the codename is noted per entry.
   updates without a reload: a stylesheet an island imports is replaced in its `<style>`,
   a linked route / layout stylesheet is swapped once the new one has loaded (no flash,
   nonce-stamped under `NOWAKI_CSP`), and a CSS Module whose class names changed re-imports
-  its islands. Route, layout and server-only edits still reload the page (in-place page
-  updates come later), as do nowaki.config, `env.ts`, `.env` and `session.ts`. The runtime
+  its islands. nowaki.config, `env.ts`, `.env` and `session.ts` still reload. The runtime
   is `client/refresh.js`, written for Nowaki on the public Preact API (Preact 10 and 11, no
   new dependency) on top of oxc's React Refresh transform, which `nowaki-core` applies only
   to dev browser modules of the app (`NowakiCore::set_dev_refresh`). Builds are unchanged.
+- HMR re-renders pages in place. Editing a route, a layout, or a server-only module that only
+  routes import (`lib/db.ts`) refetches the page and morphs it: the text, the head region
+  (`export const head`, route CSS; unchanged nodes stay, so nothing flashes) and `<html>` /
+  `<body>` attributes update, while islands whose `src` and props are unchanged keep their
+  element and state, live islands keep their server state, and the scroll position stays. An
+  island given new props hydrates afresh. With an intercepting slot open (a modal over a
+  list), the slot's fragment is refetched and the modal stays open. `nowaki:page-load` fires
+  after the update, and the client router drops the pages it had cached. A non-200 response
+  (a syntax error shows the error page) falls back to a reload, and the page comes back once
+  the file is fixed. Works under `NOWAKI_CSP=enforce` and a basePath. In the browser test,
+  edit to DOM takes about 55–90 ms.
 - **View Transitions in the client router (opt-in).** `<Link viewTransition>` (or
   `data-nowaki-transition` on an `<a>` or an element around links) runs that navigation inside
   `document.startViewTransition`; `export const viewTransition = true` on a route does it for
@@ -57,6 +75,34 @@ milestone's worth of work; the codename is noted per entry.
   element that should morph into the next page's (a list card into the detail page). Pages
   without the export render byte-identical HTML; the code is in the lazy router chunk
   (+276 bytes gzip), and first-load JS is unchanged.
+- **Observability.** All of it is off unless asked for, and costs a request one check when off.
+  - **Server-Timing**: on in `nowaki dev`, opt-in elsewhere with `NOWAKI_SERVER_TIMING=1`
+    (timings can tell a visitor something, such as whether a lookup found a user). The handler
+    reports `mw`, `loader`, `render` and `action`; `nowaki start` adds `isr;desc=HIT|STALE|MISS`
+    and `total`. An ISR hit carries only its own entries, never the timings of the render that
+    filled the cache. A streamed page has what was known when its headers went out.
+  - **JSON logs**: with `NOWAKI_LOG=json`, the Rust front and the Node runtime write one JSON
+    object per line (`time`, `level`, `msg`, `source`, plus `trace_id` / `span_id` inside a
+    traced request and the error with its stack), and `nowaki start` adds an access log line per
+    request. Sidecar lines that are already JSON pass through unchanged. Errors still reach
+    clients as generic messages.
+  - **OpenTelemetry traces**, exported as OTLP/HTTP JSON when `OTEL_EXPORTER_OTLP_ENDPOINT` or
+    `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set (and `OTEL_SDK_DISABLED` isn't true), honoring
+    `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_TRACES_SAMPLER` / `_ARG`. The
+    exporters are built in (Rust and a fetch-based JS one that also runs on the Cloudflare
+    worker), so there are no new dependencies; spans are batched in a bounded queue and dropped
+    when it is full, never holding up a request. On `nowaki start` one request is one trace: a
+    SERVER span `GET <route>` in Rust (under an incoming `traceparent`), a CLIENT span to the
+    sidecar, and the sidecar's SERVER span with `middleware`, `loader`, `render`, `action`,
+    server function and live event spans under it. Jetstream WebSocket events and publish
+    refreshes get a trace of their own. When the app registered a tracer with
+    `@opentelemetry/api`, the runtime creates its spans there instead. The Rust exporter speaks
+    plain HTTP (point it at a local collector); an `https://` endpoint turns off the Rust spans
+    with a warning, and the Node exporter still sends its own.
+  - **`GET /__nowaki/health`** (also under `basePath`): `{"status":"ok"}`, never cached, with no
+    data in it. `nowaki start` answers it in Rust with 200 while the sidecar answers a ping (1 s
+    timeout, cached for 1 s) and 503 otherwise; the node, bun, deno, Vercel and Cloudflare
+    adapters answer it before routing.
 
 ### Changed
 - Dependencies: `oxc` 0.146 → 0.158 (`oxc_resolver` stays at 11.24.3, the latest). oxc
@@ -66,6 +112,16 @@ milestone's worth of work; the codename is noted per entry.
   turns some early `return` / `continue` into `if` / `else` and folds a negated `&&`: the
   lazy router chunks shrink by 6 bytes gzip and the live runtime by 11 (first-load JS of the
   size benchmark is unchanged). Source maps map a few more names.
+
+### Fixed
+- **Client navigation under `NOWAKI_CSP=enforce` no longer logs `style-src-elem` violations**
+  for the fetched page's `<style>` (seen going to a page with `export const head` styles).
+  The document `DOMParser` creates shares the page's CSP, and the fetched `<style>` carried
+  the nonce of its own response, so Chrome reported it as it parsed (nothing was blocked on
+  screen, because the router re-stamped the copy it inserted). The router now gives fetched
+  `<style>` tags this document's nonce before parsing; boundary HTML gets it too. The lazy
+  router chunks grow by 101 bytes gzip (with the HMR Router Cache reset); first-load JS is
+  unchanged.
 
 ## [0.18.2] — 2026-11-11 · patch
 

@@ -25,6 +25,8 @@ curl -s -D - -o /dev/null -H 'cookie: user=alice' http://127.0.0.1:3310/isr-cook
 ! curl -s -D - -o /dev/null -H 'cookie: user=alice' http://127.0.0.1:3310/isr-cookie | grep -qi '^cache-control:.*s-maxage'
 curl -s -D - -o /dev/null -H 'accept-language: de' http://127.0.0.1:3310/vary | grep -qi '^vary:.*accept-language'
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr | grep -qi '^cache-control: public, s-maxage='
+# no CDN tag header off the vercel adapter (nothing here could purge by it)
+! curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-tagged | grep -qi '^vercel-cache-tag:'
 # an ISR page that sets a cookie is per-user: never shared-cacheable next to Set-Cookie
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-sets-cookie | grep -qi '^set-cookie: visited=1'
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-sets-cookie | grep -qi '^cache-control: private, no-cache'
@@ -46,6 +48,10 @@ grep -q "Couldn't display this page" /tmp/nowaki-early-fail.html
 ! grep -q 'the data source is down' /tmp/nowaki-early-fail.html   # no message in production
 curl -s 'http://127.0.0.1:3310/stream-early?go=1' | grep -q 'location.replace("/about")'
 curl -sf http://127.0.0.1:3310/api/hello | grep -q '"hello":"nowaki"'
+# /__nowaki/health is answered before routing, never cached; no Server-Timing unless asked for
+test "$(curl -sf http://127.0.0.1:3310/__nowaki/health)" = '{"status":"ok"}'
+curl -s -D - -o /dev/null http://127.0.0.1:3310/__nowaki/health | grep -qi '^cache-control: no-store'
+! curl -s -D - -o /dev/null http://127.0.0.1:3310/ | grep -qi '^server-timing:'
 # sessions on the node adapter: session.ts compiled to dist/server/session.js, the cookie round-trips
 test -f examples/hello/dist/server/session.js
 SESSION_COOKIE=$(curl -s -D - -o /dev/null -XPOST -H 'origin: http://127.0.0.1:3310' -d 'op=login&user=node' http://127.0.0.1:3310/api/session | tr -d '\r' | awk 'tolower($1)=="set-cookie:" {print $2}' | cut -d';' -f1)
@@ -110,10 +116,12 @@ test "$(echo "$LIVE_OUT" | grep -cF "$LIVE_SIG")" = 0
 test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'content-type: application/json' -H 'x-nowaki-live: 1' -H 'origin: http://evil.test' -d "$LIVE_EV" http://127.0.0.1:3310/__nowaki/live-event)" = "403"
 kill $NODE_PID
 # CSP on the node adapter (report-only): nonce on every script/style
-NOWAKI_CSP=report-only PORT=3312 node examples/hello/dist/server/index.mjs &
+# (with NOWAKI_SERVER_TIMING=1 on the same run: the handler's phases on the node adapter)
+NOWAKI_CSP=report-only NOWAKI_SERVER_TIMING=1 PORT=3312 node examples/hello/dist/server/index.mjs &
 CSPN_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3312/ >/dev/null && break; sleep 1; done
 node scripts/csp-e2e.mjs http://127.0.0.1:3312 --report-only
+curl -s -D - -o /dev/null http://127.0.0.1:3312/ | tr -d '\r' | grep -qiE '^server-timing: mw;dur=[0-9.]+, loader;dur=[0-9.]+, render;dur=[0-9.]+$'
 kill $CSPN_PID
 
 # the printed deploy command (`cd dist/server && ... && npm start`) works as written
@@ -237,6 +245,12 @@ curl -sf http://127.0.0.1:3320/ | grep -q "nowaki-island"
 curl -sf http://127.0.0.1:3320/api/hello | grep -q '"hello":"nowaki"'
 curl -sf http://127.0.0.1:3320/docs/intro | grep -q '<h2 id="why-content-collections"'   # content on vercel
 curl -sf http://127.0.0.1:3320/nav | grep -q 'href="/blog/hello"'
+# CDN purge: ISR pages carry Vercel-Cache-Tag (their tags + their path), other pages none
+curl -s -D - -o /dev/null http://127.0.0.1:3320/isr-tagged | grep -qiE '^vercel-cache-tag: t:isr-demo,p:/isr-tagged[[:space:]]*$'
+curl -s -D - -o /dev/null http://127.0.0.1:3320/isr | grep -qiE '^vercel-cache-tag: p:/isr[[:space:]]*$'
+! curl -s -D - -o /dev/null http://127.0.0.1:3320/about | grep -qi '^vercel-cache-tag:'
+# revalidateTag in an action without @vercel/functions installed: a warned no-op, the redirect stands
+curl -s -o /dev/null -w '%{http_code}' -X POST -H 'origin: http://127.0.0.1:3320' -d kind=tag http://127.0.0.1:3320/isr-tagged | grep -q '^303$'
 kill $VERCEL_PID
 # nowaki.config redirects / rewrites / headers / basePath / trailingSlash on the node, cloudflare,
 # vercel and static adapters (a generated app; the servers listen on 3313 and 3314)

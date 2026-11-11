@@ -695,11 +695,27 @@ async fn render_once(
         "load": ev.load.as_ref().map(|topic| json!({ "topic": topic })),
     });
     let url = format!("http://127.0.0.1:{}/__nowaki/live-render", ctx.sidecar_port);
+    // One trace per event or publish refresh; the sidecar's span joins it through `traceparent`.
+    let span = crate::obs::get().otel().map(|o| {
+        let kind = if ev.load.is_some() {
+            "refresh"
+        } else {
+            "event"
+        };
+        let mut s = o.root(format!("live {name}"), crate::obs::Kind::Server, None);
+        s.attr("nowaki.live.kind", crate::obs::Attr::Str(kind.to_string()));
+        (o, s)
+    });
+    let traceparent = span.as_ref().map(|(_, s)| s.traceparent());
     let call = async {
-        let r = ctx
+        let mut req = ctx
             .http
             .post(&url)
-            .header("content-type", "application/json")
+            .header("content-type", "application/json");
+        if let Some(tp) = &traceparent {
+            req = req.header("traceparent", tp.as_str());
+        }
+        let r = req
             .body(body.to_string())
             .send()
             .await
@@ -732,10 +748,21 @@ async fn render_once(
             shareable: rv.get("shareable").and_then(|v| v.as_bool()) == Some(true),
         })
     };
-    match tokio::time::timeout(ctx.timeout, call).await {
+    let result = match tokio::time::timeout(ctx.timeout, call).await {
         Ok(r) => r,
         Err(_) => Err(RenderError::Timeout),
+    };
+    if let Some((otel, mut s)) = span {
+        if let Err(e) = &result {
+            s.error = true;
+            s.attr(
+                "nowaki.live.error",
+                crate::obs::Attr::Str(e.reason().to_string()),
+            );
+        }
+        otel.end(s);
     }
+    result
 }
 
 /// Store the new state and push the patch, or tell the client the event failed.
@@ -760,7 +787,15 @@ async fn apply_rendered(
     } = match r.result {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("[nowaki live] {} re-render {}", r.name, e.reason());
+            if crate::obs::get().json {
+                crate::obs::log(
+                    "warn",
+                    &format!("live {} re-render {}", r.name, e.reason()),
+                    &[],
+                );
+            } else {
+                eprintln!("[nowaki live] {} re-render {}", r.name, e.reason());
+            }
             return send_error(socket, page, &r.nid, e.reason()).await;
         }
     };
