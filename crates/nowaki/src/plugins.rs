@@ -95,16 +95,14 @@ pub fn start(root: &Path) -> Result<Option<PluginHost>> {
 
 /// A plugin host that was spawned but not waited for (see [`spawn`]).
 pub struct Spawned {
-    root: std::path::PathBuf,
     child: Option<Child>,
     /// The host was asked for site-config.mjs's normalized config too.
     site_config: bool,
 }
 
 /// Starts the plugin host without waiting for it, so Node starts and imports nowaki.config while
-/// the CLI does other work. With `with_config` the same process also normalizes the config the
-/// way site-config.mjs does ([`Spawned::finish`] returns it), instead of a second Node start and
-/// config import (~45 ms).
+/// the CLI does other work. With `with_config` the same process also normalizes the build-time
+/// config (see crate::site; [`Spawned::finish`] returns it).
 pub fn spawn(root: &Path, with_config: bool) -> Result<Spawned> {
     let has_config = ["nowaki.config.mjs", "nowaki.config.js"]
         .iter()
@@ -112,7 +110,6 @@ pub fn spawn(root: &Path, with_config: bool) -> Result<Spawned> {
     // If @tsrx/preact is present, start the host for .tsrx even without a config.
     let has_tsrx = root.join("node_modules/@tsrx/preact").is_dir();
     let none = || Spawned {
-        root: root.to_path_buf(),
         child: None,
         site_config: false,
     };
@@ -141,7 +138,6 @@ pub fn spawn(root: &Path, with_config: bool) -> Result<Spawned> {
     }
     let child = cmd.spawn().context("failed to start plugin host (node)")?;
     Ok(Spawned {
-        root: root.to_path_buf(),
         child: Some(child),
         site_config,
     })
@@ -149,20 +145,20 @@ pub fn spawn(root: &Path, with_config: bool) -> Result<Spawned> {
 
 impl Spawned {
     /// Waits for the host. Returns it (None without hooks: the host is killed) and, for
-    /// `spawn(_, true)`, nowaki.config as [`crate::site::config`] reads it (an `Err` for an
-    /// invalid config, already explained on stderr).
+    /// `spawn(_, true)`, the build-time parts of nowaki.config normalized by the runtime
+    /// (`{ site?, fonts?, routing?, images? }`; `{}` when the config names none of them, an `Err`
+    /// for an invalid config, already explained on stderr).
     pub fn finish(self) -> Result<(Option<PluginHost>, Result<serde_json::Value>)> {
         // No host: no nowaki.config, or no runtime (so no site-config.mjs either).
         let Some(child) = self.child else {
             return Ok((None, Ok(serde_json::Value::Object(Default::default()))));
         };
-        self::finish(child, &self.root, self.site_config)
+        self::finish(child, self.site_config)
     }
 }
 
 fn finish(
     mut child: Child,
-    root: &Path,
     site_config: bool,
 ) -> Result<(Option<PluginHost>, Result<serde_json::Value>)> {
     let stdout = child.stdout.take().expect("piped stdout");
@@ -204,8 +200,10 @@ fn finish(
         eprintln!("{err}");
         Err(anyhow!("nowaki.config is invalid (see above)"))
     } else {
-        // A runtime older than 0.18.1 doesn't answer it.
-        crate::site::config(root)
+        // Every supported runtime (crate::runtime::MIN_RUNTIME) answers it.
+        Err(anyhow!(
+            "the plugin host did not return nowaki.config (is @nowaki-dev/runtime up to date?)"
+        ))
     };
 
     // No transform hook and no tsrx means no bridge is needed (kill the host).
@@ -344,9 +342,9 @@ mod tests {
         let app = app_with_config(config);
         let (host, read) = spawn(app.path(), true).unwrap().finish().unwrap();
         assert!(host.is_some(), "the plugin stays loaded");
-        let want = crate::site::config(app.path()).unwrap();
-        assert_eq!(read.unwrap(), want, "same as site-config.mjs on its own");
-        assert_eq!(want["routing"]["basePath"], "/app");
+        let read = read.unwrap();
+        assert_eq!(read["site"], "https://e.x", "normalized");
+        assert_eq!(read["routing"]["basePath"], "/app");
 
         // No plugins: the host goes away, the config is still read.
         let app = app_with_config(r#"export default { site: "https://e.x" };"#);
@@ -354,7 +352,7 @@ mod tests {
         assert!(host.is_none());
         assert_eq!(read.unwrap()["site"], "https://e.x");
 
-        // Without the config keys nothing is normalized (like site::config).
+        // Without the config keys nothing is normalized.
         let app = app_with_config("export default {};");
         let (_, read) = spawn(app.path(), true).unwrap().finish().unwrap();
         assert_eq!(read.unwrap(), serde_json::json!({}));

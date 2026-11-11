@@ -71,7 +71,7 @@ impl RemoteFetch for NodeFetch {
 
 static CURRENT: OnceLock<Arc<RemoteImages>> = OnceLock::new();
 
-/// Reads `images.remotePatterns` from the config (`site::config`) and gives them, with the Node
+/// Reads `images.remotePatterns` from the config (`plugins::Spawned::finish`) and gives them, with the Node
 /// fetcher, to `core` and to content entries. Without patterns every remote `?image` is refused.
 pub fn configure(core: &mut nowaki_core::NowakiCore, root: &Path, config: &Value) -> Result<()> {
     let patterns: Vec<RemotePattern> = match config.pointer("/images/remotePatterns") {
