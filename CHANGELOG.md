@@ -18,7 +18,8 @@ milestone's worth of work; the codename is noted per entry.
   over-limit streamed reads on Node may **reset the connection** before a 413 is sent. Malformed
   multipart maps to **400** instead of a generic 500. **Type note:** multipart returns `FormData`
   (urlencoded still returns `URLSearchParams`); use `instanceof FormData` / `instanceof File` in
-  handlers that accept uploads.
+  handlers that accept uploads. `filename*` in multipart follows the platform parser (Node 22
+  rejects it; newer runtimes may decode RFC 5987 names). Treat `File.name` as untrusted either way.
 
 ### Upgrade notes
 - **Building Nowaki from source needs Rust 1.97 or newer** (was 1.95), because oxc 0.158

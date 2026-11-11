@@ -208,20 +208,24 @@ check(
 }
 
 {
-  const fd = await parseMultipartBody(
-    latin1Bytes(
-      buildMultipart("u", [
-        {
-          name: "f",
-          filenameStar: "UTF-8''upload%2Etxt",
-          body: "x",
-        },
-      ]),
-    ),
-    "multipart/form-data; boundary=u",
+  // RFC 7578 discourages filename* in multipart; Node 22 rejects it, Node 24+ may decode it.
+  const starBody = buildMultipart("u", [
+    { name: "f", filenameStar: "UTF-8''upload%2Etxt", body: "x" },
+  ]);
+  const starCt = "multipart/form-data; boundary=u";
+  let starOk = false;
+  let starStatus = 0;
+  try {
+    const fd = await parseMultipartBody(latin1Bytes(starBody), starCt);
+    const f = fd.get("f");
+    starOk = f instanceof File && f.name === "upload.txt";
+  } catch (e) {
+    starStatus = e.status ?? 0;
+  }
+  check(
+    "filename* (UTF-8) when the platform supports it, else 400",
+    starOk || starStatus === 400,
   );
-  const f = fd.get("f");
-  check("filename* (UTF-8)", f instanceof File && f.name === "upload.txt");
 }
 
 {
