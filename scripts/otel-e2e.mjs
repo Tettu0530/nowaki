@@ -143,6 +143,8 @@ check("export: OTEL_EXPORTER_OTLP_HEADERS reach the collector (percent-decoded)"
 await (await fetch(`${B}/about`)).text();
 await waitFor(() => spans.some((s) => s.name === "GET /about" && s.resource["telemetry.sdk.language"] === "rust"));
 const about = spans.find((s) => s.name === "GET /about" && s.resource["telemetry.sdk.language"] === "rust");
+// The two exporters flush on their own timers: wait for the sidecar's half of the trace too.
+await waitFor(() => spans.some((s) => s.traceId === about?.traceId && s.resource["telemetry.sdk.language"] === "nodejs"));
 check("trace: a request without traceparent gets a root SERVER span", !!about && !about.parentSpanId && /^[0-9a-f]{32}$/.test(about.traceId));
 check("trace: and the sidecar's spans join it", spans.some((s) => s.traceId === about?.traceId && s.resource["telemetry.sdk.language"] === "nodejs"));
 
