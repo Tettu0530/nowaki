@@ -154,6 +154,11 @@ code locations and CI coverage.
   that path. The POST transport (`server/live-event.mjs`, `/__nowaki/live-event`)
   goes through the same `liveRender` and keeps the RPC-style CSRF gate (JSON +
   `x-nowaki-live` + `isCrossSite`) and its 64 KiB body cap ahead of parsing.
+- **ISR purges come only from the sidecar.** `start.rs` reads `x-nowaki-purge` / `x-nowaki-tags`
+  from the sidecar's reply (never from the client: `forward::passes` drops them) and strips them,
+  and any new internal response header, on **both** branches of `proxy`. The stdout channel needs
+  `NOWAKI_PUBLISH_TOKEN`. `POST /__nowaki/revalidate` stays off unless `NOWAKI_REVALIDATE_SECRET`
+  is set, and compares it in constant time.
 - **ISR keys must include learned `Vary` inputs** (`context.mjs` `__vary()` →
   `x-nowaki-vary`, folded in `isr_key` in `start.rs`) so cached pages cannot
   bleed across users. The query string is part of the key only when the route reads
@@ -174,6 +179,19 @@ code locations and CI coverage.
   the dev sidecar's `/__nowaki/dev-info` (`server/sidecar.mjs`); imports /
   importers from `crates/nowaki-core/src/graph.rs`. E2E: `scripts/mcp-e2e.mjs`.
 
+- **On-demand revalidation (`revalidatePath` / `revalidateTag`, `export const tags`)** —
+  `server/revalidate.mjs` (validation, path expansion over basePath / locales / trailingSlash,
+  the `t:<tag>` / `p:<browser path>` entry encoding, `POST /__nowaki/revalidate`). Calls inside a
+  request (page actions and API routes now run in `runWithContext`, like server functions and live
+  events) collect on `ctx.__purge`; `handler.mjs` `finalize` hands them over before the response
+  returns: `x-nowaki-purge` on `nowaki start` (`env.isrStore`, set by `prod-sidecar.mjs`), and the
+  adapter seams `env.purge(entries)` / `env.cacheTagHeader(entries)` (unset for now). Outside a
+  request: a `NOWAKI_PURGE <token>` stdout line (`start.rs::run`). ISR renders with tags send
+  `x-nowaki-tags` (static arrays cached per module). Rust side: `start.rs` `IsrCache::purge` (one
+  scan, delete) and `insert` (a purge epoch log keeps an in-flight render from re-storing purged
+  content). The store is per process. Dev only records calls (dev-info `revalidations`); static
+  output warns. Encoding fixture: `crates/nowaki/tests/fixtures/purge-cases.json` (`start.rs`
+  units, `scripts/revalidate-test.mjs`); e2e in `scripts/ci/e2e-prod.sh` (`routes/isr-tagged.tsx`).
 - **Server functions (`"use server"`)** — `crates/nowaki-core/src/server_fn.rs`
   (detect, id, client proxy, discover) + `packages/nowaki-runtime/server/functions.mjs`
   (dispatch + `getContext`). Allowlist: `dist/server/functions.json`.

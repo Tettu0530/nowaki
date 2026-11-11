@@ -22,7 +22,7 @@ const JSON_CT = { "content-type": "application/json; charset=utf-8" };
 
 const als = new AsyncLocalStorage();
 
-/// Runs `fn` with `ctx` as `getContext()` (server functions and live handlers).
+/// Runs `fn` with `ctx` as `getContext()` (server functions, live handlers, page actions, API routes).
 export function runWithContext(ctx, fn) {
   return ctx ? als.run(ctx, fn) : fn();
 }
@@ -38,6 +38,10 @@ export function getContext() {
   if (ctx) contextReads.add(ctx);
   return ctx;
 }
+
+// The running request's context for framework code (revalidate.mjs), without counting as a read.
+// Published on globalThis so runtime-neutral modules reach it without importing node:async_hooks.
+globalThis[Symbol.for("nowaki.context")] = () => als.getStore();
 
 /// Handles `/__nowaki/fn`. `sf` is `{ lookup(id, version), importModule(module, version) }`.
 /// Each entry point (dev/prod/edge) provides its own sf for its environment.

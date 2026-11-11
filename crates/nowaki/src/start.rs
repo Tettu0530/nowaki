@@ -3,9 +3,10 @@
 //! Rust (axum) handles the HTTP edge, static files, and HTML assembly; the Node prod-sidecar
 //! only renders components (pages return body + meta as JSON). Separate from the deploy adapters.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -64,7 +65,8 @@ struct ProdState {
     http: reqwest::Client,
     manifest: Manifest,
     live_hub: Arc<crate::live::LiveHub>,
-    isr: IsrCache,
+    /// Shared with the sidecar's stdout reader (`NOWAKI_PURGE` lines).
+    isr: Arc<IsrCache>,
     /// nowaki.config routing; `None` (no routing.json) costs nothing per request.
     front: Option<Arc<crate::front::Front>>,
 }
@@ -75,6 +77,100 @@ struct IsrCache {
     inflight: Mutex<HashSet<String>>, // revalidation single-flight
     specs: Mutex<HashMap<String, VarySpec>>, // learned Vary spec per pathname
     max: usize,                       // entry cap (oldest evicted when exceeded)
+    /// Bumped by every purge. A render records it before asking the sidecar, so a purge that
+    /// happens while the render runs keeps its result out of the cache (see `IsrCache::insert`).
+    epoch: AtomicU64,
+    /// The last purges, newest last, for that check.
+    purges: Mutex<VecDeque<Purge>>,
+}
+
+/// How many purges `IsrCache::purges` remembers. A render that started before the oldest one is
+/// not stored (it can't be checked), which only costs a re-render.
+const PURGE_LOG: usize = 64;
+
+/// One `revalidatePath` / `revalidateTag` batch: browser paths and tags (server/revalidate.mjs).
+#[derive(Default, Debug, PartialEq)]
+struct Purge {
+    epoch: u64,
+    paths: Vec<String>,
+    tags: Vec<String>,
+}
+
+impl Purge {
+    fn matches(&self, path: &str, tags: &[Box<str>]) -> bool {
+        self.paths.iter().any(|p| p == path)
+            || tags.iter().any(|t| self.tags.iter().any(|x| **x == **t))
+    }
+
+    fn is_empty(&self) -> bool {
+        self.paths.is_empty() && self.tags.is_empty()
+    }
+}
+
+/// The internal response headers of the sidecar hop: Rust consumes them, so they never reach the
+/// browser, on either branch of `proxy`.
+const PURGE_HEADER: &str = "x-nowaki-purge";
+const TAGS_HEADER: &str = "x-nowaki-tags";
+const INTERNAL_RESPONSE_HEADERS: [&str; 3] = [PURGE_HEADER, TAGS_HEADER, "x-nowaki-route"];
+
+/// Page responses drop every `x-nowaki-*` header; passthrough ones keep those the browser runtime
+/// reads (`x-nowaki-slot`) and drop these.
+fn is_internal_response_header(name: &str) -> bool {
+    name.starts_with("x-nowaki-") && INTERNAL_RESPONSE_HEADERS.contains(&name)
+}
+
+/// Percent-decodes one item of an `x-nowaki-purge` / `x-nowaki-tags` list (server/revalidate.mjs
+/// `encodeEntries`); None when it isn't valid UTF-8 or has a broken escape.
+fn percent_decode(s: &str) -> Option<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' {
+            let hex = b.get(i + 1..i + 3)?;
+            if !hex.iter().all(u8::is_ascii_hexdigit) {
+                return None;
+            }
+            out.push(u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+/// The items of an encoded list, decoded; broken ones are dropped.
+fn decode_list(value: &str) -> impl Iterator<Item = String> + '_ {
+    value
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .filter_map(percent_decode)
+}
+
+/// `t:<tag>` / `p:<browser path>` entries into a purge (epoch unset).
+fn decode_purge(value: &str) -> Purge {
+    let mut out = Purge::default();
+    for e in decode_list(value) {
+        if let Some(t) = e.strip_prefix("t:") {
+            if !t.is_empty() {
+                out.tags.push(t.to_string());
+            }
+        } else if let Some(p) = e.strip_prefix("p:") {
+            if p.starts_with('/') {
+                out.paths.push(p.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// `NOWAKI_PURGE <token> <entries>`: a revalidate call made outside a request. None for any other
+/// line, including one with the wrong token (app log output can't purge).
+fn purge_line(line: &str) -> Option<Purge> {
+    let (token, entries) = line.strip_prefix("NOWAKI_PURGE ")?.split_once(' ')?;
+    (token == crate::live::publish_token()).then(|| decode_purge(entries.trim()))
 }
 
 /// Inputs a route's render depends on (Vary). Learned from x-nowaki-vary and folded into the cache key
@@ -98,6 +194,10 @@ struct CacheEntry {
     // Request context for regenerating the same variant during background revalidation.
     refetch_path: String,                   // path(+query) sent to the sidecar
     refetch_headers: Vec<(String, String)>, // actual values of the folded-in Vary headers
+    /// The browser path of the key (before `\u{1d}`): what `revalidatePath` matches.
+    path: Box<str>,
+    /// `export const tags` of the render (`x-nowaki-tags`): what `revalidateTag` matches.
+    tags: Box<[Box<str>]>,
 }
 
 impl IsrCache {
@@ -107,12 +207,100 @@ impl IsrCache {
             .and_then(|v| v.parse::<usize>().ok())
             .filter(|n| *n > 0)
             .unwrap_or(1024);
+        Self::with_max(max)
+    }
+
+    fn with_max(max: usize) -> Self {
         IsrCache {
             entries: Mutex::new(HashMap::new()),
             inflight: Mutex::new(HashSet::new()),
             specs: Mutex::new(HashMap::new()),
             max,
+            epoch: AtomicU64::new(0),
+            purges: Mutex::new(VecDeque::new()),
         }
+    }
+
+    /// The epoch to pass to `insert` for a render that starts now.
+    fn epoch(&self) -> u64 {
+        self.epoch.load(Ordering::Acquire)
+    }
+
+    /// Deletes every entry whose path or tags `purge` names (one scan: purges are rare and the
+    /// map holds at most `NOWAKI_ISR_MAX` entries, so nothing is indexed on store). The next
+    /// request for them is a MISS that renders fresh. Returns how many were removed.
+    fn purge(&self, mut purge: Purge) -> usize {
+        if purge.is_empty() {
+            return 0;
+        }
+        // The entries lock is held across the epoch bump and the scan, and `insert` checks the log
+        // under the same lock, so a render can't slip its stale result in between.
+        let mut map = self.entries.lock().unwrap();
+        purge.epoch = self.epoch.fetch_add(1, Ordering::AcqRel) + 1;
+        let before = map.len();
+        map.retain(|_, e| !purge.matches(&e.path, &e.tags));
+        let removed = before - map.len();
+        let mut log = self.purges.lock().unwrap();
+        if log.len() >= PURGE_LOG {
+            log.pop_front();
+        }
+        log.push_back(purge);
+        removed
+    }
+
+    /// Whether a purge after `epoch` names this path or one of these tags (or may have: it fell
+    /// out of the log). Called with the entries lock held.
+    fn purged_since(&self, epoch: u64, path: &str, tags: &[Box<str>]) -> bool {
+        if self.epoch.load(Ordering::Acquire) == epoch {
+            return false;
+        }
+        let log = self.purges.lock().unwrap();
+        if log.front().is_none_or(|p| p.epoch > epoch + 1) {
+            return true;
+        }
+        log.iter().any(|p| p.epoch > epoch && p.matches(path, tags))
+    }
+
+    /// Stores a render that started at `epoch` (`IsrCache::epoch`), unless a purge since then
+    /// covers it. When over the cap, the oldest entry of the same pathname goes first (a
+    /// query/header flood doesn't evict other routes).
+    fn insert(&self, key: &str, entry: CacheEntry, epoch: u64) {
+        let mut map = self.entries.lock().unwrap();
+        if self.purged_since(epoch, &entry.path, &entry.tags) {
+            return;
+        }
+        if map.len() >= self.max && !map.contains_key(key) {
+            let path = key.split(['?', '\u{1e}', '\u{1f}']).next().unwrap_or(key);
+            let victim = map
+                .iter()
+                .filter(|(k, _)| k.split(['?', '\u{1e}', '\u{1f}']).next() == Some(path))
+                .min_by_key(|(_, e)| e.stored_at)
+                .map(|(k, _)| k.clone())
+                .or_else(|| {
+                    map.iter()
+                        .min_by_key(|(_, e)| e.stored_at)
+                        .map(|(k, _)| k.clone())
+                });
+            if let Some(v) = victim {
+                map.remove(&v);
+            }
+        }
+        map.insert(key.to_string(), Arc::new(entry));
+    }
+}
+
+/// The page's tags from `x-nowaki-tags` (none without the header).
+fn tags_of(h: &reqwest::header::HeaderMap) -> Box<[Box<str>]> {
+    h.get(TAGS_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| decode_list(v).map(String::into_boxed_str).collect())
+        .unwrap_or_default()
+}
+
+/// Purges what a sidecar response names in `x-nowaki-purge` (a revalidate call during the request).
+fn purge_from(isr: &IsrCache, h: &reqwest::header::HeaderMap) {
+    if let Some(v) = h.get(PURGE_HEADER).and_then(|v| v.to_str().ok()) {
+        isr.purge(decode_purge(v));
     }
 }
 
@@ -156,15 +344,27 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
             sidecar_port = Some(rest.trim().parse::<u16>().context("invalid sidecar port")?);
             break;
         }
+        // Nothing is cached yet; a purge from startup code only needs to stay out of the log.
+        if purge_line(&line).is_some() {
+            continue;
+        }
         println!("[sidecar] {line}");
     }
     let sidecar_port =
         sidecar_port.ok_or_else(|| anyhow!("prod-sidecar exited without reporting READY"))?;
     let hub_for_lines = live_hub.clone();
+    let isr = Arc::new(IsrCache::new());
+    let isr_for_lines = isr.clone();
     tokio::spawn(async move {
         while let Ok(Some(l)) = lines.next_line().await {
-            if !crate::live::handle_sidecar_line(&hub_for_lines, &l) {
-                println!("[sidecar] {l}");
+            if crate::live::handle_sidecar_line(&hub_for_lines, &l) {
+                continue;
+            }
+            match purge_line(&l) {
+                Some(purge) => {
+                    isr_for_lines.purge(purge);
+                }
+                None => println!("[sidecar] {l}"),
             }
         }
     });
@@ -194,7 +394,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
             .build()?,
         manifest,
         live_hub,
-        isr: IsrCache::new(),
+        isr,
         front: front.clone(),
     });
 
@@ -533,9 +733,14 @@ fn spawn_revalidate(state: Arc<ProdState>, key: String) {
 
 /// Replays the stored variant (path+query and Vary header values), not a clean GET.
 async fn revalidate_entry(state: &Arc<ProdState>, key: &str) -> Option<()> {
-    let (refetch_path, refetch_headers) = {
+    let epoch = state.isr.epoch();
+    let (refetch_path, refetch_headers, path) = {
         let e = state.isr.entries.lock().unwrap().get(key).cloned()?;
-        (e.refetch_path.clone(), e.refetch_headers.clone())
+        (
+            e.refetch_path.clone(),
+            e.refetch_headers.clone(),
+            e.path.clone(),
+        )
     };
     let url = format!("http://127.0.0.1:{}{}", state.sidecar_port, refetch_path);
     let mut req = state.http.get(&url);
@@ -543,8 +748,8 @@ async fn revalidate_entry(state: &Arc<ProdState>, key: &str) -> Option<()> {
         req = req.header(n, v);
     }
     let resp = req.send().await.ok()?;
-    let entry = page_to_entry(state, resp, refetch_path, refetch_headers).await?;
-    isr_store(state, key, entry);
+    let entry = page_to_entry(state, resp, refetch_path, refetch_headers, path).await?;
+    isr_store(state, key, entry, epoch);
     Some(())
 }
 
@@ -554,6 +759,7 @@ async fn page_to_entry(
     resp: reqwest::Response,
     refetch_path: String,
     refetch_headers: Vec<(String, String)>,
+    path: Box<str>,
 ) -> Option<CacheEntry> {
     if resp.status() != StatusCode::OK {
         return None;
@@ -564,6 +770,7 @@ async fn page_to_entry(
     }
     let secs = isr_secs_of(h)?;
     let kept = kept_headers(h);
+    let tags = tags_of(h);
     let status = resp.status().as_u16();
     let bytes = resp.bytes().await.ok()?;
     let meta: PageMeta = serde_json::from_slice(&bytes).ok()?;
@@ -577,6 +784,8 @@ async fn page_to_entry(
         revalidate: Duration::from_secs(secs),
         refetch_path,
         refetch_headers,
+        path,
+        tags,
     })
 }
 
@@ -619,6 +828,7 @@ fn maybe_store(
     secs: u64,
     status: u16,
     html: &str,
+    epoch: u64,
 ) {
     let vary_raw = resp_headers
         .get("x-nowaki-vary")
@@ -690,7 +900,10 @@ fn maybe_store(
             revalidate: Duration::from_secs(secs),
             refetch_path,
             refetch_headers,
+            path: pathname.into(),
+            tags: tags_of(resp_headers),
         },
+        epoch,
     );
 }
 
@@ -709,32 +922,15 @@ fn public_origin_headers(headers: &axum::http::HeaderMap) -> Vec<(String, String
     out
 }
 
-/// When over the cap, evict the oldest entry of the same pathname first (a query/header flood doesn't hit other routes).
-fn isr_store(state: &ProdState, key: &str, mut entry: CacheEntry) {
+/// Stores a render that started at `epoch` (see `IsrCache::insert`).
+fn isr_store(state: &ProdState, key: &str, mut entry: CacheEntry, epoch: u64) {
     // Compress and tag once here, outside the lock. Not with CSP: the CSP layer rewrites each
     // HTML response with a new nonce, so a compressed body or a 304 would carry a stale one.
     if crate::csp::mode() == crate::csp::Mode::Off {
         entry.body = crate::encoding::Variants::compressed(entry.body.plain.clone());
         entry.with_etag = true;
     }
-    let mut map = state.isr.entries.lock().unwrap();
-    if map.len() >= state.isr.max && !map.contains_key(key) {
-        let path = key.split(['?', '\u{1e}', '\u{1f}']).next().unwrap_or(key);
-        let victim = map
-            .iter()
-            .filter(|(k, _)| k.split(['?', '\u{1e}', '\u{1f}']).next() == Some(path))
-            .min_by_key(|(_, e)| e.stored_at)
-            .map(|(k, _)| k.clone())
-            .or_else(|| {
-                map.iter()
-                    .min_by_key(|(_, e)| e.stored_at)
-                    .map(|(k, _)| k.clone())
-            });
-        if let Some(v) = victim {
-            map.remove(&v);
-        }
-    }
-    map.insert(key.to_string(), Arc::new(entry));
+    state.isr.insert(key, entry, epoch);
 }
 
 /// A `/_nowaki/*` file in memory. Names are content-hashed, so they never change while running.
@@ -932,6 +1128,8 @@ async fn proxy(
     if let Some(r) = &route_path {
         builder = builder.header(crate::front::ROUTE_PATH_HEADER, r);
     }
+    // Before the render starts: a purge that lands while it runs keeps its result out of the cache.
+    let epoch = if cacheable { state.isr.epoch() } else { 0 };
 
     let resp = match builder.send().await {
         Ok(r) => r,
@@ -947,13 +1145,19 @@ async fn proxy(
     let status = resp.status();
     let is_page = resp.headers().get("x-nowaki-page").is_some();
     let resp_headers = resp.headers().clone();
+    // A revalidate call during this request (an action, API route, server function): purged
+    // before the response goes out, so whatever the browser asks for next renders fresh.
+    purge_from(&state.isr, &resp_headers);
 
     if !is_page {
         // Pass through as the sidecar writes it (API, redirect, file stream, streaming SSR,
         // built-in 404/500): the first bytes go out before the last are rendered.
         let mut builder = Response::builder().status(status.as_u16());
         for (name, value) in resp_headers.iter() {
-            if name != header::TRANSFER_ENCODING && name != header::CONTENT_LENGTH {
+            if name != header::TRANSFER_ENCODING
+                && name != header::CONTENT_LENGTH
+                && !is_internal_response_header(name.as_str())
+            {
                 builder = builder.header(name, value);
             }
         }
@@ -1006,6 +1210,7 @@ async fn proxy(
                     secs,
                     status.as_u16(),
                     &html,
+                    epoch,
                 );
             }
         }
@@ -1274,5 +1479,157 @@ mod tests {
             &Method::GET,
             &header_map(&[("x-nowaki-intercept", b"/@modal")])
         ));
+    }
+
+    fn entry(path: &str, tags: &[&str]) -> CacheEntry {
+        CacheEntry {
+            status: 200,
+            body: crate::encoding::Variants::new(axum::body::Bytes::from_static(b"x"), None, None),
+            with_etag: false,
+            headers: Vec::new(),
+            stored_at: Instant::now(),
+            revalidate: Duration::from_secs(60),
+            refetch_path: path.to_string(),
+            refetch_headers: Vec::new(),
+            path: path.into(),
+            tags: tags.iter().map(|t| Box::<str>::from(*t)).collect(),
+        }
+    }
+
+    fn keys(cache: &IsrCache) -> Vec<String> {
+        let mut k: Vec<String> = cache.entries.lock().unwrap().keys().cloned().collect();
+        k.sort();
+        k
+    }
+
+    fn purge_of(paths: &[&str], tags: &[&str]) -> Purge {
+        Purge {
+            epoch: 0,
+            paths: paths.iter().map(|p| p.to_string()).collect(),
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn purge_fixture_matches_the_js_encoding() {
+        let fx: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/purge-cases.json")).unwrap();
+        let strings = |v: &serde_json::Value| -> Vec<String> {
+            v.as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s.as_str().unwrap().to_string())
+                .collect()
+        };
+        for c in fx["encode"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .chain(fx["broken"].as_array().unwrap())
+        {
+            let header = c["header"].as_str().unwrap();
+            let got: Vec<String> = decode_list(header).collect();
+            assert_eq!(got, strings(&c["entries"]), "decode {header}");
+        }
+        for c in fx["purge"].as_array().unwrap() {
+            let header = c["header"].as_str().unwrap();
+            let got = decode_purge(header);
+            assert_eq!(got.paths, strings(&c["paths"]), "paths of {header}");
+            assert_eq!(got.tags, strings(&c["tags"]), "tags of {header}");
+        }
+    }
+
+    #[test]
+    fn purge_by_tag_deletes_only_tagged_entries() {
+        let cache = IsrCache::with_max(16);
+        cache.insert("/blog/a", entry("/blog/a", &["posts", "post:a"]), 0);
+        cache.insert("/blog/b", entry("/blog/b", &["posts", "post:b"]), 0);
+        cache.insert("/about", entry("/about", &[]), 0);
+        assert_eq!(cache.purge(purge_of(&[], &["post:a"])), 1);
+        assert_eq!(keys(&cache), ["/about", "/blog/b"]);
+        assert_eq!(cache.purge(purge_of(&[], &["posts"])), 1);
+        assert_eq!(keys(&cache), ["/about"]);
+        assert_eq!(cache.purge(purge_of(&[], &[])), 0);
+    }
+
+    #[test]
+    fn purge_by_path_covers_every_query_vary_and_route_variant() {
+        let cache = IsrCache::with_max(16);
+        for key in [
+            "/blog",
+            "/blog?page=2",
+            "/blog\u{1e}http://a.test\u{1f}cookie=x",
+            "/blog\u{1d}/posts",
+        ] {
+            cache.insert(key, entry("/blog", &[]), 0);
+        }
+        cache.insert("/blog/", entry("/blog/", &[]), 0);
+        cache.insert("/blogroll", entry("/blogroll", &[]), 0);
+        assert_eq!(cache.purge(purge_of(&["/blog"], &[])), 4);
+        assert_eq!(keys(&cache), ["/blog/", "/blogroll"]);
+    }
+
+    #[test]
+    fn a_render_started_before_a_purge_is_not_stored() {
+        let cache = IsrCache::with_max(16);
+        cache.insert("/p", entry("/p", &["t"]), cache.epoch());
+        // A background revalidation (or a MISS render) starts, then the page is purged.
+        let started = cache.epoch();
+        assert_eq!(cache.purge(purge_of(&[], &["t"])), 1);
+        cache.insert("/p", entry("/p", &["t"]), started);
+        assert!(
+            keys(&cache).is_empty(),
+            "the stale render must not come back"
+        );
+        // A purge of something else doesn't block it; a render started after the purge is stored.
+        let other = cache.epoch();
+        cache.purge(purge_of(&["/elsewhere"], &[]));
+        cache.insert("/p", entry("/p", &["t"]), other);
+        assert_eq!(keys(&cache), ["/p"]);
+        // A purge of a page that isn't cached yet still stops its first render.
+        let first = cache.epoch();
+        cache.purge(purge_of(&["/new"], &[]));
+        cache.insert("/new", entry("/new", &[]), first);
+        assert_eq!(keys(&cache), ["/p"]);
+    }
+
+    #[test]
+    fn a_render_older_than_the_purge_log_is_not_stored() {
+        let cache = IsrCache::with_max(16);
+        let started = cache.epoch();
+        for i in 0..=PURGE_LOG {
+            cache.purge(purge_of(&[&format!("/x{i}")], &[]));
+        }
+        cache.insert("/p", entry("/p", &[]), started);
+        assert!(keys(&cache).is_empty());
+        cache.insert("/p", entry("/p", &[]), cache.epoch());
+        assert_eq!(keys(&cache), ["/p"]);
+    }
+
+    #[test]
+    fn purge_lines_need_the_publish_token() {
+        let token = crate::live::publish_token();
+        let ok = purge_line(&format!("NOWAKI_PURGE {token} t:posts,p:/blog")).unwrap();
+        assert_eq!(
+            ok,
+            Purge {
+                epoch: 0,
+                paths: vec!["/blog".into()],
+                tags: vec!["posts".into()]
+            }
+        );
+        assert_eq!(purge_line("NOWAKI_PURGE wrong t:posts"), None);
+        assert_eq!(purge_line("NOWAKI_PURGE t:posts"), None);
+        assert_eq!(purge_line(&format!("[app] NOWAKI_PURGE {token} t:x")), None);
+    }
+
+    #[test]
+    fn internal_response_headers_never_pass_through() {
+        assert!(is_internal_response_header("x-nowaki-purge"));
+        assert!(is_internal_response_header("x-nowaki-tags"));
+        assert!(is_internal_response_header("x-nowaki-route"));
+        // The client router reads this one from an intercepted fragment.
+        assert!(!is_internal_response_header("x-nowaki-slot"));
+        assert!(!is_internal_response_header("cache-control"));
     }
 }

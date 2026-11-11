@@ -10,6 +10,21 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **On-demand revalidation.** `revalidatePath(path)` and `revalidateTag(tag)` from
+  `@nowaki-dev/runtime` purge ISR pages, and `export const tags` (an array, or a function of
+  `{ params, data }`) tags them. `revalidatePath` takes an app path, as in `<Link href>`, and
+  purges every query and `Vary` variant, every locale, the basePath form, and both
+  trailing-slash forms under `"ignore"`. Purged pages are deleted, so the next request renders
+  fresh. Called from a page action, an API route, a server function or a live handler, the purge
+  happens under `nowaki start` before that response is sent, so the redirect after an action
+  already shows new content; calls outside a request reach the cache through the sidecar's
+  stdout. The ISR cache is per process: to fan a purge out, set `NOWAKI_REVALIDATE_SECRET` and
+  send `POST /__nowaki/revalidate` (`Authorization: Bearer <secret>`, JSON `{ paths, tags }`) to
+  each instance; the endpoint is off (404) without it. `nowaki dev` has no cache and only records
+  the calls; static output and the deploy adapters ignore them for now (warned once).
+- Page actions and API routes now run inside the request context, so `getContext()` works there.
+
 ### Upgrade notes
 - **Building Nowaki from source needs Rust 1.97 or newer** (was 1.95), because oxc 0.158
   does. `rust-version` and the MSRV CI job are 1.97. The npm packages are unaffected.

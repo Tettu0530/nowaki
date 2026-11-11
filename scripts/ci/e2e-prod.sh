@@ -38,7 +38,8 @@ test -f examples/hello/dist/server/islands/LiveCounter.js
 # nowaki start (Rust front) serves the live island, assembled with live.js
 rm -f examples/hello/.nowaki/live-rooms.json   # rooms start empty; the livetest votes in /poll
 # No ISR warm-up here: the ISR checks below start from an empty cache (MISS → HIT → STALE).
-NOWAKI_ISR_WARM=0 ./target/debug/nowaki start examples/hello --port 3300 &
+# NOWAKI_REVALIDATE_SECRET turns on POST /__nowaki/revalidate (checked below).
+NOWAKI_ISR_WARM=0 NOWAKI_REVALIDATE_SECRET=e2e-revalidate-secret-0123456789 ./target/debug/nowaki start examples/hello --port 3300 &
 START_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3300/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3300/ | grep -q "modulepreload"
@@ -117,6 +118,37 @@ curl -s -o /dev/null -D - -H 'Accept-Encoding: br' http://127.0.0.1:3300/isr | g
 ISR_ETAG=$(curl -s -o /dev/null -D - http://127.0.0.1:3300/isr | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]: //p')
 test "$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $ISR_ETAG" http://127.0.0.1:3300/isr)" = 304
 curl -s --compressed http://127.0.0.1:3300/isr | grep -q '</html>'
+# On-demand revalidation (routes/isr-tagged.tsx: revalidate = 300, tags = ["isr-demo"]).
+TAG=http://127.0.0.1:3300/isr-tagged
+tnum() { curl -s -D /tmp/tag.h -o /tmp/tag.html "$TAG"; grep -o 'isr-tagged-renders">[0-9]*' /tmp/tag.html | grep -o '[0-9]*'; }
+tcache() { tr -d '\r' < /tmp/tag.h | sed -n 's/^[Xx]-[Nn]owaki-[Cc]ache: //p'; }
+tpost() { curl -s -D /tmp/tag-post.h -o /dev/null -XPOST -H 'origin: http://127.0.0.1:3300' -d "kind=$1" "$TAG"; }
+T1=$(tnum); test "$(tcache)" = MISS
+T2=$(tnum); test "$(tcache)" = HIT; test "$T2" = "$T1"
+# Internal headers (tags, purge, revalidate, vary) never reach the browser.
+! grep -qiE '^x-nowaki-(tags|purge|route|revalidate|vary|page)' /tmp/tag.h
+# A client-sent x-nowaki-purge purges nothing (forward.rs drops it; only the sidecar's reply counts).
+curl -s -o /dev/null -H 'x-nowaki-purge: t:isr-demo,p:/isr-tagged' "$TAG"
+curl -s -o /dev/null -XPOST -H 'origin: http://127.0.0.1:3300' -H 'x-nowaki-purge: t:isr-demo' -H 'content-type: application/json' -d '{}' http://127.0.0.1:3300/api/echo
+T3=$(tnum); test "$(tcache)" = HIT; test "$T3" = "$T1"
+# The action's revalidateTag purges before its 303 goes out, so the next GET renders fresh.
+tpost tag
+grep -q '^HTTP/1.1 303' /tmp/tag-post.h
+! grep -qi '^x-nowaki-' /tmp/tag-post.h
+T4=$(tnum); test "$(tcache)" = MISS; test "$T4" -gt "$T3"
+T5=$(tnum); test "$(tcache)" = HIT; test "$T5" = "$T4"
+# revalidatePath purges the page by its path (every query variant too).
+curl -s -o /dev/null "$TAG?utm=1"
+tpost path
+T6=$(tnum); test "$(tcache)" = MISS; test "$T6" -gt "$T5"
+# POST /__nowaki/revalidate: the secret is required; with it, the purge lands before the reply.
+REV=http://127.0.0.1:3300/__nowaki/revalidate
+test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'content-type: application/json' -d '{"tags":["isr-demo"]}' $REV)" = 401
+test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'authorization: Bearer wrong' -H 'content-type: application/json' -d '{"tags":["isr-demo"]}' $REV)" = 401
+tnum >/dev/null; test "$(tcache)" = HIT
+curl -s -D /tmp/rev.h -XPOST -H 'authorization: Bearer e2e-revalidate-secret-0123456789' -H 'content-type: application/json' -d '{"paths":["/isr-tagged"]}' $REV | grep -q '"revalidated"'
+! grep -qi '^x-nowaki-purge' /tmp/rev.h
+T7=$(tnum); test "$(tcache)" = MISS; test "$T7" -gt "$T6"
 # loading/error boundaries are served through the Rust front too
 curl -sf http://127.0.0.1:3300/__nowaki/boundaries | grep -q 'data-nowaki-reset'
 # v0.9 Jetstream presence + connection scaling: WS join->presence,
@@ -324,10 +356,12 @@ bash scripts/ci/assert-no-orphans.sh $TIMEOUT_PID
 WARM_PID=$!
 for i in $(seq 1 20); do grep -q 'ISR warm-up' /tmp/nowaki-warm.log && break; sleep 1; done
 # (/isr-sets-cookie sets a cookie, so it is never cached)
-grep -q 'ISR warm-up: 3 of 4 pages cached' /tmp/nowaki-warm.log
+grep -q 'ISR warm-up: 4 of 5 pages cached' /tmp/nowaki-warm.log
 FIRST=$(curl -s -o /dev/null -D - http://127.0.0.1:3304/vary | tr -d '\r' | sed -n 's/^[Xx]-[Nn]owaki-[Cc]ache: //p')
 test "$FIRST" = HIT -o "$FIRST" = STALE
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3304/__nowaki/isr-urls)" = 404
+# Without NOWAKI_REVALIDATE_SECRET the revalidate endpoint doesn't exist.
+test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'authorization: Bearer x' -H 'content-type: application/json' -d '{"tags":["isr-demo"]}' http://127.0.0.1:3304/__nowaki/revalidate)" = 404
 kill $WARM_PID
 bash scripts/ci/assert-no-orphans.sh $WARM_PID
 

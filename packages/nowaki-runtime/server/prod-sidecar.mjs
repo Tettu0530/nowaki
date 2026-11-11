@@ -14,6 +14,7 @@ import { pageMeta } from "./document.mjs";
 import { persistRooms } from "./live-rooms-file.mjs";
 import { isrUrls } from "./isr-urls.mjs";
 import { requestOrigin } from "./origin.mjs";
+import { flushDetached, setRevalidateEnv } from "./revalidate.mjs";
 
 const appRoot = process.cwd();
 persistRooms(appRoot);
@@ -27,6 +28,9 @@ env.renderDocument = ({ mod, body, meta }) => {
   const m = pageMeta(meta, mod);
   return { __nowakiPage: true, body, title: m.title, head: m.head, lang: m.lang, htmlAttrs: m.htmlAttrs, bodyAttrs: m.bodyAttrs, router: meta?.router === true };
 };
+// The Rust front keeps the ISR cache: pages send their tags, revalidate*() purges it.
+env.isrStore = true;
+setRevalidateEnv(env);
 
 const server = createServer(async (req, res) => {
   if (req.method === "GET" && req.url.split("?")[0] === "/__nowaki/isr-urls") {
@@ -57,6 +61,8 @@ const server = createServer(async (req, res) => {
       const result = await runWithContext(ctx, () =>
         liveRender(entry.mod, state, handler, payload, name, sig, { load }),
       );
+      // A WebSocket event has no response for x-nowaki-purge to ride on.
+      flushDetached(ctx);
       // Rust reuses a shareable render for every connection in the room (one render per publish).
       result.shareable = liveShareable(entry.mod, { handler, load, contextRead: !!ctx && contextReads.has(ctx) });
       res.writeHead(200, { "content-type": "application/json" });
