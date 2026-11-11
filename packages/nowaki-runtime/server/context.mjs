@@ -2,6 +2,7 @@
 
 import { createSession } from "./session.mjs";
 import { withBase } from "./base-path.mjs";
+import { assertBufferedBodySize, contentLengthOverLimit } from "./body-read.mjs";
 import { FORM_BODY_LIMIT, isMultipartFormData, parseMultipartBody } from "./multipart.mjs";
 import { RequestBodyError } from "./request-body.mjs";
 
@@ -99,26 +100,39 @@ export function makeContext(info) {
     async formData() {
       reqAccessed = true; // depends on body/Content-Type → no shared ISR cache (prevents per-user mixups)
       const ct = reqHeaders["content-type"] ?? "";
-      if (isMultipartFormData(ct)) {
-        const len = Number(reqHeaders["content-length"]);
-        if (Number.isFinite(len) && len > FORM_BODY_LIMIT) {
-          discardUnreadBody(req);
-          throw new RequestBodyError(`multipart body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
-        }
+      if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
+        discardUnreadBody(req);
+        throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
       }
       const buf =
         isMultipartFormData(ct) && req && typeof req.on === "function"
           ? await readBodyNode(req, FORM_BODY_LIMIT)
-          : await readBodyFn();
-      return parseFormBody(buf, ct);
+          : assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT);
+      return await parseFormBody(buf, ct);
     },
     async bodyText() {
       reqAccessed = true;
-      return decodeBody(await readBodyFn());
+      if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
+        discardUnreadBody(req);
+        throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
+      }
+      const buf =
+        req && typeof req.on === "function"
+          ? await readBodyNode(req, FORM_BODY_LIMIT)
+          : assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT);
+      return decodeBody(buf);
     },
     async bodyJson() {
       reqAccessed = true;
-      const s = decodeBody(await readBodyFn());
+      if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
+        discardUnreadBody(req);
+        throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
+      }
+      const buf =
+        req && typeof req.on === "function"
+          ? await readBodyNode(req, FORM_BODY_LIMIT)
+          : assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT);
+      const s = decodeBody(buf);
       return s ? JSON.parse(s) : null;
     },
 
@@ -247,7 +261,7 @@ function decodeBody(buf) {
   return new TextDecoder().decode(buf);
 }
 
-function parseFormBody(buf, contentType) {
+async function parseFormBody(buf, contentType) {
   if (isMultipartFormData(contentType)) {
     return parseMultipartBody(buf, contentType);
   }

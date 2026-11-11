@@ -13,9 +13,12 @@ milestone's worth of work; the codename is noted per entry.
 ### Added
 - **`multipart/form-data` in `ctx.formData()`.** Actions, API routes, and middleware can read file
   uploads from a `FormData` body (`File` parts keep `name`, `type`, and bytes). The whole body is
-  buffered (same as urlencoded today) with a default cap of 10 MiB (`NOWAKI_FORM_BODY_LIMIT`);
-  oversized `Content-Length` is rejected before the body is read (Node), and over-limit streamed
-  reads abort; limits and malformed bodies map to **413** / **400** instead of a generic 500.
+  buffered (same as urlencoded today) with a default cap of 10 MiB (`NOWAKI_FORM_BODY_LIMIT`) on
+  `formData()`, `bodyText()`, and `bodyJson()`; oversized `Content-Length` is rejected before read;
+  over-limit streamed reads on Node may **reset the connection** before a 413 is sent. Malformed
+  multipart maps to **400** instead of a generic 500. **Type note:** multipart returns `FormData`
+  (urlencoded still returns `URLSearchParams`); use `instanceof FormData` / `instanceof File` in
+  handlers that accept uploads.
 
 ## [0.18.0] — 2026-11-10 · "Sirocco": routing for real apps
 

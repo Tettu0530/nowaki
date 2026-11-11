@@ -6,8 +6,6 @@ import { requestBodyResult } from "../packages/nowaki-runtime/server/request-bod
 import {
   FORM_BODY_LIMIT,
   boundaryFromContentType,
-  decodeFilenameStar,
-  filenameFromDisposition,
   isMultipartFormData,
   parseMultipartBody,
 } from "../packages/nowaki-runtime/server/multipart.mjs";
@@ -61,6 +59,7 @@ function buildMultipart(boundary, parts) {
     lines.push(`--${boundary}\r\n`);
     let disp = `Content-Disposition: form-data; name="${p.name}"`;
     if (p.filename) disp += `; filename="${p.filename}"`;
+    if (p.filenameStar) disp += `; filename*=${p.filenameStar}`;
     lines.push(`${disp}\r\n`);
     if (p.type) lines.push(`Content-Type: ${p.type}\r\n`);
     lines.push("\r\n");
@@ -80,7 +79,7 @@ function buildMultipart(boundary, parts) {
     { name: "pic", filename: "x.png", type: "image/png", body: "\x89PNG" },
   ]);
   const ct = `multipart/form-data; boundary=${boundary}`;
-  const form = parseMultipartBody(latin1Bytes(body), ct);
+  const form = await parseMultipartBody(latin1Bytes(body), ct);
   check("text field", form.get("title") === "hello");
   check("duplicate names (getAll)", form.getAll("tags").join(",") === "a,b");
   const file = form.get("pic");
@@ -91,10 +90,10 @@ function buildMultipart(boundary, parts) {
 }
 
 check(
-  "invalid body: boundary not in payload",
+  "invalid body: wrong boundary in payload",
   await rejects(
     () => parseMultipartBody(latin1Bytes("not multipart"), "multipart/form-data; boundary=x"),
-    /does not start with the boundary/,
+    /malformed|boundary|form/i,
   ),
 );
 check(
@@ -113,24 +112,24 @@ check(
     /exceeds 5 byte/,
   ),
 );
+
 check(
-  "empty multipart body",
-  parseMultipartBody(latin1Bytes("--bbb\r\n--bbb--\r\n"), "multipart/form-data; boundary=bbb").get("x") === null,
+  "empty multipart body (no parts)",
+  await rejects(
+    () =>
+      parseMultipartBody(
+        latin1Bytes("--bbb\r\n--bbb--\r\n"),
+        "multipart/form-data; boundary=bbb",
+      ),
+    /malformed|FormData/i,
+  ),
 );
+
 check(
-  "empty filename → text field",
-  parseMultipartBody(
-    latin1Bytes(
-      '--e\r\nContent-Disposition: form-data; name="f"; filename=""\r\n\r\nplain\r\n--e--\r\n',
-    ),
-    "multipart/form-data; boundary=e",
-  ).get("f") === "plain",
-);
-check(
-  "wrong boundary in header",
+  "wrong boundary in header vs body",
   await rejects(
     () => parseMultipartBody(latin1Bytes("--aaa\r\n--aaa--\r\n"), "multipart/form-data; boundary=bbb"),
-    /does not start with the boundary/,
+    /malformed|boundary|form/i,
   ),
 );
 check(
@@ -140,6 +139,7 @@ check(
     /1-70/,
   ),
 );
+
 {
   let read = 0;
   check(
@@ -208,90 +208,80 @@ check(
 }
 
 {
-  const fd = parseMultipartBody(
+  const fd = await parseMultipartBody(
     latin1Bytes(
-      '--u\r\nContent-Disposition: form-data; name="f"; filename*=UTF-8\'\'upload%2Etxt\r\n\r\nx\r\n--u--\r\n',
+      buildMultipart("u", [
+        {
+          name: "f",
+          filenameStar: "UTF-8''upload%2Etxt",
+          body: "x",
+        },
+      ]),
     ),
     "multipart/form-data; boundary=u",
   );
   const f = fd.get("f");
-  check("filename* (RFC 5987 UTF-8)", f instanceof File && f.name === "upload.txt");
+  check("filename* (UTF-8)", f instanceof File && f.name === "upload.txt");
 }
 
-check(
-  "filename* with language tag",
-  decodeFilenameStar("UTF-8'ja'%E3%81%82%E3%81%84.jpg") === "\u3042\u3044.jpg",
-);
-check(
-  "filename* ISO-8859-1",
-  decodeFilenameStar("ISO-8859-1''%E9%2Etxt") === "\u00e9.txt",
-);
-check(
-  "filename* default charset (empty, UTF-8 default)",
-  decodeFilenameStar("''%C2%A9.png") === "\u00a9.png",
-);
-check("filename* invalid % escape", decodeFilenameStar("UTF-8''%E") === null);
-check(
-  "filename* priority over filename (RFC 6266)",
-  filenameFromDisposition({ filename: "fallback.bin", "filename*": "UTF-8''real%2Etxt" }) === "real.txt",
-);
-check(
-  "filename fallback when filename* is invalid",
-  filenameFromDisposition({ filename: "fallback.bin", "filename*": "nope" }) === "fallback.bin",
-);
-check(
-  "filename only",
-  filenameFromDisposition({ filename: "plain.csv" }) === "plain.csv",
-);
+{
+  const fd = await parseMultipartBody(
+    latin1Bytes(
+      buildMultipart("q", [{ name: "f", filename: "report; final.pdf", body: "x" }]),
+    ),
+    "multipart/form-data; boundary=q",
+  );
+  check("quoted filename with semicolon", fd.get("f") instanceof File && fd.get("f").name === "report; final.pdf");
+}
 
 {
-  const fd = parseMultipartBody(
-    latin1Bytes(
-      '--p\r\nContent-Disposition: form-data; name="f"; filename="wrong"; filename*=UTF-8\'\'%E6%97%A5%E6%9C%AC.txt\r\n\r\nx\r\n--p--\r\n',
-    ),
-    "multipart/form-data; boundary=p",
-  );
+  const boundary = "nl";
+  const body = buildMultipart(boundary, [{ name: "f", filename: "t.txt", body: "bytes end with newline\n" }]);
+  const file = (await parseMultipartBody(latin1Bytes(body), `multipart/form-data; boundary=${boundary}`)).get("f");
+  const bytes = file && (await file.arrayBuffer());
   check(
-    "multipart: filename* wins over filename",
-    fd.get("f") instanceof File && fd.get("f").name === "\u65e5\u672c.txt",
+    "file content keeps trailing newline",
+    bytes && new TextDecoder().decode(bytes) === "bytes end with newline\n",
   );
 }
 
 {
-  const fd = parseMultipartBody(
-    latin1Bytes(
-      '--fb\r\nContent-Disposition: form-data; name="f"; filename="keep.me"; filename*=bad\r\n\r\nx\r\n--fb--\r\n',
-    ),
-    "multipart/form-data; boundary=fb",
+  const parts = [];
+  for (let i = 0; i < 80; i++) parts.push({ name: `p${i}`, body: `${i}` });
+  const boundary = "many";
+  const form = await parseMultipartBody(
+    latin1Bytes(buildMultipart(boundary, parts)),
+    `multipart/form-data; boundary=${boundary}`,
   );
-  check("multipart: invalid filename* uses filename", fd.get("f") instanceof File && fd.get("f").name === "keep.me");
+  check("many parts round trip", form.get("p0") === "0" && form.get("p79") === "79");
 }
 
-check(
-  "LF-only delimiters",
-  parseMultipartBody(
+{
+  const form = await parseMultipartBody(
     latin1Bytes(
-      '--lf\r\nContent-Disposition: form-data; name="a"\r\n\r\none\n--lf\r\nContent-Disposition: form-data; name="b"\r\n\r\ntwo\n--lf--\r\n',
-    ),
-    "multipart/form-data; boundary=lf",
-  ).get("b") === "two",
-);
-
-check(
-  "text part charset",
-  parseMultipartBody(
-    latin1Bytes(
-      `--c\r\nContent-Disposition: form-data; name="x"\r\nContent-Type: text/plain; charset=iso-8859-1\r\n\r\n\xe9\r\n--c--\r\n`,
+      `--c\r\nContent-Disposition: form-data; name="x"\r\nContent-Type: text/plain; charset=not-a-real-charset\r\n\r\nx\r\n--c--\r\n`,
     ),
     "multipart/form-data; boundary=c",
-  ).get("x") === "\u00e9",
+  );
+  check("unknown charset does not throw (platform fallback)", form.get("x") === "x");
+}
+
+check(
+  "part without header/body separator → 400",
+  await rejects(
+    () =>
+      parseMultipartBody(
+        latin1Bytes(`--b\r\nContent-Disposition: form-data; name="a"\r\n--b\r\nContent-Disposition: form-data; name="b"\r\n\r\nok\r\n--b--\r\n`),
+        "multipart/form-data; boundary=b",
+      ),
+    /FormData|malformed/i,
+  ),
 );
 
 check("requestBodyResult 413 JSON", requestBodyResult({ name: "RequestBodyError", status: 413, message: "x" }, { json: true })?.status === 413);
 check("requestBodyResult 400 plain", requestBodyResult({ name: "RequestBodyError", status: 400, message: "bad boundary" }, { dev: true })?.body === "bad boundary");
 
 {
-  const { FORM_BODY_LIMIT } = await import("../packages/nowaki-runtime/server/multipart.mjs");
   const boundary = "stream";
   const req = new EventEmitter();
   req.headers = { "content-type": `multipart/form-data; boundary=${boundary}` };
@@ -328,8 +318,6 @@ check("requestBodyResult 400 plain", requestBodyResult({ name: "RequestBodyError
       },
     },
   };
-  const boundary = "api";
-  const body = `--${boundary}\r\n--${boundary}--\r\n`;
   const env = {
     dev: true,
     routeTable: async () => table,

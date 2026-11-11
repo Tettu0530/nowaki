@@ -214,7 +214,10 @@ export function createFetchHandler({
       url,
       version: "prod",
       headers,
-      readBody: async () => new Uint8Array(await request.arrayBuffer()),
+      readBody: async () => {
+        const { readBodyWithLimit } = await import("./body-read.mjs");
+        return readBodyWithLimit(request, headers);
+      },
       routePath: front?.routePath,
     });
     return resultToResponse(applyCsp(result), front?.headers);

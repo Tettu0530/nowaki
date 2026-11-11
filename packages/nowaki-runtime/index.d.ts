@@ -96,9 +96,10 @@ export interface LoaderContext {
   get(name: string): string | undefined;
   /**
    * Reads the request body as form fields: `application/x-www-form-urlencoded` →
-   * `URLSearchParams`, `multipart/form-data` → `FormData`. Oversized or malformed multipart bodies
-   * throw before user code runs (413/400). File parts are `File` — use `instanceof File` on
-   * `form.get("field")`; text parts are strings.
+   * `URLSearchParams`, `multipart/form-data` → `FormData`. Oversized or malformed bodies throw
+   * before user code runs (413/400). On multipart requests, narrow with `form instanceof FormData`
+   * before reading files; `form.get()` is then `string | File | null`. **`File.name` is untrusted**
+   * (may contain CR/LF or `../`) — sanitize before storage or display.
    */
   formData(): Promise<URLSearchParams | FormData>;
   /** Reads the request body as a string. */

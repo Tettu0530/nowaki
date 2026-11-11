@@ -803,9 +803,13 @@ async fn proxy_to_sidecar(
         return (status, body).into_response();
     }
 
-    let body = match axum::body::to_bytes(req.into_body(), 16 * 1024 * 1024).await {
+    let proxy_limit = crate::form_body::proxy_body_limit();
+    let body = match axum::body::to_bytes(req.into_body(), proxy_limit).await {
         Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+        Err(_) => {
+            let (status, body) = crate::form_body::proxy_body_overflow_response(&headers);
+            return (status, body).into_response();
+        }
     };
 
     let mut builder = state

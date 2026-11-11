@@ -1,6 +1,8 @@
 // Multipart smoke route for security-e2e (multipart/form-data via ctx.formData()).
 import type { LoaderContext } from "@nowaki-dev/runtime";
 
+export const csrf = true;
+
 export async function POST(ctx: LoaderContext) {
   const form = await ctx.formData();
   const file = form.get("file");
