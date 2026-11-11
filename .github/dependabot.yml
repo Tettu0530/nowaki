@@ -13,7 +13,7 @@ updates:
         update-types: [minor, patch]
     ignore:
       # oxc 0.147+ needs a newer Rust than our MSRV (1.95), and 0.156 breaks nowaki-core's API use.
-      # Lift this together with the MSRV bump and the port (see ROADMAP).
+      # Lift this together with the MSRV bump and the port (ROADMAP v0.19: "Upgrade oxc to the latest release").
       - dependency-name: "oxc"
         versions: [">=0.147"]
 

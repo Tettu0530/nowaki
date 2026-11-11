@@ -509,9 +509,6 @@ fn normalize(p: &Path) -> PathBuf {
 /// page rather than a file route).
 async fn static_paths(root: &Path) -> Result<Vec<(String, String, bool)>> {
     let script = root.join("node_modules/@nowaki-dev/runtime/server/static-paths.mjs");
-    if !script.exists() {
-        return Ok(Vec::new()); // older runtime: dynamic routes stay unrendered, as before
-    }
     let output = Command::new("node")
         .arg(&script)
         .arg(root.join("dist/server"))

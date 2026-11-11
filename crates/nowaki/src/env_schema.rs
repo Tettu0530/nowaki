@@ -21,7 +21,7 @@ pub fn start(root: &Path) -> Result<Pending> {
     let script = root.join("node_modules/@nowaki-dev/runtime/server/env-check.mjs");
     if !script.exists() {
         return Err(anyhow!(
-            "env.ts needs @nowaki-dev/runtime 0.18 or newer (server/env-check.mjs not found)"
+            "env.ts needs @nowaki-dev/runtime 0.17 or newer (server/env-check.mjs not found)"
         ));
     }
     let child = std::process::Command::new("node")

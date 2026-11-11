@@ -23,7 +23,7 @@ impl NodeFetch {
             .join("node_modules/@nowaki-dev/runtime/server/images-fetch.mjs");
         if !script.exists() {
             return Err(anyhow!(
-                "remote images need @nowaki-dev/runtime 0.18 or newer (server/images-fetch.mjs not found)"
+                "remote images need @nowaki-dev/runtime 0.17 or newer (server/images-fetch.mjs not found)"
             ));
         }
         let mut child = std::process::Command::new("node")
@@ -71,7 +71,7 @@ impl RemoteFetch for NodeFetch {
 
 static CURRENT: OnceLock<Arc<RemoteImages>> = OnceLock::new();
 
-/// Reads `images.remotePatterns` from the config (`site::config`) and gives them, with the Node
+/// Reads `images.remotePatterns` from the config (`plugins::Spawned::finish`) and gives them, with the Node
 /// fetcher, to `core` and to content entries. Without patterns every remote `?image` is refused.
 pub fn configure(core: &mut nowaki_core::NowakiCore, root: &Path, config: &Value) -> Result<()> {
     let patterns: Vec<RemotePattern> = match config.pointer("/images/remotePatterns") {

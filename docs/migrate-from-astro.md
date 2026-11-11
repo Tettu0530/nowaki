@@ -188,7 +188,43 @@ export async function GET({ params, site, url }: { params: { card: string }; sit
   `preload` is on by default; turn it off for large CJK files. Local fonts aren't subset, so
   keep a subsetting step if the site has one.
 
-## 9. Build and compare
+## 9. Config: redirects, base, trailing slash, i18n
+
+These `astro.config.mjs` keys move to `nowaki.config.mjs`. Nowaki applies them in `nowaki dev`,
+`nowaki start`, every adapter, and static output (as `_redirects` / `_headers`).
+
+| Astro | Nowaki |
+|---|---|
+| `base: "/docs"` | `basePath: "/docs"` (`<Link>`, `href()`, and `ctx.redirect` add it; `import.meta.env.BASE_URL` works in both) |
+| `trailingSlash: "always" \| "never" \| "ignore"` | `trailingSlash`, same values and default (`"ignore"`); the other two redirect |
+| `redirects: { "/old": "/new" }` | `redirects: [{ source: "/old", destination: "/new", permanent: true }]` |
+| `redirects: { "/a": { status: 302, destination: "/b" } }` | `{ source: "/a", destination: "/b", statusCode: 302 }` |
+| `i18n: { locales, defaultLocale }` | `i18n: { locales, defaultLocale }` |
+| `i18n.routing.prefixDefaultLocale` | `i18n.prefixDefaultLocale` |
+| `Astro.currentLocale` | `getLocale()` (or `ctx.locale` in a loader) |
+| `getRelativeLocaleUrl(locale, path)` | `href(path, { locale })` from `@nowaki-dev/runtime/navigation`, or `<Link href={path} locale={locale}>` |
+
+- Astro redirects are 301 by default. A Nowaki redirect is 307 unless it has `permanent: true`
+  (308) or a `statusCode`. Dynamic segments use the route syntax in both (`/blog/[...slug]`).
+- With `i18n`, `<Link href="/about">` stays in the current locale, and redirect / rewrite /
+  header sources match the path without the locale prefix (add `locale: false` to a rule to
+  match the full path).
+- `i18n.detect: true` sends a first visit to `/` to the locale the browser prefers. It needs a
+  server (`nowaki start` or an adapter); static output only warns.
+- Nowaki also has `rewrites` and `headers` rules, which Astro leaves to the host.
+
+```js
+// nowaki.config.mjs
+export default {
+  site: "https://example.com",
+  basePath: "/docs",
+  trailingSlash: "always",
+  redirects: [{ source: "/old-blog/[...slug]", destination: "/blog/[...slug]", permanent: true }],
+  i18n: { locales: ["en", "ja"], defaultLocale: "en" },
+};
+```
+
+## 10. Build and compare
 
 ```sh
 nowaki build --adapter static   # → dist/static

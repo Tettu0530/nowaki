@@ -12,6 +12,7 @@ mod mcp;
 mod plugins;
 mod prerender;
 mod remote_images;
+mod runtime;
 mod security_headers;
 mod shutdown;
 mod sidecar;
@@ -112,6 +113,7 @@ fn main() -> anyhow::Result<()> {
             open,
         } => {
             let root = dunce::canonicalize(&dir)?;
+            runtime::check(&root)?;
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
@@ -119,6 +121,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Build { dir, adapter } => {
             let root = dunce::canonicalize(&dir)?;
+            runtime::check(&root)?;
             // The static adapter delegates to prerender (build → temporary server → render each route).
             if adapter == Adapter::Static {
                 typegen::write(&root)?;
@@ -184,6 +187,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Start { dir, port, host } => {
             let root = dunce::canonicalize(&dir)?;
+            runtime::check(&root)?;
             // Rust (axum) serves static files + assembles HTML; the Node prod-sidecar renders components.
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -196,6 +200,7 @@ fn main() -> anyhow::Result<()> {
             skip_build,
         } => {
             let root = dunce::canonicalize(&dir)?;
+            runtime::check(&root)?;
             let out = if out.is_absolute() {
                 out
             } else {

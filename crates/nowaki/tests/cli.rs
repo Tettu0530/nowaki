@@ -750,3 +750,51 @@ fn prerender_worker_pool_matches_single_worker_output() {
         assert_eq!(b.get(path), Some(bytes), "mismatch at {path}");
     }
 }
+
+#[test]
+fn every_server_command_refuses_a_runtime_older_than_the_cli_supports() {
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let app = dir.path();
+    std::fs::create_dir_all(app.join("routes")).unwrap();
+    std::fs::write(
+        app.join("routes/index.tsx"),
+        "export default function Home() { return <p>hi</p>; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("nowaki.config.mjs"),
+        "export default { basePath: \"/app\" };\n",
+    )
+    .unwrap();
+    let runtime = app.join("node_modules/@nowaki-dev/runtime");
+    std::fs::create_dir_all(&runtime).unwrap();
+    std::fs::write(
+        runtime.join("package.json"),
+        r#"{"name":"@nowaki-dev/runtime","version":"0.16.3"}"#,
+    )
+    .unwrap();
+    // Ports in case a command got past the check (it must not).
+    for args in [
+        &["dev", "--port", "5420"][..],
+        &["build"],
+        &["start", "--port", "5421"],
+        &["prerender"],
+    ] {
+        let out = Command::new(bin)
+            .args(&args[..1])
+            .arg(app)
+            .args(&args[1..])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{args:?} must fail:\n{stderr}");
+        assert!(
+            stderr.contains("@nowaki-dev/runtime 0.16.3 is too old")
+                && stderr.contains(env!("CARGO_PKG_VERSION"))
+                && stderr.contains("npm i @nowaki-dev/runtime@^"),
+            "{args:?}:\n{stderr}"
+        );
+    }
+    assert!(!app.join("dist").exists(), "nothing is built");
+}

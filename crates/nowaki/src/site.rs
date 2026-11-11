@@ -1,4 +1,5 @@
-//! The build-time parts of nowaki.config, read through Node once (nowaki-core runs no JS):
+//! The build-time parts of nowaki.config, read through Node once by the plugin host
+//! (`plugins::spawn(root, true)`; nowaki-core runs no JS):
 //! `site` (the site's URL: canonical / Open Graph links, sitemap.xml, robots.txt; written to
 //! `dist/server/site.json` for the adapters and the edge, `NOWAKI_SITE` winning at runtime),
 //! `fonts` (fonts.rs), `routing` (basePath, trailingSlash, redirects, rewrites, headers, i18n:
@@ -24,30 +25,7 @@ const KEYS: &[&str] = &[
     "images",
 ];
 
-/// `{ site?, fonts?, routing?, images? }` from nowaki.config. Starts Node only when the config
-/// mentions one of them.
-/// `plugins::spawn(root, true)` reads it in the plugin host's Node process instead.
-pub fn config(root: &Path) -> Result<Value> {
-    if !mentions(root) {
-        return Ok(Value::Object(Default::default()));
-    }
-    let script = root.join("node_modules/@nowaki-dev/runtime/server/site-config.mjs");
-    if !script.exists() {
-        return Ok(Value::Object(Default::default())); // an older runtime: NOWAKI_SITE still works
-    }
-    let output = std::process::Command::new("node")
-        .arg(&script)
-        .current_dir(root)
-        .output()
-        .context("failed to run node for nowaki.config")?;
-    if !output.status.success() {
-        eprint!("{}", String::from_utf8_lossy(&output.stderr));
-        return Err(anyhow!("nowaki.config is invalid (see above)"));
-    }
-    serde_json::from_slice(&output.stdout).context("site-config.mjs printed invalid JSON")
-}
-
-/// Whether nowaki.config names one of the keys `config` reads.
+/// Whether nowaki.config names one of the build-time keys, so the plugin host is asked for them.
 pub fn mentions(root: &Path) -> bool {
     ["nowaki.config.mjs", "nowaki.config.js"]
         .iter()
