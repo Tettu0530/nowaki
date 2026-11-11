@@ -42,6 +42,9 @@ NOWAKI_ISR_WARM=0 ./target/debug/nowaki start examples/hello --port 3300 &
 START_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3300/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3300/ | grep -q "modulepreload"
+# HMR and Fast Refresh are dev-only: nothing of them in production pages or client output.
+! curl -sf http://127.0.0.1:3300/ | grep -qE 'hmr\.js|refresh\.js|__nowaki/hmr'
+! grep -rlE 'RefreshReg|RefreshSig|__nowaki_refresh|__nowaki/hmr' examples/hello/dist/client examples/hello/dist/server
 # Pre-compressed assets and ISR pages: br / gzip by Accept-Encoding, weak ETag, 304 on a match.
 ls examples/hello/dist/client/preact.*.js.br examples/hello/dist/client/preact.*.js.gz >/dev/null
 ASSET=http://127.0.0.1:3300/_nowaki/$(basename "$(ls examples/hello/dist/client/preact.*.js | head -1)")

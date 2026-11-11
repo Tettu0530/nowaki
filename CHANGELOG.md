@@ -14,6 +14,22 @@ milestone's worth of work; the codename is noted per entry.
 - **Building Nowaki from source needs Rust 1.97 or newer** (was 1.95), because oxc 0.158
   does. `rust-version` and the MSRV CI job are 1.97. The npm packages are unaffected.
 
+### Added
+- HMR keeps island state (Fast Refresh). In `nowaki dev`, editing an island, or a module
+  that only islands import, swaps the components in place: hook state survives, and a
+  changed hook list (an added or removed hook) remounts that component. Only the edited
+  modules and their importers up to the island are loaded again (`?t=<n>`), so unchanged
+  modules such as shared stores keep one instance. Live (Jetstream) islands are re-rendered
+  on the server with the state they hold, and their open socket renders the new code. CSS
+  updates without a reload: a stylesheet an island imports is replaced in its `<style>`,
+  a linked route / layout stylesheet is swapped once the new one has loaded (no flash,
+  nonce-stamped under `NOWAKI_CSP`), and a CSS Module whose class names changed re-imports
+  its islands. Route, layout and server-only edits still reload the page (in-place page
+  updates come later), as do nowaki.config, `env.ts`, `.env` and `session.ts`. The runtime
+  is `client/refresh.js`, written for Nowaki on the public Preact API (Preact 10 and 11, no
+  new dependency) on top of oxc's React Refresh transform, which `nowaki-core` applies only
+  to dev browser modules of the app (`NowakiCore::set_dev_refresh`). Builds are unchanged.
+
 ### Changed
 - Dependencies: `oxc` 0.146 → 0.158 (`oxc_resolver` stays at 11.24.3, the latest). oxc
   string literals are now `JSStr`, which can hold a lone surrogate; `nowaki-core` leaves an

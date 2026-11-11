@@ -149,6 +149,12 @@ pub struct NowakiCore {
     remote_salt: u64,
     /// nowaki.config `basePath` ("" at the root); see `set_base_path`.
     base_path: String,
+    /// `nowaki dev` Fast Refresh for browser modules (`set_dev_refresh`); off for builds.
+    dev_refresh: bool,
+    /// Hot module versions by file (`bump_dev_version`). Empty outside `nowaki dev`.
+    dev_versions: dashmap::DashMap<PathBuf, u64>,
+    /// Source of the version numbers: one counter, so a number is never reused for a file.
+    dev_version_seq: std::sync::atomic::AtomicU64,
 }
 
 impl NowakiCore {
@@ -175,6 +181,54 @@ impl NowakiCore {
             remote: None,
             remote_salt: 0,
             base_path: String::new(),
+            dev_refresh: false,
+            dev_versions: dashmap::DashMap::new(),
+            dev_version_seq: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// `nowaki dev` only: browser modules of the app (not its dependencies) get oxc's Fast
+    /// Refresh transform, registering their components with `client/refresh.js`
+    /// ([`transform::REFRESH_RUNTIME_URL`]), which they import. SSR and builds never do. Resets the
+    /// in-memory transform cache.
+    pub fn set_dev_refresh(&mut self, on: bool) {
+        if self.dev_refresh != on {
+            self.dev_refresh = on;
+            self.cache.clear();
+            self.inputs.clear();
+        }
+    }
+
+    /// Whether [`Self::set_dev_refresh`] turned Fast Refresh on.
+    pub fn dev_refresh(&self) -> bool {
+        self.dev_refresh
+    }
+
+    /// `nowaki dev` hot updates: gives the app module `abs` a new version and returns it. Browser
+    /// imports of `abs` then carry `?t=<version>`, so the browser loads it again; modules whose
+    /// version never changed keep their URL (one instance). Bump every importer of `abs` up to the
+    /// module the browser re-imports, or an importer keeps the old URL in its cached output.
+    pub fn bump_dev_version(&self, abs: &Path) -> u64 {
+        let n = self
+            .dev_version_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
+        self.dev_versions.insert(abs.to_path_buf(), n);
+        n
+    }
+
+    /// The hot module version of `abs` (see [`Self::bump_dev_version`]); None if never bumped.
+    pub fn dev_version(&self, abs: &Path) -> Option<u64> {
+        self.dev_versions.get(abs).map(|n| *n)
+    }
+
+    /// The dev browser URL of an app file (`/islands/Counter.tsx`, `/@fs/…` outside the root),
+    /// with `?t=<version>` once [`Self::bump_dev_version`] gave it one.
+    pub fn dev_module_url(&self, abs: &Path) -> String {
+        let url = resolve::fs_path_to_url(&self.root, abs);
+        match self.dev_version(abs) {
+            Some(n) => transform::with_version(&url, n),
+            None => url,
         }
     }
 
@@ -470,6 +524,17 @@ impl NowakiCore {
                 .with_context(|| format!("failed to read: {}", abs.display()))?;
             (self.raw_hash(&raw), None)
         };
+        // Dev browser output also depends on Fast Refresh and on the versions of the imports.
+        // Every importer of a bumped module is bumped too, so this module's own version stands
+        // for its imports'. Versions only live in this process, so a versioned module skips the
+        // disk cache.
+        let (hash, versioned) = if mode == Mode::Browser && self.dev_refresh {
+            let v = self.dev_version(abs);
+            let salted = hash ^ 0x5bd1_e995_7f4a_7c15 ^ v.unwrap_or(0).wrapping_mul(0x9e37_79b9);
+            (salted, v.is_some())
+        } else {
+            (hash, false)
+        };
         let key = (abs.to_path_buf(), mode);
 
         // A hit must also have unchanged inputs: files the output inlines (a CSS Module's class
@@ -481,16 +546,22 @@ impl NowakiCore {
         }
 
         let disk_key = self.disk_cache.key(abs, mode, hash);
-        if let Some((code, inputs)) = self.disk_cache.get_with_inputs(disk_key) {
-            self.remember(key, hash, &code, inputs);
-            return Ok(code);
+        if !versioned {
+            if let Some((code, inputs)) = self.disk_cache.get_with_inputs(disk_key) {
+                self.remember(key, hash, &code, inputs);
+                return Ok(code);
+            }
         }
 
         let source = match pre_read {
             Some(s) => s,
             None => self.read_source(abs)?,
         };
-        let (code, inputs) = transform::transform_file_with_inputs(
+        let dev = transform::DevBrowser {
+            refresh: self.dev_refresh,
+            versions: (!self.dev_versions.is_empty()).then_some(&self.dev_versions),
+        };
+        let (code, inputs) = transform::transform_file_dev(
             &self.root,
             abs,
             &source,
@@ -498,8 +569,11 @@ impl NowakiCore {
             &self.resolver,
             &self.client_defines,
             Some(self),
+            dev,
         )?;
-        self.disk_cache.put_with_inputs(disk_key, &code, &inputs);
+        if !versioned {
+            self.disk_cache.put_with_inputs(disk_key, &code, &inputs);
+        }
         self.remember(key, hash, &code, inputs);
         Ok(code)
     }
