@@ -136,6 +136,19 @@ class CDP {
       this.ws.send(JSON.stringify({ id, method, params }));
     });
   }
+  // Runs a fixed function in the page with `args` passed as values (not spliced into source).
+  async call(fn, ...args) {
+    const g = await this.send("Runtime.evaluate", { expression: "globalThis" });
+    const r = await this.send("Runtime.callFunctionOn", {
+      objectId: g.result.objectId,
+      functionDeclaration: fn.toString(),
+      arguments: args.map((value) => ({ value })),
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails));
+    return r.result.value;
+  }
   async eval(expr) {
     const r = await this.send("Runtime.evaluate", { expression: `(async () => { ${expr} })()`, awaitPromise: true, returnByValue: true });
     if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails));
@@ -229,9 +242,17 @@ async function run(mode) {
       addEventListener("securitypolicyviolation", (e) => window.__violations.push(e.violatedDirective + " " + e.blockedURI));
       return true;`);
   };
-  const text = (id) => cdp.eval(`return document.getElementById(${JSON.stringify(id)})?.textContent ?? null;`);
-  const color = (id) => cdp.eval(`const el = document.getElementById(${JSON.stringify(id)}); return el ? getComputedStyle(el).color : null;`);
-  const click = (id, times = 1) => cdp.eval(`for (let i = 0; i < ${times}; i++) document.getElementById(${JSON.stringify(id)}).click(); return true;`);
+  const text = (id) => cdp.call((id) => document.getElementById(id)?.textContent ?? null, id);
+  const color = (id) =>
+    cdp.call((id) => {
+      const el = document.getElementById(id);
+      return el ? getComputedStyle(el).color : null;
+    }, id);
+  const click = (id, times = 1) =>
+    cdp.call((id, times) => {
+      for (let i = 0; i < times; i++) document.getElementById(id).click();
+      return true;
+    }, id, times);
   const tag = `[${mode}]`;
 
   await go("/");

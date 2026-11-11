@@ -22,7 +22,7 @@ async function hot(msg) {
       try {
         touched.push({ els, mod: await import(island.url) });
       } catch (err) {
-        console.error(`[nowaki] failed to reload island ${island.src}:`, err);
+        console.error("[nowaki] failed to reload island %s:", island.src, err);
       }
     }
     for (const el of document.querySelectorAll("nowaki-live")) {
@@ -66,7 +66,7 @@ async function rerenderLive(el) {
     el.setAttribute("state", JSON.stringify(msg.state));
     el.setAttribute("sig", msg.sig);
   } catch (err) {
-    console.error(`[nowaki] failed to re-render live island ${el.getAttribute("name")}:`, err);
+    console.error("[nowaki] failed to re-render live island %s:", el.getAttribute("name"), err);
   }
 }
 
@@ -78,7 +78,7 @@ async function css(msg) {
     const style = [...document.querySelectorAll("style[data-nowaki-css]")].some(
       (s) => s.getAttribute("data-nowaki-css") === f.id,
     );
-    if (style) loads.push(import(`${f.url}?t=${t}`).catch((err) => console.error(`[nowaki] failed to reload ${f.file}:`, err)));
+    if (style) loads.push(import(`${f.url}?t=${t}`).catch((err) => console.error("[nowaki] failed to reload %s:", f.file, err)));
     // Linked by the page (route CSS).
     for (const old of document.querySelectorAll('link[rel="stylesheet"]')) {
       let url;
