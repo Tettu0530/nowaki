@@ -2,6 +2,7 @@
 //! Rejects oversized `multipart/form-data` before buffering the body so a lying `Content-Length`
 //! cannot hold the proxy until the client times out.
 
+use std::error::Error as StdError;
 use std::sync::OnceLock;
 
 use axum::http::{header, HeaderMap, StatusCode};
@@ -69,6 +70,31 @@ pub fn proxy_body_overflow_response(headers: &HeaderMap) -> (StatusCode, &'stati
         .unwrap_or("");
     if is_multipart_form_data(ct) {
         multipart_payload_too_large()
+    } else {
+        (StatusCode::BAD_REQUEST, "request body too large.")
+    }
+}
+
+fn is_length_limit_error(err: &axum::Error) -> bool {
+    let mut cur = err.source();
+    while let Some(e) = cur {
+        if e.downcast_ref::<http_body_util::LengthLimitError>()
+            .is_some()
+        {
+            return true;
+        }
+        cur = e.source();
+    }
+    false
+}
+
+/// Map `axum::body::to_bytes` failures: 413 only for length-limit hits on multipart.
+pub fn proxy_body_to_bytes_error(
+    headers: &HeaderMap,
+    err: &axum::Error,
+) -> (StatusCode, &'static str) {
+    if is_length_limit_error(err) {
+        proxy_body_overflow_response(headers)
     } else {
         (StatusCode::BAD_REQUEST, "request body too large.")
     }

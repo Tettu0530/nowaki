@@ -6,17 +6,41 @@ function tooLarge(limit = FORM_BODY_LIMIT) {
   return new RequestBodyError(`request body exceeds ${limit} byte limit`, { status: 413 });
 }
 
-/** Reject oversize bodies before buffering (Workers `arrayBuffer()` has no streaming cap). */
+/** Reject oversize bodies while streaming (chunked bodies without Content-Length included). */
 export async function readBodyWithLimit(request, headers, limit = FORM_BODY_LIMIT) {
   const len = Number(headers["content-length"]);
   if (Number.isFinite(len) && len > limit) {
     throw tooLarge(limit);
   }
-  const buf = new Uint8Array(await request.arrayBuffer());
-  if (buf.byteLength > limit) {
-    throw tooLarge(limit);
+  if (!request.body) return new Uint8Array(0);
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) {
+        try {
+          await reader.cancel();
+        } catch {
+          /* stream already errored */
+        }
+        throw tooLarge(limit);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
   }
-  return buf;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    out.set(c, off);
+    off += c.byteLength;
+  }
+  return out;
 }
 
 export function assertBufferedBodySize(buf, limit = FORM_BODY_LIMIT) {

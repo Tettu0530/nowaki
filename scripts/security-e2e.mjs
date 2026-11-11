@@ -99,7 +99,6 @@ async function serverFnHardening(b, m) {
     (await rpc(JSON.stringify({ id: "6c90d7dc921a9a3f", args: ["x".repeat(1100 * 1024)] }))).status === 413);
 }
 
-// Page actions reject cross-site non-GET requests by default; API routes warn unless they opt in.
 async function multipartFormGuards(b) {
   const { FORM_BODY_LIMIT } = await import("../packages/nowaki-runtime/server/multipart.mjs");
   const boundary = "nowakie2e";
@@ -132,6 +131,7 @@ async function multipartFormGuards(b) {
   check("multipart malformed body (400)", bad.status === 400);
 }
 
+// Page actions reject cross-site non-GET requests by default; API routes warn unless they opt in.
 async function crossSiteWritesRejected(b) {
   const send = (path, h) =>
     fetch(`${b}${path}`, {
@@ -371,6 +371,7 @@ if (mode === "dev") {
   await forwardedHostIgnored(base);
   await serverFnHardening(base, mode);
   await crossSiteWritesRejected(base);
+  // multipart upload limits (examples/hello /api/upload): dev and prod sidecars.
   await multipartFormGuards(base);
   await sessionGuards(base);
   await securityHeadersPresent(base, ["/", "/nope"]);

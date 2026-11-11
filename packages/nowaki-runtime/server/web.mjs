@@ -14,6 +14,7 @@ import { initServerEnv } from "./env-schema.mjs";
 import { setServerEnv } from "./env-server.mjs";
 import { configureSessions, sessionConfigOf } from "./session.mjs";
 import { setBasePath } from "./base-path.mjs";
+import { readBodyWithLimit } from "./body-read.mjs";
 
 /// `defaults`: [name, value] pairs (nowaki.config `headers`) set when the result doesn't set them,
 /// before the security headers, so they win over those.
@@ -214,10 +215,7 @@ export function createFetchHandler({
       url,
       version: "prod",
       headers,
-      readBody: async () => {
-        const { readBodyWithLimit } = await import("./body-read.mjs");
-        return readBodyWithLimit(request, headers);
-      },
+      readBody: () => readBodyWithLimit(request, headers),
       routePath: front?.routePath,
     });
     return resultToResponse(applyCsp(result), front?.headers);

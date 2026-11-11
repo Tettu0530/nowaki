@@ -1,5 +1,7 @@
 // multipart/form-data parsing for LoaderContext.formData(). No server needed.
 import { EventEmitter } from "node:events";
+import http from "node:http";
+import { readBodyWithLimit } from "../packages/nowaki-runtime/server/body-read.mjs";
 import { makeContext } from "../packages/nowaki-runtime/server/context.mjs";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
 import { requestBodyResult } from "../packages/nowaki-runtime/server/request-body.mjs";
@@ -101,13 +103,13 @@ check(
   await rejects(() => parseMultipartBody(latin1Bytes("--x\r\n\r\n"), "multipart/form-data"), /requires a boundary/),
 );
 check(
-  "file size limit",
+  "parse bodyLimit option",
   await rejects(
     () =>
       parseMultipartBody(
         latin1Bytes(buildMultipart("z", [{ name: "f", filename: "big.bin", body: "0123456789" }])),
         "multipart/form-data; boundary=z",
-        { fileLimit: 5 },
+        { bodyLimit: 5 },
       ),
     /exceeds 5 byte/,
   ),
@@ -339,6 +341,105 @@ check("requestBodyResult 400 plain", requestBodyResult({ name: "RequestBodyError
     version: 1,
   });
   check("handler maps oversized multipart to 413 on API routes", res.status === 413);
+}
+
+{
+  const limit = 100;
+  const req = new Request("http://127.0.0.1/", {
+    method: "POST",
+    body: new ReadableStream({
+      start(c) {
+        c.enqueue(new Uint8Array(80));
+        c.enqueue(new Uint8Array(80));
+        c.close();
+      },
+    }),
+    duplex: "half",
+  });
+  check(
+    "readBodyWithLimit caps chunked Worker bodies",
+    await rejects(() => readBodyWithLimit(req, {}, limit), /exceeds.*byte limit/),
+  );
+}
+
+{
+  const table = {
+    routes: [{ file: "routes/api/upload.ts", segments: [{ lit: "api" }, { lit: "upload" }], isApi: true }],
+    layouts: [],
+    middleware: [],
+  };
+  const modules = {
+    "routes/api/upload.ts": {
+      POST: async (ctx) => {
+        await ctx.formData();
+        return { ok: true };
+      },
+    },
+  };
+  const env = {
+    dev: true,
+    routeTable: async () => table,
+    importModule: async (f) => modules[f],
+    ensureIslands: async () => {},
+    renderDocument: ({ body: b }) => b,
+    renderError: (err) => ({ status: 500, body: String(err) }),
+    onError: () => {},
+  };
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    const result = await handleRequest(env, { method: req.method, url, version: 1, req, headers: req.headers });
+    res.writeHead(result.status ?? 200, result.headers ?? {});
+    res.end(result.body ?? "");
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const { port } = server.address();
+  const boundary = "sock";
+  let httpStatus = 0;
+  let reset = false;
+  await new Promise((resolve) => {
+    const piece = Buffer.alloc(64 * 1024, 0x61);
+    const req = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        path: "/api/upload",
+        method: "POST",
+        headers: {
+          "content-type": `multipart/form-data; boundary=${boundary}`,
+          origin: `http://127.0.0.1:${port}`,
+          "transfer-encoding": "chunked",
+        },
+      },
+      (res) => {
+        httpStatus = res.statusCode ?? 0;
+        res.resume();
+        resolve();
+      },
+    );
+    req.on("error", () => {
+      reset = true;
+      resolve();
+    });
+    let sent = 0;
+    const target = FORM_BODY_LIMIT + piece.length;
+    const pump = () => {
+      while (sent < target) {
+        if (!req.write(piece)) {
+          req.once("drain", pump);
+          return;
+        }
+        sent += piece.length;
+      }
+      req.end();
+    };
+    pump();
+  });
+  server.close();
+  check(
+    "real-socket chunked upload over limit (413 or reset)",
+    httpStatus === 413 || reset,
+    `status=${httpStatus} reset=${reset}`,
+  );
 }
 
 if (failures) process.exit(1);

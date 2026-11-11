@@ -10,7 +10,7 @@ export function makeContext(info) {
   const { url, params = {}, method = "GET", req } = info;
   // Callers may inject headers / readBody (Node: from req; Edge: from the Web Request).
   const reqHeaders = info.headers ?? req?.headers ?? {};
-  const readBodyFn = info.readBody ?? (() => readBodyNode(req));
+  const readBodyFn = info.readBody ?? (() => readBodyNode(req, FORM_BODY_LIMIT));
   const resHeaders = new Map();
   const setCookies = [];
 
@@ -104,10 +104,7 @@ export function makeContext(info) {
         discardUnreadBody(req);
         throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
       }
-      const buf =
-        isMultipartFormData(ct) && req && typeof req.on === "function"
-          ? await readBodyNode(req, FORM_BODY_LIMIT)
-          : assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT);
+      const buf = assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT);
       return await parseFormBody(buf, ct);
     },
     async bodyText() {
@@ -116,11 +113,7 @@ export function makeContext(info) {
         discardUnreadBody(req);
         throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
       }
-      const buf =
-        req && typeof req.on === "function"
-          ? await readBodyNode(req, FORM_BODY_LIMIT)
-          : assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT);
-      return decodeBody(buf);
+      return decodeBody(assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT));
     },
     async bodyJson() {
       reqAccessed = true;
@@ -128,11 +121,7 @@ export function makeContext(info) {
         discardUnreadBody(req);
         throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
       }
-      const buf =
-        req && typeof req.on === "function"
-          ? await readBodyNode(req, FORM_BODY_LIMIT)
-          : assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT);
-      const s = decodeBody(buf);
+      const s = decodeBody(assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT));
       return s ? JSON.parse(s) : null;
     },
 
@@ -243,9 +232,7 @@ function readBodyNode(req, maxBytes) {
       total += c.length;
       if (maxBytes !== undefined && total > maxBytes) {
         abortUnreadBody(req);
-        fail(
-          new RequestBodyError(`multipart body exceeds ${maxBytes} byte limit`, { status: 413 }),
-        );
+        fail(new RequestBodyError(`request body exceeds ${maxBytes} byte limit`, { status: 413 }));
         return;
       }
       chunks.push(c);

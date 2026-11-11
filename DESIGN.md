@@ -141,7 +141,7 @@ export default function Home({ data }: PageProps<typeof loader>) {
 
 ### LoaderContext and action
 
-Loaders, actions, middleware, and API handlers all receive the same `LoaderContext`. It has the request side (`url`, `params`, `method`, `headers`, `cookies`, `formData()` — urlencoded or multipart (`FormData` with `File` parts), `bodyJson()`) and response writers (`status()`, `setHeader()`, `setCookie()`, `redirect()`, `json()`, `html()`, `text()`). Multipart over the limit becomes **413** before the action/API handler runs.
+Loaders, actions, middleware, and API handlers all receive the same `LoaderContext`. It has the request side (`url`, `params`, `method`, `headers`, `cookies`, `formData()` — urlencoded or multipart (`FormData` with `File` parts), `bodyJson()`) and response writers (`status()`, `setHeader()`, `setCookie()`, `redirect()`, `json()`, `html()`, `text()`). Oversized `Content-Length` on multipart is rejected with **413** at the Rust front (dev/start) before the sidecar reads the body; otherwise limits are enforced while buffering in the runtime (handlers may still run briefly before a **413**/`RequestBodyError` is mapped).
 
 ```tsx
 // routes/todos.tsx: action runs on non-GET requests (form submissions, etc.)

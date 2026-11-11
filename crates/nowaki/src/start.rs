@@ -930,8 +930,8 @@ async fn proxy(
     let proxy_limit = crate::form_body::proxy_body_limit();
     let body = match axum::body::to_bytes(req.into_body(), proxy_limit).await {
         Ok(b) => b,
-        Err(_) => {
-            let (status, body) = crate::form_body::proxy_body_overflow_response(&headers);
+        Err(err) => {
+            let (status, body) = crate::form_body::proxy_body_to_bytes_error(&headers, &err);
             return (status, body).into_response();
         }
     };

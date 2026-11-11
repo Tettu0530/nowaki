@@ -78,21 +78,6 @@ export function boundaryFromContentType(contentType) {
   return null;
 }
 
-function enforceEntryLimits(form, limit) {
-  for (const [name, value] of form.entries()) {
-    if (value instanceof File) {
-      if (value.size > limit) {
-        throw tooLarge(`multipart file "${value.name}" exceeds ${limit} byte limit`);
-      }
-    } else if (typeof value === "string") {
-      const bytes = new TextEncoder().encode(value).byteLength;
-      if (bytes > limit) {
-        throw tooLarge(`multipart field "${name}" exceeds ${limit} byte limit`);
-      }
-    }
-  }
-}
-
 /**
  * @param {Uint8Array | ArrayBuffer | string} buf
  * @param {string} contentType
@@ -116,9 +101,7 @@ export async function parseMultipartBody(buf, contentType, opts = {}) {
 
   try {
     const res = new Response(u8, { headers: { "content-type": contentType } });
-    const form = await res.formData();
-    enforceEntryLimits(form, opts.fileLimit ?? bodyLimit);
-    return form;
+    return await res.formData();
   } catch (err) {
     if (err instanceof RequestBodyError) throw err;
     throw badRequest(err instanceof Error ? err.message : "multipart body is malformed");
