@@ -8,7 +8,7 @@ use oxc::diagnostics::{GraphicalReportHandler, GraphicalTheme, NamedSource, OxcD
 use oxc::parser::Parser;
 use oxc::semantic::{Scoping, SemanticBuilder};
 use oxc::span::SourceType;
-use oxc::transformer::{JsxRuntime, TransformOptions, Transformer};
+use oxc::transformer::{JsxRuntime, ReactRefreshOptions, TransformOptions, Transformer};
 use oxc::transformer_plugins::{ReplaceGlobalDefines, ReplaceGlobalDefinesConfig};
 use oxc_resolver::Resolver;
 
@@ -57,6 +57,65 @@ pub fn transform_file_with_inputs(
     client_defines: &[(String, String)],
     vr: Option<&dyn VirtualResolve>,
 ) -> Result<(String, Vec<PathBuf>)> {
+    transform_file_dev(
+        root,
+        path,
+        source,
+        mode,
+        resolver,
+        client_defines,
+        vr,
+        DevBrowser::OFF,
+    )
+}
+
+/// Dev-only extras for `nowaki dev`'s browser modules (`NowakiCore::set_dev_refresh`). Builds and
+/// SSR never get them.
+#[derive(Clone, Copy)]
+pub(crate) struct DevBrowser<'v> {
+    /// Fast Refresh registration (oxc's refresh transform plus the `client/refresh.js` import).
+    pub refresh: bool,
+    /// Hot module versions: an app module with a bumped version gets `?t=<n>` in the import URLs
+    /// that name it, so the browser loads that module again (and only that one).
+    pub versions: Option<&'v dashmap::DashMap<PathBuf, u64>>,
+}
+
+impl DevBrowser<'_> {
+    pub(crate) const OFF: DevBrowser<'static> = DevBrowser {
+        refresh: false,
+        versions: None,
+    };
+}
+
+/// The dev Fast Refresh runtime every refreshed module imports (served from the runtime package).
+pub const REFRESH_RUNTIME_URL: &str = "/node_modules/@nowaki-dev/runtime/client/refresh.js";
+
+/// Whether `path` is one of the app's own modules (not a dependency): the ones Fast Refresh
+/// registers and hot versions apply to.
+pub(crate) fn is_app_module(root: &Path, path: &Path) -> bool {
+    path.strip_prefix(root)
+        .is_ok_and(|rel| !rel.components().any(|c| c.as_os_str() == "node_modules"))
+}
+
+/// [`transform_file_with_inputs`] with the dev browser extras in `dev` (ignored outside
+/// `Mode::Browser`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn transform_file_dev(
+    root: &Path,
+    path: &Path,
+    source: &str,
+    mode: Mode,
+    resolver: &Resolver,
+    client_defines: &[(String, String)],
+    vr: Option<&dyn VirtualResolve>,
+    dev: DevBrowser<'_>,
+) -> Result<(String, Vec<PathBuf>)> {
+    let dev = if mode == Mode::Browser {
+        dev
+    } else {
+        DevBrowser::OFF
+    };
+    let refresh = dev.refresh && is_app_module(root, path);
     // When transforming a server module (`"use server"`) for the browser, emit no implementation;
     // swap in a client proxy (tiny async functions that fetch). SSR keeps the real thing.
     if mode == Mode::Browser && crate::server_fn::has_use_server(source) {
@@ -80,7 +139,7 @@ pub fn transform_file_with_inputs(
     let mut program = parse_program(&allocator, path, source, source_type_for_path(path))?;
     let scoping = semantic_scoping(&program);
     let scoping = apply_client_defines(&allocator, scoping, &mut program, client_defines);
-    run_preact_transform(&allocator, path, source, scoping, &mut program)?;
+    run_preact_transform_with(&allocator, path, source, scoping, &mut program, refresh)?;
 
     if mode == Mode::Browser {
         rewrite_imports(
@@ -91,6 +150,7 @@ pub fn transform_file_with_inputs(
             resolver,
             vr,
             &mut inputs,
+            dev.versions,
         );
     } else {
         // SSR: .css becomes a no-op, assets become URL-string data modules (so Node doesn't crash
@@ -114,6 +174,9 @@ pub fn transform_file_with_inputs(
         })
         .build(&program);
     let mut code = ret.code;
+    if refresh && (code.contains("$RefreshReg$") || code.contains("$RefreshSig$")) {
+        code.insert_str(0, &refresh_prelude(&fs_path_to_url(root, path)));
+    }
     if let Some(map) = ret.map {
         code.push_str("\n//# sourceMappingURL=");
         code.push_str(&map.to_data_url());
@@ -124,8 +187,18 @@ pub fn transform_file_with_inputs(
     Ok((code, inputs))
 }
 
+/// What a module with Fast Refresh registrations starts with: the runtime import, and a
+/// `$RefreshReg$` that scopes each component id to this module's URL (so `Counter` in two files
+/// is two families). One line with no newline, so the inline source map's lines stay exact.
+fn refresh_prelude(module_url: &str) -> String {
+    format!(
+        "import {{ register as __nowaki_refresh_register, $RefreshSig$ }} from {REFRESH_RUNTIME_URL:?}; const $RefreshReg$ = (type, id) => __nowaki_refresh_register(type, {module_url:?} + \" \" + id); "
+    )
+}
+
 /// Rewrites top-level import / re-export specifiers to dev server URLs.
 /// (Also catches the "preact/jsx-runtime" inserted by the automatic JSX transform.)
+#[allow(clippy::too_many_arguments)]
 fn rewrite_imports<'a>(
     allocator: &'a Allocator,
     root: &Path,
@@ -134,6 +207,7 @@ fn rewrite_imports<'a>(
     resolver: &Resolver,
     vr: Option<&dyn VirtualResolve>,
     inputs: &mut Vec<PathBuf>,
+    versions: Option<&dashmap::DashMap<PathBuf, u64>>,
 ) {
     let dir = path.parent().unwrap_or(root);
     for stmt in program.body.iter_mut() {
@@ -153,7 +227,7 @@ fn rewrite_imports<'a>(
             lit.raw = None;
             spec = aliased;
         }
-        let Some(url) = map_specifier(spec, dir, root, resolver, vr, inputs) else {
+        let Some(url) = map_specifier(spec, dir, root, resolver, vr, inputs, versions) else {
             continue;
         };
         lit.value = allocator.alloc_str(&url).into();
@@ -186,10 +260,24 @@ pub(crate) fn source_type_for_path(path: &Path) -> SourceType {
     SourceType::from_path(path).unwrap_or_else(|_| SourceType::tsx())
 }
 
-fn preact_transform_options() -> TransformOptions {
+/// `url` with the hot module version query (`?t=<n>`, or `&t=<n>` after an existing query).
+pub(crate) fn with_version(url: &str, n: u64) -> String {
+    let sep = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{sep}t={n}")
+}
+
+fn preact_transform_options(refresh: bool) -> TransformOptions {
     let mut options = TransformOptions::default();
     options.jsx.runtime = JsxRuntime::Automatic;
     options.jsx.import_source = Some("preact".to_string());
+    if refresh {
+        options.jsx.refresh = Some(ReactRefreshOptions {
+            refresh_reg: "$RefreshReg$".to_string(),
+            refresh_sig: "$RefreshSig$".to_string(),
+            // Readable hook signatures: client/refresh.js compares them as text.
+            emit_full_signatures: true,
+        });
+    }
     options
 }
 
@@ -225,7 +313,19 @@ pub(crate) fn run_preact_transform<'a>(
     scoping: Scoping,
     program: &mut Program<'a>,
 ) -> Result<Scoping> {
-    let ret = Transformer::new(allocator, path, &preact_transform_options())
+    run_preact_transform_with(allocator, path, source, scoping, program, false)
+}
+
+/// [`run_preact_transform`], plus oxc's React Refresh transform when `refresh` (dev browser only).
+fn run_preact_transform_with<'a>(
+    allocator: &'a Allocator,
+    path: &Path,
+    source: &str,
+    scoping: Scoping,
+    program: &mut Program<'a>,
+    refresh: bool,
+) -> Result<Scoping> {
+    let ret = Transformer::new(allocator, path, &preact_transform_options(refresh))
         .build_with_scoping(scoping, program);
     if !ret.diagnostics.is_empty() {
         return Err(anyhow!(
@@ -266,6 +366,7 @@ fn map_specifier(
     resolver: &Resolver,
     vr: Option<&dyn VirtualResolve>,
     inputs: &mut Vec<PathBuf>,
+    versions: Option<&dashmap::DashMap<PathBuf, u64>>,
 ) -> Option<String> {
     if let Some(r) = vr.and_then(|v| v.remote_image(spec)) {
         return Some(remote_image_module(root, spec, r, inputs));
@@ -276,7 +377,14 @@ fn map_specifier(
     match resolver.resolve(dir, spec) {
         Ok(resolution) => {
             let full = resolution.full_path();
-            dev_asset_module(root, &full, inputs).or_else(|| Some(fs_path_to_url(root, &full)))
+            dev_asset_module(root, &full, inputs).or_else(|| {
+                let url = fs_path_to_url(root, &full);
+                let version = versions.and_then(|v| v.get(&full).map(|n| *n));
+                Some(match version {
+                    Some(n) if is_app_module(root, &full) => with_version(&url, n),
+                    _ => url,
+                })
+            })
         }
         Err(err) => {
             // Virtual modules get a dev URL for their synthetic path; the dev server serves them via load.
@@ -504,5 +612,144 @@ mod tests {
         let code = Codegen::new().build(&program).code;
         assert!(!code.contains(": number"));
         assert!(code.contains("jsx"));
+    }
+
+    /// An app with an island importing a util and a store, for the dev refresh tests.
+    fn refresh_app() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap();
+        std::fs::create_dir_all(root.join("islands")).unwrap();
+        std::fs::create_dir_all(root.join("node_modules/dep")).unwrap();
+        std::fs::write(
+            root.join("islands/Counter.tsx"),
+            "import { useState } from \"preact/hooks\";\nimport { label } from \"./util.ts\";\nimport { store } from \"./store.ts\";\nexport default function Counter() {\n  const [n, setN] = useState(0);\n  return <button onClick={() => setN(n + 1)}>{label(n)}{store.x}</button>;\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("islands/util.ts"),
+            "export const label = (n: number) => `n=${n}`;\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("islands/store.ts"),
+            "export const store = { x: 1 };\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("node_modules/dep/package.json"),
+            r#"{"name":"dep","type":"module","main":"index.jsx"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("node_modules/dep/index.jsx"),
+            "export default function Dep() { return <i>dep</i>; }\n",
+        )
+        .unwrap();
+        (tmp, root)
+    }
+
+    #[test]
+    fn dev_refresh_registers_app_components_in_browser_mode_only() {
+        let (_tmp, root) = refresh_app();
+        let island = root.join("islands/Counter.tsx");
+        let mut core = crate::NowakiCore::new(root.clone());
+
+        // Off (the default, and what every build uses): no refresh code anywhere.
+        let plain = core.load_module(&island, Mode::Browser).unwrap();
+        assert!(!plain.contains("$RefreshReg$"), "{plain}");
+
+        core.set_dev_refresh(true);
+        let browser = core.load_module(&island, Mode::Browser).unwrap();
+        assert!(
+            browser.starts_with(&format!(
+                "import {{ register as __nowaki_refresh_register, $RefreshSig$ }} from \"{REFRESH_RUNTIME_URL}\";"
+            )),
+            "{browser}"
+        );
+        // Component ids are scoped to the module URL; hook signatures are readable.
+        assert!(
+            browser.contains("\"/islands/Counter.tsx\" + \" \" + id"),
+            "{browser}"
+        );
+        assert!(
+            browser.contains("$RefreshReg$(_c, \"Counter\")"),
+            "{browser}"
+        );
+        assert!(browser.contains("useState{"), "{browser}");
+        // The prelude adds no line, so the inline source map still lines up.
+        assert!(!refresh_prelude("/x.tsx").contains('\n'));
+
+        let ssr = core.load_module(&island, Mode::Ssr).unwrap();
+        assert!(!ssr.contains("$Refresh"), "{ssr}");
+        // A module with no component gets no prelude; dependencies are never refreshed.
+        let util = core
+            .load_module(&root.join("islands/util.ts"), Mode::Browser)
+            .unwrap();
+        assert!(!util.contains("refresh.js"), "{util}");
+        let dep = core
+            .load_module(&root.join("node_modules/dep/index.jsx"), Mode::Browser)
+            .unwrap();
+        assert!(!dep.contains("$Refresh"), "{dep}");
+    }
+
+    #[test]
+    fn bundle_transforms_never_get_refresh_code() {
+        let (_tmp, root) = refresh_app();
+        let mut core = crate::NowakiCore::new(root.clone());
+        core.set_dev_refresh(true);
+        let island = root.join("islands/Counter.tsx");
+        let source = std::fs::read_to_string(&island).unwrap();
+        let allocator = Allocator::default();
+        let mut program =
+            parse_program(&allocator, &island, &source, source_type_for_path(&island)).unwrap();
+        let scoping = semantic_scoping(&program);
+        run_preact_transform(&allocator, &island, &source, scoping, &mut program).unwrap();
+        let code = Codegen::new().build(&program).code;
+        assert!(!code.contains("$Refresh"), "{code}");
+        // The public transform entry points (no dev extras) neither.
+        let out = transform_file(
+            &root,
+            &island,
+            &source,
+            Mode::Browser,
+            &crate::resolve::make_resolver(),
+            &[],
+            None,
+        )
+        .unwrap();
+        assert!(!out.contains("$Refresh"), "{out}");
+    }
+
+    #[test]
+    fn hot_versions_only_on_bumped_app_modules() {
+        let (_tmp, root) = refresh_app();
+        let mut core = crate::NowakiCore::new(root.clone());
+        core.set_dev_refresh(true);
+        let island = root.join("islands/Counter.tsx");
+        let before = core.load_module(&island, Mode::Browser).unwrap();
+        assert!(before.contains("\"/islands/util.ts\""), "{before}");
+
+        // The util changed: it and its importer get versions; the store keeps its URL.
+        let util_v = core.bump_dev_version(&root.join("islands/util.ts"));
+        let island_v = core.bump_dev_version(&island);
+        assert_ne!(util_v, island_v);
+        assert_eq!(
+            core.dev_module_url(&island),
+            format!("/islands/Counter.tsx?t={island_v}")
+        );
+        let after = core.load_module(&island, Mode::Browser).unwrap();
+        assert!(
+            after.contains(&format!("\"/islands/util.ts?t={util_v}\"")),
+            "{after}"
+        );
+        assert!(after.contains("\"/islands/store.ts\""), "{after}");
+        assert!(
+            !after.contains("preact/hooks?t") && !after.contains(".js?t="),
+            "{after}"
+        );
+        // SSR output has no versions.
+        let ssr = core.load_module(&island, Mode::Ssr).unwrap();
+        assert!(!ssr.contains("?t="), "{ssr}");
+        assert_eq!(with_version("/a.css?x=1", 3), "/a.css?x=1&t=3");
     }
 }

@@ -143,6 +143,8 @@ jobs:
         run: node scripts/loader-hooks-test.mjs
       - name: Request handler (layouts, routePath, commit hook)
         run: node scripts/handler-test.mjs
+      - name: On-demand revalidation (purge encoding vs the shared fixture, tags, purge on the response, endpoint)
+        run: node scripts/revalidate-test.mjs
       - name: i18n (locale split and localePath against the shared fixture, hreflang, per-locale content)
         run: node scripts/i18n-test.mjs
       - name: Sessions (encryption, tampering, expiry, key rotation, store mode, CSRF read-only)

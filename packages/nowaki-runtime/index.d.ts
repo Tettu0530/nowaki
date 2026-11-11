@@ -332,9 +332,53 @@ export interface Live<S = any> {
 export function publish(topic: string): void;
 
 /**
- * While a server function (`"use server"`) or a live handler / `live.authorize` is running, returns
- * that call's LoaderContext (for live, the WebSocket upgrade's cookie, authorization,
- * accept-language, and user-agent headers). Returns null elsewhere. Use it for auth.
+ * `export const tags` on an ISR page (one with `export const revalidate`): the cache tags its
+ * cached copies carry, so `revalidateTag(tag)` can purge them. An array, or a function of the
+ * render's `{ params, data }` returning one. A tag is 1 to 256 characters without whitespace,
+ * commas or control characters; at most 64 per page (invalid ones are dropped with a warning).
+ * Pages with `streaming = "early"` are never cached, so their tags are unused.
+ * @example export const tags = ({ params }) => ["posts", `post:${params.slug}`];
+ */
+export type RouteTags =
+  | string[]
+  | ((info: { params: RouteParams; data: any }) => string[]);
+
+/**
+ * Purges every cached copy of the page at `path` from the ISR cache, so the next request renders
+ * it fresh (and waits for that render). `path` is an app path, as written in `<Link href>`: without
+ * the basePath or a locale prefix. Every form a browser can cache it under is purged: each query
+ * string and `Vary` variant, each locale, the basePath, and both trailing-slash forms under
+ * `trailingSlash: "ignore"`. A rewritten URL is cached under the browser's path; use a tag for it.
+ *
+ * Call it from a page `action`, an API route, a server function or a live handler after data
+ * changes: under `nowaki start` the purge happens before that response is sent, so a redirect
+ * after the action already shows fresh content. Calls made outside a request, or after its
+ * response was sent (a timer, a queue consumer), reach the cache shortly after. The ISR cache lives in each `nowaki start` process;
+ * with several instances, fan the purge out with `POST /__nowaki/revalidate` (see
+ * `revalidateTag`). Under `nowaki dev` (no cache) calls are only recorded; in static output and on
+ * the deploy adapters they are a no-op for now (warned once). Throws a TypeError for a path that
+ * isn't root-relative (`/blog`).
+ * @example revalidatePath("/blog");
+ */
+export function revalidatePath(path: string): void;
+
+/**
+ * Purges every cached ISR page tagged `tag` (`export const tags`), with the same timing and
+ * reach as `revalidatePath`. Throws a TypeError for an invalid tag.
+ *
+ * To purge every `nowaki start` instance, set `NOWAKI_REVALIDATE_SECRET` and send each one
+ * `POST /__nowaki/revalidate` with `Authorization: Bearer <secret>` and a JSON body
+ * `{ "paths": ["/blog"], "tags": ["posts"] }` (at most 256 entries). The endpoint is off (404)
+ * while the variable is unset.
+ * @example revalidateTag(`post:${ctx.params.slug}`);
+ */
+export function revalidateTag(tag: string): void;
+
+/**
+ * While a server function (`"use server"`), a page `action`, an API route, or a live handler /
+ * `live.authorize` is running, returns that call's LoaderContext (for live, the WebSocket
+ * upgrade's cookie, authorization, accept-language, and user-agent headers). Returns null
+ * elsewhere. Use it for auth.
  */
 export function getContext(): LoaderContext | null;
 
@@ -426,3 +470,15 @@ export declare class ServerFnError extends Error {
   readonly status: number;
   readonly data?: unknown;
 }
+
+/**
+ * `export const viewTransition = true` on a page route: client navigations to and from the page
+ * run as View Transitions (`document.startViewTransition`), and full page loads between two such
+ * pages get a cross-document one (`@view-transition { navigation: auto }`), also on pages that
+ * ship no JS. Skipped when the browser lacks the API or the visitor prefers reduced motion. For a
+ * single link, use `<Link viewTransition>` (or `data-nowaki-transition` on an `<a>`) instead, and
+ * `transitionName()` from `@nowaki-dev/runtime/navigation` to morph an element into the next
+ * page's. Off by default: a page without it gets nothing added to its HTML.
+ * @example export const viewTransition = true;
+ */
+export type ViewTransition = boolean;

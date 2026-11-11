@@ -32,6 +32,9 @@ curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-sets-cookie | grep -qi '^cac
 # route / layout CSS: linked in the head, served as text/css (0.16.1)
 curl -sf http://127.0.0.1:3310/styled | grep -qE '<link rel="stylesheet" href="/_nowaki/styled\.[0-9a-f]+\.css"'
 curl -sf http://127.0.0.1:3310/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'
+# `export const viewTransition` through the node adapter's document (document.mjs prodDocument)
+curl -sf http://127.0.0.1:3310/vt | grep -q '<meta name="nowaki-view-transition" content="1" />'
+! curl -s http://127.0.0.1:3310/about | grep -qE 'nowaki-view-transition|@view-transition'
 # streaming = "early": the shell goes out before the 300 ms loader; a loader error renders
 # error.tsx in the page (status stays 200) and a loader redirect becomes location.replace (#112)
 FB=$(curl -s -N -o /tmp/nowaki-early.html -w '%{time_starttransfer}' http://127.0.0.1:3310/stream-early)
@@ -125,6 +128,11 @@ pkill -f 'node index.mjs' 2>/dev/null || true
 ./target/debug/nowaki build examples/hello --adapter static
 test -f examples/hello/dist/static/index.html
 test -f examples/hello/dist/static/about/index.html
+# View Transitions in static output: the opted route has the @view-transition style (full loads
+# between opted pages transition with no server and no JS), the others don't.
+grep -q '@view-transition{navigation:auto}' examples/hello/dist/static/vt/index.html
+grep -q '<meta name="nowaki-view-transition" content="1" />' examples/hello/dist/static/vt/detail/index.html
+! grep -qE 'nowaki-view-transition|@view-transition' examples/hello/dist/static/about/index.html
 grep -q '<div data-group="marketing"><main' examples/hello/dist/static/pricing/index.html
 ! test -e 'examples/hello/dist/static/(marketing)'
 # parallel routes in static output: slots render into the pages; slot files are not pages

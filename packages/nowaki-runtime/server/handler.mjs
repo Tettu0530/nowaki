@@ -17,6 +17,7 @@ import { requestBodyResult } from "./request-body.mjs";
 import { dispatchServerFn, runWithContext, SERVER_FN_PATH } from "./functions.mjs";
 import { isCrossSite } from "./origin.mjs";
 import { dispatchLiveEvent, LIVE_EVENT_PATH } from "./live-event.mjs";
+import { encodeEntries, encodeTags, flushPurge, REVALIDATE_PATH, revalidateEndpoint, revalidateEndpointEnabled, TAGS_HEADER } from "./revalidate.mjs";
 
 // Internal path the client router fetches loading/error boundary HTML from, once.
 export const BOUNDARIES_PATH = "/__nowaki/boundaries";
@@ -41,6 +42,11 @@ const JSON_CT = { "content-type": "application/json; charset=utf-8" };
 ///   renderError(err) -> { status, headers, body } (500 page differs between dev/prod)
 ///   onError(err, ctx) (optional) -> called for every error that becomes a 500 page
 ///   live (optional) -> { lookup(name, version), render } for POST /__nowaki/live-event
+///   isrStore (optional) -> true on `nowaki start`: ISR responses carry `x-nowaki-tags`, and
+///     revalidate*() calls ride on the response as `x-nowaki-purge` (server/revalidate.mjs)
+///   purge(entries) (optional) -> an adapter's CDN purge, awaited before the response returns
+///   cacheTagHeader(entries) (optional) -> { [header]: value } an adapter's CDN keys a page by;
+///     `entries` are the page's `t:<tag>` plus `p:<browser path>` (the form `purge` receives)
 // Not async itself: the request's promise is routeRequest's, so an app without i18n pays this one
 // check and no extra async frame.
 export function handleRequest(env, info) {
@@ -69,15 +75,20 @@ async function routeRequest(env, info, localized) {
 
   // Handle server function RPC before routing.
   if (env.serverFunctions && url.pathname === SERVER_FN_PATH) {
+    ctx.__purgeClosed = false;
     return finalize(ctx, await dispatchServerFn(ctx, info, env.serverFunctions, { dev: env.dev === true }));
   }
   if (env.live && url.pathname === LIVE_EVENT_PATH) {
     // The event runs with this request as getContext() (handlers and live.authorize see its cookies).
-    return finalize(ctx, await runWithContext(ctx, () => dispatchLiveEvent(ctx, info, env.live)));
+    return finalize(ctx, await inRequest(ctx, () => dispatchLiveEvent(ctx, info, env.live)));
   }
 
   if (method === "GET" && url.pathname === BOUNDARIES_PATH) {
     return finalize(ctx, await renderBoundaries(env, table, version));
+  }
+  // Off (a 404 like any unknown path) unless NOWAKI_REVALIDATE_SECRET is set.
+  if (url.pathname === REVALIDATE_PATH && revalidateEndpointEnabled()) {
+    return finalize(ctx, await inRequest(ctx, () => revalidateEndpoint(ctx)));
   }
 
   try {
@@ -128,13 +139,14 @@ async function routeRequest(env, info, localized) {
         if (mod.csrf === true) return finalize(ctx, FORBIDDEN, env, table, version);
         warnCrossSiteApi(match.file, url.pathname);
       }
-      return finalize(ctx, await handleApi(mod, ctx, match.fileExt), env, table, version);
+      // Inside the request's context, so getContext() and revalidate*() work there.
+      return finalize(ctx, await inRequest(ctx, () => handleApi(mod, ctx, match.fileExt)), env, table, version);
     }
 
     if (crossSite && typeof mod.action === "function") return finalize(ctx, FORBIDDEN, env, table, version);
 
     if (method !== "GET" && method !== "HEAD" && typeof mod.action === "function") {
-      const out = await mod.action(ctx);
+      const out = await inRequest(ctx, () => mod.action(ctx));
       const res = toResult(out);
       if (res) return finalize(ctx, res, env, table, version);
       ctx.actionData = out; // data → re-render the page
@@ -285,21 +297,42 @@ function warnCrossSiteApi(file, pathname) {
 // goes out. Without one the result is built synchronously: the common path adds no await. A commit
 // that fails (a store error, a cookie over 4 KB) is handled here, since the promise returned from
 // the handler's try block would escape its catch: the 500 page when the route table is given,
-// else a plain 500.
+// else a plain 500. revalidate*() calls collected on the request (`ctx.__purge`) are handed over
+// here too, before the response returns (server/revalidate.mjs `flushPurge`).
 function finalize(ctx, result, env, table, version) {
-  if (!ctx.__commit) return finalizeResult(ctx, result);
+  if (!ctx.__commit && !ctx.__purge) {
+    if (ctx.__purgeClosed === false) ctx.__purgeClosed = true;
+    return finalizeResult(ctx, result);
+  }
   return commitAndFinalize(ctx, result, env, table, version);
 }
 
 async function commitAndFinalize(ctx, result, env, table, version) {
   const commit = ctx.__commit;
   ctx.__commit = undefined;
-  try {
-    await commit(result);
-  } catch (err) {
-    return finalizeResult(ctx, table ? await render500(env, table, ctx, version, err) : plainError(err));
+  let out;
+  if (commit) {
+    try {
+      await commit(result);
+      out = finalizeResult(ctx, result);
+    } catch (err) {
+      out = finalizeResult(ctx, table ? await render500(env, table, ctx, version, err) : plainError(err));
+    }
+  } else {
+    out = finalizeResult(ctx, result);
   }
-  return finalizeResult(ctx, result);
+  if (ctx.__purge) await flushPurge(ctx, out.headers);
+  else if (ctx.__purgeClosed === false) ctx.__purgeClosed = true;
+  return out;
+}
+
+// Runs request code (an action, API route, live event) as getContext(). `__purgeClosed` is false
+// until the response is built; a revalidate*() call after that (a timer the code started) takes
+// the detached channel instead of a Set nobody reads. GET page renders never get here, so they
+// carry neither field.
+function inRequest(ctx, fn) {
+  ctx.__purgeClosed = false;
+  return runWithContext(ctx, fn);
 }
 
 function plainError(err) {
@@ -451,6 +484,8 @@ async function renderRoute(env, table, match, mod, ctx, version, path) {
     const bodyStream = await renderToReadableStream(node);
     // The loaders have run (above), so the request inputs they read are known.
     const headers = revalidate ? { ...HTML, ...sharedCacheHeaders(revalidate, ctx.__vary()) } : HTML;
+    // `nowaki start` doesn't store a streamed page (no x-nowaki-revalidate), but a CDN does.
+    if (revalidate && env.cacheTagHeader) cacheTags(env, mod, match.file, ctx, data, headers);
     return {
       status: 200,
       headers,
@@ -470,10 +505,49 @@ async function renderRoute(env, table, match, mod, ctx, version, path) {
       "x-nowaki-vary": vary.headers.join(","),
       "x-nowaki-vary-query": vary.query ? "1" : "0",
     };
+    if (mod.tags !== undefined && env.isrStore) {
+      const tags = routeTags(mod, match.file, ctx, data);
+      if (tags) headers[TAGS_HEADER] = tags.encoded;
+    }
+    if (env.cacheTagHeader) cacheTags(env, mod, match.file, ctx, data, headers);
   }
   // A slot that intercepts URLs needs the client router: the page ships the runtime without islands.
   const doc = slots && slots.some((l) => l?.some((s) => s.slot.intercepts?.some((i) => i.segments))) ? { ...meta, router: true } : meta;
   return { status: 200, headers, body: env.renderDocument({ mod, body, meta: doc }) };
+}
+
+// `export const tags`: a static array is validated and encoded once per module; a function of
+// `{ params, data }` runs on each render. Only ISR renders of pages with tags get here.
+const staticTags = new WeakMap();
+function routeTags(mod, file, ctx, data) {
+  const t = mod.tags;
+  if (typeof t === "function") {
+    let list;
+    try {
+      list = t({ params: ctx.params, data });
+    } catch (err) {
+      console.error(`[nowaki] ${file}: tags() failed:`, err);
+      return null;
+    }
+    const ok = encodeTags(list, file);
+    return ok && { list: ok, encoded: encodeEntries(ok) };
+  }
+  let v = staticTags.get(mod);
+  if (v === undefined) {
+    const ok = encodeTags(t, file);
+    staticTags.set(mod, (v = ok && { list: ok, encoded: encodeEntries(ok) }));
+  }
+  return v;
+}
+
+// The adapter's CDN tag header (env.cacheTagHeader): the route's tags plus the page's own browser
+// path, so revalidatePath() can map to a purge by tag.
+function cacheTags(env, mod, file, ctx, data, headers) {
+  const tags = mod.tags !== undefined ? routeTags(mod, file, ctx, data) : null;
+  const entries = tags ? tags.list.map((t) => `t:${t}`) : [];
+  entries.push(`p:${ctx.url.pathname}`);
+  const extra = env.cacheTagHeader(entries);
+  if (extra) Object.assign(headers, extra);
 }
 
 function isrSeconds(mod) {
