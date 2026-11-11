@@ -518,3 +518,111 @@ fn prerender_keeps_reading_a_chatty_servers_stdout() {
     // The app's logs are passed through.
     assert!(out.contains(&"x".repeat(4096)));
 }
+
+fn prerender_multi_page_app(extra_routes: usize) -> tempfile::TempDir {
+    let app = budget_app("{ js: 100 }");
+    std::fs::write(
+        app.path().join("routes/index.tsx"),
+        "export default function Home() { return <p>home</p>; }\n",
+    )
+    .unwrap();
+    for i in 0..extra_routes {
+        std::fs::write(
+            app.path().join(format!("routes/p{i}.tsx")),
+            format!("export default function P{i}() {{ return <p>{i}</p>; }}\n"),
+        )
+        .unwrap();
+    }
+    app
+}
+
+/// Walk `dir` and collect relative path → file contents (directories only as path keys for files).
+fn dir_snapshot(dir: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    let mut out = std::collections::BTreeMap::new();
+    fn walk(
+        base: &std::path::Path,
+        root: &std::path::Path,
+        out: &mut std::collections::BTreeMap<String, Vec<u8>>,
+    ) {
+        let read_dir = match std::fs::read_dir(base) {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        for ent in read_dir.flatten() {
+            let path = ent.path();
+            let meta = ent.metadata().expect("metadata");
+            if meta.is_dir() {
+                walk(&path, root, out);
+            } else if meta.is_file() {
+                let rel = path.strip_prefix(root).expect("under root");
+                out.insert(
+                    rel.to_string_lossy().into_owned(),
+                    std::fs::read(&path).expect("read file"),
+                );
+            }
+        }
+    }
+    walk(dir, dir, &mut out);
+    out
+}
+
+/// With `NOWAKI_PRERENDER_POOL_THRESHOLD=1`, several workers split the same pages as a single worker.
+#[test]
+fn prerender_worker_pool_matches_single_worker_output() {
+    let root = example_root();
+    if !deps_installed(&root) {
+        eprintln!("skip: examples/hello deps not installed");
+        return;
+    }
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    // index, about, and p0..p2 → pool (threshold 1) with NOWAKI_PRERENDER_WORKERS=2 uses 2 workers.
+    let app = prerender_multi_page_app(3);
+    let single_out = app.path().join("dist/static-single");
+    let pool_out = app.path().join("dist/static-pool");
+    let _ = std::fs::remove_dir_all(single_out.parent().unwrap());
+
+    let single = Command::new(bin)
+        .arg("prerender")
+        .arg(app.path())
+        .arg("--out")
+        .arg(&single_out)
+        .env("NOWAKI_PRERENDER_POOL_THRESHOLD", "0")
+        .output()
+        .unwrap();
+    let single_stdout = String::from_utf8_lossy(&single.stdout);
+    assert!(
+        single.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&single.stderr),
+        single_stdout
+    );
+    assert!(
+        !single_stdout.contains("Node render workers"),
+        "threshold 0 must not start a pool:\n{single_stdout}"
+    );
+
+    let pool = Command::new(bin)
+        .arg("prerender")
+        .arg(app.path())
+        .arg("--out")
+        .arg(&pool_out)
+        .env("NOWAKI_PRERENDER_POOL_THRESHOLD", "1")
+        .env("NOWAKI_PRERENDER_WORKERS", "2")
+        .output()
+        .unwrap();
+    let pool_stdout = String::from_utf8_lossy(&pool.stdout);
+    let pool_stderr = String::from_utf8_lossy(&pool.stderr);
+    assert!(pool.status.success(), "{pool_stderr}\n{pool_stdout}");
+    assert!(
+        pool_stdout.contains("2 Node render workers"),
+        "expected a 2-worker pool:\n{pool_stdout}"
+    );
+    assert!(pool_stdout.contains("prerender done"), "{pool_stdout}");
+
+    let a = dir_snapshot(&single_out);
+    let b = dir_snapshot(&pool_out);
+    assert_eq!(a.len(), b.len(), "file count differs");
+    for (path, bytes) in &a {
+        assert_eq!(b.get(path), Some(bytes), "mismatch at {path}");
+    }
+}
