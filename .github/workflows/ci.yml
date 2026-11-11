@@ -139,6 +139,8 @@ jobs:
         run: node scripts/isr-urls-test.mjs
       - name: Same-origin host resolution (adapters + trust proxy)
         run: node scripts/origin-test.mjs
+      - name: nowaki.config CORS (preflight, allowlist, framework paths)
+        run: node scripts/cors-test.mjs
       - name: Dev SSR loader hooks (which modules re-evaluate after an edit)
         run: node scripts/loader-hooks-test.mjs
       - name: Request handler (layouts, routePath, commit hook)

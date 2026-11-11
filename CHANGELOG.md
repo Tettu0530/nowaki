@@ -10,6 +10,13 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **General CORS middleware** — opt-in `cors` in `nowaki.config` (`origins`, `methods`,
+  `headers`, `credentials`, `maxAge`). Browsers get `Access-Control-*` on app routes and API
+  handlers; `OPTIONS` preflight is answered when `Origin` and `Access-Control-Request-Method` are
+  present. Framework paths (`/__nowaki/*`, `/_nowaki/*`) never get CORS headers. Cross-origin
+  writes still pass the existing same-origin / CSRF checks.
+
 ### Upgrade notes
 - **Building Nowaki from source needs Rust 1.97 or newer** (was 1.95), because oxc 0.158
   does. `rust-version` and the MSRV CI job are 1.97. The npm packages are unaffected.

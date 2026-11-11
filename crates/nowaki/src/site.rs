@@ -4,7 +4,8 @@
 //! `dist/server/site.json` for the adapters and the edge, `NOWAKI_SITE` winning at runtime),
 //! `fonts` (fonts.rs), `routing` (basePath, trailingSlash, redirects, rewrites, headers, i18n:
 //! normalized and validated by site-config.mjs, written to `dist/server/routing.json`; dev:
-//! `.nowaki/routing.json`) and `images` (remote image patterns). Read before the build, so an
+//! `.nowaki/routing.json`), optional `cors` (written to `dist/server/cors.json`; dev:
+//! `.nowaki/cors.json`), and `images` (remote image patterns). Read before the build, so an
 //! invalid config fails before anything is built.
 
 use std::path::Path;
@@ -23,6 +24,7 @@ const KEYS: &[&str] = &[
     "headers",
     "i18n",
     "images",
+    "cors",
 ];
 
 /// Whether nowaki.config names one of the build-time keys, so the plugin host is asked for them.
@@ -66,12 +68,14 @@ pub fn write(dist: &Path, config: &Value) -> Result<()> {
         std::fs::create_dir_all(dist.join("server"))?;
         std::fs::write(&out, serde_json::json!({ "site": site }).to_string())?;
     }
-    write_routing(&dist.join("server/routing.json"), config)
+    write_routing(&dist.join("server/routing.json"), config)?;
+    write_cors(&dist.join("server/cors.json"), config)
 }
 
 /// `nowaki dev`: `.nowaki/routing.json`.
 pub fn write_dev(root: &Path, config: &Value) -> Result<()> {
-    write_routing(&root.join(".nowaki/routing.json"), config)
+    write_routing(&root.join(".nowaki/routing.json"), config)?;
+    write_cors(&root.join(".nowaki/cors.json"), config)
 }
 
 /// The routing config, also checked by the Rust compiler the fronts use. No file when there is
@@ -88,5 +92,17 @@ fn write_routing(out: &Path, config: &Value) -> Result<()> {
         std::fs::create_dir_all(dir)?;
     }
     std::fs::write(out, routing.to_string())?;
+    Ok(())
+}
+
+fn write_cors(out: &Path, config: &Value) -> Result<()> {
+    let _ = std::fs::remove_file(out);
+    let Some(cors) = config.get("cors") else {
+        return Ok(());
+    };
+    if let Some(dir) = out.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(out, cors.to_string())?;
     Ok(())
 }

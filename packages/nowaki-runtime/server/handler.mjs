@@ -14,6 +14,7 @@ import { localeState, runWithLocale } from "./i18n-context.mjs";
 import { sitemapUrls } from "./isr-urls.mjs";
 import { makeContext } from "./context.mjs";
 import { dispatchServerFn, runWithContext, SERVER_FN_PATH } from "./functions.mjs";
+import { corsPreflight, withCorsOnResult } from "./cors.mjs";
 import { isCrossSite } from "./origin.mjs";
 import { dispatchLiveEvent, LIVE_EVENT_PATH } from "./live-event.mjs";
 
@@ -43,6 +44,14 @@ const JSON_CT = { "content-type": "application/json; charset=utf-8" };
 // Not async itself: the request's promise is routeRequest's, so an app without i18n pays this one
 // check and no extra async frame.
 export function handleRequest(env, info) {
+  const pre = corsPreflight(env.cors, {
+    method: info.method,
+    origin: rawHeader(info)("origin"),
+    pathname: info.url.pathname,
+    requestMethod: rawHeader(info)("access-control-request-method"),
+    requestHeaders: rawHeader(info)("access-control-request-headers"),
+  });
+  if (pre) return Promise.resolve(pre);
   return env.i18n ? localizedRequest(env, info) : routeRequest(env, info);
 }
 
@@ -284,7 +293,7 @@ function warnCrossSiteApi(file, pathname) {
 // the handler's try block would escape its catch: the 500 page when the route table is given,
 // else a plain 500.
 function finalize(ctx, result, env, table, version) {
-  if (!ctx.__commit) return finalizeResult(ctx, result);
+  if (!ctx.__commit) return withCorsOnResult(env, ctx, finalizeResult(ctx, result));
   return commitAndFinalize(ctx, result, env, table, version);
 }
 
@@ -294,9 +303,13 @@ async function commitAndFinalize(ctx, result, env, table, version) {
   try {
     await commit(result);
   } catch (err) {
-    return finalizeResult(ctx, table ? await render500(env, table, ctx, version, err) : plainError(err));
+    return withCorsOnResult(
+      env,
+      ctx,
+      finalizeResult(ctx, table ? await render500(env, table, ctx, version, err) : plainError(err)),
+    );
   }
-  return finalizeResult(ctx, result);
+  return withCorsOnResult(env, ctx, finalizeResult(ctx, result));
 }
 
 function plainError(err) {

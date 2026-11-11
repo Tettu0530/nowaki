@@ -108,6 +108,7 @@ export function createFetchHandler({
   trailingSlash,
   basePath,
   routing,
+  cors,
 }) {
   setBasePath(basePath);
   const assetBase = `${basePath ?? ""}/_nowaki/`;
@@ -143,6 +144,7 @@ export function createFetchHandler({
 
   const env = {
     dev: false,
+    cors: cors ?? null,
     // NOWAKI_SITE (a Worker var) or nowaki.config `site`, embedded by edge-build.mjs.
     site: resolveSite(site),
     trailingSlash,

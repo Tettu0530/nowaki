@@ -1,7 +1,7 @@
 // Prints the build-time parts of nowaki.config as JSON, for `nowaki build` / `nowaki dev`
 // (nowaki-core runs no JS): `site` (normalized), `fonts` (as written), `routing` (basePath,
 // trailingSlash, redirects, rewrites, headers, i18n: normalized and validated, written to
-// dist/server/routing.json) and `images` (remotePatterns).
+// dist/server/routing.json), `cors` (written to dist/server/cors.json) and `images` (remotePatterns).
 // Usage: node site-config.mjs   (in the app root)  → {"site":"https://example.com","fonts":[…]}
 import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
@@ -14,8 +14,10 @@ const REDIRECT_STATUS = [301, 302, 303, 307, 308];
 const BASE_SEGMENT = /^[A-Za-z0-9\-._~!$&'()*+,;=:@]+$/;
 const LOCALE = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/;
 const HOSTNAME = /^(\*\*?\.)?[a-z0-9-]+(\.[a-z0-9-]+)*$/;
+const CORS_METHOD = /^[A-Z*-]+$/;
+const CORS_HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
-/// The build-time config: `{ site?, fonts?, routing?, images? }`. Throws on an invalid value.
+/// The build-time config: `{ site?, fonts?, routing?, cors?, images? }`. Throws on an invalid value.
 /// `redirects` / `rewrites` / `headers` may be (async) functions, called once here.
 export async function normalizeConfig(config) {
   const out = {};
@@ -24,9 +26,91 @@ export async function normalizeConfig(config) {
   if (Array.isArray(config.fonts) && config.fonts.length) out.fonts = config.fonts;
   const routing = await normalizeRouting(config);
   if (routing) out.routing = routing;
+  const cors = normalizeCors(config.cors);
+  if (cors) out.cors = cors;
   const images = normalizeImages(config.images);
   if (images) out.images = images;
   return out;
+}
+
+export function normalizeCors(value) {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`cors must be an object (got ${typeof value})`);
+  }
+  keys(value, ["origins", "methods", "headers", "credentials", "maxAge"], "cors");
+  if (!Array.isArray(value.origins) || !value.origins.length) {
+    throw new Error("cors.origins must be a non-empty array");
+  }
+  const origins = [];
+  for (const [i, o] of value.origins.entries()) {
+    if (o === "*") {
+      origins.push("*");
+      continue;
+    }
+    if (typeof o !== "string") throw new Error(`cors.origins[${i}] must be a string`);
+    let url;
+    try {
+      url = new URL(o);
+    } catch {
+      throw new Error(
+        `cors.origins[${i}] must be a full origin like "https://example.com" (got ${JSON.stringify(o)})`,
+      );
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error(`cors.origins[${i}] must use http or https (got ${JSON.stringify(url.protocol)})`);
+    }
+    if (!url.host || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+      throw new Error(`cors.origins[${i}] must be an origin only (scheme + host + optional port)`);
+    }
+    origins.push(`${url.protocol}//${url.host}`);
+  }
+  const uniqueOrigins = [...new Set(origins)];
+  if (uniqueOrigins.includes("*") && uniqueOrigins.length > 1) {
+    throw new Error('cors.origins cannot combine "*" with other origins');
+  }
+  const credentials = value.credentials === true;
+  if (credentials && uniqueOrigins.includes("*")) {
+    throw new Error('cors.credentials cannot be true when cors.origins includes "*"');
+  }
+  const methods = normalizeCorsMethods(value.methods);
+  const headers = normalizeCorsHeaders(value.headers);
+  const maxAge = value.maxAge === undefined ? 86_400 : positiveCorsInt(value.maxAge, "cors.maxAge");
+  if (maxAge > 86_400 * 366) throw new Error("cors.maxAge must be at most 31574400 (366 days)");
+  return { origins: uniqueOrigins, methods, headers, credentials, maxAge };
+}
+
+function positiveCorsInt(n, label) {
+  const v = Number(n);
+  if (!Number.isInteger(v) || v < 0) throw new Error(`${label} must be a non-negative integer`);
+  return v;
+}
+
+function normalizeCorsMethods(methods) {
+  if (methods === undefined) return ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"];
+  if (!Array.isArray(methods) || !methods.length) throw new Error("cors.methods must be a non-empty array");
+  const out = [];
+  for (const [i, m] of methods.entries()) {
+    if (typeof m !== "string" || !CORS_METHOD.test(m) || m === "*" || m.includes("*")) {
+      throw new Error(`cors.methods[${i}] must be an uppercase HTTP method name`);
+    }
+    out.push(m.toUpperCase());
+  }
+  if (!out.includes("OPTIONS")) out.push("OPTIONS");
+  return [...new Set(out)];
+}
+
+function normalizeCorsHeaders(headers) {
+  if (headers === undefined) return ["Content-Type", "Authorization"];
+  if (!Array.isArray(headers) || !headers.length) throw new Error("cors.headers must be a non-empty array");
+  const out = [];
+  for (const [i, h] of headers.entries()) {
+    if (typeof h !== "string" || !CORS_HEADER_NAME.test(h)) {
+      throw new Error(`cors.headers[${i}] must be a valid header field-name token`);
+    }
+    out.push(h);
+  }
+  return [...new Set(out)];
 }
 
 async function normalizeRouting(config) {
