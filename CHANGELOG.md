@@ -37,8 +37,25 @@ improvements (a render worker pool above 256 pages, hard-linked client assets,
   `<form action={href("/logout")}>`, `fetch` or `location`. `locale` picks another locale
   (`false`: no prefix), `basePath: false` leaves the base out. Works on the server and in islands.
   `examples/gallery` uses it instead of reading `import.meta.env.BASE_URL` by hand.
-
+- **`nowaki prerender --skip-build`:** render static HTML from an existing
+  `nowaki build` output (`dist/`) without re-running the transform, content
+  index, or route JS budgets. Routing for requests and static `_redirects` /
+  `_headers` comes from the built `dist/server/routing.json`. With `env.ts`, the
+  check must pass and every `PUBLIC_*` value must match
+  `dist/server/env-public.json` (what the client bundle inlined); app source or
+  public env changes require a new build.
 ### Changed
+- **`nowaki prerender`:** above 256 pages (default), up to one Node render
+  worker per CPU receives pages round-robin; output order is unchanged. Override
+  the cutoff with `NOWAKI_PRERENDER_POOL_THRESHOLD` (`0` keeps a single worker).
+  Cap workers with `NOWAKI_PRERENDER_WORKERS` (each worker loads the full server
+  build and content collections in memory).
+- **`nowaki prerender`:** copies `dist/client` into `out/_nowaki` with hard links
+  when the output tree is on the same filesystem (copies on cross-device
+  failure). On the same volume, files under `out/_nowaki` share inodes with
+  `dist/client`; `nowaki build` clears `dist/client` before rewriting, but
+  in-place edits under `out/_nowaki` (for example a post-deploy minifier) also
+  change `dist/client`.
 - **Behavior change: with `i18n` configured, config `redirects` / `rewrites` / `headers`
   are locale-aware.** A rule's source now matches the path without its locale prefix, so a
   `/login` rule matches `/login` and `/ja/login` (before, only `/login`). An internal
@@ -250,13 +267,6 @@ benchmark (uncached, ISR, CSP, build, dev) found no regression.
   with `PUBLIC_` and server names must not. New core API:
   `NowakiCore::set_public_env`.
 ### Added
-- **`nowaki prerender --skip-build`:** render static HTML from an existing
-  `nowaki build` output (`dist/`) without re-running the transform, content
-  index, or route JS budgets. Routing for requests and static `_redirects` /
-  `_headers` comes from the built `dist/server/routing.json`. With `env.ts`, the
-  check must pass and every `PUBLIC_*` value must match
-  `dist/server/env-public.json` (what the client bundle inlined); app source or
-  public env changes require a new build.
 - **i18n routing.** With `i18n: { locales: ["en", "ja"], defaultLocale: "en" }`
   in nowaki.config, every locale except the default is a URL prefix
   (`/ja/about`); the default has none (`/about`), and `/en/about` redirects
@@ -301,12 +311,6 @@ benchmark (uncached, ISR, CSP, build, dev) found no regression.
   Pages without an intercepting slot render the same bytes as before; apps without slots pay
   only the existing length check per request.
 ### Changed
-- **`nowaki prerender`:** copies `dist/client` into `out/_nowaki` with hard links
-  when the output tree is on the same filesystem (copies on cross-device
-  failure). On the same volume, files under `out/_nowaki` share inodes with
-  `dist/client`; `nowaki build` clears `dist/client` before rewriting, but
-  in-place edits under `out/_nowaki` (for example a post-deploy minifier) also
-  change `dist/client`.
 - **`trailingSlash` also shapes static output and page URLs.** With `"never"`, the static
   adapter writes `about.html` instead of `about/index.html`, and canonical URLs, the default
   `og:url` and `sitemap.xml` drop the slash; with `"always"` they get one on every server too.
@@ -317,11 +321,6 @@ benchmark (uncached, ISR, CSP, build, dev) found no regression.
   is unchanged: servers use the request's path and static output `x/index.html` with a slash.
 - An error while saving a request's session (a store failure, a cookie over 4 KB) now renders
   the 500 page instead of escaping the request handler.
-- **`nowaki prerender`:** above 256 pages (default), up to one Node render
-  worker per CPU receives pages round-robin; output order is unchanged. Override
-  the cutoff with `NOWAKI_PRERENDER_POOL_THRESHOLD` (`0` keeps a single worker).
-  Cap workers with `NOWAKI_PRERENDER_WORKERS` (each worker loads the full server
-  build and content collections in memory).
 - `localePath` from `@nowaki-dev/runtime/navigation` returns an `Href` when given a static route
   or a `route()` href, so `<Link href={localePath(route("/photo/[id]", { id }))}>` type-checks
   once `nowaki typegen` has registered the routes. Before, the `string` it returned was refused
