@@ -184,7 +184,8 @@ code locations and CI coverage.
   The host (`server/plugin-host.mjs`, started by `plugins::spawn` before typegen) also
   normalizes the build-time config with site-config.mjs's `normalizeConfig` and returns it in
   `/caps` (`siteConfig`, under `NOWAKI_SITE_CONFIG=1`), so build / dev / prerender import
-  nowaki.config once; `site::config` (its own Node start) is the fallback for older runtimes.
+  nowaki.config once. `runtime::check` (`MIN_RUNTIME`) refuses runtimes older than that,
+  so the CLI has no fallback paths for them.
 - **Scope hoisting / chunking** — `crates/nowaki-core/src/chunk.rs`.
 - **Deploy adapters** — `crates/nowaki/src/adapter.rs` (+ `server/edge-build.mjs`).
 - **Images (`?image`, `<Image>`)** — `crates/nowaki-core/src/image.rs` (widths, AVIF via ravif

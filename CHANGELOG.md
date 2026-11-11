@@ -10,6 +10,17 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Fixed
+- **`nowaki dev` / `build` / `start` / `prerender` refuse an `@nowaki-dev/runtime`
+  older than the CLI supports (0.17.1 for 0.18.x)**, naming both versions and the
+  `npm i @nowaki-dev/runtime@^0.17.1` fix. Before, an old runtime made the CLI
+  silently drop nowaki.config (routing, site, staticPaths). The CLI's fallbacks
+  for older runtimes are gone: the second Node start to read the config, and the
+  skipped `staticPaths` without `static-paths.mjs`.
+- `nowaki dev` prints `[nowaki] <file> changed; restart nowaki dev to apply it`
+  when nowaki.config, env.ts, `.env` or `.env.local` changes. It reads them only at
+  startup (reloading them in place is v0.19 work).
+
 ## [0.18.1] — 2026-11-11 · patch
 
 Packages: `nowaki` / `nowaki-core` 0.18.1 (crates.io, npm), `@nowaki-dev/runtime`
