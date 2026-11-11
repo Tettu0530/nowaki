@@ -365,8 +365,9 @@ jobs:
               cargo build --release -p nowaki --locked --manifest-path .perf-release/Cargo.toml --target-dir .perf-release/target
             fi
           fi
-          # Guard: the two binaries must differ whenever the Rust code does.
-          if ! git diff --quiet "$BASE_SHA" HEAD -- crates Cargo.lock; then
+          # Guard: the two binaries must differ whenever release code changes. Integration tests
+          # under crates/*/tests/ (e.g. cli.rs) do not affect the release `nowaki` binary.
+          if git diff --name-only "$BASE_SHA" HEAD -- crates Cargo.lock | grep -vE '/tests/' | grep -q .; then
             if cmp -s target/release/nowaki .perf-base/target/release/nowaki; then
               echo "::error::head and base binaries are identical although crates/ changed"; exit 1
             fi

@@ -341,7 +341,9 @@ code locations and CI coverage.
 
 Versions are synced across `Cargo.toml` (`[workspace.package]`), the `nowaki`
 crate's `nowaki-core` path-dep version, and the four npm `package.json`s +
-`create-nowaki/template`. After bumping, run `pnpm install` so `pnpm-lock.yaml`
+`create-nowaki/template` (`@nowaki-dev/markdoc` in `packages/nowaki-markdoc`
+has its own semver). After bumping, run `pnpm install` so `pnpm-lock.yaml`
 matches (CI uses a frozen lockfile). Then: `cargo publish -p nowaki-core` →
 `-p nowaki`; push a `vX.Y.Z` tag (triggers `release.yml` for the CLI binaries);
-`gh workflow run publish-npm.yml -f package=all` for runtime + scaffolders.
+`gh workflow run publish-npm.yml -f package=all` for runtime, markdoc, and
+scaffolders.

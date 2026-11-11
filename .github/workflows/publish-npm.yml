@@ -1,6 +1,6 @@
 name: Publish npm packages
 
-# Publishes the platform-independent npm packages (runtime / create-nowaki / create-nowaki-app).
+# Publishes the platform-independent npm packages (runtime / markdoc / create-nowaki / create-nowaki-app).
 # Per-platform CLI binaries are handled by release.yml.
 # Bump the version in package.json first, then run this workflow manually.
 # Requires NPM_TOKEN (a 2FA-bypass Automation/Granular token) in repo Secrets.
@@ -15,6 +15,7 @@ on:
         options:
           - all
           - runtime
+          - markdoc
           - create-nowaki
           - create-nowaki-app
 
@@ -38,6 +39,13 @@ jobs:
         if: ${{ inputs.package == 'all' || inputs.package == 'runtime' }}
         run: npm publish --access public
         working-directory: packages/nowaki-runtime
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @nowaki-dev/markdoc
+        if: ${{ inputs.package == 'all' || inputs.package == 'markdoc' }}
+        run: npm publish --access public
+        working-directory: packages/nowaki-markdoc
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

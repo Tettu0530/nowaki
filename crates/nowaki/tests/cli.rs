@@ -438,6 +438,69 @@ fn build_writes_routing_json_and_rejects_an_invalid_config_first() {
 }
 
 #[test]
+fn build_compiles_markdoc_through_the_official_plugin() {
+    let root = example_root();
+    if !deps_installed(&root) {
+        eprintln!("skip: examples/hello deps not installed");
+        return;
+    }
+    if !root.join("node_modules/@nowaki-dev/markdoc").exists() {
+        eprintln!("skip: @nowaki-dev/markdoc not installed");
+        return;
+    }
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    let app = budget_app("{ js: 100 }");
+    std::fs::create_dir_all(app.path().join("markdoc")).unwrap();
+    std::fs::write(
+        app.path().join("nowaki.config.mjs"),
+        r#"import { markdoc } from "@nowaki-dev/markdoc";
+export default { plugins: [markdoc()] };
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        app.path().join("markdoc/page.mdoc"),
+        "---\ntitle: Doc\n---\n\n# Hello Markdoc\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.path().join("routes/doc.tsx"),
+        r#"import Doc from "../markdoc/page.mdoc";
+export default function Page() { return <Doc />; }
+"#,
+    )
+    .unwrap();
+    let ok = Command::new(bin)
+        .arg("build")
+        .arg(app.path())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&ok.stderr);
+    assert!(ok.status.success(), "{stderr}");
+    let compiled = std::fs::read_to_string(app.path().join("dist/server/markdoc/page.js")).unwrap();
+    assert!(
+        compiled.contains("renderMarkdoc") && compiled.contains("Hello Markdoc"),
+        "{compiled}"
+    );
+    let route = std::fs::read_to_string(app.path().join("dist/server/routes/doc.js")).unwrap();
+    assert!(route.contains("markdoc/page"), "{route}");
+
+    std::fs::write(app.path().join("markdoc/page.mdoc"), "{% nope /%}\n").unwrap();
+    std::fs::remove_dir_all(app.path().join("dist")).unwrap();
+    let bad = Command::new(bin)
+        .arg("build")
+        .arg(app.path())
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&bad.stderr);
+    assert!(!bad.status.success(), "invalid Markdoc must fail the build");
+    assert!(
+        err.contains("Markdoc validation failed") || err.contains("Undefined tag"),
+        "{err}"
+    );
+}
+
+#[test]
 fn prerender_refuses_an_out_that_is_the_build() {
     let root = example_root();
     if !deps_installed(&root) {
