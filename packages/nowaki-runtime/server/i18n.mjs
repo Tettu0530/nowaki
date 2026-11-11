@@ -35,14 +35,17 @@ export function splitLocale(i18n, path) {
 
 /// `path` for `locale`: an existing locale prefix is replaced, the default locale gets none unless
 /// `prefixDefaultLocale`. Without i18n (or for a locale that isn't configured) `path` is returned
-/// as it is. The query and fragment are kept.
-export function localePathFor(i18n, path, locale) {
+/// as it is. The query and fragment are kept. With `keep`, a path that already has a locale prefix
+/// stays as it is (how `<Link>` keeps the current locale without overriding an explicit prefix).
+export function localePathFor(i18n, path, locale, keep) {
   const s = String(path);
   if (!i18n || !s.startsWith("/") || s.startsWith("//") || !i18n.set.has(locale)) return s;
   const cut = s.search(/[?#]/);
   const pathname = cut < 0 ? s : s.slice(0, cut);
   const tail = cut < 0 ? "" : s.slice(cut);
-  const bare = splitLocale(i18n, pathname).path;
+  const split = splitLocale(i18n, pathname);
+  if (keep && split.prefixed) return s;
+  const bare = split.path;
   if (locale === i18n.defaultLocale && !i18n.prefixDefault) return bare + tail;
   return (bare === "/" ? `/${locale}` : `/${locale}${bare}`) + tail;
 }

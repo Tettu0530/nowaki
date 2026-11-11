@@ -10,6 +10,33 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **`href(path, { locale, basePath })`** from `@nowaki-dev/runtime/navigation` (and
+  `@nowaki-dev/runtime`): a path as the browser requests it, built the way `<Link>` builds its
+  href (the current locale, then basePath), for URLs `<Link>` doesn't build, such as
+  `<form action={href("/logout")}>`, `fetch` or `location`. `locale` picks another locale
+  (`false`: no prefix), `basePath: false` leaves the base out. Works on the server and in islands.
+  `examples/gallery` uses it instead of reading `import.meta.env.BASE_URL` by hand.
+
+### Changed
+- **`<Link>` keeps the current locale** when nowaki.config has `i18n`: on `/ja/x`,
+  `<Link href="/about">` renders `/ja/about`. An href that already has a locale prefix keeps it,
+  `locale="en"` switches as before, and `locale={false}` leaves the href as written (the base is
+  still added). The server reads the request's locale, the browser `<html data-nowaki-i18n>`, so
+  both render the same href. Without `i18n` nothing changes. `navigation.js` grows by 46 B gzip
+  for an app whose islands import it (the new `href` export); apps whose islands don't import it,
+  such as `examples/hello`, ship the same bytes.
+
+### Fixed
+- **i18n's per-request cost.** A localized request built the `data-nowaki-i18n` JSON and its
+  escaped attribute string, and (with `site`) the hreflang tags, on every request, and went
+  through an extra async function. They are now built once per locale (the attribute) and per
+  route path (hreflang, bounded), and the locale split no longer adds an async frame or copies
+  the request info. In-process `handleRequest` CPU time on Apple M2, i18n
+  `{ locales: ["en", "ja"], detect: true }` vs. none: `/` +2.1 µs → +0.6 µs, a post page
+  +3.7 µs → +0.7 µs per request. What is left is mostly the AsyncLocalStorage `run` that
+  `getLocale()` needs.
+
 ## [0.18.0] — 2026-11-10 · "Sirocco": routing for real apps
 
 Packages: `nowaki` / `nowaki-core` 0.18.0 (crates.io, npm), `@nowaki-dev/runtime`

@@ -41,13 +41,9 @@ export function t(key: keyof typeof en): string {
   return (dictionaries[getLocale() ?? "en"] ?? en)[key];
 }
 
-// The basePath ("/gallery"), for the few URLs <Link> and ctx.redirect don't build: form actions.
+// The basePath ("/gallery"). <Link>, ctx.redirect and href() from /navigation add it; reading a
+// browser URL back (below) takes it off.
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-
-/// A URL in the current locale under the base, for a plain attribute like <form action>.
-export function href(path: string): string {
-  return base + localePath(path);
-}
 
 /// The route path of a browser URL: no base, no locale prefix ("/gallery/ja/photo/1" → "/photo/1").
 export function routePath(url: URL): Href {
