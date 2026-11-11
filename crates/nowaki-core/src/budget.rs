@@ -360,7 +360,7 @@ pub fn parse_budget(path: &Path, source: &str) -> Result<Option<f64>> {
                 };
                 let key = match &p.key {
                     PropertyKey::StaticIdentifier(k) => k.name.as_str(),
-                    PropertyKey::StringLiteral(s) => s.value.as_str(),
+                    PropertyKey::StringLiteral(s) => s.value.as_str().unwrap_or_default(),
                     _ => continue,
                 };
                 if key != "js" {

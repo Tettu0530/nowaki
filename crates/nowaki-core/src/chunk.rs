@@ -333,11 +333,13 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
     for stmt in &program.body {
         match stmt {
             Statement::ImportDeclaration(d) => {
-                let Some(abs_src) = resolve(core, dir, d.source.value.as_str()) else {
+                let Some(spec) = d.source.value.as_str() else {
                     continue;
                 };
-                meta.deps
-                    .push((abs_src.clone(), d.source.value.to_string()));
+                let Some(abs_src) = resolve(core, dir, spec) else {
+                    continue;
+                };
+                meta.deps.push((abs_src.clone(), spec.to_string()));
                 let mut items = Vec::new();
                 if let Some(specs) = &d.specifiers {
                     for s in specs {
@@ -377,8 +379,10 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
                 // `export {..} from` re-export unsupported. Still a dependency: the graph
                 // walks (sharing counts, budgets) must see it.
                 meta.fallback = true;
-                if let Some(abs_src) = resolve(core, dir, d.source.value.as_str()) {
-                    meta.deps.push((abs_src, d.source.value.to_string()));
+                if let Some(spec) = d.source.value.as_str() {
+                    if let Some(abs_src) = resolve(core, dir, spec) {
+                        meta.deps.push((abs_src, spec.to_string()));
+                    }
                 }
             }
             Statement::ExportNamedDeclaration(d) => {
@@ -409,8 +413,10 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
             },
             Statement::ExportAllDeclaration(d) => {
                 meta.fallback = true; // `export *` unsupported
-                if let Some(abs_src) = resolve(core, dir, d.source.value.as_str()) {
-                    meta.deps.push((abs_src, d.source.value.to_string()));
+                if let Some(spec) = d.source.value.as_str() {
+                    if let Some(abs_src) = resolve(core, dir, spec) {
+                        meta.deps.push((abs_src, spec.to_string()));
+                    }
                 }
             }
             _ => {}
@@ -531,7 +537,8 @@ fn export_name_str(n: &ModuleExportName) -> String {
     match n {
         ModuleExportName::IdentifierName(i) => i.name.to_string(),
         ModuleExportName::IdentifierReference(i) => i.name.to_string(),
-        ModuleExportName::StringLiteral(s) => s.value.to_string(),
+        // Export names must be well-formed Unicode (an early error otherwise), so `display` is exact.
+        ModuleExportName::StringLiteral(s) => s.value.display().to_string(),
     }
 }
 

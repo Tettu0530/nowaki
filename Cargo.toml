@@ -9,7 +9,7 @@ license = "MIT"
 authors = ["Tettu0530"]
 repository = "https://github.com/Tettu0530/nowaki"
 homepage = "https://nowaki.dev"
-rust-version = "1.95"
+rust-version = "1.97"
 
 # The AVIF encoder (for `?image`) is unusably slow unoptimized; debug builds (`cargo build`, CI's
 # e2e) optimize just it and the image codecs.

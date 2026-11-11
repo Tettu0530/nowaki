@@ -43,18 +43,26 @@ pub fn parse_scripts(path: &Path, source: &str) -> Result<Vec<String>> {
             };
             let mut out = Vec::new();
             for el in &arr.elements {
-                match el {
-                    ArrayExpressionElement::StringLiteral(s) => out.push(s.value.to_string()),
+                let value = match el {
+                    ArrayExpressionElement::StringLiteral(s) => s.value.as_str(),
                     ArrayExpressionElement::TemplateLiteral(t)
                         if t.expressions.is_empty() && t.quasis.len() == 1 =>
                     {
                         let q = &t.quasis[0];
-                        out.push(q.value.cooked.as_ref().unwrap_or(&q.value.raw).to_string());
+                        match q.value.cooked {
+                            Some(cooked) => cooked.as_str(),
+                            None => Some(q.value.raw.as_str()),
+                        }
                     }
                     _ => bail!(
                         "`export const scripts` entries must be string literals (read at build time)"
                     ),
-                }
+                };
+                // A lone surrogate (`"\uD800"`) can't be part of a file path.
+                let Some(value) = value else {
+                    bail!("`export const scripts` entries must be module paths, without lone surrogates");
+                };
+                out.push(value.to_string());
             }
             return Ok(out);
         }
@@ -102,5 +110,8 @@ mod tests {
         let p = Path::new("routes/index.tsx");
         assert!(parse_scripts(p, "export const scripts = list;").is_err());
         assert!(parse_scripts(p, "const a = './a.ts'; export const scripts = [a];").is_err());
+        // A lone surrogate can't be in a file path (oxc keeps it in the string value).
+        assert!(parse_scripts(p, r#"export const scripts = ["./\uD800.ts"];"#).is_err());
+        assert!(parse_scripts(p, r"export const scripts = [`./\uD800.ts`];").is_err());
     }
 }

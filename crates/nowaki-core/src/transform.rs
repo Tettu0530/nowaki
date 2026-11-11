@@ -144,11 +144,16 @@ fn rewrite_imports<'a>(
             _ => None,
         };
         let Some(lit) = source else { continue };
-        if let Some(aliased) = crate::resolve::alias_specifier(lit.value.as_str()) {
+        // A specifier with a lone surrogate isn't a path or package name: left as written.
+        let Some(mut spec) = lit.value.as_str() else {
+            continue;
+        };
+        if let Some(aliased) = crate::resolve::alias_specifier(spec) {
             lit.value = allocator.alloc_str(aliased).into();
             lit.raw = None;
+            spec = aliased;
         }
-        let Some(url) = map_specifier(lit.value.as_str(), dir, root, resolver, vr, inputs) else {
+        let Some(url) = map_specifier(spec, dir, root, resolver, vr, inputs) else {
             continue;
         };
         lit.value = allocator.alloc_str(&url).into();
@@ -332,12 +337,16 @@ fn rewrite_ssr_imports<'a>(
             _ => None,
         };
         let Some(lit) = source else { continue };
+        // A specifier with a lone surrogate isn't a path or package name: left as written.
+        let Some(mut spec) = lit.value.as_str() else {
+            continue;
+        };
         // React packages → preact/compat (left bare for Node to resolve).
-        if let Some(aliased) = crate::resolve::alias_specifier(lit.value.as_str()) {
+        if let Some(aliased) = crate::resolve::alias_specifier(spec) {
             lit.value = allocator.alloc_str(aliased).into();
             lit.raw = None;
+            spec = aliased;
         }
-        let spec = lit.value.as_str();
         // Inline virtual modules as data: (assumed self-contained ESM). Checked before bare resolution.
         if !spec.starts_with('.') && !spec.starts_with('/') && !spec.contains("://") {
             if let Some(data) = vr.and_then(|v| v.virtual_ssr_module(dir, spec)) {
