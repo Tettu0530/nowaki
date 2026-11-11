@@ -178,6 +178,15 @@ code locations and CI coverage.
   Streamable HTTP, tools, error ring buffer); route table + island registry from
   the dev sidecar's `/__nowaki/dev-info` (`server/sidecar.mjs`); imports /
   importers from `crates/nowaki-core/src/graph.rs`. E2E: `scripts/mcp-e2e.mjs`.
+- **Dev HMR / Fast Refresh** — `crates/nowaki/src/dev.rs` `apply_changes` →
+  `plan_changes` (`css` / `hot` / `page` / `reload`, from the import graph walked up to
+  island entries) → `hmr_messages` (bumps hot versions via `NowakiCore::bump_dev_version`;
+  `transform.rs` `map_specifier` appends `?t=<n>`). The refresh transform runs only for dev
+  browser modules of the app (`NowakiCore::set_dev_refresh`, `transform_file_dev`); a module
+  that registers components imports `client/refresh.js` (families + an `options.vnode`
+  proxy, public Preact API). `client/hmr.js` applies the messages. Live islands re-render
+  through `/__nowaki/live-event`; `live::handle_versioned` reads the SSR version per render.
+  Builds never see any of it. Browser test: `scripts/hmr-browser-test.mjs` (in e2e-dev).
 
 - **On-demand revalidation (`revalidatePath` / `revalidateTag`, `export const tags`)** —
   `server/revalidate.mjs` (validation, path expansion over basePath / locales / trailingSlash,

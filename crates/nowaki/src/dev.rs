@@ -36,6 +36,19 @@ pub struct DevState {
     /// nowaki.config routing from `.nowaki/routing.json` (read at startup; a change needs a restart,
     /// which `apply_changes` says).
     front: Option<Arc<crate::front::Front>>,
+    /// What `apply_changes` needs between batches: import edges and CSS Module class maps.
+    hmr_graph: std::sync::Mutex<HmrGraph>,
+}
+
+impl DevState {
+    /// Remembers the class map of a CSS Module the browser got, so a later edit can tell a rule
+    /// change (`css`) from a class name change (the importers re-import).
+    fn record_css_map(&self, abs: &Path, map: &[(String, String)]) {
+        let mut graph = self.hmr_graph.lock().unwrap_or_else(|e| e.into_inner());
+        graph
+            .css_maps
+            .insert(abs.to_path_buf(), nowaki_core::css::mapping_object(map));
+    }
 }
 
 pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<()> {
@@ -55,6 +68,8 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
 
     let (plugin_host, config) = plugin_host.finish()?;
     let mut core = NowakiCore::new(root.clone());
+    // Fast Refresh for island modules (browser transforms of app files only).
+    core.set_dev_refresh(true);
     if let Some(ph) = &plugin_host {
         core.set_plugins(ph.bridge.clone());
     }
@@ -105,6 +120,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         fs_allow: compute_fs_allow(&root),
         expose,
         front: front.clone(),
+        hmr_graph: Default::default(),
     });
 
     dev_content(&state);
@@ -188,7 +204,6 @@ async fn serve(
     }
 }
 
-/// File watch → bump ssr_version + broadcast reload (100ms debounce)
 /// Content collections in dev: re-read content/ into .nowaki/content/index.json, which the
 /// sidecar loads for the next SSR version. A bad file is reported (overlay, MCP) and the last
 /// good output is kept.
@@ -214,11 +229,15 @@ fn dev_content(state: &DevState) {
     }
 }
 
+/// How long a batch of file events has to be quiet before it is applied. An editor's save
+/// (write, rename, metadata) lands within a few ms; the HMR budget is 100 ms edit to DOM.
+const HMR_QUIET: Duration = Duration::from_millis(30);
+
 fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::RecommendedWatcher> {
     let root_owned = root.to_path_buf();
     // notify's callback only filters and forwards; a worker thread batches the changes and
-    // reloads once they have been quiet for 100 ms. One save (several events) is one reload, a
-    // second quick save is never dropped, and nothing blocks notify's thread.
+    // applies them once they have been quiet for HMR_QUIET. One save (several events) is one
+    // update, a second quick save is never dropped, and nothing blocks notify's thread.
     let (tx, rx) = std::sync::mpsc::channel::<Vec<PathBuf>>();
     let filter_state = state.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
@@ -255,7 +274,7 @@ fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::Recommende
     std::thread::spawn(move || {
         while let Ok(first) = rx.recv() {
             let mut batch: std::collections::BTreeSet<PathBuf> = first.into_iter().collect();
-            while let Ok(more) = rx.recv_timeout(Duration::from_millis(100)) {
+            while let Ok(more) = rx.recv_timeout(HMR_QUIET) {
                 batch.extend(more);
             }
             apply_changes(&state, batch.into_iter().collect());
@@ -324,19 +343,287 @@ fn apply_changes(state: &DevState, relevant: Vec<PathBuf>) {
         dev_content(state);
     }
     state.ssr_version.fetch_add(1, Ordering::SeqCst);
-    let island_only = relevant.iter().all(|p| under(root, p, &["islands"]));
-    let kind = if island_only { "update" } else { "reload" };
-    let files: Vec<String> = relevant
-        .iter()
-        .map(|p| {
-            p.strip_prefix(root)
-                .unwrap_or(p)
-                .to_string_lossy()
-                .into_owned()
+    let files: Vec<String> = relevant.iter().map(|p| rel_name(root, p)).collect();
+    let plan = {
+        let mut graph = state.hmr_graph.lock().unwrap_or_else(|e| e.into_inner());
+        plan_changes(&state.core, &mut graph, &relevant, !restart.is_empty())
+    };
+    let messages = hmr_messages(&state.core, &plan);
+    for (kind, msg) in messages {
+        crate::ui::hmr_log(kind, &files);
+        let _ = state.hmr_tx.send(msg.to_string());
+    }
+}
+
+/// A root-relative name for logs and messages (`/` separators).
+fn rel_name(root: &Path, p: &Path) -> String {
+    p.strip_prefix(root)
+        .unwrap_or(p)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+/// Import edges and CSS Module class maps, kept across change batches.
+#[derive(Default)]
+pub(crate) struct HmrGraph {
+    /// Each app module's resolved imports, with the (mtime, length) they were read at.
+    imports: std::collections::HashMap<PathBuf, (Option<std::time::SystemTime>, u64, Vec<PathBuf>)>,
+    /// The class map each CSS Module had when the browser last got it (`mapping_object` text).
+    css_maps: std::collections::HashMap<PathBuf, String>,
+}
+
+impl HmrGraph {
+    /// Who imports whom, for every app module (read again only when a file changed).
+    fn importers(&mut self, core: &NowakiCore) -> std::collections::HashMap<PathBuf, Vec<PathBuf>> {
+        let sources = nowaki_core::graph::app_sources(&core.root);
+        self.imports.retain(|p, _| sources.contains(p));
+        let mut by: std::collections::HashMap<PathBuf, Vec<PathBuf>> = Default::default();
+        for src in sources {
+            let meta = std::fs::metadata(&src).ok();
+            let stamp = (
+                meta.as_ref().and_then(|m| m.modified().ok()),
+                meta.as_ref().map_or(0, |m| m.len()),
+            );
+            let fresh = self
+                .imports
+                .get(&src)
+                .is_some_and(|(t, len, _)| (*t, *len) == stamp);
+            if !fresh {
+                let resolved = nowaki_core::graph::module_imports(core, &src)
+                    .map(|imports| imports.into_iter().filter_map(|i| i.resolved).collect())
+                    .unwrap_or_default();
+                self.imports
+                    .insert(src.clone(), (stamp.0, stamp.1, resolved));
+            }
+            for target in &self.imports[&src].2 {
+                by.entry(target.clone()).or_default().push(src.clone());
+            }
+        }
+        by
+    }
+
+    /// Records the class map the browser got for a CSS Module; returns whether it differs from
+    /// the one recorded before (false the first time).
+    fn css_map_changed(&mut self, abs: &Path, map: String) -> bool {
+        match self.css_maps.insert(abs.to_path_buf(), map.clone()) {
+            Some(old) => old != map,
+            None => false,
+        }
+    }
+}
+
+/// What a batch of file changes does to open pages.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct HmrPlan {
+    /// A full reload: config, env, session, content, a removed file, or a module no island or
+    /// route imports.
+    reload: bool,
+    /// A route, layout or a module a route imports changed (H2 re-renders pages in place; until
+    /// then the client reloads).
+    page: bool,
+    /// Stylesheets to replace in place (the changed ones, and the ones that `@import` them).
+    css: std::collections::BTreeSet<PathBuf>,
+    /// Island entries to re-import, and every module between them and the change (all get new
+    /// hot versions).
+    islands: std::collections::BTreeSet<PathBuf>,
+    modules: std::collections::BTreeSet<PathBuf>,
+}
+
+/// Most modules walked from one change before giving up and reloading.
+const HMR_WALK_CAP: usize = 2000;
+
+/// Whether `p` is an island entry (`islands/<name>.<ext>`, as the island registry reads them).
+fn is_island_entry(root: &Path, p: &Path) -> bool {
+    p.parent() == Some(root.join("islands").as_path())
+        && matches!(
+            p.extension().and_then(|e| e.to_str()),
+            Some("tsx" | "jsx" | "ts" | "js" | "tsrx")
+        )
+}
+
+/// Classifies a batch of changed files (see [`HmrPlan`]).
+pub(crate) fn plan_changes(
+    core: &NowakiCore,
+    graph: &mut HmrGraph,
+    changed: &[PathBuf],
+    restart: bool,
+) -> HmrPlan {
+    let root = &core.root;
+    let mut plan = HmrPlan {
+        reload: restart,
+        ..HmrPlan::default()
+    };
+    let mut walk: Vec<PathBuf> = Vec::new();
+    for p in changed {
+        let top = p
+            .strip_prefix(root)
+            .ok()
+            .and_then(|r| r.components().next())
+            .map(|c| c.as_os_str().to_string_lossy().into_owned());
+        if !p.is_file() || top.as_deref() == Some("content") {
+            plan.reload = true;
+        } else if nowaki_core::css::is_css(p) {
+            // A CSS Module whose class names changed: the modules importing it get the new map.
+            let map_changed = nowaki_core::css::is_css_module(p)
+                && core.read_css(p).is_ok_and(|css| {
+                    let id = nowaki_core::css::css_scope_id(root, p);
+                    let map = nowaki_core::css::scope_css(&id, &css).1;
+                    graph.css_map_changed(p, nowaki_core::css::mapping_object(&map))
+                });
+            if map_changed {
+                walk.push(p.clone());
+            } else {
+                plan.css.insert(p.clone());
+                plan.css.extend(css_importers(core, p));
+            }
+        } else if is_transformable(p) {
+            walk.push(p.clone());
+        } else {
+            plan.reload = true;
+        }
+    }
+    if walk.is_empty() || plan.reload {
+        return plan;
+    }
+    let importers = graph.importers(core);
+    let mut seen: std::collections::HashSet<PathBuf> = Default::default();
+    while let Some(p) = walk.pop() {
+        if !seen.insert(p.clone()) {
+            continue;
+        }
+        if seen.len() > HMR_WALK_CAP {
+            plan.reload = true;
+            break;
+        }
+        if is_island_entry(root, &p) {
+            // The boundary: the browser re-imports the island; its own importers are routes
+            // (SSR), which the next request renders with the new SSR version anyway.
+            plan.islands.insert(p.clone());
+            plan.modules.insert(p);
+            continue;
+        }
+        if under(root, &p, &["routes"]) {
+            plan.page = true;
+            continue;
+        }
+        match importers.get(&p) {
+            Some(by) if !by.is_empty() => {
+                plan.modules.insert(p);
+                walk.extend(by.iter().cloned());
+            }
+            // Nothing imports it. The changed file itself, or a file the framework loads
+            // (session.ts, content/config.ts): reload. Another importer nothing loads (a test
+            // file, a module not used yet) changes no page.
+            _ if changed.contains(&p) || framework_entry(root, &p) => plan.reload = true,
+            _ => {}
+        }
+    }
+    plan
+}
+
+/// Server files the framework imports itself, outside `routes/` (no app module imports them).
+fn framework_entry(root: &Path, p: &Path) -> bool {
+    let top_level = p.parent() == Some(root)
+        && p.file_stem()
+            .and_then(|s| s.to_str())
+            .is_some_and(|s| matches!(s, "session" | "env" | "nowaki.config"));
+    top_level || p.starts_with(root.join("content"))
+}
+
+/// App stylesheets that `@import` `css` (directly or through others), which inline its text.
+fn css_importers(core: &NowakiCore, css: &Path) -> Vec<PathBuf> {
+    let mut sheets = Vec::new();
+    css_files(&core.root, &mut sheets);
+    sheets
+        .into_iter()
+        .filter(|s| s != css)
+        .filter(|s| {
+            let Ok(text) = std::fs::read_to_string(s) else {
+                return false;
+            };
+            if !text.contains("@import") {
+                return false;
+            }
+            let resolve = |dir: &Path, spec: &str| core.resolve_spec(dir, spec);
+            let (_, inlined) = nowaki_core::css::inline_imports_with_files(s, &text, &resolve);
+            inlined.iter().any(|f| f == css)
         })
-        .collect();
-    crate::ui::hmr_log(kind, &files);
-    let _ = state.hmr_tx.send(json!({ "type": kind }).to_string());
+        .collect()
+}
+
+/// `.css` files of the app (no dependencies, build output or dot directories).
+fn css_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if path.is_dir() {
+            if !name.starts_with('.')
+                && !matches!(name.as_ref(), "node_modules" | "dist" | "target")
+            {
+                css_files(&path, out);
+            }
+        } else if nowaki_core::css::is_css(&path) {
+            out.push(path);
+        }
+    }
+}
+
+/// The HMR messages for a plan, with the log kind of each. Bumps the hot versions of the modules
+/// a `hot` message re-imports.
+fn hmr_messages(core: &NowakiCore, plan: &HmrPlan) -> Vec<(&'static str, serde_json::Value)> {
+    let root = &core.root;
+    if plan.reload {
+        return vec![("reload", json!({ "type": "reload" }))];
+    }
+    if plan.page {
+        // H2 re-renders the page in place; hmr.js reloads for now.
+        return vec![("page", json!({ "type": "page" }))];
+    }
+    let mut out = Vec::new();
+    if !plan.css.is_empty() {
+        let files: Vec<_> = plan
+            .css
+            .iter()
+            .map(|p| {
+                json!({
+                    "file": rel_name(root, p),
+                    "id": nowaki_core::css::css_scope_id(root, p),
+                    "url": nowaki_core::resolve::fs_path_to_url(root, p),
+                })
+            })
+            .collect();
+        out.push(("css", json!({ "type": "css", "files": files })));
+    }
+    if !plan.modules.is_empty() {
+        for m in &plan.modules {
+            core.bump_dev_version(m);
+        }
+        let islands: Vec<_> = plan
+            .islands
+            .iter()
+            .map(|p| {
+                json!({
+                    "src": nowaki_core::resolve::fs_path_to_url(root, p),
+                    "url": core.dev_module_url(p),
+                    "name": p.file_stem().map(|s| s.to_string_lossy().into_owned()),
+                })
+            })
+            .collect();
+        let modules: Vec<_> = plan
+            .modules
+            .iter()
+            .map(|p| core.dev_module_url(p))
+            .collect();
+        out.push((
+            "hot",
+            json!({ "type": "hot", "islands": islands, "modules": modules }),
+        ));
+    }
+    out
 }
 
 async fn hmr_ws(
@@ -362,10 +649,16 @@ async fn live_ws(
     }
     let http = state.http.clone();
     let port = state.sidecar_port;
-    let version = state.ssr_version.load(Ordering::SeqCst).to_string();
+    // The current SSR version at each render: after a hot update, the open socket renders the
+    // edited island with the state it holds.
+    let versions = state.clone();
+    let version: crate::live::Version =
+        Arc::new(move || versions.ssr_version.load(Ordering::SeqCst).to_string());
     let hub = state.live_hub.clone();
     let request = crate::live::context_headers(&headers);
-    ws.on_upgrade(move |socket| crate::live::handle(socket, hub, http, port, version, request))
+    ws.on_upgrade(move |socket| {
+        crate::live::handle_versioned(socket, hub, http, port, version, request)
+    })
 }
 
 async fn handle_hmr(mut socket: WebSocket, state: Arc<DevState>) {
@@ -594,7 +887,9 @@ async fn dev_css(State(state): State<Arc<DevState>>, Query(q): Query<DevCssQuery
     };
     let sheet = if nowaki_core::css::is_css_module(&canon) {
         let id = nowaki_core::css::css_scope_id(&state.core.root, &canon);
-        nowaki_core::css::scope_css(&id, &css).0
+        let (scoped, map) = nowaki_core::css::scope_css(&id, &css);
+        state.record_css_map(&canon, &map);
+        scoped
     } else {
         css
     };
@@ -758,6 +1053,7 @@ async fn serve_file(state: Arc<DevState>, abs: PathBuf) -> Response {
                 let id = nowaki_core::css::css_scope_id(&state.core.root, &abs);
                 let shim = if nowaki_core::css::is_css_module(&abs) {
                     let (scoped, map) = nowaki_core::css::scope_css(&id, &css);
+                    state.record_css_map(&abs, &map);
                     nowaki_core::css::css_module_client_js(&id, &scoped, &map)
                 } else {
                     nowaki_core::css::css_shim(&id, &css)
@@ -1261,5 +1557,145 @@ mod tests {
             needs_restart(root, &[PathBuf::from("/app/.env.local")]),
             [".env.local"]
         );
+    }
+
+    /// An app for `plan_changes`: islands, a util only islands use, a component a route uses
+    /// too, stylesheets with an `@import`, a CSS Module, and session.ts.
+    fn hmr_app() -> (tempfile::TempDir, NowakiCore) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        let files = [
+            ("routes/index.tsx", "import C from \"../islands/Counter.tsx\";\nimport Shared from \"../components/Shared.tsx\";\nimport \"../styles/a.css\";\nexport default () => <main><C /><Shared /></main>;\n"),
+            ("islands/Counter.tsx", "import { label } from \"../lib/label.ts\";\nimport s from \"./S.module.css\";\nexport default function Counter() { return <b class={s.x}>{label}</b>; }\n"),
+            ("islands/Other.tsx", "import Shared from \"../components/Shared.tsx\";\nexport default function Other() { return <Shared />; }\n"),
+            ("lib/label.ts", "export const label = \"n\";\n"),
+            ("components/Shared.tsx", "export default function Shared() { return <i>s</i>; }\n"),
+            ("styles/a.css", "@import \"./b.css\";\n.a { color: red; }\n"),
+            ("styles/b.css", ".b { color: blue; }\n"),
+            ("islands/S.module.css", ".x { color: red; }\n"),
+            ("session.ts", "import { secret } from \"./lib/auth.ts\";\nexport default { secret };\n"),
+            ("lib/auth.ts", "export const secret = \"s\";\n"),
+            ("lib/label.test.ts", "import { label } from \"./label.ts\";\nlabel;\n"),
+        ];
+        for (file, text) in files {
+            let p = root.join(file);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        }
+        (dir, NowakiCore::new(root))
+    }
+
+    #[test]
+    fn hmr_plan_island_only_chains_are_hot() {
+        // (lib/label.test.ts imports the util too; nothing loads it, so it changes nothing.)
+        let (_dir, core) = hmr_app();
+        let root = core.root.clone();
+        let mut graph = HmrGraph::default();
+        let plan = plan_changes(&core, &mut graph, &[root.join("lib/label.ts")], false);
+        assert_eq!(
+            plan,
+            HmrPlan {
+                islands: [root.join("islands/Counter.tsx")].into(),
+                modules: [root.join("islands/Counter.tsx"), root.join("lib/label.ts")].into(),
+                ..HmrPlan::default()
+            }
+        );
+        // The island itself: the routes importing it (SSR) don't make it a page update.
+        let plan = plan_changes(
+            &core,
+            &mut graph,
+            &[root.join("islands/Counter.tsx")],
+            false,
+        );
+        assert!(!plan.page && !plan.reload, "{plan:?}");
+        assert_eq!(plan.islands, [root.join("islands/Counter.tsx")].into());
+
+        // The messages bump exactly those modules, and carry their new URLs.
+        let msgs = hmr_messages(
+            &core,
+            &plan_changes(&core, &mut graph, &[root.join("lib/label.ts")], false),
+        );
+        assert_eq!(msgs.len(), 1);
+        let (kind, msg) = &msgs[0];
+        assert_eq!(*kind, "hot");
+        let v = core.dev_version(&root.join("islands/Counter.tsx")).unwrap();
+        assert_eq!(msg["islands"][0]["src"], "/islands/Counter.tsx");
+        assert_eq!(
+            msg["islands"][0]["url"],
+            format!("/islands/Counter.tsx?t={v}")
+        );
+        assert_eq!(msg["islands"][0]["name"], "Counter");
+        assert!(core.dev_version(&root.join("lib/label.ts")).is_some());
+        assert!(core
+            .dev_version(&root.join("components/Shared.tsx"))
+            .is_none());
+    }
+
+    #[test]
+    fn hmr_plan_routes_server_files_and_removals_reload() {
+        let (_dir, core) = hmr_app();
+        let root = core.root.clone();
+        let mut graph = HmrGraph::default();
+        // A component a route imports too: the page has to update (H2; a reload until then).
+        let plan = plan_changes(
+            &core,
+            &mut graph,
+            &[root.join("components/Shared.tsx")],
+            false,
+        );
+        assert!(plan.page && !plan.reload, "{plan:?}");
+        assert_eq!(hmr_messages(&core, &plan)[0].1, json!({ "type": "page" }));
+        let plan = plan_changes(&core, &mut graph, &[root.join("routes/index.tsx")], false);
+        assert!(plan.page, "{plan:?}");
+        // Loaded by the framework, not imported: session.ts (and what it imports) reloads.
+        let plan = plan_changes(&core, &mut graph, &[root.join("session.ts")], false);
+        assert!(plan.reload, "{plan:?}");
+        let plan = plan_changes(&core, &mut graph, &[root.join("lib/auth.ts")], false);
+        assert!(plan.reload, "{plan:?}");
+        assert_eq!(hmr_messages(&core, &plan)[0].1, json!({ "type": "reload" }));
+        let plan = plan_changes(&core, &mut graph, &[root.join("islands/Gone.tsx")], false);
+        assert!(plan.reload, "{plan:?}");
+        // nowaki.config / env.ts / .env (needs_restart) reload whatever else changed.
+        let plan = plan_changes(&core, &mut graph, &[root.join("lib/label.ts")], true);
+        assert!(plan.reload, "{plan:?}");
+    }
+
+    #[test]
+    fn hmr_plan_css_swaps_in_place_unless_class_names_change() {
+        let (_dir, core) = hmr_app();
+        let root = core.root.clone();
+        let mut graph = HmrGraph::default();
+        // b.css is inlined into a.css (the route links a.css), so both are replaced.
+        let plan = plan_changes(&core, &mut graph, &[root.join("styles/b.css")], false);
+        assert_eq!(
+            plan,
+            HmrPlan {
+                css: [root.join("styles/a.css"), root.join("styles/b.css")].into(),
+                ..HmrPlan::default()
+            }
+        );
+        let (kind, msg) = &hmr_messages(&core, &plan)[0];
+        assert_eq!(*kind, "css");
+        assert_eq!(msg["files"][1]["file"], "styles/b.css");
+        assert_eq!(msg["files"][1]["url"], "/styles/b.css");
+
+        // A CSS Module rule change is CSS; a renamed class re-imports its importers.
+        let module = root.join("islands/S.module.css");
+        let map = |css: &str| {
+            let id = nowaki_core::css::css_scope_id(&root, &module);
+            nowaki_core::css::mapping_object(&nowaki_core::css::scope_css(&id, css).1)
+        };
+        graph
+            .css_maps
+            .insert(module.clone(), map(".x { color: red; }"));
+        std::fs::write(&module, ".x { color: blue; }\n").unwrap();
+        let plan = plan_changes(&core, &mut graph, std::slice::from_ref(&module), false);
+        assert_eq!(plan.css, [module.clone()].into());
+        assert!(plan.modules.is_empty());
+        std::fs::write(&module, ".y { color: blue; }\n").unwrap();
+        let plan = plan_changes(&core, &mut graph, std::slice::from_ref(&module), false);
+        assert!(plan.css.is_empty(), "{plan:?}");
+        assert_eq!(plan.islands, [root.join("islands/Counter.tsx")].into());
+        assert!(plan.modules.contains(&module));
     }
 }
