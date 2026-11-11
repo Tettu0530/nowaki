@@ -10,6 +10,19 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.18.2] — 2026-11-11 · patch
+
+Packages: `nowaki` / `nowaki-core` 0.18.2, `@nowaki-dev/runtime` 0.17.2 (types and docs
+only), `create-nowaki` / `create-nowaki-app` 0.19.2. `@nowaki-dev/markdoc` is unchanged
+(0.1.0).
+
+Cleanup before v0.19: a clear error for an outdated runtime, a dev restart hint, an
+unmaintained font dependency replaced, test cleanup on Windows, and current docs.
+
+### Upgrade notes
+- **The CLI now refuses an `@nowaki-dev/runtime` older than 0.17.1** instead of silently
+  ignoring nowaki.config. Update the runtime along with the CLI.
+
 ### Changed
 - Font fallback metrics (units per em, ascent / descent / line gap, average width) are read
   from the `head`, `hhea` and `OS/2` tables by a small built-in reader instead of
@@ -18,16 +31,11 @@ milestone's worth of work; the codename is noted per entry.
   machine.
 - Removed the stale `minimumReleaseAgeExclude` entries for `@tsrx/*@0.1.30` from
   `pnpm-workspace.yaml`. The lockfile no longer uses those versions.
+- **Docs:** ROADMAP marks v0.15–v0.18 done, lists the deferred items, and adds the oxc upgrade,
+  the API-route CSRF default, and synced versions to v0.19. AGENTS.md, docs/RELEASING.md, the
+  README features, the scaffolded app's AGENTS.md (0.17 / 0.18 features, `NOWAKI_SESSION_SECRET`),
+  the Astro guide (config mapping), and the `live.room` / `localePath` JSDoc are current.
 
-### Fixed
-- The e2e and browser test scripts remove their temp directories on a best-effort basis
-  (`maxRetries`, errors ignored), so a Windows EBUSY or an ENOTEMPTY can no longer fail a
-  test that passed. `locale-browser-test.mjs` keeps Chrome's profile in its own directory
-  and waits for Chrome to exit before removing it.
-
-### Security
-- `rustix` 1.1.4 → 1.1.6 (RUSTSEC-2026-0486, unsound xattr functions with a zero-length
-  buffer; Nowaki does not call them).
 ### Fixed
 - **`nowaki dev` / `build` / `start` / `prerender` refuse an `@nowaki-dev/runtime`
   older than the CLI supports (0.17.1 for 0.18.x)**, naming both versions and the
@@ -38,10 +46,14 @@ milestone's worth of work; the codename is noted per entry.
 - `nowaki dev` prints `[nowaki] <file> changed; restart nowaki dev to apply it`
   when nowaki.config, env.ts, `.env` or `.env.local` changes. It reads them only at
   startup (reloading them in place is v0.19 work).
-- **Docs:** ROADMAP marks v0.15–v0.18 done, lists the deferred items, and adds the oxc upgrade,
-  the API-route CSRF default, and synced versions to v0.19. AGENTS.md, docs/RELEASING.md, the
-  README features, the scaffolded app's AGENTS.md (0.17 / 0.18 features, `NOWAKI_SESSION_SECRET`),
-  the Astro guide (config mapping), and the `live.room` / `localePath` JSDoc are current.
+- The e2e and browser test scripts remove their temp directories on a best-effort basis
+  (`maxRetries`, errors ignored), so a Windows EBUSY or an ENOTEMPTY can no longer fail a
+  test that passed. `locale-browser-test.mjs` keeps Chrome's profile in its own directory
+  and waits for Chrome to exit before removing it.
+
+### Security
+- `rustix` 1.1.4 → 1.1.6 (RUSTSEC-2026-0486, unsound xattr functions with a zero-length
+  buffer; Nowaki does not call them).
 
 ## [0.18.1] — 2026-11-11 · patch
 

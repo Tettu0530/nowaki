@@ -23,7 +23,7 @@ impl NodeFetch {
             .join("node_modules/@nowaki-dev/runtime/server/images-fetch.mjs");
         if !script.exists() {
             return Err(anyhow!(
-                "remote images need @nowaki-dev/runtime 0.18 or newer (server/images-fetch.mjs not found)"
+                "remote images need @nowaki-dev/runtime 0.17 or newer (server/images-fetch.mjs not found)"
             ));
         }
         let mut child = std::process::Command::new("node")
