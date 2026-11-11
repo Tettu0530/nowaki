@@ -45,6 +45,8 @@ export function compileRules(config) {
     base,
     trailing,
     detect,
+    // i18n: rule sources match the route path without its locale prefix.
+    locales: c.i18n ? compileLocales(c.i18n) : null,
     // Locale detection alone: applyRules passes every request through.
     plain,
     redirects: compileSet(redirects, "redirects", (r, segs) => {
@@ -62,7 +64,7 @@ export function compileRules(config) {
         }
         return [key.toLowerCase(), value];
       });
-      return { segs, pairs };
+      return { segs, pairs, raw: h.locale === false };
     }),
   };
 }
@@ -71,6 +73,13 @@ export function compileRules(config) {
 /// route path), { pass: path } (the route path: the request path without basePath), or
 /// { notFound: true } (outside basePath). `path` is the raw (percent-encoded) pathname. A
 /// redirect's location doesn't carry the request's query; the caller appends it.
+///
+/// With i18n configured, sources match the path without its locale prefix (`/ja/login` as
+/// `/login`), unless the rule has `locale: false`. An internal redirect destination becomes the
+/// destination's URL in the request's locale (no prefix for the default locale unless
+/// `prefixDefaultLocale`); a rewrite destination gets the request's locale prefix back, so the
+/// renderer sees the locale. A destination whose first segment is a configured locale is left as
+/// written.
 export function applyRules(rules, method, path) {
   if (!rules || rules.plain) return { pass: path };
   const strip = stripBase(rules, path);
@@ -90,19 +99,30 @@ export function applyRules(rules, method, path) {
       return guard({ redirect: { status: 308, location: browserPath(rules, path, null) } });
     }
   }
-  const redirect = findRule(rules.redirects, decoded);
+  const hit = localeHit(rules, p);
+  const localized = hit < 0 ? decoded : decoded.slice(1);
+  const redirect = findRule(rules.redirects, localized, decoded);
   if (redirect) {
     const { rule, params } = redirect;
     const dest = rule.dest;
-    const path = substitute(dest.segs, params);
+    let path = substitute(dest.segs, params);
+    if (!dest.origin && !rule.raw) {
+      const l = redirectLocale(rules, hit, dest.segs);
+      if (l) path = withLocale(l, path);
+    }
     let location;
     if (!dest.origin) location = browserPath(rules, path, dest.slash) + dest.tail;
     else if (dest.bare) location = dest.origin + dest.tail;
     else location = dest.origin + path + (dest.slash ? "/" : "") + dest.tail;
     return guard({ redirect: { status: rule.status, location } });
   }
-  const rewrite = findRule(rules.rewrites, decoded);
-  if (rewrite) return guard({ rewrite: substitute(rewrite.rule.dest.segs, rewrite.params) });
+  const rewrite = findRule(rules.rewrites, localized, decoded);
+  if (rewrite) {
+    const { rule, params } = rewrite;
+    let path = substitute(rule.dest.segs, params);
+    if (hit >= 0 && !rule.raw && !startsWithLocale(rules.locales, rule.dest.segs)) path = withLocale(rules.locales.list[hit], path);
+    return guard({ rewrite: path });
+  }
   return { pass: p };
 }
 
@@ -113,9 +133,10 @@ export function ruleHeaders(rules, path) {
   const strip = stripBase(rules, path);
   const decoded = strip && decodeParts(strip.p);
   if (!decoded) return [];
+  const localized = localeHit(rules, strip.p) < 0 ? decoded : decoded.slice(1);
   const out = [];
   for (const h of rules.headers) {
-    if (!matchSegments(h.segs, decoded)) continue;
+    if (!matchSegments(h.segs, h.raw ? decoded : localized)) continue;
     for (const [k, v] of h.pairs) {
       const i = out.findIndex((e) => e[0] === k);
       if (i >= 0) out[i] = [k, v];
@@ -168,6 +189,39 @@ function compileDetect(i18n) {
   const def = locales.indexOf(i18n.defaultLocale);
   if (def < 0) throw new Error(`i18n.defaultLocale must be one of i18n.locales (got ${JSON.stringify(i18n.defaultLocale)})`);
   return { locales: [...locales], lower: locales.map((l) => l.toLowerCase()), default: def, prefixDefault: i18n.prefixDefaultLocale === true };
+}
+
+function compileLocales(i18n) {
+  const d = compileDetect(i18n);
+  return { list: d.locales, default: d.default, prefixDefault: d.prefixDefault };
+}
+
+// The configured locale (an index) the route path `p` starts with, or -1. Compared on the raw first
+// segment, as handler.mjs (splitLocale) does, so `/%6Aa/x` and `//ja/x` carry no locale.
+function localeHit(rules, p) {
+  if (!rules.locales) return -1;
+  const end = p.indexOf("/", 1);
+  const first = end < 0 ? p.slice(1) : p.slice(1, end);
+  return first ? rules.locales.list.indexOf(first) : -1;
+}
+
+// The locale prefix an internal redirect destination gets: the request's locale, or none for the
+// default locale without prefixDefaultLocale (and without i18n, or when the destination already
+// names a locale).
+function redirectLocale(rules, hit, segs) {
+  const l = rules.locales;
+  if (!l || startsWithLocale(l, segs)) return null;
+  const i = hit < 0 ? l.default : hit;
+  return i !== l.default || l.prefixDefault ? l.list[i] : null;
+}
+
+/// Whether a destination's first segment is a configured locale, written literally.
+export function startsWithLocale(locales, segs) {
+  return segs[0]?.lit !== undefined && locales.list.includes(segs[0].lit);
+}
+
+function withLocale(locale, path) {
+  return path === "/" ? `/${locale}` : `/${locale}${path}`;
 }
 
 // The first `nowaki_locale` value of a Cookie header.
@@ -252,30 +306,38 @@ function guard(outcome) {
 
 function compileSet(list, kind, target) {
   const literals = new Map();
+  const rawLiterals = new Map();
   const patterns = [];
   const rules = list.map((r, index) => {
     const segs = compileSource(r.source, kind);
-    const rule = { index, segs, ...target(r, segs) };
+    const raw = r.locale === false;
+    const rule = { index, segs, raw, ...target(r, segs) };
     if (segs.every((s) => s.lit !== undefined)) {
       const key = segs.map((s) => s.lit).join("/");
-      if (!literals.has(key)) literals.set(key, index);
+      const map = raw ? rawLiterals : literals;
+      if (!map.has(key)) map.set(key, index);
     } else {
       patterns.push(rule);
     }
     return rule;
   });
-  return { rules, literals, patterns };
+  return { rules, literals, rawLiterals, patterns };
 }
 
+// A literal segment never holds "/", so a decoded %2F can't match one.
+const lookup = (map, parts) => (map.size && !parts.some((p) => p.includes("/")) ? (map.get(parts.join("/")) ?? -1) : -1);
+
 // First matching rule in config order: a literal source by one map lookup, patterns in order.
-function findRule(set, decoded) {
+// `localized` is `decoded` without its locale prefix (all of it without i18n); `locale: false`
+// rules match `decoded`.
+function findRule(set, localized, decoded) {
   if (!set.rules.length) return null;
-  let best = -1;
-  // A literal segment never holds "/", so a decoded %2F can't match one.
-  if (set.literals.size && !decoded.some((p) => p.includes("/"))) best = set.literals.get(decoded.join("/")) ?? -1;
+  const a = lookup(set.literals, localized);
+  const b = lookup(set.rawLiterals, decoded);
+  const best = a < 0 ? b : b < 0 ? a : Math.min(a, b);
   for (const rule of set.patterns) {
     if (best >= 0 && rule.index > best) break;
-    const params = matchSegments(rule.segs, decoded);
+    const params = matchSegments(rule.segs, rule.raw ? decoded : localized);
     if (params) return { rule, params };
   }
   return best >= 0 ? { rule: set.rules[best], params: {} } : null;

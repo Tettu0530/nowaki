@@ -10,7 +10,15 @@
 // segment, and never an empty segment; a request outside that falls through to the function.
 // Routes are emitted in config order and stop at the first rule that can't be expressed, so a
 // later native rule never answers a request an earlier rule owns. scripts/rules-front-test.mjs
-// checks every redirect in the shared rules fixture against applyRules.
+// checks every redirect and header rule in the shared rules fixture against applyRules /
+// ruleHeaders.
+//
+// With i18n, a rule matches the path without its locale prefix (rules.mjs): a redirect becomes one
+// route per locale (`/ja/a` → `/ja/b`, `/en/a` → `/b`) and one for unprefixed paths, which a
+// lookahead keeps off locale-prefixed ones; a header rule takes an optional locale segment in one
+// route. `locale: false` rules are emitted as written.
+
+import { startsWithLocale } from "./rules.mjs";
 
 const SAFE = "[A-Za-z0-9\\-_.!~*'()]";
 const SAFE_TEXT = /^[A-Za-z0-9\-_.!~*'()]+$/;
@@ -24,17 +32,30 @@ export function vercelRedirects(rules) {
   const out = [];
   if (!rules) return out;
   for (const rule of rules.redirects.rules) {
-    const route = redirectRoute(rules, rule);
-    if (!route) break;
-    out.push(route);
+    const routes = rules.locales && !rule.raw ? localeRedirects(rules, rule) : [redirectRoute(rules, rule, "", "", null)];
+    if (routes.some((r) => !r)) break;
+    out.push(...routes);
   }
   return out;
+}
+
+// `(?:ja|en)`: any configured locale as a path segment.
+const localeAlt = (locales) => `(?:${locales.list.map(esc).join("|")})`;
+
+// One route per locale prefix, then one for paths without a locale prefix.
+function localeRedirects(rules, rule) {
+  const l = rules.locales;
+  const own = startsWithLocale(l, rule.dest.segs);
+  const target = (i) => (own || (i === l.default && !l.prefixDefault) ? null : l.list[i]);
+  const routes = l.list.map((loc, i) => redirectRoute(rules, rule, "/" + esc(loc), "", target(i)));
+  routes.push(redirectRoute(rules, rule, "", `(?!/${localeAlt(l)}(?:/|$))`, target(l.default)));
+  return routes;
 }
 
 /// Routes adding the config headers (`continue: true`, later rules overriding earlier ones).
 export function vercelHeaders(rules) {
   if (!rules) return [];
-  return rules.headers.map(({ segs, pairs }) => {
+  return rules.headers.map(({ segs, pairs, raw }) => {
     const parts = segs.map((s) => {
       if (s.lit !== undefined) return "/" + esc(encodeURIComponent(s.lit));
       if (s.rest) return "/[^/]+(?:/[^/]+)*";
@@ -42,12 +63,21 @@ export function vercelHeaders(rules) {
     });
     const body = parts.join("");
     // Never on the framework's /__nowaki/* endpoints (the client reaches them under basePath).
-    const src = rules.base ? `^${esc(rules.base)}(?!/__nowaki/)${body}/?$` : body ? `^(?!/__nowaki/)${body}/?$` : "^/$";
+    let src;
+    if (rules.locales && !raw) {
+      // A locale segment, or none: then the path must not start with one.
+      const alt = localeAlt(rules.locales);
+      src = `^${esc(rules.base)}(?!/__nowaki/)(?:/${alt}|(?!/${alt}(?:/|$)))${body}/?$`;
+    } else {
+      src = rules.base ? `^${esc(rules.base)}(?!/__nowaki/)${body}/?$` : body ? `^(?!/__nowaki/)${body}/?$` : "^/$";
+    }
     return { src, headers: Object.fromEntries(pairs), continue: true };
   });
 }
 
-function redirectRoute(rules, rule) {
+// `prefix`: a locale segment in front of the source (escaped), or ""; `guard`: a lookahead after
+// the base; `locale`: the locale the destination goes under, or null.
+function redirectRoute(rules, rule, prefix, guard, locale) {
   const { dest } = rule;
   // A destination query would need merging with the request's; `$` would read as a capture.
   if (dest.tail || dest.origin.includes("$")) return null;
@@ -66,7 +96,8 @@ function redirectRoute(rules, rule) {
       ? `/(?<${name}>${segment()}(?:/${segment()})*)`
       : `/(?<${name}>${segment(s.suffix)})${esc(s.suffix ?? "")}`;
   }
-  const last = rule.segs[rule.segs.length - 1];
+  src = prefix + src;
+  const last = prefix && !rule.segs.length ? undefined : rule.segs[rule.segs.length - 1];
   const dottedLast = last && (last.suffix !== undefined || (last.lit !== undefined && last.lit.includes(".")));
   let end;
   if (rules.trailing === "ignore") end = "/?$";
@@ -78,7 +109,7 @@ function redirectRoute(rules, rule) {
     if (!rules.base) src = "^/$";
     else src = `^${base}${rules.trailing === "ignore" ? "/?" : rules.trailing === "always" ? "/" : ""}$`;
   } else {
-    src = `^${base}${src}${end}`;
+    src = `^${base}${guard}${src}${end}`;
   }
 
   let path = "";
@@ -90,6 +121,7 @@ function redirectRoute(rules, rule) {
       path += "/$" + names.get(s.param) + (s.suffix ?? "");
     }
   }
+  if (locale && !dest.origin) path = `/${locale}${path}`;
   path ||= "/";
   let location;
   if (dest.origin) {

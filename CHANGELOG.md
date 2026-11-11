@@ -10,6 +10,101 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.18.1] — 2026-11-11 · patch
+
+Packages: `nowaki` / `nowaki-core` 0.18.1 (crates.io, npm), `@nowaki-dev/runtime`
+0.17.1, `create-nowaki` / `create-nowaki-app` 0.19.1. `@nowaki-dev/markdoc` is
+unchanged (0.1.0).
+
+Fills gaps found while building `examples/gallery` and measuring 0.18.0: config
+rules and `<Link>` are locale-aware, i18n's per-request cost is mostly gone, a
+config file no longer starts Node twice before a build, and server source maps
+point at the real files. Also includes the contributed `nowaki prerender`
+improvements (a render worker pool above 256 pages, hard-linked client assets,
+`--skip-build`).
+
+### Upgrade notes
+- **With `i18n` configured, config rules match the path without the locale
+  prefix**, so a `/login` rule now also applies to `/ja/login`. Add
+  `locale: false` to a rule to keep matching the full path.
+- **With `i18n` configured, `<Link href="/x">` keeps the current locale**
+  (`/ja/x` on a Japanese page). Pass `locale={false}` for the old behavior.
+
+### Added
+- **`href(path, { locale, basePath })`** from `@nowaki-dev/runtime/navigation` (and
+  `@nowaki-dev/runtime`): a path as the browser requests it, built the way `<Link>` builds its
+  href (the current locale, then basePath), for URLs `<Link>` doesn't build, such as
+  `<form action={href("/logout")}>`, `fetch` or `location`. `locale` picks another locale
+  (`false`: no prefix), `basePath: false` leaves the base out. Works on the server and in islands.
+  `examples/gallery` uses it instead of reading `import.meta.env.BASE_URL` by hand.
+- **`nowaki prerender --skip-build`:** render static HTML from an existing
+  `nowaki build` output (`dist/`) without re-running the transform, content
+  index, or route JS budgets. Routing for requests and static `_redirects` /
+  `_headers` comes from the built `dist/server/routing.json`. With `env.ts`, the
+  check must pass and every `PUBLIC_*` value must match
+  `dist/server/env-public.json` (what the client bundle inlined); app source or
+  public env changes require a new build.
+### Changed
+- **`nowaki prerender`:** above 256 pages (default), up to one Node render
+  worker per CPU receives pages round-robin; output order is unchanged. Override
+  the cutoff with `NOWAKI_PRERENDER_POOL_THRESHOLD` (`0` keeps a single worker).
+  Cap workers with `NOWAKI_PRERENDER_WORKERS` (each worker loads the full server
+  build and content collections in memory).
+- **`nowaki prerender`:** copies `dist/client` into `out/_nowaki` with hard links
+  when the output tree is on the same filesystem (copies on cross-device
+  failure). On the same volume, files under `out/_nowaki` share inodes with
+  `dist/client`; `nowaki build` clears `dist/client` before rewriting, but
+  in-place edits under `out/_nowaki` (for example a post-deploy minifier) also
+  change `dist/client`.
+- **Behavior change: with `i18n` configured, config `redirects` / `rewrites` / `headers`
+  are locale-aware.** A rule's source now matches the path without its locale prefix, so a
+  `/login` rule matches `/login` and `/ja/login` (before, only `/login`). An internal
+  redirect destination lands on that page in the request's locale (`/ja/old` → `/ja/new`;
+  `/en/old` → `/new` without `prefixDefaultLocale`), and a rewrite keeps the request's locale
+  prefix, so `ctx.locale` / `getLocale()` stay right after it. External destinations, and
+  destinations that start with a locale themselves, are kept as written. The new
+  `locale: false` field on a rule matches the path with the locale prefix (the 0.18.0
+  behavior) and leaves the destination as written. Without `i18n` nothing changes, and
+  routing.json is the same. Both engines (`nowaki_core::rules`, `server/rules.mjs`) share
+  the new fixture cases. Vercel gets one native redirect route per locale (plus the
+  unprefixed one) and header routes with an optional locale segment. Static `_redirects` /
+  `_headers` get a line or block per locale; a static host has no lookahead, so a source that
+  starts with a parameter also matches locale-prefixed paths there (the build warns).
+- `nowaki build`, `nowaki dev` and the static prerender read nowaki.config in one Node process:
+  the plugin host now also normalizes `site` / `fonts` / routing / `images` (what
+  `server/site-config.mjs` did in a second Node start and config import), and it starts before
+  typegen and the env.ts check instead of after them. In 0.18.0 an app with only `site` paid
+  for two Node starts in a row (site-config.mjs ≈ 29 ms, then the plugin host ≈ 45 ms); it now
+  pays for one, partly overlapped. Medians of 7 interleaved runs on a busy Apple M2:
+  `nowaki build` of a one-page `site`-only app 206 → 138 ms, `benchmarks/ci-perf-app`
+  338 → 273 ms; `nowaki dev` startup of the same apps 313 → 231 ms and 417 → 286 ms,
+  examples/hello 638 → 410 ms. A runtime older than this release still works (the CLI falls back
+  to site-config.mjs). Output is unchanged.
+- **`<Link>` keeps the current locale** when nowaki.config has `i18n`: on `/ja/x`,
+  `<Link href="/about">` renders `/ja/about`. An href that already has a locale prefix keeps it,
+  `locale="en"` switches as before, and `locale={false}` leaves the href as written (the base is
+  still added). The server reads the request's locale, the browser `<html data-nowaki-i18n>`, so
+  both render the same href. Without `i18n` nothing changes. `navigation.js` grows by 46 B gzip
+  for an app whose islands import it (the new `href` export); apps whose islands don't import it,
+  such as `examples/hello`, ship the same bytes.
+
+### Fixed
+- Stack traces from `nowaki start` (and the adapters' Node servers) name the real source file.
+  The server build's inline source maps listed `sources` relative to the app root, which Node
+  resolves against each emitted file's directory, so a throw in
+  `routes/(account)/_middleware.ts` was reported at
+  `dist/server/routes/(account)/routes/(account)/_middleware.ts`. `sources` is now relative to the
+  emitted file (`../../../../routes/(account)/_middleware.ts`); dev SSR was already right. Covered
+  by `scripts/sourcemap-e2e.mjs` (start and dev).
+- **i18n's per-request cost.** A localized request built the `data-nowaki-i18n` JSON and its
+  escaped attribute string, and (with `site`) the hreflang tags, on every request, and went
+  through an extra async function. They are now built once per locale (the attribute) and per
+  route path (hreflang, bounded), and the locale split no longer adds an async frame or copies
+  the request info. In-process `handleRequest` CPU time on Apple M2, i18n
+  `{ locales: ["en", "ja"], detect: true }` vs. none: `/` +2.1 µs → +0.6 µs, a post page
+  +3.7 µs → +0.7 µs per request. What is left is mostly the AsyncLocalStorage `run` that
+  `getLocale()` needs.
+
 ## [0.18.0] — 2026-11-10 · "Sirocco": routing for real apps
 
 Packages: `nowaki` / `nowaki-core` 0.18.0 (crates.io, npm), `@nowaki-dev/runtime`
@@ -172,13 +267,6 @@ benchmark (uncached, ISR, CSP, build, dev) found no regression.
   with `PUBLIC_` and server names must not. New core API:
   `NowakiCore::set_public_env`.
 ### Added
-- **`nowaki prerender --skip-build`:** render static HTML from an existing
-  `nowaki build` output (`dist/`) without re-running the transform, content
-  index, or route JS budgets. Routing for requests and static `_redirects` /
-  `_headers` comes from the built `dist/server/routing.json`. With `env.ts`, the
-  check must pass and every `PUBLIC_*` value must match
-  `dist/server/env-public.json` (what the client bundle inlined); app source or
-  public env changes require a new build.
 - **i18n routing.** With `i18n: { locales: ["en", "ja"], defaultLocale: "en" }`
   in nowaki.config, every locale except the default is a URL prefix
   (`/ja/about`); the default has none (`/about`), and `/en/about` redirects
@@ -223,12 +311,6 @@ benchmark (uncached, ISR, CSP, build, dev) found no regression.
   Pages without an intercepting slot render the same bytes as before; apps without slots pay
   only the existing length check per request.
 ### Changed
-- **`nowaki prerender`:** copies `dist/client` into `out/_nowaki` with hard links
-  when the output tree is on the same filesystem (copies on cross-device
-  failure). On the same volume, files under `out/_nowaki` share inodes with
-  `dist/client`; `nowaki build` clears `dist/client` before rewriting, but
-  in-place edits under `out/_nowaki` (for example a post-deploy minifier) also
-  change `dist/client`.
 - **`trailingSlash` also shapes static output and page URLs.** With `"never"`, the static
   adapter writes `about.html` instead of `about/index.html`, and canonical URLs, the default
   `og:url` and `sitemap.xml` drop the slash; with `"always"` they get one on every server too.
@@ -239,11 +321,6 @@ benchmark (uncached, ISR, CSP, build, dev) found no regression.
   is unchanged: servers use the request's path and static output `x/index.html` with a slash.
 - An error while saving a request's session (a store failure, a cookie over 4 KB) now renders
   the 500 page instead of escaping the request handler.
-- **`nowaki prerender`:** above 256 pages (default), up to one Node render
-  worker per CPU receives pages round-robin; output order is unchanged. Override
-  the cutoff with `NOWAKI_PRERENDER_POOL_THRESHOLD` (`0` keeps a single worker).
-  Cap workers with `NOWAKI_PRERENDER_WORKERS` (each worker loads the full server
-  build and content collections in memory).
 - `localePath` from `@nowaki-dev/runtime/navigation` returns an `Href` when given a static route
   or a `route()` href, so `<Link href={localePath(route("/photo/[id]", { id }))}>` type-checks
   once `nowaki typegen` has registered the routes. Before, the `string` it returned was refused

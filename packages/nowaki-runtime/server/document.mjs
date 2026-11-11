@@ -13,9 +13,18 @@ export function pageMeta(meta, mod) {
     head: str(meta?.head) ?? str(mod?.head) ?? "",
     // `export const lang` / meta().lang win; htmlAttrs.lang (say, from a layout) is the fallback.
     lang: str(meta?.lang) ?? str(mod?.lang) ?? attrValue(html.lang) ?? "en",
-    htmlAttrs: attrString(html, ["lang"]),
+    htmlAttrs: Object.isFrozen(html) ? frozenHtmlAttrs(html) : attrString(html, ["lang"]),
     bodyAttrs: attrString(body, []),
   };
+}
+
+// A frozen htmlAttrs object (handler.mjs gives every page of a locale the same one) can't change,
+// so its attribute string is built once.
+const frozenHtml = new WeakMap();
+function frozenHtmlAttrs(html) {
+  let s = frozenHtml.get(html);
+  if (s === undefined) frozenHtml.set(html, (s = attrString(html, ["lang"])));
+  return s;
 }
 
 const isAttrs = (v) => v !== null && typeof v === "object" && !Array.isArray(v);

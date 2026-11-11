@@ -40,29 +40,33 @@ async function normalizeRouting(config) {
   if (trailing !== "ignore") r.trailingSlash = trailing;
   const redirects = (await ruleList(config.redirects, "redirects")).map((x, i) => {
     const label = `redirects[${i}]`;
-    keys(x, ["source", "destination", "permanent", "statusCode"], label);
+    keys(x, ["source", "destination", "permanent", "statusCode", "locale"], label);
     if (x.permanent !== undefined && typeof x.permanent !== "boolean") throw new Error(`${label}.permanent must be a boolean`);
     if (x.statusCode !== undefined && !REDIRECT_STATUS.includes(x.statusCode)) {
       throw new Error(`${label}.statusCode must be one of ${REDIRECT_STATUS.join(", ")}`);
     }
-    return {
-      source: source(x.source, label),
-      destination: destination(x.destination, label),
-      status: x.statusCode ?? (x.permanent ? 308 : 307),
-    };
+    return withLocale(
+      {
+        source: source(x.source, label),
+        destination: destination(x.destination, label),
+        status: x.statusCode ?? (x.permanent ? 308 : 307),
+      },
+      x,
+      label,
+    );
   });
   const rewrites = (await ruleList(config.rewrites, "rewrites")).map((x, i) => {
     const label = `rewrites[${i}]`;
-    keys(x, ["source", "destination"], label);
+    keys(x, ["source", "destination", "locale"], label);
     if (typeof x.destination === "string" && /^[a-z][a-z0-9+.-]*:/i.test(x.destination)) {
       throw new Error(`${label}.destination must be a path starting with "/": rewrites are internal (use a redirect for another site)`);
     }
-    return { source: source(x.source, label), destination: destination(x.destination, label) };
+    return withLocale({ source: source(x.source, label), destination: destination(x.destination, label) }, x, label);
   });
   const headers = (await ruleList(config.headers, "headers")).map((x, i) => {
     const label = `headers[${i}]`;
-    keys(x, ["source", "headers"], label);
-    return { source: source(x.source, label), headers: headerPairs(x.headers, label) };
+    keys(x, ["source", "headers", "locale"], label);
+    return withLocale({ source: source(x.source, label), headers: headerPairs(x.headers, label) }, x, label);
   });
   if (redirects.length) r.redirects = redirects;
   if (rewrites.length) r.rewrites = rewrites;
@@ -97,6 +101,15 @@ async function ruleList(value, name) {
     if (!x || typeof x !== "object") throw new Error(`${name}[${i}] must be an object`);
   }
   return list;
+}
+
+// `locale: false` (match the path with its locale prefix) is kept; the default `true` is left out,
+// so routing.json without i18n stays as it was.
+function withLocale(rule, x, label) {
+  if (x.locale === undefined || x.locale === true) return rule;
+  if (x.locale !== false) throw new Error(`${label}.locale must be a boolean`);
+  rule.locale = false;
+  return rule;
 }
 
 function keys(obj, allowed, label) {

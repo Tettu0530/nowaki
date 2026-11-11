@@ -181,6 +181,8 @@ async function checks(label, req, origin, { dev = false } = {}) {
   check(t("/gallery/en → 308 /gallery"), r.status === 308 && r.headers.location === "/gallery", `${r.status} ${r.headers.location}`);
   r = await req("/gallery/photos/2");
   check(t("config redirect /photos/[id] → 308 /gallery/photo/[id]"), r.status === 308 && r.headers.location === "/gallery/photo/2", `${r.status} ${r.headers.location}`);
+  r = await req("/gallery/ja/photos/2");
+  check(t("the config redirect keeps the locale"), r.status === 308 && r.headers.location === "/gallery/ja/photo/2", `${r.status} ${r.headers.location}`);
   r = await req("/gallery", { headers: { "accept-language": "ja-JP,ja;q=0.9,en;q=0.5" } });
   check(t("Accept-Language ja on /gallery → 307 /gallery/ja"), r.status === 307 && r.headers.location === "/gallery/ja" && varies(r) && /private/.test(r.headers["cache-control"] ?? ""), `${r.status} ${r.headers.location} ${r.headers.vary} ${r.headers["cache-control"]}`);
   r = await req("/gallery", { headers: { "accept-language": "ja", cookie: "nowaki_locale=en" } });
@@ -195,6 +197,8 @@ async function checks(label, req, origin, { dev = false } = {}) {
   // The config header.
   r = await req("/gallery/login");
   check(t("config header on /login"), r.status === 200 && r.headers["x-robots-tag"] === "noindex", `${r.status} ${r.headers["x-robots-tag"]}`);
+  r = await req("/gallery/ja/login");
+  check(t("config header on /ja/login"), r.status === 200 && r.headers["x-robots-tag"] === "noindex", `${r.status} ${r.headers["x-robots-tag"]}`);
   r = await req("/gallery/photo/1");
   check(t("the header stays on its source"), r.headers["x-robots-tag"] === undefined, r.headers["x-robots-tag"]);
 
@@ -251,9 +255,9 @@ function staticChecks() {
   const img = ja.match(/<img src="([^"]+)"/)?.[1] ?? "";
   check("static: assets referenced under the base, written at the site root", img.startsWith("/gallery/_nowaki/") && existsSync(path.join(out, img.slice("/gallery/".length))), img);
   const redirects = read("_redirects");
-  check("static: the config redirect in _redirects", redirects.includes("/gallery/photos/:id /gallery/photo/:id 308"), redirects);
+  check("static: the config redirect in _redirects", redirects.includes("/gallery/photos/:id /gallery/photo/:id 308") && redirects.includes("/gallery/ja/photos/:id /gallery/ja/photo/:id 308"), redirects);
   check("static: /gallery/en in _redirects", redirects.includes("/gallery/en /gallery 308"), redirects);
-  check("static: the config header in _headers", /\/gallery\/login\n\s+x-robots-tag: noindex/.test(read("_headers")), read("_headers"));
+  check("static: the config header in _headers", /\/gallery\/login\n\s+x-robots-tag: noindex/.test(read("_headers")) && /\/gallery\/ja\/login\n\s+x-robots-tag: noindex/.test(read("_headers")), read("_headers"));
   check("static: no fragment can be served (the router falls back to the page)", !existsSync(path.join(out, "@modal")));
 }
 

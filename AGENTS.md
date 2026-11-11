@@ -181,6 +181,10 @@ code locations and CI coverage.
   WS session, not wired into a server yet.
 - **Plugins / virtual modules** — `PluginBridge` (`transform`, `compile_tsrx`,
   `resolve_id`, `load`); `NowakiCore::resolve_spec` + the `VirtualResolve` trait.
+  The host (`server/plugin-host.mjs`, started by `plugins::spawn` before typegen) also
+  normalizes the build-time config with site-config.mjs's `normalizeConfig` and returns it in
+  `/caps` (`siteConfig`, under `NOWAKI_SITE_CONFIG=1`), so build / dev / prerender import
+  nowaki.config once; `site::config` (its own Node start) is the fallback for older runtimes.
 - **Scope hoisting / chunking** — `crates/nowaki-core/src/chunk.rs`.
 - **Deploy adapters** — `crates/nowaki/src/adapter.rs` (+ `server/edge-build.mjs`).
 - **Images (`?image`, `<Image>`)** — `crates/nowaki-core/src/image.rs` (widths, AVIF via ravif
@@ -248,7 +252,9 @@ code locations and CI coverage.
   sidecars in `x-nowaki-route-path` → `info.routePath`) and `server/front.mjs` (`app.mjs` `handle`,
   the worker `fetch` from `edge-build.mjs`); Vercel platform routes from `server/vercel-routes.mjs`,
   static `_redirects` / `_headers` from `prerender.rs`. Without a routing config each front does
-  one null check. Tests: `scripts/rules-front-test.mjs`, `scripts/rules-e2e.mjs` (every front).
+  one null check. With `i18n`, the engines match rule sources without the locale prefix
+  (`locale: false` opts a rule out) and put the locale back on internal destinations; the
+  handler then splits the locale off the route path once, as for any request. Tests: `scripts/rules-front-test.mjs`, `scripts/rules-e2e.mjs` (every front).
 - **`basePath`** — build: `NowakiCore::set_base_path` (asset URLs via `asset_base()`, the server
   function proxy path, the `import.meta.env.BASE_URL` define, plus `__NOWAKI_BASE_URL__` for the
   classic-script `client/live.js`), set by `site::configure`; fonts and content images read
@@ -269,8 +275,12 @@ code locations and CI coverage.
   request when off), which runs the request inside `server/i18n-context.mjs` (an
   AsyncLocalStorage published on `globalThis[Symbol.for("nowaki.locale")]`, so `getLocale()` /
   `getCollection` never import `node:async_hooks`) and renders through `localizedEnv` (`<html
-  lang>`, `data-nowaki-i18n`, hreflang from `seo.mjs` `hreflangTags`). `env.i18n` is set by
-  `app.mjs`, `web.mjs` (`routing`, passed by `edge-build.mjs`) and dev `sidecar.mjs`
+  lang>`, `data-nowaki-i18n`, hreflang from `seo.mjs` `hreflangTags`; the attributes are cached per
+  locale in `localeAttrs`, the hreflang tags per route path in `hreflangFor`, and document.mjs
+  caches the string of a frozen htmlAttrs object: keep the per-request work to the split and the
+  AsyncLocalStorage `run`). `<Link>` and `href()` (`navigation.js`) add the current locale
+  (server: the request's locale state, browser: `data-nowaki-i18n`) unless the href has a locale
+  prefix or `locale={false}`, then the base. `env.i18n` is set by `app.mjs`, `web.mjs` (`routing`, passed by `edge-build.mjs`) and dev `sidecar.mjs`
   (`.nowaki/routing.json`). Content locales: `content.rs` `split_locale` (locales from the routing
   config). Per-locale URLs: `isr-urls.mjs` `localeUrls`, `static-paths.mjs` `localePages`,
   `prerender.rs` `locale_urls` / `locale_404s` / `locale_redirects`; `locale_url` and

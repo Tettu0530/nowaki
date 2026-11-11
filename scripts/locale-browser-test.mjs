@@ -32,11 +32,20 @@ const FILES = {
 export default function Home() { return <main id="home">{\`HOME \${getLocale()}\`}</main>; }\n`,
   "routes/switch.tsx": `import Switcher from "../islands/Switcher.tsx";
 export default function Switch() { return <main><Switcher /></main>; }\n`,
-  "islands/Switcher.tsx": `import { useEffect } from "preact/hooks";
-import { Link } from "@nowaki-dev/runtime/navigation";
+  "islands/Switcher.tsx": `import { useEffect, useState } from "preact/hooks";
+import { href, Link } from "@nowaki-dev/runtime/navigation";
 export default function Switcher() {
-  useEffect(() => { document.body.dataset.ready = "1"; }, []);
-  return <nav><Link href="/" locale="ja">ja</Link> <Link href="/" locale="en">en</Link></nav>;
+  // Rendered only in the browser, so these hrefs come from the client's reading of <html>.
+  const [later, setLater] = useState(false);
+  useEffect(() => { setLater(true); }, []);
+  useEffect(() => { if (later) document.body.dataset.ready = "1"; }, [later]);
+  return (
+    <nav>
+      <Link href="/" locale="ja">ja</Link> <Link href="/" locale="en">en</Link>
+      {later && <Link id="later" href="/switch">later</Link>}
+      {later && <form id="later-form" action={href("/switch")}></form>}
+    </nav>
+  );
 }\n`,
 };
 
@@ -166,6 +175,9 @@ try {
   await language("en");
   await go("/switch");
   check("the island hydrated", await waitFor(cdp, `document.body.dataset.ready === "1"`));
+  const later = () => cdp.eval(`return [document.getElementById("later")?.getAttribute("href"), document.getElementById("later-form")?.getAttribute("action")].join(" ");`);
+  let l = await later();
+  check("client: <Link> and href() in the default locale add no prefix", l === "/switch /switch", l);
   await cdp.eval(`document.querySelector('a[hreflang="ja"]').click(); return true;`);
   await waitFor(cdp, `location.pathname === "/ja"`);
   s = await state(cdp);
@@ -178,6 +190,8 @@ try {
   await language("ja");
   await go("/ja/switch");
   check("the island hydrated under /ja", await waitFor(cdp, `document.body.dataset.ready === "1"`));
+  l = await later();
+  check("client: <Link> and href() keep the page's locale", l === "/ja/switch /ja/switch", l);
   await cdp.eval(`document.querySelector('a[hreflang="en"]').click(); return true;`);
   await sleep(500);
   s = await state(cdp);

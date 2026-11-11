@@ -119,22 +119,25 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Build { dir, adapter } => {
             let root = dunce::canonicalize(&dir)?;
-            typegen::write(&root)?;
             // The static adapter delegates to prerender (build → temporary server → render each route).
             if adapter == Adapter::Static {
+                typegen::write(&root)?;
                 let out = root.join("dist/static");
                 return tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()?
                     .block_on(prerender::run(root.clone(), out, false));
             }
-            let dist = root.join("dist");
-            // env.ts is checked in Node alongside the config read and the plugin host start.
+            // One Node process imports nowaki.config for the plugins and the build-time config,
+            // starting while typegen runs and env.ts is checked (in another Node process).
+            let plugin_host = plugins::spawn(&root, true)?;
             let env_check = env_schema::start(&root)?;
-            // Before the build: an invalid config fails before anything is built.
-            let config = site::config(&root)?;
-            // Keep alive until the build finishes (drop kills the host).
-            let plugin_host = plugins::start(&root)?;
+            typegen::write(&root)?;
+            let dist = root.join("dist");
+            // Before the build: an invalid config fails before anything is built. The host stays
+            // alive until the build finishes (drop kills it).
+            let (plugin_host, config) = plugin_host.finish()?;
+            let config = config?;
             let mut core = nowaki_core::NowakiCore::new(root.clone());
             if let Some(host) = &plugin_host {
                 core.set_plugins(host.bridge.clone());

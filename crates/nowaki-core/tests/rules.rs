@@ -94,7 +94,10 @@ fn routing_json_round_trips() {
     let src = json!({
         "basePath": "/app",
         "trailingSlash": "always",
-        "redirects": [{ "source": "/a", "destination": "/b", "status": 308 }],
+        "redirects": [
+            { "source": "/a", "destination": "/b", "status": 308 },
+            { "source": "/ja/c", "destination": "/ja/d", "status": 307, "locale": false }
+        ],
         "rewrites": [{ "source": "/p/[id]", "destination": "/photo/[id]" }],
         "headers": [{ "source": "/", "headers": [{ "key": "x-a", "value": "1" }] }],
         "i18n": { "locales": ["en", "ja"], "defaultLocale": "en", "prefixDefaultLocale": false, "detect": true }

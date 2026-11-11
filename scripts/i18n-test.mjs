@@ -10,7 +10,7 @@ import { hreflangTags, sitemapXml } from "../packages/nowaki-runtime/server/seo.
 import { pageUrls } from "../packages/nowaki-runtime/server/isr-urls.mjs";
 import { setContent, validateContent } from "../packages/nowaki-runtime/server/content-store.mjs";
 import { getCollection, getEntry } from "../packages/nowaki-runtime/content.js";
-import { getLocale, Link, localePath, setLocale } from "../packages/nowaki-runtime/navigation.js";
+import { getLocale, href, Link, localePath, setLocale } from "../packages/nowaki-runtime/navigation.js";
 import { compileRules } from "../packages/nowaki-runtime/server/rules.mjs";
 import { frontLocale, mergeVary, withVary, withVaryHeaders } from "../packages/nowaki-runtime/server/front.mjs";
 
@@ -48,6 +48,10 @@ const modules = {
     default: ({ data }) => h("p", null, `about ${data.locale} ${getLocale()} ${data.path} ${data.href} `, h(Link, { href: "/about", locale: "ja" }, "ja")),
   },
   "routes/langset.tsx": { lang: "fr", default: () => h("p", null, "langset") },
+  "routes/links.tsx": {
+    htmlAttrs: { "data-theme": "dark" },
+    default: () => h("p", null, h(Link, { href: "/contact" }, "c"), h(Link, { href: "/contact", locale: false }, "raw"), ` form:${href("/logout")}`),
+  },
   "routes/early.tsx": { streaming: "early", default: () => h("p", null, `early ${getLocale()}`) },
   "routes/api/ping.ts": { GET: (ctx) => ({ locale: ctx.locale ?? null }) },
   "routes/_404.tsx": { default: () => h("p", null, `missing ${getLocale()}`) },
@@ -58,6 +62,7 @@ const table = {
     { file: "routes/index.tsx", segments: [], dir: "", isApi: false },
     { file: "routes/about.tsx", segments: [{ lit: "about" }], dir: "", isApi: false },
     { file: "routes/langset.tsx", segments: [{ lit: "langset" }], dir: "", isApi: false },
+    { file: "routes/links.tsx", segments: [{ lit: "links" }], dir: "", isApi: false },
     { file: "routes/early.tsx", segments: [{ lit: "early" }], dir: "", isApi: false },
     { file: "routes/api/ping.ts", segments: [{ lit: "api" }, { lit: "ping" }], dir: "/api", isApi: true },
   ],
@@ -105,6 +110,17 @@ const req = (e, path, extra = {}) => {
   );
   check("<Link locale> links to the localized page", body.includes('<a href="/ja/about" hreflang="ja">ja</a>'), body);
   check("middleware sees ctx.locale", seen.includes("mw ja"), seen.join(","));
+}
+{
+  const again = await text(await req(env, "/ja/about"));
+  check("a second request gets the same document (cached attributes and hreflang)", again.includes(`data-i18n='{"locale":"ja"`) && again.includes('hreflang="ja" href="https://example.com/ja/about"'), again.slice(0, 300));
+  const ja = await text(await req(env, "/ja/links"));
+  check("server: <Link> keeps the request's locale", ja.includes('<a href="/ja/contact">c</a>'), ja);
+  check("server: <Link locale={false}> leaves the href alone", ja.includes('<a href="/contact">raw</a>'), ja);
+  check("server: href() for a form action", ja.includes("form:/ja/logout"), ja);
+  check("a page's htmlAttrs keep the client's i18n settings", ja.includes(`data-i18n='{"locale":"ja"`), ja.slice(0, 200));
+  const en = await text(await req(env, "/links"));
+  check("server: in the default locale <Link> and href() add no prefix", en.includes('<a href="/contact">c</a>') && en.includes("form:/logout"), en);
 }
 {
   const body = await text(await req(env, "/about"));
@@ -289,7 +305,17 @@ const req = (e, path, extra = {}) => {
   check("client: getLocale() reads <html data-nowaki-i18n>", getLocale() === "ja");
   check("client: localePath", localePath("/about") === "/ja/about" && localePath("/ja/about", "en") === "/about");
   check("client: <Link locale>", renderToString(h(Link, { href: "/about", locale: "en" }, "x")) === '<a href="/about" hreflang="en">x</a>');
+  const anchor = (props) => renderToString(h(Link, props, "x"));
+  check("client: <Link> keeps the page's locale", anchor({ href: "/about?q=1#t" }) === '<a href="/ja/about?q=1#t">x</a>', anchor({ href: "/about?q=1#t" }));
+  check("client: <Link> keeps an explicit locale prefix", anchor({ href: "/ja/about" }) === '<a href="/ja/about">x</a>' && anchor({ href: "/en/about" }) === '<a href="/en/about">x</a>');
+  check("client: <Link locale={false}> leaves the href alone", anchor({ href: "/about", locale: false }) === '<a href="/about">x</a>');
+  check("client: <Link> leaves other URLs alone", anchor({ href: "https://x.dev/a" }) === '<a href="https://x.dev/a">x</a>' && anchor({ href: "#top" }) === '<a href="#top">x</a>');
+  globalThis.__nowakiBase = "/app";
+  check("client: <Link> under basePath: base, then locale", anchor({ href: "/about" }) === '<a href="/app/ja/about">x</a>' && anchor({ href: "/" }) === '<a href="/app/ja">x</a>' && anchor({ href: "/", locale: "en" }) === '<a href="/app" hreflang="en">x</a>');
+  check("client: href()", href("/logout") === "/app/ja/logout" && href("/a", { locale: "en" }) === "/app/a" && href("/a", { locale: false }) === "/app/a" && href("/a", { basePath: false }) === "/ja/a");
+  delete globalThis.__nowakiBase;
   delete globalThis.document;
+  check("client: without i18n, <Link> and href() change nothing", anchor({ href: "/about" }) === '<a href="/about">x</a>' && href("/about") === "/about" && href("/about", { locale: "ja" }) === "/about");
   const jar = [];
   globalThis.document = { documentElement: { getAttribute: () => null }, set cookie(v) { jar.push(v); } };
   globalThis.location = { protocol: "https:" };
