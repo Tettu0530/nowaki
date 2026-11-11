@@ -7,7 +7,7 @@
     { "entries": ["t:a%b"], "header": "t:a%25b" },
     { "entries": ["p:/a,b"], "header": "p:/a%2Cb" },
     { "entries": ["p:/a b"], "header": "p:/a%20b" },
-    { "entries": ["t:日本", "t:post:1"], "header": "t:%E6%97%A5%E6%9C%AC,t:post:1" }
+    { "entries": ["t:Ω€", "t:post:1"], "header": "t:%CE%A9%E2%82%AC,t:post:1" }
   ],
   "broken": [
     { "header": "t:a,t:%zz,t:b", "entries": ["t:a", "t:b"] },

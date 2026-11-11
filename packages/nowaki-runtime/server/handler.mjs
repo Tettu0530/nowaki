@@ -74,11 +74,12 @@ async function routeRequest(env, info, localized) {
 
   // Handle server function RPC before routing.
   if (env.serverFunctions && url.pathname === SERVER_FN_PATH) {
+    ctx.__purgeClosed = false;
     return finalize(ctx, await dispatchServerFn(ctx, info, env.serverFunctions, { dev: env.dev === true }));
   }
   if (env.live && url.pathname === LIVE_EVENT_PATH) {
     // The event runs with this request as getContext() (handlers and live.authorize see its cookies).
-    return finalize(ctx, await runWithContext(ctx, () => dispatchLiveEvent(ctx, info, env.live)));
+    return finalize(ctx, await inRequest(ctx, () => dispatchLiveEvent(ctx, info, env.live)));
   }
 
   if (method === "GET" && url.pathname === BOUNDARIES_PATH) {
@@ -86,7 +87,7 @@ async function routeRequest(env, info, localized) {
   }
   // Off (a 404 like any unknown path) unless NOWAKI_REVALIDATE_SECRET is set.
   if (url.pathname === REVALIDATE_PATH && revalidateEndpointEnabled()) {
-    return finalize(ctx, await runWithContext(ctx, () => revalidateEndpoint(ctx)));
+    return finalize(ctx, await inRequest(ctx, () => revalidateEndpoint(ctx)));
   }
 
   try {
@@ -138,13 +139,13 @@ async function routeRequest(env, info, localized) {
         warnCrossSiteApi(match.file, url.pathname);
       }
       // Inside the request's context, so getContext() and revalidate*() work there.
-      return finalize(ctx, await runWithContext(ctx, () => handleApi(mod, ctx, match.fileExt)), env, table, version);
+      return finalize(ctx, await inRequest(ctx, () => handleApi(mod, ctx, match.fileExt)), env, table, version);
     }
 
     if (crossSite && typeof mod.action === "function") return finalize(ctx, FORBIDDEN, env, table, version);
 
     if (method !== "GET" && method !== "HEAD" && typeof mod.action === "function") {
-      const out = await runWithContext(ctx, () => mod.action(ctx));
+      const out = await inRequest(ctx, () => mod.action(ctx));
       const res = toResult(out);
       if (res) return finalize(ctx, res, env, table, version);
       ctx.actionData = out; // data → re-render the page
@@ -296,7 +297,10 @@ function warnCrossSiteApi(file, pathname) {
 // else a plain 500. revalidate*() calls collected on the request (`ctx.__purge`) are handed over
 // here too, before the response returns (server/revalidate.mjs `flushPurge`).
 function finalize(ctx, result, env, table, version) {
-  if (!ctx.__commit && !ctx.__purge) return finalizeResult(ctx, result);
+  if (!ctx.__commit && !ctx.__purge) {
+    if (ctx.__purgeClosed === false) ctx.__purgeClosed = true;
+    return finalizeResult(ctx, result);
+  }
   return commitAndFinalize(ctx, result, env, table, version);
 }
 
@@ -315,7 +319,17 @@ async function commitAndFinalize(ctx, result, env, table, version) {
     out = finalizeResult(ctx, result);
   }
   if (ctx.__purge) await flushPurge(ctx, out.headers);
+  else if (ctx.__purgeClosed === false) ctx.__purgeClosed = true;
   return out;
+}
+
+// Runs request code (an action, API route, live event) as getContext(). `__purgeClosed` is false
+// until the response is built; a revalidate*() call after that (a timer the code started) takes
+// the detached channel instead of a Set nobody reads. GET page renders never get here, so they
+// carry neither field.
+function inRequest(ctx, fn) {
+  ctx.__purgeClosed = false;
+  return runWithContext(ctx, fn);
 }
 
 function plainError(err) {

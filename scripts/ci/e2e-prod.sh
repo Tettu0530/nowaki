@@ -141,6 +141,11 @@ T5=$(tnum); test "$(tcache)" = HIT; test "$T5" = "$T4"
 curl -s -o /dev/null "$TAG?utm=1"
 tpost path
 T6=$(tnum); test "$(tcache)" = MISS; test "$T6" -gt "$T5"
+# A revalidateTag in a timer after the action returned goes through the stdout channel.
+tpost late
+for i in $(seq 1 20); do T6B=$(tnum); test "$(tcache)" = MISS && break; sleep 0.25; done
+test "$(tcache)" = MISS; test "$T6B" -gt "$T6"
+T6=$(tnum); test "$(tcache)" = HIT
 # POST /__nowaki/revalidate: the secret is required; with it, the purge lands before the reply.
 REV=http://127.0.0.1:3300/__nowaki/revalidate
 test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'content-type: application/json' -d '{"tags":["isr-demo"]}' $REV)" = 401

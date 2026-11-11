@@ -144,7 +144,8 @@ function add(entries, label) {
     return;
   }
   const ctx = ctxOf();
-  if (ctx) {
+  // A context whose response is already built (`__purgeClosed`) falls through to the detached path.
+  if (ctx && !ctx.__purgeClosed) {
     const set = (ctx.__purge ??= new Set());
     for (const e of entries) set.add(e);
     return;
@@ -213,6 +214,7 @@ function chunks(entries, max) {
 export function flushPurge(ctx, headers) {
   const entries = [...ctx.__purge];
   ctx.__purge = undefined;
+  ctx.__purgeClosed = true;
   const env = S.env;
   if (env?.isrStore) {
     const [first, ...rest] = chunks(entries, HEADER_MAX);
@@ -230,7 +232,9 @@ export function flushPurge(ctx, headers) {
 /// For contexts that have no response of their own (a WebSocket live render): sends what was
 /// collected through the detached channel.
 export function flushDetached(ctx) {
-  if (!ctx?.__purge) return;
+  if (!ctx) return;
+  ctx.__purgeClosed = true;
+  if (!ctx.__purge) return;
   const entries = [...ctx.__purge];
   ctx.__purge = undefined;
   sendDetached(entries);

@@ -346,8 +346,8 @@ export type RouteTags =
  *
  * Call it from a page `action`, an API route, a server function or a live handler after data
  * changes: under `nowaki start` the purge happens before that response is sent, so a redirect
- * after the action already shows fresh content. Calls made outside a request (a timer, a queue
- * consumer) reach the cache shortly after. The ISR cache lives in each `nowaki start` process;
+ * after the action already shows fresh content. Calls made outside a request, or after its
+ * response was sent (a timer, a queue consumer), reach the cache shortly after. The ISR cache lives in each `nowaki start` process;
  * with several instances, fan the purge out with `POST /__nowaki/revalidate` (see
  * `revalidateTag`). Under `nowaki dev` (no cache) calls are only recorded; in static output and on
  * the deploy adapters they are a no-op for now (warned once). Throws a TypeError for a path that

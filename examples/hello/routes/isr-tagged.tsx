@@ -18,7 +18,10 @@ export const loader = async () => {
 
 export async function action(ctx: LoaderContext) {
   const form = await ctx.formData();
-  if (form.get("kind") === "path") revalidatePath("/isr-tagged");
+  const kind = form.get("kind");
+  if (kind === "path") revalidatePath("/isr-tagged");
+  // A call after the response went out (a timer, a queue job) still reaches the cache, just later.
+  else if (kind === "late") setTimeout(() => revalidateTag("isr-demo"), 50);
   else revalidateTag("isr-demo");
   return ctx.redirect("/isr-tagged", 303);
 }

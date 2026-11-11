@@ -89,6 +89,12 @@ const modules = {
       return { ctx: getContext() !== null };
     },
   },
+  "routes/api/late.ts": {
+    POST: () => {
+      setTimeout(() => R.revalidateTag("late"), 5);
+      return { ok: true };
+    },
+  },
   "routes/api/many.ts": {
     POST: () => {
       for (let i = 0; i < 600; i++) R.revalidateTag(`tag-${"x".repeat(20)}-${i}`);
@@ -103,6 +109,7 @@ const table = {
     { file: "routes/plain.tsx", segments: [{ lit: "plain" }], dir: "", isApi: false },
     { file: "routes/save.tsx", segments: [{ lit: "save" }], dir: "", isApi: false },
     { file: "routes/api/touch.ts", segments: [{ lit: "api" }, { lit: "touch" }], dir: "/api", isApi: true },
+    { file: "routes/api/late.ts", segments: [{ lit: "api" }, { lit: "late" }], dir: "/api", isApi: true },
     { file: "routes/api/many.ts", segments: [{ lit: "api" }, { lit: "many" }], dir: "/api", isApi: true },
   ],
   layouts: [],
@@ -166,6 +173,13 @@ R.setRevalidateEnv(start);
   await tick();
   check("outside a request: one batched stdout line", lines.length === 1 && lines[0] === "NOWAKI_PURGE tok123 t:a,t:b,p:/x,p:/x/\n", JSON.stringify(lines));
 
+  // A call after the response was built (a timer the action started) takes the detached path.
+  lines.length = 0;
+  const late = await post(start, "/api/late");
+  check("late call: not on the response", !("x-nowaki-purge" in late.headers));
+  await new Promise((r) => setTimeout(r, 30));
+  check("late call: sent through stdout instead of lost", lines.length === 1 && lines[0] === "NOWAKI_PURGE tok123 t:late\n", JSON.stringify(lines));
+
   // A live render over WebSocket has a context but no response.
   lines.length = 0;
   const liveCtx = {};
@@ -205,6 +219,9 @@ R.setRevalidateEnv(start);
   check("cacheTagHeader for a page without tags: just its path", same(seen[1], ["p:/plain"]));
   const saved = await post(env, "/save");
   check("env.purge is awaited before the response returns", resolved && same(purged.at(-1), ["t:posts", "p:/blog", "p:/blog/"]));
+  await post(env, "/api/late");
+  await new Promise((r) => setTimeout(r, 30));
+  check("late call: env.purge still gets it", same(purged.at(-1), ["t:late"]), JSON.stringify(purged.at(-1)));
   check("adapters get no x-nowaki-purge header", !("x-nowaki-purge" in saved.headers));
 }
 

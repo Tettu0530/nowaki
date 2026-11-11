@@ -18,7 +18,7 @@ milestone's worth of work; the codename is noted per entry.
   trailing-slash forms under `"ignore"`. Purged pages are deleted, so the next request renders
   fresh. Called from a page action, an API route, a server function or a live handler, the purge
   happens under `nowaki start` before that response is sent, so the redirect after an action
-  already shows new content; calls outside a request reach the cache through the sidecar's
+  already shows new content; calls outside a request (or after its response was sent) reach the cache through the sidecar's
   stdout. The ISR cache is per process: to fan a purge out, set `NOWAKI_REVALIDATE_SECRET` and
   send `POST /__nowaki/revalidate` (`Authorization: Bearer <secret>`, JSON `{ paths, tags }`) to
   each instance; the endpoint is off (404) without it. `nowaki dev` has no cache and only records

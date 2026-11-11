@@ -186,7 +186,8 @@ code locations and CI coverage.
   events) collect on `ctx.__purge`; `handler.mjs` `finalize` hands them over before the response
   returns: `x-nowaki-purge` on `nowaki start` (`env.isrStore`, set by `prod-sidecar.mjs`), and the
   adapter seams `env.purge(entries)` / `env.cacheTagHeader(entries)` (unset for now). Outside a
-  request: a `NOWAKI_PURGE <token>` stdout line (`start.rs::run`). ISR renders with tags send
+  request, or after its response was built (`ctx.__purgeClosed`, set only on those wrapped
+  requests): a `NOWAKI_PURGE <token>` stdout line (`start.rs::run`) or `env.purge`. ISR renders with tags send
   `x-nowaki-tags` (static arrays cached per module). Rust side: `start.rs` `IsrCache::purge` (one
   scan, delete) and `insert` (a purge epoch log keeps an in-flight render from re-storing purged
   content). The store is per process. Dev only records calls (dev-info `revalidations`); static
