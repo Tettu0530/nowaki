@@ -344,6 +344,15 @@ export function getLocale(): string | undefined;
 export function localePath(path: string, locale?: string): string;
 
 /**
+ * `path` as the browser requests it, built the way `<Link>` builds its href: in the current locale
+ * (with `i18n`; a path that already has a locale prefix keeps it) and under nowaki.config
+ * `basePath`. For URLs `<Link>` doesn't build: `<form action={href("/logout")}>`, `fetch`,
+ * `location`. `locale` picks another locale (`false`: no prefix); `basePath: false` leaves the base
+ * out. Works on the server and in islands; without i18n and basePath, returns `path` as it is.
+ */
+export function href(path: string, options?: { locale?: string | false; basePath?: boolean }): string;
+
+/**
  * Remembers `locale` as the visitor's choice when nowaki.config has `i18n.detect`: sets the
  * `nowaki_locale` cookie (Path = basePath, one year, SameSite=Lax), which the site's root follows
  * instead of `Accept-Language`. Call it from an island (a language switcher) before navigating;

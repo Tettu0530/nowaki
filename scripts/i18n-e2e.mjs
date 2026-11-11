@@ -50,7 +50,7 @@ const FILES = {
   "routes/index.tsx": `import { getLocale } from "@nowaki-dev/runtime";
 export default function Home() { return <main>{\`HOME \${getLocale()}\`}</main>; }\n`,
   "routes/about.tsx": `import { getLocale } from "@nowaki-dev/runtime";
-import { Link } from "@nowaki-dev/runtime/navigation";
+import { href, Link } from "@nowaki-dev/runtime/navigation";
 import Where from "../islands/Where.tsx";
 export const loader = (ctx) => ({ locale: ctx.locale, path: ctx.url.pathname });
 export default function About({ data }) {
@@ -58,12 +58,15 @@ export default function About({ data }) {
     <main>
       <p>{\`ABOUT locale:\${data.locale} get:\${getLocale()} url:\${data.path}\`}</p>
       <Link href="/about" locale="ja">ja</Link>
+      <Link id="keep" href="/blog/hello">keep</Link>
+      <Link id="raw" href="/blog/hello" locale={false}>raw</Link>
+      <form id="f" method="post" action={href("/about")}></form>
       <Where />
     </main>
   );
 }\n`,
-  "islands/Where.tsx": `import { getLocale } from "@nowaki-dev/runtime/navigation";
-export default function Where() { return <span>{\`WHERE \${getLocale()}\`}</span>; }\n`,
+  "islands/Where.tsx": `import { getLocale, Link } from "@nowaki-dev/runtime/navigation";
+export default function Where() { return <span>{\`WHERE \${getLocale()}\`}<Link id="island-keep" href="/blog/hello">i</Link></span>; }\n`,
   "routes/blog/[slug].tsx": `import { getCollection, getEntry } from "@nowaki-dev/runtime/content";
 export const staticPaths = async () => (await getCollection("blog")).map((e) => ({ slug: e.slug }));
 export const loader = async (ctx) => ({ entry: await getEntry("blog", ctx.params.slug), count: (await getCollection("blog")).length });
@@ -182,6 +185,7 @@ async function comboChecks(label, req) {
     r.body.slice(0, 900),
   );
   check(t("<Link locale> gets the base after the locale"), r.body.includes('href="/app/ja/about" hreflang="ja"'), r.body.slice(0, 900));
+  check(t("<Link> and href() keep the locale under the base"), r.body.includes('id="keep" href="/app/ja/blog/hello"') && r.body.includes('id="island-keep" href="/app/ja/blog/hello"') && r.body.includes('id="raw" href="/app/blog/hello"') && r.body.includes('action="/app/ja/about"'), r.body.slice(0, 1200));
   r = await req("/app/ja/about/");
   check(t("/app/ja/about/ → 308 /app/ja/about (never)"), r.status === 308 && r.headers.location === "/app/ja/about", `${r.status} ${r.headers.location}`);
   r = await req("/app/en/about?x=1");
@@ -245,6 +249,7 @@ function staticCombo(dir) {
   const ja = read("ja/about.html");
   check("static combo: x.html per locale (never)", /<html lang="ja"/.test(ja) && read("about.html").includes("ABOUT locale:en") && read("ja.html").includes("HOME ja") && !existsSync(path.join(out, "ja/about/index.html")));
   check("static combo: pages requested under the base", ja.includes("url:/app/ja/about"), ja.slice(0, 300));
+  check("static combo: <Link> and href() keep base + locale", ja.includes('id="keep" href="/app/ja/blog/hello"') && ja.includes('action="/app/ja/about"'), ja.slice(0, 1200));
   check("static combo: canonical without the slash", ja.includes('rel="canonical" href="https://example.com/app/ja/about"'), ja.match(/rel="canonical"[^>]*/)?.[0]);
   check("static combo: hreflang with the base, no slash", ja.includes('hreflang="en" href="https://example.com/app/about"') && ja.includes('hreflang="ja" href="https://example.com/app/ja/about"'), ja.slice(0, 900));
   check("static combo: slot page per locale", read("ja/photos/1.html").includes("MODAL 1 ja") && read("photos/1.html").includes("MODAL 1 en"));
@@ -368,9 +373,12 @@ async function checks(label, req, { isr = false } = {}) {
     r.body.slice(0, 800),
   );
   check(t("<Link locale> links to the localized page"), r.body.includes('href="/ja/about" hreflang="ja"'));
+  check(t("<Link> keeps the locale (page and island SSR)"), r.body.includes('id="keep" href="/ja/blog/hello"') && r.body.includes('id="island-keep" href="/ja/blog/hello"'), r.body.slice(0, 1200));
+  check(t("<Link locale={false}> and href() for a form action"), r.body.includes('id="raw" href="/blog/hello"') && r.body.includes('action="/ja/about"'), r.body.slice(0, 1200));
   check(t("the page carries the client's i18n settings"), r.body.includes("data-nowaki-i18n="));
   r = await req("/about");
   check(t("/about is the default locale"), r.status === 200 && /<html lang="en"/.test(r.body) && r.body.includes("ABOUT locale:en get:en url:/about"), r.body.slice(0, 300));
+  check(t("in the default locale <Link> and href() add no prefix"), r.body.includes('id="keep" href="/blog/hello"') && r.body.includes('action="/about"'), r.body.slice(0, 1200));
   r = await req("/ja");
   check(t("/ja is the locale's home"), r.status === 200 && r.body.includes("HOME ja"), `${r.status}`);
   r = await req("/en/about?x=1");
@@ -459,6 +467,7 @@ try {
       const out = path.join(app, "dist/static");
       const read = (f) => (existsSync(path.join(out, f)) ? readFileSync(path.join(out, f), "utf8") : "");
       check("static: ja/about/index.html in ja", /<html lang="ja"/.test(read("ja/about/index.html")) && read("ja/about/index.html").includes("ABOUT locale:ja"));
+      check("static: <Link> and href() keep the locale", read("ja/about/index.html").includes('id="keep" href="/ja/blog/hello"') && read("ja/about/index.html").includes('action="/ja/about"') && read("about/index.html").includes('id="keep" href="/blog/hello"'));
       check("static: about/index.html in en", read("about/index.html").includes("ABOUT locale:en"));
       check("static: ja/index.html", read("ja/index.html").includes("HOME ja"));
       check("static: hreflang with trailing slashes", read("ja/about/index.html").includes('hreflang="en" href="https://example.com/about/"'), read("ja/about/index.html").slice(0, 600));

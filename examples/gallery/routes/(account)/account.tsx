@@ -1,6 +1,7 @@
 // Only reachable signed in (see _middleware.ts, which put the user in ctx.state).
 import type { LoaderContext } from "@nowaki-dev/runtime";
-import { href, t } from "../../lib/i18n.ts";
+import { href } from "@nowaki-dev/runtime/navigation";
+import { t } from "../../lib/i18n.ts";
 
 export const title = "Account";
 

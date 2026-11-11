@@ -1,7 +1,7 @@
 // The photo as a full page: a reload, a direct visit, or a shared link.
 import type { LoaderContext } from "@nowaki-dev/runtime";
 import { Image } from "@nowaki-dev/runtime/image";
-import { Link, localePath } from "@nowaki-dev/runtime/navigation";
+import { Link } from "@nowaki-dev/runtime/navigation";
 import { findPhoto, photos, photoTitle } from "../../lib/photos.ts";
 import { t } from "../../lib/i18n.ts";
 
@@ -21,7 +21,7 @@ export default function PhotoPage({ params }: { params: { id: string } }) {
       <h1>{photoTitle(photo)}</h1>
       <Image src={photo.image} alt={photoTitle(photo)} loading="eager" />
       <p>
-        <Link href={localePath("/")}>{t("allPhotos")}</Link>
+        <Link href="/">{t("allPhotos")}</Link>
       </p>
     </main>
   );

@@ -18,24 +18,31 @@ export function route(pattern, params = {}) {
 }
 
 // Typed <a>. The client router intercepts clicks for SPA navigation (same as a plain <a>).
-// Under nowaki.config `basePath`, a root-relative href gets the base in front (`basePath={false}`
-// keeps it as written); a plain <a> is left alone. `locale` (i18n) links to the page in that
-// locale (the locale prefix goes after the base); inside an island, a click on it also remembers
-// the choice (setLocale) before the router navigates.
+// The href goes through href(): under nowaki.config `basePath` a root-relative href gets the base
+// in front (`basePath={false}` keeps it as written), and with `i18n` it stays in the current
+// locale (`locale="ja"` links to another one, `locale={false}` leaves the href alone). A plain <a>
+// is left alone. Inside an island, a click on a `locale` link also remembers the choice
+// (setLocale) before the router navigates.
 export function Link(props) {
-  if (!globalThis.__nowakiBase && props.basePath === undefined && props.locale === undefined) return h("a", props);
+  if (!globalThis.__nowakiBase && props.basePath === undefined && props.locale === undefined && !localeState()) return h("a", props);
   const { basePath, locale, ...rest } = props;
-  if (locale !== undefined) {
-    rest.href = localePath(String(rest.href ?? ""), locale);
-    rest.hreflang = rest.hreflang ?? locale;
+  if (locale) {
+    rest.hreflang ??= locale;
     const onClick = rest.onClick;
-    rest.onClick = (e) => {
-      setLocale(locale);
-      return onClick?.(e);
-    };
+    rest.onClick = (e) => (setLocale(locale), onClick?.(e));
   }
-  if (basePath !== false) rest.href = withBase(rest.href);
+  if (typeof rest.href == "string") rest.href = href(rest.href, props);
   return h("a", rest);
+}
+
+/// `path` as the browser requests it: in the current locale (i18n; `locale` picks another one,
+/// `false` none) and under basePath (`basePath: false` leaves it out). A path that already has a
+/// locale prefix keeps it unless `locale` is given. For URLs <Link> doesn't build: form actions,
+/// fetch, location.
+export function href(path, { locale, basePath } = {}) {
+  const st = locale !== false && localeState();
+  const s = st ? localePathFor(st.i18n, path, locale ?? st.locale, locale === undefined) : String(path);
+  return basePath === false ? s : withBase(s);
 }
 
 const STATE = Symbol.for("nowaki.locale");

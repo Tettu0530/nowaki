@@ -275,8 +275,12 @@ code locations and CI coverage.
   request when off), which runs the request inside `server/i18n-context.mjs` (an
   AsyncLocalStorage published on `globalThis[Symbol.for("nowaki.locale")]`, so `getLocale()` /
   `getCollection` never import `node:async_hooks`) and renders through `localizedEnv` (`<html
-  lang>`, `data-nowaki-i18n`, hreflang from `seo.mjs` `hreflangTags`). `env.i18n` is set by
-  `app.mjs`, `web.mjs` (`routing`, passed by `edge-build.mjs`) and dev `sidecar.mjs`
+  lang>`, `data-nowaki-i18n`, hreflang from `seo.mjs` `hreflangTags`; the attributes are cached per
+  locale in `localeAttrs`, the hreflang tags per route path in `hreflangFor`, and document.mjs
+  caches the string of a frozen htmlAttrs object: keep the per-request work to the split and the
+  AsyncLocalStorage `run`). `<Link>` and `href()` (`navigation.js`) add the current locale
+  (server: the request's locale state, browser: `data-nowaki-i18n`) unless the href has a locale
+  prefix or `locale={false}`, then the base. `env.i18n` is set by `app.mjs`, `web.mjs` (`routing`, passed by `edge-build.mjs`) and dev `sidecar.mjs`
   (`.nowaki/routing.json`). Content locales: `content.rs` `split_locale` (locales from the routing
   config). Per-locale URLs: `isr-urls.mjs` `localeUrls`, `static-paths.mjs` `localePages`,
   `prerender.rs` `locale_urls` / `locale_404s` / `locale_redirects`; `locale_url` and

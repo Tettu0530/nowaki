@@ -47,16 +47,42 @@ export interface LinkProps {
   /** `false` keeps `href` as written under nowaki.config `basePath` (default: the base is added). */
   basePath?: boolean;
   /**
-   * i18n: links to `href` in this locale (`localePath(href, locale)`), with `hreflang` set. Used
-   * inside an island, a click also remembers the choice for locale detection (`setLocale`).
+   * i18n. By default the link stays in the current locale: on `/ja/x`, `href="/about"` renders
+   * `/ja/about` (an href that already has a locale prefix keeps it). A locale links to `href` in
+   * that locale (`localePath(href, locale)`) with `hreflang` set; inside an island, a click also
+   * remembers the choice for locale detection (`setLocale`). `false` leaves `href` as written
+   * (the base is still added). No effect without `i18n` in nowaki.config.
    */
-  locale?: string;
+  locale?: string | false;
   children?: unknown;
   [key: string]: unknown;
 }
 
-/** A typed <a>. The client router handles it as an SPA navigation. */
+/**
+ * A typed <a>. The client router handles it as an SPA navigation. Its `href` is built by
+ * {@link href}: the current locale (i18n) and basePath go in front.
+ */
 export function Link(props: LinkProps): VNode;
+
+export interface HrefOptions {
+  /** A locale to link to instead of the current one, or `false` for no locale prefix. */
+  locale?: string | false;
+  /** `false` leaves basePath out. */
+  basePath?: boolean;
+}
+
+/**
+ * A path as the browser requests it, the way `<Link>` builds its href: in the current locale
+ * (with `i18n`; a path that already has a locale prefix keeps it) and under basePath. For the URLs
+ * `<Link>` doesn't build, such as `<form action={href("/logout")}>`, `fetch(href("/api/x"))` or
+ * `location.assign(...)`. Works in components, layouts and islands. Without i18n and basePath,
+ * `path` comes back as it is.
+ *   href("/logout")                 // "/gallery/ja/logout" on a ja page under basePath "/gallery"
+ *   href("/about", { locale: "en" }) // "/gallery/about"
+ *   href("/api/x", { locale: false }) // "/gallery/api/x"
+ */
+export function href(path: StaticRoutePath | Href, options?: HrefOptions): Href;
+export function href(path: string, options?: HrefOptions): string;
 
 /** The current locale with `i18n` in nowaki.config (see `getLocale` in `@nowaki-dev/runtime`). */
 export function getLocale(): string | undefined;
