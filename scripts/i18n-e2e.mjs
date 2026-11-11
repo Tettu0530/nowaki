@@ -4,8 +4,8 @@
 // generated into a temp directory (linked to examples/hello's node_modules).
 // A second app ("combo", on --port + 1) composes i18n with basePath "/app", trailingSlash
 // "never" and a parallel-route slot: prefixed URLs, canonical / hreflang / sitemap, the locale
-// redirect, static file names and _redirects, and the slot (with an intercepting route) under a
-// locale.
+// redirect, static file names and _redirects, the slot (with an intercepting route) under a
+// locale, and config redirects / rewrites / headers matched without the locale prefix.
 // A third app ("detect", on --port + 2) turns on `i18n.detect`: Accept-Language and the
 // nowaki_locale cookie on `/`, Vary / Cache-Control, and an ISR root never answering another
 // language.
@@ -90,6 +90,16 @@ const COMBO = {
   basePath: "/app",
   trailingSlash: "never",
   i18n: { locales: ["en", "ja"], defaultLocale: "en", detect: true },
+  redirects: [
+    { source: "/old-about", destination: "/about" },
+    { source: "/go/[to]", destination: "/[to]" },
+    { source: "/ja/legacy", destination: "/ja/about", locale: false },
+  ],
+  rewrites: [{ source: "/p/[id]", destination: "/photos/[id]" }],
+  headers: [
+    { source: "/about", headers: { "x-about": "1" } },
+    { source: "/ja/[...rest]", headers: { "x-ja-raw": "1" }, locale: false },
+  ],
 };
 `,
   "routes/about.tsx": FILES["routes/about.tsx"].replace("export const loader", "export const meta = { canonical: true };\nexport const loader"),
@@ -199,6 +209,24 @@ async function comboChecks(label, req) {
   check(t("the default locale's intercept patterns carry the base only"), r.body.includes('data-nowaki-intercepts="[&quot;/app/photos/[id]&quot;]"'), r.body.match(/<nowaki-slot[^>]*>/)?.[0]);
   r = await req("/app/ja/photos/1", { headers: { "x-nowaki-intercept": "/photos/@modal" } });
   check(t("intercepting route under base + locale: the fragment"), r.status === 200 && r.headers["x-nowaki-slot"] === "modal" && r.body.endsWith("<aside>INTERCEPTED 1 ja</aside>"), `${r.status} ${r.body.slice(-200)}`);
+  r = await req("/app/ja/old-about?x=1");
+  check(t("config redirect under a locale keeps it"), r.status === 307 && r.headers.location === "/app/ja/about?x=1", `${r.status} ${r.headers.location}`);
+  r = await req("/app/old-about");
+  check(t("config redirect without a locale"), r.status === 307 && r.headers.location === "/app/about", `${r.status} ${r.headers.location}`);
+  r = await req("/app/en/old-about");
+  check(t("config redirect from the default locale's prefix lands unprefixed"), r.status === 307 && r.headers.location === "/app/about", `${r.status} ${r.headers.location}`);
+  r = await req("/app/ja/go/%2F%2Fevil.com");
+  check(t("config redirect under a locale is no open redirect"), r.status === 307 && r.headers.location === "/app/ja/%2F%2Fevil.com", `${r.status} ${r.headers.location}`);
+  r = await req("/app/ja/legacy");
+  check(t("locale: false matches the prefixed path"), r.status === 307 && r.headers.location === "/app/ja/about", `${r.status} ${r.headers.location}`);
+  r = await req("/app/ja/p/1");
+  check(t("config rewrite under a locale renders in it"), r.status === 200 && /<html lang="ja"/.test(r.body) && r.body.includes("PHOTO 1 ja"), `${r.status} ${r.body.slice(0, 300)}`);
+  r = await req("/app/p/1");
+  check(t("config rewrite in the default locale"), r.status === 200 && r.body.includes("PHOTO 1 en"), `${r.status}`);
+  r = await req("/app/ja/about");
+  check(t("config headers match under a locale"), r.headers["x-about"] === "1" && r.headers["x-ja-raw"] === "1", JSON.stringify(r.headers));
+  r = await req("/app/about");
+  check(t("config headers without a locale"), r.headers["x-about"] === "1" && r.headers["x-ja-raw"] === undefined, JSON.stringify(r.headers));
   r = await req("/app/sitemap.xml");
   check(
     t("sitemap: base + locale, no trailing slashes, alternates"),
@@ -223,6 +251,17 @@ function staticCombo(dir) {
   check("static combo: staticPaths per locale", read("ja/blog/hello.html").includes("POST Konnichiwa") && read("blog/hello.html").includes("POST Hello"));
   check("static combo: a 404.html per locale", read("404.html").includes("NOTFOUND en") && read("ja/404.html").includes("NOTFOUND ja"));
   check("static combo: _redirects sends /app/en under the base", read("_redirects").includes("/app/en /app 308\n/app/en/* /app/:splat 308\n"), read("_redirects"));
+  const redirects = read("_redirects");
+  check(
+    "static combo: config rules per locale in _redirects",
+    redirects.includes("/app/ja/old-about /app/ja/about 307\n/app/old-about /app/about 307\n") &&
+      redirects.includes("/app/ja/p/:id /app/ja/photos/:id 200\n/app/p/:id /app/photos/:id 200\n") &&
+      redirects.includes("/app/ja/legacy /app/ja/about 307\n") &&
+      redirects.indexOf("/app/ja/old-about") < redirects.indexOf("/app/en/* "),
+    redirects,
+  );
+  const headers = read("_headers");
+  check("static combo: config headers per locale in _headers", headers.includes("/app/ja/about\n  x-about: 1\n/app/about\n  x-about: 1\n") && headers.includes("/app/ja/*\n  x-ja-raw: 1\n"), headers);
   const sm = read("sitemap.xml");
   check("static combo: sitemap with the base, no slashes", sm.includes("<loc>https://example.com/app/ja/about</loc>") && sm.includes('hreflang="en" href="https://example.com/app/about"') && !/\/<\/loc>|\/"\/>/.test(sm), sm.slice(0, 600));
 }

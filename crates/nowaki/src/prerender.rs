@@ -630,6 +630,12 @@ struct StaticHostRules {
 /// `:x`, `[...x]` becomes `*` in a source and `:splat` in a destination, rewrites are 200 rules.
 /// Rules a static host can't express are left out with a warning. `rendered` lists the prerendered
 /// page URLs (a rewrite can only reach a page that exists as a file).
+///
+/// With i18n, a rule matches without the locale prefix (as `Rules::apply` does): redirects and
+/// rewrites get one line per locale ahead of the unprefixed one (`/ja/a /ja/b`), header rules one
+/// block per prefixed locale. A static host has no lookahead, so the unprefixed line of a source
+/// starting with a parameter also matches locale-prefixed paths (warned); a header rule starting
+/// with a catch-all already covers them and gets no extra blocks.
 fn static_host_rules(
     config: &nowaki_core::rules::RoutingConfig,
     rendered: &[&str],
@@ -657,14 +663,29 @@ fn static_host_rules(
             d.to_string()
         }
     };
+    let i18n = config.i18n.as_ref();
+    let param_first = |source: &str| source.split('/').nth(1).is_some_and(|s| s.starts_with('['));
+    let warn_param = |out: &mut StaticHostRules, kind: &str, source: &str| {
+        out.warnings.push(format!(
+            "{kind} {source}: a static host also matches it against locale-prefixed paths (it starts with a parameter); add locale: false or a literal first segment"
+        ));
+    };
     for r in &config.redirects {
         match (static_pattern(&r.source, true), static_pattern(&r.destination, false)) {
-            (Some(from), Some(to)) => out.redirects.push_str(&format!(
-                "{} {} {}\n",
-                internal(&from),
-                internal(&to),
-                r.status
-            )),
+            (Some(from), Some(to)) => {
+                let i18n = i18n.filter(|_| r.locale);
+                for (from, to) in locale_lines(i18n, &from, &to, &r.destination, true) {
+                    out.redirects.push_str(&format!(
+                        "{} {} {}\n",
+                        internal(&from),
+                        internal(&to),
+                        r.status
+                    ));
+                }
+                if i18n.is_some() && param_first(&r.source) {
+                    warn_param(&mut out, "redirect", &r.source);
+                }
+            }
             _ => out.warnings.push(format!(
                 "redirect {} → {} can't be written for a static host (a [x].ext segment or a param name other than letters, digits and _); left out",
                 r.source, r.destination
@@ -691,8 +712,14 @@ fn static_host_rules(
                 r.source, r.destination
             ));
         }
-        out.redirects
-            .push_str(&format!("{} {} 200\n", internal(&from), internal(&to)));
+        let locale_aware = i18n.filter(|_| r.locale);
+        for (from, to) in locale_lines(locale_aware, &from, &to, &r.destination, false) {
+            out.redirects
+                .push_str(&format!("{} {} 200\n", internal(&from), internal(&to)));
+        }
+        if locale_aware.is_some() && param_first(&r.source) {
+            warn_param(&mut out, "rewrite", &r.source);
+        }
     }
     let defaults: Vec<&str> = crate::security_headers::DEFAULTS
         .iter()
@@ -707,8 +734,22 @@ fn static_host_rules(
             ));
             continue;
         };
-        out.headers.push_str(&internal(&from));
-        out.headers.push('\n');
+        let mut paths = Vec::new();
+        if let Some(i18n) = i18n.filter(|_| h.locale) {
+            let first = h.source.split('/').nth(1).unwrap_or("");
+            if first.starts_with('[') && !first.starts_with("[...") {
+                warn_param(&mut out, "headers for", &h.source);
+            } else if !first.starts_with('[') {
+                paths.extend(
+                    i18n.locales
+                        .iter()
+                        .filter(|l| **l != i18n.default_locale || i18n.prefix_default_locale)
+                        .map(|l| under_locale(l, &from)),
+                );
+            }
+        }
+        paths.push(from);
+        let mut block = String::new();
         for header in &h.headers {
             let name = header.key.to_ascii_lowercase();
             if defaults.contains(&name.as_str()) {
@@ -717,10 +758,61 @@ fn static_host_rules(
                     h.source
                 ));
             }
-            out.headers
-                .push_str(&format!("  {}: {}\n", header.key, header.value));
+            block.push_str(&format!("  {}: {}\n", header.key, header.value));
+        }
+        for path in paths {
+            out.headers.push_str(&internal(&path));
+            out.headers.push('\n');
+            out.headers.push_str(&block);
         }
     }
+    out
+}
+
+/// `path` (a `_redirects` path) under `/<locale>`.
+fn under_locale(locale: &str, path: &str) -> String {
+    if path == "/" {
+        format!("/{locale}")
+    } else {
+        format!("/{locale}{path}")
+    }
+}
+
+/// The `_redirects` lines (source, destination) of one redirect or rewrite: as written without
+/// i18n (or with `locale: false`); otherwise one per locale, then the unprefixed one. An internal
+/// destination goes under the locale, except the default one without `prefixDefaultLocale` (a
+/// redirect from an unprefixed path goes to the default locale's URL). A destination that is
+/// external or names a locale itself is kept.
+fn locale_lines(
+    i18n: Option<&I18nConfig>,
+    from: &str,
+    to: &str,
+    destination: &str,
+    redirect: bool,
+) -> Vec<(String, String)> {
+    let Some(i18n) = i18n else {
+        return vec![(from.to_string(), to.to_string())];
+    };
+    let first = destination.split('/').nth(1).unwrap_or("");
+    let keep = !to.starts_with('/') || i18n.locales.iter().any(|l| l == first);
+    let dest = |l: &str| {
+        if keep || (l == i18n.default_locale && !i18n.prefix_default_locale) {
+            to.to_string()
+        } else {
+            under_locale(l, to)
+        }
+    };
+    let mut out: Vec<(String, String)> = i18n
+        .locales
+        .iter()
+        .map(|l| (under_locale(l, from), dest(l)))
+        .collect();
+    let unprefixed = if redirect {
+        dest(&i18n.default_locale)
+    } else {
+        to.to_string()
+    };
+    out.push((from.to_string(), unprefixed));
     out
 }
 
@@ -944,6 +1036,56 @@ mod tests {
             &[],
         );
         assert!(no_detect.warnings.is_empty());
+    }
+
+    #[test]
+    fn static_host_rules_per_locale() {
+        let host = static_host_rules(
+            &routing(
+                r#"{"basePath":"/app",
+                "redirects":[
+                    {"source":"/a","destination":"/b","status":307},
+                    {"source":"/old/[...rest]","destination":"/[...rest]","status":308},
+                    {"source":"/ja/x","destination":"/y","status":307,"locale":false},
+                    {"source":"/to","destination":"/ja/welcome","status":307},
+                    {"source":"/[slug]","destination":"https://example.com/[slug]","status":302}
+                ],
+                "rewrites":[{"source":"/p/[id]","destination":"/photo/[id]"}],
+                "headers":[
+                    {"source":"/login","headers":[{"key":"x-robots-tag","value":"noindex"}]},
+                    {"source":"/[...all]","headers":[{"key":"x-all","value":"1"}]},
+                    {"source":"/ja/[...rest]","headers":[{"key":"x-ja","value":"1"}],"locale":false}
+                ],
+                "i18n":{"locales":["en","ja"],"defaultLocale":"en"}}"#,
+            ),
+            &["/photo/1", "/ja/photo/1"],
+        );
+        assert_eq!(
+            host.redirects,
+            "/app/en/a /app/b 307\n/app/ja/a /app/ja/b 307\n/app/a /app/b 307\n\
+             /app/en/old/* /app/:splat 308\n/app/ja/old/* /app/ja/:splat 308\n/app/old/* /app/:splat 308\n\
+             /app/ja/x /app/y 307\n\
+             /app/en/to /app/ja/welcome 307\n/app/ja/to /app/ja/welcome 307\n/app/to /app/ja/welcome 307\n\
+             /app/en/:slug https://example.com/:slug 302\n/app/ja/:slug https://example.com/:slug 302\n/app/:slug https://example.com/:slug 302\n\
+             /app/en/p/:id /app/photo/:id 200\n/app/ja/p/:id /app/ja/photo/:id 200\n/app/p/:id /app/photo/:id 200\n"
+        );
+        assert_eq!(
+            host.headers,
+            "/app/ja/login\n  x-robots-tag: noindex\n/app/login\n  x-robots-tag: noindex\n\
+             /app/*\n  x-all: 1\n/app/ja/*\n  x-ja: 1\n"
+        );
+        assert!(host.warnings.iter().any(|w| w.contains("redirect /[slug]")));
+        let prefixed = static_host_rules(
+            &routing(
+                r#"{"redirects":[{"source":"/a","destination":"/b","status":307}],
+                "i18n":{"locales":["en","ja"],"defaultLocale":"en","prefixDefaultLocale":true}}"#,
+            ),
+            &[],
+        );
+        assert_eq!(
+            prefixed.redirects,
+            "/en/a /en/b 307\n/ja/a /ja/b 307\n/a /en/b 307\n"
+        );
     }
 
     #[test]

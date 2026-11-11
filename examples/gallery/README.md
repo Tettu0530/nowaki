@@ -33,8 +33,8 @@ variables. `PUBLIC_GALLERY_TITLE` is optional (default `Sirocco`).
 | Fails without a required variable | `env.ts` declares `GALLERY_ADMIN_PASSWORD` (required), `NOWAKI_SESSION_SECRET` (at least 32 characters), and `PUBLIC_GALLERY_TITLE` (with a default). `nowaki build` and `nowaki start` stop with the variable's name and never print its value. |
 
 The config `redirects` entry (`/photos/[id]` → `/photo/[id]`) and `headers` entry
-(`x-robots-tag: noindex` on `/login`) are relative to the base. They see the path before
-the locale split, so `/ja/login` does not match `/login`.
+(`x-robots-tag: noindex` on `/login`) are relative to the base. They match the path without
+its locale, so `/ja/login` gets the header too, and `/ja/photos/1` redirects to `/ja/photo/1`.
 
 The photos are tiny PNGs in `photos/`, imported with `?image` (`lib/photos.ts`) and
 rendered with `<Image>` (AVIF plus PNG, with width and height).

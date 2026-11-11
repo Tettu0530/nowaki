@@ -252,7 +252,9 @@ code locations and CI coverage.
   sidecars in `x-nowaki-route-path` → `info.routePath`) and `server/front.mjs` (`app.mjs` `handle`,
   the worker `fetch` from `edge-build.mjs`); Vercel platform routes from `server/vercel-routes.mjs`,
   static `_redirects` / `_headers` from `prerender.rs`. Without a routing config each front does
-  one null check. Tests: `scripts/rules-front-test.mjs`, `scripts/rules-e2e.mjs` (every front).
+  one null check. With `i18n`, the engines match rule sources without the locale prefix
+  (`locale: false` opts a rule out) and put the locale back on internal destinations; the
+  handler then splits the locale off the route path once, as for any request. Tests: `scripts/rules-front-test.mjs`, `scripts/rules-e2e.mjs` (every front).
 - **`basePath`** — build: `NowakiCore::set_base_path` (asset URLs via `asset_base()`, the server
   function proxy path, the `import.meta.env.BASE_URL` define, plus `__NOWAKI_BASE_URL__` for the
   classic-script `client/live.js`), set by `site::configure`; fonts and content images read
