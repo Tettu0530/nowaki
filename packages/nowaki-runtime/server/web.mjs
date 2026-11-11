@@ -14,6 +14,8 @@ import { initServerEnv } from "./env-schema.mjs";
 import { setServerEnv } from "./env-server.mjs";
 import { configureSessions, sessionConfigOf } from "./session.mjs";
 import { setBasePath } from "./base-path.mjs";
+import { traceFromEnv } from "./trace.mjs";
+import { HEALTH_BODY, HEALTH_HEADERS, isHealth } from "./health.mjs";
 
 /// `defaults`: [name, value] pairs (nowaki.config `headers`) set when the result doesn't set them,
 /// before the security headers, so they win over those.
@@ -87,10 +89,11 @@ function installIslandHook(registry, liveRegistry, live) {
 ///   trailingSlash    : nowaki.config `trailingSlash` when it isn't "ignore" (canonical / sitemap URLs)
 ///   basePath         : nowaki.config `basePath` ("/app"), when set
 ///   routing          : the routing config (dist/server/routing.json), for i18n
-/// Returns `(request, bindings?, front?) => Promise<Response>`; `bindings` (the Worker's `env`) adds
-/// its string vars and secrets to process.env for validating env.ts. `front` comes from the
+/// Returns `(request, bindings?, front?, exec?) => Promise<Response>`; `bindings` (the Worker's `env`)
+/// adds its string vars and secrets to process.env for validating env.ts. `front` comes from the
 /// worker's nowaki.config routing (front.mjs): `{ routePath, headers }`, the path to route by and
-/// the config headers for the response.
+/// the config headers for the response. `exec` is the Worker's execution context: with OTLP export
+/// on, the spans go out in `exec.waitUntil` after the response.
 export function createFetchHandler({
   manifest,
   modules,
@@ -175,6 +178,9 @@ export function createFetchHandler({
     },
   };
 
+  // Server-Timing (NOWAKI_SERVER_TIMING=1) and OpenTelemetry (OTEL_*): null when both are off.
+  env.trace = traceFromEnv(globalThis.process?.env, { runtime: "workerd" });
+
   // Content collections, inlined by the edge build: validated once, before the first request.
   const contentReady = content
     ? validateContent(content.raw, content.config, (e) => modules[e.module]).then(({ collections, errors }) => {
@@ -189,7 +195,12 @@ export function createFetchHandler({
   let envReady = null;
   if (!envPending) setServerEnv(null);
 
-  return async (request, bindings, front) => {
+  return async (request, bindings, front, exec) => {
+    // Before env.ts and content: a liveness answer needs neither.
+    const url = new URL(request.url);
+    if (isHealth(request.method, url.pathname)) {
+      return withSecurityHeaders(new Response(request.method === "HEAD" ? null : HEALTH_BODY, { headers: HEALTH_HEADERS }));
+    }
     if (typeof bindings?.NOWAKI_SESSION_SECRET === "string") sessionSecret = bindings.NOWAKI_SESSION_SECRET;
     if (envPending) {
       envReady ??= initServerEnv(envModule, envSource(bindings), envPublic).catch((err) => {
@@ -204,7 +215,6 @@ export function createFetchHandler({
       }
     }
     if (contentReady) await contentReady;
-    const url = new URL(request.url);
     const headers = {};
     for (const [k, v] of request.headers) headers[k.toLowerCase()] = v;
     // Web Requests may omit Host; the same-origin checks (actions, RPC) need it, and the URL has it.
@@ -217,6 +227,7 @@ export function createFetchHandler({
       readBody: async () => new Uint8Array(await request.arrayBuffer()),
       routePath: front?.routePath,
     });
+    if (env.trace?.exporter && typeof exec?.waitUntil === "function") exec.waitUntil(env.trace.flush());
     return resultToResponse(applyCsp(result), front?.headers);
   };
 }

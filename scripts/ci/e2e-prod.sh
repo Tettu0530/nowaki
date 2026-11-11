@@ -43,6 +43,11 @@ NOWAKI_ISR_WARM=0 NOWAKI_REVALIDATE_SECRET=e2e-revalidate-secret-0123456789 ./ta
 START_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3300/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3300/ | grep -q "modulepreload"
+# Observability is off by default: no Server-Timing (ISR hits included) and no internal route
+# header; /__nowaki/health answers 200 (it pings the sidecar), never cached.
+! curl -s -o /dev/null -D - http://127.0.0.1:3300/ | grep -qiE '^(server-timing|x-nowaki-route):'
+curl -s -D - http://127.0.0.1:3300/__nowaki/health | tr -d '\r' | grep -qi '^cache-control: no-store'
+test "$(curl -sf http://127.0.0.1:3300/__nowaki/health)" = '{"status":"ok"}'
 # HMR and Fast Refresh are dev-only: nothing of them in production pages or client output.
 ! curl -sf http://127.0.0.1:3300/ | grep -qE 'hmr\.js|refresh\.js|__nowaki/hmr'
 ! grep -rlE 'RefreshReg|RefreshSig|__nowaki_refresh|__nowaki/hmr' examples/hello/dist/client examples/hello/dist/server
@@ -329,6 +334,10 @@ node scripts/route-js-e2e.mjs http://127.0.0.1:3300 examples/hello
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) sleep 3 ;; esac
 kill $START_PID
 bash scripts/ci/assert-no-orphans.sh $START_PID
+# Observability on: one trace from the Rust front through the sidecar (a local OTLP receiver on
+# 3311), Server-Timing with NOWAKI_SERVER_TIMING=1, NOWAKI_LOG=json lines; then all of it off
+# (servers on 3312 and 3313)
+node scripts/otel-e2e.mjs --port 3311
 # nowaki.config redirects / rewrites / headers / basePath / trailingSlash at the Rust front
 # (a generated app; listens on 3306 and 3307)
 node scripts/rules-e2e.mjs start --port 3306

@@ -159,6 +159,11 @@ code locations and CI coverage.
   and any new internal response header, on **both** branches of `proxy`. The stdout channel needs
   `NOWAKI_PUBLISH_TOKEN`. `POST /__nowaki/revalidate` stays off unless `NOWAKI_REVALIDATE_SECRET`
   is set, and compares it in constant time.
+- **Observability stays opt-in and free when off.** Server-Timing is off in production unless
+  `NOWAKI_SERVER_TIMING=1`; tracing only with an OTLP endpoint (or a registered OTel API tracer).
+  With everything off, `start.rs` pays one `Obs::active` check and the handler one `env.trace` /
+  `ctx.__trace` null check per phase, allocating nothing. `x-nowaki-route` is internal (stripped
+  on both `proxy` branches), and an ISR hit never replays a stored `server-timing`.
 - **ISR keys must include learned `Vary` inputs** (`context.mjs` `__vary()` →
   `x-nowaki-vary`, folded in `isr_key` in `start.rs`) so cached pages cannot
   bleed across users. The query string is part of the key only when the route reads
@@ -221,6 +226,27 @@ code locations and CI coverage.
 
   Tests: `scripts/purge-adapters-test.mjs` (mocked package, a generated function on port 5540);
   `scripts/ci/e2e-adapters.sh` checks the header from the built `examples/hello` function.
+- **Observability (Server-Timing, JSON logs, OpenTelemetry, health)** — env vars:
+  `NOWAKI_SERVER_TIMING=1` (always on in dev), `NOWAKI_LOG=json`, and the standard
+  `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (tracing is on iff one is set
+  and `OTEL_SDK_DISABLED` isn't true), `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_SERVICE_NAME`,
+  `OTEL_TRACES_SAMPLER` / `_ARG`, `OTEL_BSP_SCHEDULE_DELAY` / `_MAX_EXPORT_BATCH_SIZE` /
+  `_MAX_QUEUE_SIZE`. Rust: `crates/nowaki/src/obs.rs` (one `OnceLock`: config, traceparent,
+  sampler, spans, the bounded batch exporter over reqwest, plain HTTP only; log lines; the
+  Server-Timing tail); `start.rs` `handle` → `observed` (only when `Obs::active`: the SERVER span,
+  `isr` + `total`, the access log), `proxy` (CLIENT span, `forward::apply_traced` replaces the
+  client's `traceparent`, reads the internal `x-nowaki-route`), `health` (`/__nowaki/health`, a
+  cached 1 s sidecar ping); `live.rs` `render_once` (a span per WS event / refresh, `traceparent`
+  on `/__nowaki/live-render`). JS: `server/trace.mjs` (`env.trace`, null when off: the handler does
+  `ctx.__trace?.begin/end` around middleware, loader, render, action, API, server functions and
+  POST live events, and `finish` in `finalizeResult` writes `server-timing` and, for
+  prod-sidecar.mjs, `x-nowaki-route`), `server/otel.mjs` (config, OTLP JSON, fetch exporter; the
+  worker flushes in `waitUntil`), the `@opentelemetry/api` bridge (used when the app registered a
+  tracer), `server/log.mjs` (every runtime error log; text mode reads as before),
+  `server/health.mjs`. `env.trace` is set by `app.mjs`, `web.mjs` and dev `sidecar.mjs`. `kept_headers`
+  never stores `server-timing`. Shared fixture: `crates/nowaki/tests/fixtures/otel-cases.json`
+  (`obs.rs` units, `scripts/otel-test.mjs`); e2e: `scripts/otel-e2e.mjs` (a local OTLP receiver,
+  in e2e-prod), `scripts/ci/e2e-{dev,prod,adapters}.sh`, `scripts/edge-handler-test.mjs`.
 - **Server functions (`"use server"`)** — `crates/nowaki-core/src/server_fn.rs`
   (detect, id, client proxy, discover) + `packages/nowaki-runtime/server/functions.mjs`
   (dispatch + `getContext`). Allowlist: `dist/server/functions.json`.

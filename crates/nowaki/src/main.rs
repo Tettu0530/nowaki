@@ -9,6 +9,7 @@ mod forward;
 mod front;
 mod live;
 mod mcp;
+mod obs;
 mod plugins;
 mod prerender;
 mod remote_images;

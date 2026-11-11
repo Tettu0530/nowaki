@@ -7,6 +7,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ServerFnError } from "./server-fn.mjs";
 import { sameOrigin, browserHost } from "./origin.mjs";
+import { logError } from "./log.mjs";
 
 export const SERVER_FN_PATH = "/__nowaki/fn";
 
@@ -101,7 +102,13 @@ export async function dispatchServerFn(ctx, info, sf, { dev = false } = {}) {
     if (typeof fn !== "function") {
       return errBody(500, `server function is not a function: ${entry.export}`);
     }
-    const result = await als.run(ctx, () => fn(...args));
+    const tok = ctx.__trace?.begin(null, `fn ${entry.export}`);
+    let result;
+    try {
+      result = await als.run(ctx, () => fn(...args));
+    } finally {
+      ctx.__trace?.end(tok);
+    }
     return {
       status: 200,
       headers: JSON_CT,
@@ -115,7 +122,7 @@ export async function dispatchServerFn(ctx, info, sf, { dev = false } = {}) {
     }
     // Any other error may carry internals (queries, paths, secrets): log it, send only a generic
     // message in production. Dev keeps the message for debugging.
-    console.error(`[nowaki] server function ${entry.export} failed:`, err);
+    logError(`server function ${entry.export} failed:`, err, { trace: ctx.__trace });
     return errBody(500, dev ? String(err?.message ?? err) : "Internal Server Error");
   }
 }
