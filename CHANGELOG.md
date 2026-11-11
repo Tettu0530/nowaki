@@ -10,6 +10,26 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.18.1] — 2026-11-11 · patch
+
+Packages: `nowaki` / `nowaki-core` 0.18.1 (crates.io, npm), `@nowaki-dev/runtime`
+0.17.1, `create-nowaki` / `create-nowaki-app` 0.19.1. `@nowaki-dev/markdoc` is
+unchanged (0.1.0).
+
+Fills gaps found while building `examples/gallery` and measuring 0.18.0: config
+rules and `<Link>` are locale-aware, i18n's per-request cost is mostly gone, a
+config file no longer starts Node twice before a build, and server source maps
+point at the real files. Also includes the contributed `nowaki prerender`
+improvements (a render worker pool above 256 pages, hard-linked client assets,
+`--skip-build`).
+
+### Upgrade notes
+- **With `i18n` configured, config rules match the path without the locale
+  prefix**, so a `/login` rule now also applies to `/ja/login`. Add
+  `locale: false` to a rule to keep matching the full path.
+- **With `i18n` configured, `<Link href="/x">` keeps the current locale**
+  (`/ja/x` on a Japanese page). Pass `locale={false}` for the old behavior.
+
 ### Added
 - **`href(path, { locale, basePath })`** from `@nowaki-dev/runtime/navigation` (and
   `@nowaki-dev/runtime`): a path as the browser requests it, built the way `<Link>` builds its
