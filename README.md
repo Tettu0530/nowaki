@@ -31,10 +31,19 @@ Nowaki (野分, an archaic Japanese word for a typhoon) is a full-stack framewor
 
 ## Features
 
-- An on-demand transform pipeline in Rust, built on oxc (parser / transformer / codegen / resolver).
-- Islands Architecture: zero client JS by default; only components under `islands/` are hydrated.
-- File-based routing and Remix-style `loader`s.
+- An on-demand transform pipeline and bundler in Rust, built on oxc (parser / transformer / codegen / resolver).
+- Islands Architecture: zero client JS by default; only components under `islands/` are hydrated, with `client:*` directives for lazy hydration.
+- Jetstream islands: server-reactive islands that ship no component JS. State stays on the server, and patches arrive over WebSocket (`nowaki dev` / `nowaki start`) or per event over POST on the deploy adapters. Live queries (`publish`) and shared rooms are included.
+- File-based routing with nested layouts, middleware, Remix-style `loader` / `action`, API routes, route groups, and parallel and intercepting routes.
+- Server functions (`"use server"`) with Standard Schema validation.
+- Content sites: content collections, Markdown / MDX (and Markdoc via `@nowaki-dev/markdoc`), `<Image>` with AVIF and `srcset`, typed `meta`, a generated sitemap, self-hosted fonts, and per-route JS budgets.
+- Routing config in `nowaki.config.mjs`: `redirects`, `rewrites`, `headers`, `basePath`, `trailingSlash`, and i18n routing.
+- Sessions (`ctx.session`, an encrypted cookie) and a typed env schema (`env.ts`).
+- Secure defaults: origin checks, security headers, and an optional CSP nonce.
+- Six deploy targets: node, static, bun, deno, cloudflare, vercel. ISR is served from Rust on `nowaki start`.
 - Use the npm ecosystem as is. SSR is delegated to a Rust-managed Node sidecar (Preact).
+
+See <https://nowaki.dev/docs> for the full guide.
 
 ## Quick start
 

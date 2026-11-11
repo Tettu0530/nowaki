@@ -10,6 +10,12 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Changed
+- **Docs:** ROADMAP marks v0.15–v0.18 done, lists the deferred items, and adds the oxc upgrade,
+  the API-route CSRF default, and synced versions to v0.19. AGENTS.md, docs/RELEASING.md, the
+  README features, the scaffolded app's AGENTS.md (0.17 / 0.18 features, `NOWAKI_SESSION_SECRET`),
+  the Astro guide (config mapping), and the `live.room` / `localePath` JSDoc are current.
+
 ## [0.18.1] — 2026-11-11 · patch
 
 Packages: `nowaki` / `nowaki-core` 0.18.1 (crates.io, npm), `@nowaki-dev/runtime`
