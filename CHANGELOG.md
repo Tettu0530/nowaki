@@ -223,6 +223,12 @@ benchmark (uncached, ISR, CSP, build, dev) found no regression.
   Pages without an intercepting slot render the same bytes as before; apps without slots pay
   only the existing length check per request.
 ### Changed
+- **`nowaki prerender`:** copies `dist/client` into `out/_nowaki` with hard links
+  when the output tree is on the same filesystem (copies on cross-device
+  failure). On the same volume, files under `out/_nowaki` share inodes with
+  `dist/client`; `nowaki build` clears `dist/client` before rewriting, but
+  in-place edits under `out/_nowaki` (for example a post-deploy minifier) also
+  change `dist/client`.
 - **`trailingSlash` also shapes static output and page URLs.** With `"never"`, the static
   adapter writes `about.html` instead of `about/index.html`, and canonical URLs, the default
   `og:url` and `sitemap.xml` drop the slash; with `"always"` they get one on every server too.

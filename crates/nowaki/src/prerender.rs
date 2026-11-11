@@ -300,7 +300,9 @@ pub async fn run(root: PathBuf, out: PathBuf, skip_build: bool) -> Result<()> {
     let assets = out.join("_nowaki");
     nowaki_core::build::clear_dir(&assets)?;
     std::fs::create_dir_all(&assets)?;
-    copy_dir(&root.join("dist/client"), &assets)?;
+    // Hashed client chunks are immutable; hard links avoid duplicating them under `out/_nowaki`
+    // when `dist/client` lives on the same filesystem (falls back to copy on EXDEV).
+    link_client_dir(&root.join("dist/client"), &assets)?;
     // public/ files at their own path, last, so they win over a page at the same path (as on a
     // server). A `_headers` of the app's own comes first in the generated one.
     let mut own_headers = String::new();
@@ -801,19 +803,40 @@ fn route_could_match(pattern: &str, url: &str) -> bool {
         .all(|(p, u)| p.starts_with('[') || p == u)
 }
 
-fn copy_dir(from: &Path, to: &Path) -> Result<()> {
+fn link_client_dir(from: &Path, to: &Path) -> Result<()> {
+    std::fs::create_dir_all(to)?;
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
         let src = entry.path();
         let dst = to.join(entry.file_name());
-        if src.is_dir() {
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
             std::fs::create_dir_all(&dst)?;
-            copy_dir(&src, &dst)?;
+            link_client_dir(&src, &dst)?;
         } else {
-            std::fs::copy(&src, &dst)?;
+            hard_link_or_copy(&src, &dst)?;
         }
     }
     Ok(())
+}
+
+/// Hard-link `src` to `dst` when both paths share a volume; otherwise copy the file bytes.
+fn hard_link_or_copy(src: &Path, dst: &Path) -> Result<()> {
+    match std::fs::hard_link(src, dst) {
+        Ok(()) => Ok(()),
+        Err(e) if hard_link_copy_fallback(&e) => {
+            std::fs::copy(src, dst)?;
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn hard_link_copy_fallback(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::CrossesDevices | std::io::ErrorKind::Unsupported
+    ) || (cfg!(windows) && err.raw_os_error() == Some(17)) // ERROR_NOT_SAME_DEVICE
 }
 
 #[cfg(test)]
@@ -867,6 +890,29 @@ mod tests {
         assert!(ensure_built(root).is_err());
         std::fs::create_dir_all(root.join("dist/server/routes")).unwrap();
         ensure_built(root).unwrap();
+    }
+
+    #[test]
+    fn client_dir_uses_hard_links_on_the_same_filesystem() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("client");
+        let to = dir.path().join("out/_nowaki");
+        std::fs::create_dir_all(from.join("sub")).unwrap();
+        std::fs::write(from.join("sub/a.js"), b"chunk").unwrap();
+        std::fs::write(from.join("manifest.json"), b"{}").unwrap();
+        link_client_dir(&from, &to).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(to.join("sub/a.js")).unwrap(),
+            "chunk"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(
+                std::fs::metadata(from.join("sub/a.js")).unwrap().ino(),
+                std::fs::metadata(to.join("sub/a.js")).unwrap().ino()
+            );
+        }
     }
 
     fn routing(json: &str) -> nowaki_core::rules::RoutingConfig {
