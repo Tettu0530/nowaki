@@ -274,6 +274,10 @@ curl -sf $B/virtual | grep -q 'nowaki-island name="VirtualBadge"'
 # typed navigation: <Link href> renders an <a href>, route() builds dynamic
 # hrefs (encoded params, catch-all joined with /).
 curl -sf $B/nav | grep -q '<a href="/about" data-testid="link-about">'
+# `export const viewTransition` in dev (render.mjs shares document.mjs pageMeta), and nothing on
+# pages without it
+curl -sf $B/vt | grep -q '<meta name="nowaki-view-transition" content="1" />'
+! curl -sf $B/about | grep -qE 'nowaki-view-transition|@view-transition'
 curl -sf $B/nav | grep -q 'href="/blog/hello" data-testid="link-blog"'
 curl -sf $B/nav | grep -q 'href="/files/docs/intro" data-testid="link-files"'
 
@@ -318,6 +322,24 @@ node scripts/i18n-e2e.mjs dev --port "$((PORT + 10))"
 node scripts/gallery-e2e.mjs dev --port "$((PORT + 13))"
 # Dev SSR stack traces name the real routes/ files (source maps), on PORT+14
 node scripts/sourcemap-e2e.mjs dev --port "$((PORT + 14))"
+# HMR in headless Chrome (Fast Refresh keeps island state, CSS without a reload, NOWAKI_CSP=enforce),
+# on PORT+15 with CDP on PORT+16 (HMR_PORT / HMR_CDP_PORT override them). Needs Chrome: CHROME, or
+# the usual Linux / macOS location. Not run on Windows.
+if [ -z "${CHROME:-}" ]; then
+  for c in /usr/bin/google-chrome /usr/bin/google-chrome-stable "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; do
+    if [ -x "$c" ]; then CHROME=$c; break; fi
+  done
+fi
+if [ "${RUNNER_OS:-}" = Windows ]; then
+  echo "hmr-browser-test: skipped on Windows"
+elif [ -n "${CHROME:-}" ]; then
+  CHROME="$CHROME" PORT="${HMR_PORT:-$((PORT + 15))}" CDP_PORT="${HMR_CDP_PORT:-$((PORT + 16))}" node scripts/hmr-browser-test.mjs
+elif [ -n "${CI:-}" ]; then
+  echo "hmr-browser-test: no Chrome found (set CHROME)" >&2
+  exit 1
+else
+  echo "hmr-browser-test: skipped (no Chrome found; set CHROME to run it)"
+fi
 
 # SIGKILL: the dev sidecar and plugin host exit when their stdin pipe closes (exit-with-parent.mjs).
 ./target/debug/nowaki dev examples/hello --port "$((PORT + 7))" &

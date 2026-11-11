@@ -22,10 +22,12 @@ export function route(pattern, params = {}) {
 // in front (`basePath={false}` keeps it as written), and with `i18n` it stays in the current
 // locale (`locale="ja"` links to another one, `locale={false}` leaves the href alone). A plain <a>
 // is left alone. Inside an island, a click on a `locale` link also remembers the choice
-// (setLocale) before the router navigates.
+// (setLocale) before the router navigates. `viewTransition` renders data-nowaki-transition: the
+// client router runs that navigation as a View Transition (client/router.js).
 export function Link(props) {
-  if (!globalThis.__nowakiBase && props.basePath === undefined && props.locale === undefined && !localeState()) return h("a", props);
-  const { basePath, locale, ...rest } = props;
+  if (!globalThis.__nowakiBase && props.basePath === undefined && props.locale === undefined && props.viewTransition === undefined && !localeState()) return h("a", props);
+  const { basePath, locale, viewTransition, ...rest } = props;
+  if (viewTransition) rest["data-nowaki-transition"] = "";
   if (locale) {
     rest.hreflang ??= locale;
     const onClick = rest.onClick;
@@ -33,6 +35,18 @@ export function Link(props) {
   }
   if (typeof rest.href == "string") rest.href = href(rest.href, props);
   return h("a", rest);
+}
+
+/// `{ viewTransitionName }` for a `style` prop: `name` as a CSS identifier. Characters other than
+/// letters, digits, `-`, `_` and non-ASCII ones become `_`. A leading `_` goes in front of a name
+/// that would start with a digit (or `-` and a digit), of "" and "-", and of the keywords a name
+/// can't be (`none`, `auto`, `match-element` and the CSS-wide ones).
+export function transitionName(name) {
+  return {
+    viewTransitionName: String(name)
+      .replace(/[^\w\u0080-￿-]/g, "_")
+      .replace(/^(?=-?\d|-?$|(none|auto|match-element|initial|inherit|unset|revert(-layer)?|default)$)/i, "_"),
+  };
 }
 
 /// `path` as the browser requests it: in the current locale (i18n; `locale` picks another one,

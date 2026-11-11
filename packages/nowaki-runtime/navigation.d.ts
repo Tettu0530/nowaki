@@ -54,6 +54,15 @@ export interface LinkProps {
    * (the base is still added). No effect without `i18n` in nowaki.config.
    */
   locale?: string | false;
+  /**
+   * Run this navigation as a View Transition (`document.startViewTransition`). Renders
+   * `data-nowaki-transition`, which also works on a plain `<a>` or on an element around links.
+   * The client router transitions when the browser supports it and the visitor doesn't prefer
+   * reduced motion; otherwise it swaps the page as usual. A page can opt in all navigations to and
+   * from it with `export const viewTransition = true` instead. The transition carries the type
+   * `"forward"` (`"back"` for a back navigation) for `:active-view-transition-type()`.
+   */
+  viewTransition?: boolean;
   children?: unknown;
   [key: string]: unknown;
 }
@@ -99,3 +108,25 @@ export function localePath(path: string, locale?: string): string;
 
 /** Remembers the visitor's locale for `i18n.detect` (see `setLocale` in `@nowaki-dev/runtime`). */
 export function setLocale(locale: string): void;
+
+/**
+ * A `view-transition-name` for a `style` prop, so an element morphs into the element of the same
+ * name on the next page during a View Transition (`<Link viewTransition>` or
+ * `export const viewTransition`). `name` becomes a CSS identifier: characters other than letters,
+ * digits, `-`, `_` and non-ASCII ones become `_`, and a name starting with a digit or equal to a
+ * keyword (`none`, `auto`, ...) gets a leading `_`. Target it in CSS as
+ * `::view-transition-group(<name>)`.
+ *
+ * List to detail: give each card in the list its own name and the detail page's element the
+ * same one. Names must be unique on a page, so key them by the item.
+ *
+ *   // routes/photos/index.tsx
+ *   <Link viewTransition href={route("/photos/[id]", { id })}>
+ *     <img src={src} style={transitionName(`photo-${id}`)} />
+ *   </Link>
+ *   // routes/photos/[id].tsx
+ *   <img src={src} style={transitionName(`photo-${params.id}`)} />
+ *
+ * Spread it to combine with other styles: `style={{ ...transitionName(id), width: 320 }}`.
+ */
+export function transitionName(name: string | number): { viewTransitionName: string };

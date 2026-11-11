@@ -25,6 +25,7 @@ const { loadIslandRegistry, renderDocument, renderShell, errorPage } = await imp
 const { handleRequest, sendResult } = await import("./handler.mjs");
 const { liveRender, liveContext, liveShareable, liveSigStatus, LiveForbiddenError } = await import("./live.mjs");
 const { runWithContext, contextReads } = await import("./functions.mjs");
+const { recentRevalidations, setRevalidateEnv } = await import("./revalidate.mjs");
 const { pathToFileURL } = await import("node:url");
 
 const appRoot = process.cwd();
@@ -223,7 +224,7 @@ async function devInfo(version) {
   } catch (err) {
     islands = { loadError: String(err?.message ?? err) };
   }
-  return { routes, conventions, islands };
+  return { routes, conventions, islands, revalidations: recentRevalidations() };
 }
 
 // NOWAKI_SITE, else `site` in nowaki.config, and its `trailingSlash` (read once; restart dev
@@ -335,6 +336,8 @@ const env = {
     };
   },
 };
+// Dev has no ISR cache: revalidate*() calls are only recorded (dev-info `revalidations`).
+setRevalidateEnv(env);
 
 const server = createServer(async (req, res) => {
   if (req.method === "GET" && req.url.split("?")[0] === "/__nowaki/dev-info") {

@@ -1,0 +1,54 @@
+{
+  "_comment": "Cache purge encoding shared by server/revalidate.mjs (scripts/revalidate-test.mjs) and start.rs (unit tests). `encode`: entries <-> the x-nowaki-purge / x-nowaki-tags value. `broken`: items that don't decode are dropped on both sides. `purge`: what start.rs makes of a header. `expand`: revalidatePath's app path -> every browser path (JS only).",
+  "encode": [
+    { "entries": ["t:posts", "p:/blog"], "header": "t:posts,p:/blog" },
+    { "entries": ["t:café"], "header": "t:caf%C3%A9" },
+    { "entries": ["p:/blog/h%C3%A9llo"], "header": "p:/blog/h%25C3%25A9llo" },
+    { "entries": ["t:a%b"], "header": "t:a%25b" },
+    { "entries": ["p:/a,b"], "header": "p:/a%2Cb" },
+    { "entries": ["p:/a b"], "header": "p:/a%20b" },
+    { "entries": ["t:Ω€", "t:post:1"], "header": "t:%CE%A9%E2%82%AC,t:post:1" }
+  ],
+  "broken": [
+    { "header": "t:a,t:%zz,t:b", "entries": ["t:a", "t:b"] },
+    { "header": "t:%C3,t:ok", "entries": ["t:ok"] },
+    { "header": "t:%,t:%2,t:%+1", "entries": [] },
+    { "header": ",,t:x,", "entries": ["t:x"] }
+  ],
+  "purge": [
+    { "header": "t:posts,p:/blog,p:/blog/", "paths": ["/blog", "/blog/"], "tags": ["posts"] },
+    { "header": "x:other,t:,p:relative,p:/ok", "paths": ["/ok"], "tags": [] },
+    { "header": "p:/blog/h%25C3%25A9llo,t:caf%C3%A9", "paths": ["/blog/h%C3%A9llo"], "tags": ["café"] }
+  ],
+  "configs": {
+    "root": {},
+    "never": { "trailingSlash": "never" },
+    "always": { "trailingSlash": "always" },
+    "base": { "basePath": "/app" },
+    "baseAlways": { "basePath": "/app", "trailingSlash": "always" },
+    "i18n": { "trailingSlash": "never", "i18n": { "locales": ["en", "ja"], "defaultLocale": "en" } },
+    "combo": { "basePath": "/app", "trailingSlash": "always", "i18n": { "locales": ["en", "ja"], "defaultLocale": "en", "prefixDefaultLocale": true } }
+  },
+  "expand": [
+    { "config": "root", "path": "/blog", "paths": ["/blog", "/blog/"] },
+    { "config": "root", "path": "/", "paths": ["/"] },
+    { "config": "root", "path": "/blog?page=2#top", "paths": ["/blog", "/blog/"] },
+    { "config": "root", "path": "/blog/héllo", "paths": ["/blog/h%C3%A9llo", "/blog/h%C3%A9llo/"] },
+    { "config": "root", "path": "/a/../b", "paths": ["/b", "/b/"] },
+    { "config": "never", "path": "/blog/", "paths": ["/blog"] },
+    { "config": "always", "path": "/blog", "paths": ["/blog/"] },
+    { "config": "always", "path": "/feed.xml", "paths": ["/feed.xml"] },
+    { "config": "base", "path": "/", "paths": ["/app", "/app/"] },
+    { "config": "base", "path": "/blog", "paths": ["/app/blog", "/app/blog/"] },
+    { "config": "baseAlways", "path": "/", "paths": ["/app/"] },
+    { "config": "i18n", "path": "/about", "paths": ["/about", "/ja/about"] },
+    { "config": "i18n", "path": "/ja/about", "paths": ["/about", "/ja/about"] },
+    { "config": "i18n", "path": "/", "paths": ["/", "/ja"] },
+    { "config": "combo", "path": "/about", "paths": ["/app/en/about/", "/app/ja/about/"] },
+    { "config": "combo", "path": "/", "paths": ["/app/en/", "/app/ja/"] }
+  ],
+  "validTags": ["posts", "post:42", "café", "a%b"],
+  "invalidTags": ["", "two words", "a,b", "tab\there", "new\nline"],
+  "validPaths": ["/", "/blog", "/blog?x=1", "/ja/about"],
+  "invalidPaths": ["", "blog", "//evil.com", "/\\evil", "https://x.test/"]
+}
