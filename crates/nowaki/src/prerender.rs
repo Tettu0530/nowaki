@@ -56,9 +56,10 @@ fn available_parallelism() -> usize {
 pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     // Checked before building: the build writes dist/, and clearing `out` must never reach it.
     let clear_out = check_out(&root, &out)?;
+    let plugin_host = crate::plugins::spawn(&root, true)?;
     let env_check = crate::env_schema::start(&root)?;
-    let config = crate::site::config(&root)?;
-    let _plugin_host = crate::plugins::start(&root)?;
+    let (_plugin_host, config) = plugin_host.finish()?;
+    let config = config?;
     let mut core = NowakiCore::new(root.clone());
     if let Some(host) = &_plugin_host {
         core.set_plugins(host.bridge.clone());

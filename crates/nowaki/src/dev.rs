@@ -40,22 +40,19 @@ pub struct DevState {
 pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<()> {
     let started = Instant::now();
 
-    crate::typegen::write(&root).ok();
-    // nowaki.config is read through Node while the sidecar and plugin host start, and joined
-    // before serving: routing (.nowaki/routing.json) must be in place for the first request.
-    let config = {
-        let root = root.clone();
-        std::thread::spawn(move || crate::site::config(&root))
-    };
-
+    // The plugin host imports nowaki.config (plugins, and the build-time config site-config.mjs
+    // normalizes) while typegen runs and the sidecar starts; it's waited for before serving:
+    // routing (.nowaki/routing.json) must be in place for the first request.
+    let plugin_host = crate::plugins::spawn(&root, true)?;
     // env.ts is checked in Node while the sidecar and plugin host start.
     let env_check = crate::env_schema::start(&root)?;
+    crate::typegen::write(&root).ok();
 
     let live_hub = crate::live::LiveHub::new();
     let errors = crate::mcp::ErrorLog::new(&root);
     let sidecar = sidecar::spawn(&root, port, live_hub.clone(), errors.clone()).await?;
 
-    let plugin_host = crate::plugins::start(&root)?;
+    let (plugin_host, config) = plugin_host.finish()?;
     let mut core = NowakiCore::new(root.clone());
     if let Some(ph) = &plugin_host {
         core.set_plugins(ph.bridge.clone());
@@ -65,13 +62,10 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
     crate::env_schema::finish(env_check, &mut core)?;
 
     // An invalid config is reported (site-config.mjs printed why) and dev runs without it.
-    let config = config
-        .join()
-        .map_err(|_| anyhow::anyhow!("reading nowaki.config panicked"))?
-        .unwrap_or_else(|e| {
-            eprintln!("[nowaki] {e:#}");
-            serde_json::Value::Object(Default::default())
-        });
+    let config = config.unwrap_or_else(|e| {
+        eprintln!("[nowaki] {e:#}");
+        serde_json::Value::Object(Default::default())
+    });
     if let Err(e) = crate::site::write_dev(&root, &config) {
         eprintln!("[nowaki] {e:#}");
     }
