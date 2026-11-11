@@ -5,17 +5,14 @@ updates:
     schedule:
       interval: weekly
     groups:
+      # All oxc crates in one PR: they release in lockstep. A new oxc can raise its minimum Rust
+      # version; the MSRV job fails then, and the PR raises `rust-version` and that job with it.
       oxc:
         patterns: ["oxc*"]
       rust-deps:
         patterns: ["*"]
         exclude-patterns: ["oxc*"]
         update-types: [minor, patch]
-    ignore:
-      # oxc 0.147+ needs a newer Rust than our MSRV (1.95), and 0.156 breaks nowaki-core's API use.
-      # Lift this together with the MSRV bump and the port (ROADMAP v0.19: "Upgrade oxc to the latest release").
-      - dependency-name: "oxc"
-        versions: [">=0.147"]
 
   - package-ecosystem: npm
     directory: /

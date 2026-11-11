@@ -545,12 +545,16 @@ fn transform_for_server(
             _ => None,
         };
         let Some(lit) = source_lit else { continue };
+        // A specifier with a lone surrogate isn't a path or package name: left as written.
+        let Some(mut spec) = lit.value.as_str() else {
+            continue;
+        };
         // React packages → preact/compat (left bare for Node to resolve).
-        if let Some(aliased) = crate::resolve::alias_specifier(lit.value.as_str()) {
+        if let Some(aliased) = crate::resolve::alias_specifier(spec) {
             lit.value = allocator.alloc_str(aliased).into();
             lit.raw = None;
+            spec = aliased;
         }
-        let spec = lit.value.as_str();
         // Inline virtual modules as data: (assumed self-contained ESM).
         if !spec.starts_with('.') && !spec.starts_with('/') && !spec.contains("://") {
             if let Some(data) = core.virtual_ssr_module(dir, spec) {
@@ -666,10 +670,12 @@ struct DynamicImportSpecs<'a> {
 impl<'a> VisitMut<'a> for DynamicImportSpecs<'a> {
     fn visit_import_expression(&mut self, it: &mut ImportExpression<'a>) {
         if let Expression::StringLiteral(lit) = &mut it.source {
-            let spec = lit.value.as_str();
-            let rewritten = match crate::resolve::alias_specifier(spec) {
-                Some(aliased) => Some(aliased.to_string()),
-                None => rewrite_server_spec(spec),
+            let rewritten = match lit.value.as_str() {
+                Some(spec) => match crate::resolve::alias_specifier(spec) {
+                    Some(aliased) => Some(aliased.to_string()),
+                    None => rewrite_server_spec(spec),
+                },
+                None => None,
             };
             if let Some(rewritten) = rewritten {
                 lit.value = self.allocator.alloc_str(&rewritten).into();
@@ -1120,11 +1126,19 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
             _ => None,
         };
         let Some(lit) = source_lit else { continue };
-        if let Some(aliased) = crate::resolve::alias_specifier(lit.value.as_str()) {
+        // A specifier with a lone surrogate can't name a file or package.
+        let Some(mut spec) = lit.value.as_str() else {
+            return Err(anyhow!(
+                "failed to resolve {} (from {})",
+                lit.value.display(),
+                dir.display()
+            ));
+        };
+        if let Some(aliased) = crate::resolve::alias_specifier(spec) {
             lit.value = allocator.alloc_str(aliased).into();
             lit.raw = None;
+            spec = aliased;
         }
-        let spec = lit.value.as_str();
         let remote = core
             .resolve_remote_image(spec)
             .transpose()

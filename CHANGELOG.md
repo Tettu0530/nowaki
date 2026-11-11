@@ -10,6 +10,19 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Upgrade notes
+- **Building Nowaki from source needs Rust 1.97 or newer** (was 1.95), because oxc 0.158
+  does. `rust-version` and the MSRV CI job are 1.97. The npm packages are unaffected.
+
+### Changed
+- Dependencies: `oxc` 0.146 → 0.158 (`oxc_resolver` stays at 11.24.3, the latest). oxc
+  string literals are now `JSStr`, which can hold a lone surrogate; `nowaki-core` leaves an
+  import specifier with one as written (the client build reports it as unresolvable) and
+  refuses one in `export const scripts`. Output is unchanged apart from the minifier, which
+  turns some early `return` / `continue` into `if` / `else` and folds a negated `&&`: the
+  lazy router chunks shrink by 6 bytes gzip and the live runtime by 11 (first-load JS of the
+  size benchmark is unchanged). Source maps map a few more names.
+
 ## [0.18.2] — 2026-11-11 · patch
 
 Packages: `nowaki` / `nowaki-core` 0.18.2, `@nowaki-dev/runtime` 0.17.2 (types and docs

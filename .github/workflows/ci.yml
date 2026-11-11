@@ -53,7 +53,7 @@ jobs:
       - run: cargo test --workspace --locked
 
   msrv:
-    name: MSRV (Rust 1.95)
+    name: MSRV (Rust 1.97)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -62,7 +62,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
         with:
-          rust: "1.95"
+          rust: "1.97"
           install: "false"
       - run: cargo check --workspace --all-targets --locked
 

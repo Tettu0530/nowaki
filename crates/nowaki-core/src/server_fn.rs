@@ -327,7 +327,8 @@ fn export_name_str(n: &ModuleExportName) -> String {
     match n {
         ModuleExportName::IdentifierName(i) => i.name.to_string(),
         ModuleExportName::IdentifierReference(i) => i.name.to_string(),
-        ModuleExportName::StringLiteral(s) => s.value.to_string(),
+        // Export names must be well-formed Unicode (an early error otherwise), so `display` is exact.
+        ModuleExportName::StringLiteral(s) => s.value.display().to_string(),
     }
 }
 
