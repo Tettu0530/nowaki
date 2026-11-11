@@ -4,6 +4,7 @@
 // (used on Edge too); the signing render is injected.
 
 import { isCrossSite } from "./origin.mjs";
+import { logError } from "./log.mjs";
 
 export const LIVE_EVENT_PATH = "/__nowaki/live-event";
 
@@ -35,6 +36,7 @@ export async function dispatchLiveEvent(ctx, info, live) {
   if (!name) return errBody(400, "Bad Request");
   const mod = await live.lookup(name, info.version);
   if (!mod) return errBody(404, "Not Found");
+  const tok = ctx.__trace?.begin(null, `live ${name}`);
   try {
     const { html, state, sig } = await live.render(
       mod,
@@ -49,8 +51,10 @@ export async function dispatchLiveEvent(ctx, info, live) {
     if (err?.code === "NOWAKI_LIVE_STALE") return errBody(409, "stale");
     if (err?.code === "NOWAKI_LIVE_SIG") return errBody(403, "Forbidden");
     if (err?.name === "LiveForbiddenError") return errBody(403, "forbidden");
-    console.error(`[nowaki live] ${name} event failed:`, err);
+    logError(`${name} event failed:`, err, { scope: "live", trace: ctx.__trace });
     return errBody(500, "Internal Server Error");
+  } finally {
+    ctx.__trace?.end(tok);
   }
 }
 

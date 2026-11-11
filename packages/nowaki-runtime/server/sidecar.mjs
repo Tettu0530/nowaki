@@ -12,6 +12,8 @@ import { resolveSite } from "./seo.mjs";
 import { compileI18n } from "./i18n.mjs";
 import { loadEnv } from "./env.mjs";
 import { requestOrigin } from "./origin.mjs";
+import { traceFromEnv } from "./trace.mjs";
+import { HEALTH_BODY, HEALTH_HEADERS, HEALTH_PATH } from "./health.mjs";
 
 // load .env before routes so routes/loaders can read process.env
 loadEnv();
@@ -325,8 +327,14 @@ const env = {
 };
 // Dev has no ISR cache: revalidate*() calls are only recorded (dev-info `revalidations`).
 setRevalidateEnv(env);
+// Server-Timing is always on in dev (OTEL_* still decides about spans).
+env.trace = traceFromEnv(process.env, { timing: true });
 
 const server = createServer(async (req, res) => {
+  if (req.url === HEALTH_PATH) {
+    res.writeHead(200, HEALTH_HEADERS).end(HEALTH_BODY);
+    return;
+  }
   if (req.method === "GET" && req.url.split("?")[0] === "/__nowaki/dev-info") {
     try {
       const version = new URL(req.url, "http://localhost").searchParams.get("v") ?? "0";

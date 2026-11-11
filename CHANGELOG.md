@@ -57,6 +57,34 @@ milestone's worth of work; the codename is noted per entry.
   element that should morph into the next page's (a list card into the detail page). Pages
   without the export render byte-identical HTML; the code is in the lazy router chunk
   (+276 bytes gzip), and first-load JS is unchanged.
+- **Observability.** All of it is off unless asked for, and costs a request one check when off.
+  - **Server-Timing**: on in `nowaki dev`, opt-in elsewhere with `NOWAKI_SERVER_TIMING=1`
+    (timings can tell a visitor something, such as whether a lookup found a user). The handler
+    reports `mw`, `loader`, `render` and `action`; `nowaki start` adds `isr;desc=HIT|STALE|MISS`
+    and `total`. An ISR hit carries only its own entries, never the timings of the render that
+    filled the cache. A streamed page has what was known when its headers went out.
+  - **JSON logs**: with `NOWAKI_LOG=json`, the Rust front and the Node runtime write one JSON
+    object per line (`time`, `level`, `msg`, `source`, plus `trace_id` / `span_id` inside a
+    traced request and the error with its stack), and `nowaki start` adds an access log line per
+    request. Sidecar lines that are already JSON pass through unchanged. Errors still reach
+    clients as generic messages.
+  - **OpenTelemetry traces**, exported as OTLP/HTTP JSON when `OTEL_EXPORTER_OTLP_ENDPOINT` or
+    `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set (and `OTEL_SDK_DISABLED` isn't true), honoring
+    `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_TRACES_SAMPLER` / `_ARG`. The
+    exporters are built in (Rust and a fetch-based JS one that also runs on the Cloudflare
+    worker), so there are no new dependencies; spans are batched in a bounded queue and dropped
+    when it is full, never holding up a request. On `nowaki start` one request is one trace: a
+    SERVER span `GET <route>` in Rust (under an incoming `traceparent`), a CLIENT span to the
+    sidecar, and the sidecar's SERVER span with `middleware`, `loader`, `render`, `action`,
+    server function and live event spans under it. Jetstream WebSocket events and publish
+    refreshes get a trace of their own. When the app registered a tracer with
+    `@opentelemetry/api`, the runtime creates its spans there instead. The Rust exporter speaks
+    plain HTTP (point it at a local collector); an `https://` endpoint turns off the Rust spans
+    with a warning, and the Node exporter still sends its own.
+  - **`GET /__nowaki/health`** (also under `basePath`): `{"status":"ok"}`, never cached, with no
+    data in it. `nowaki start` answers it in Rust with 200 while the sidecar answers a ping (1 s
+    timeout, cached for 1 s) and 503 otherwise; the node, bun, deno, Vercel and Cloudflare
+    adapters answer it before routing.
 
 ### Changed
 - Dependencies: `oxc` 0.146 → 0.158 (`oxc_resolver` stays at 11.24.3, the latest). oxc

@@ -145,6 +145,8 @@ jobs:
         run: node scripts/handler-test.mjs
       - name: On-demand revalidation (purge encoding vs the shared fixture, tags, purge on the response, endpoint)
         run: node scripts/revalidate-test.mjs
+      - name: Observability (traceparent / sampler / OTLP shape vs the shared fixture, Server-Timing, exporter, OTel API bridge, JSON logs)
+        run: node scripts/otel-test.mjs
       - name: i18n (locale split and localePath against the shared fixture, hreflang, per-locale content)
         run: node scripts/i18n-test.mjs
       - name: Sessions (encryption, tampering, expiry, key rotation, store mode, CSRF read-only)

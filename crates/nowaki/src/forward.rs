@@ -88,19 +88,39 @@ pub fn passes(name: &HeaderName, trust: bool) -> bool {
 /// Copy the client's headers onto a sidecar request, minus the ones it must not control, plus
 /// canonical `x-forwarded-host` / `x-forwarded-proto`.
 pub fn apply(
-    mut builder: reqwest::RequestBuilder,
+    builder: reqwest::RequestBuilder,
     headers: &HeaderMap,
     trust: bool,
 ) -> reqwest::RequestBuilder {
+    apply_traced(builder, headers, trust, None)
+}
+
+/// [`apply`], with `traceparent` (the front's CLIENT span, `obs.rs`) replacing the client's own
+/// `traceparent` / `tracestate`: the sidecar's spans are children of the front's, which already has
+/// the client's span as its parent.
+pub fn apply_traced(
+    mut builder: reqwest::RequestBuilder,
+    headers: &HeaderMap,
+    trust: bool,
+    traceparent: Option<String>,
+) -> reqwest::RequestBuilder {
+    let traced = traceparent.is_some();
     for (name, value) in headers.iter() {
-        if passes(name, trust) {
+        if passes(name, trust) && !(traced && is_trace_context(name)) {
             builder = builder.header(name, value);
         }
+    }
+    if let Some(tp) = traceparent {
+        builder = builder.header("traceparent", tp);
     }
     if let Some(host) = public_host(headers, trust) {
         builder = builder.header("x-forwarded-host", host);
     }
     builder.header("x-forwarded-proto", public_proto(headers, trust))
+}
+
+fn is_trace_context(name: &HeaderName) -> bool {
+    name.as_str() == "traceparent" || name.as_str() == "tracestate"
 }
 
 #[cfg(test)]
@@ -195,6 +215,37 @@ mod tests {
     }
 
     #[test]
+    fn a_traced_request_replaces_the_client_traceparent() {
+        let h = map(&[
+            ("host", "app.example"),
+            (
+                "traceparent",
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            ),
+            ("tracestate", "vendor=x"),
+        ]);
+        let client = reqwest::Client::new();
+        let ours = "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01".to_string();
+        let req = apply_traced(
+            client.get("http://127.0.0.1/"),
+            &h,
+            false,
+            Some(ours.clone()),
+        )
+        .build()
+        .unwrap();
+        let tps: Vec<_> = req.headers().get_all("traceparent").iter().collect();
+        assert_eq!(tps, vec![ours.as_str()]);
+        assert!(req.headers().get("tracestate").is_none());
+        // Untraced, the client's trace context passes as before.
+        let req = apply(client.get("http://127.0.0.1/"), &h, false)
+            .build()
+            .unwrap();
+        assert_eq!(req.headers().get_all("traceparent").iter().count(), 1);
+        assert!(req.headers().get("tracestate").is_some());
+    }
+
+    #[test]
     fn live_render_is_internal() {
         assert!(is_internal_path("/__nowaki/live-render"));
         assert!(is_internal_path("/__nowaki/live-render/x"));
@@ -207,5 +258,7 @@ mod tests {
         assert!(!is_internal_path("/__nowaki/mcpx"));
         // Client-facing (behind NOWAKI_REVALIDATE_SECRET), so it is proxied.
         assert!(!is_internal_path("/__nowaki/revalidate"));
+        // Public, answered by start.rs itself (the sidecar's copy is only pinged by Rust).
+        assert!(!is_internal_path("/__nowaki/health"));
     }
 }

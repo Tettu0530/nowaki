@@ -160,5 +160,11 @@ check("config rewrite renders the destination on the edge", (await (await req("/
 const forged = await (await req("/about", { headers: { "x-nowaki-route-path": "/env" } })).text();
 check("client x-nowaki-route-path is ignored on the edge", forged.includes("<h1>About</h1>") && !forged.includes("token length"));
 
+// /__nowaki/health on the worker: answered before routing and env.ts, never cached, no data.
+const health = await req("/__nowaki/health");
+check("health on the edge: 200 {status:ok}, no-store, security headers",
+  health.status === 200 && (await health.text()) === '{"status":"ok"}' && health.headers.get("cache-control") === "no-store" && secure(health));
+check("no Server-Timing on the edge unless NOWAKI_SERVER_TIMING is set", !(await req("/")).headers.has("server-timing"));
+
 console.log(failures ? `\nEDGE HANDLER TEST FAILED (${failures})` : "\nEDGE HANDLER TEST PASSED");
 process.exit(failures ? 1 : 0);

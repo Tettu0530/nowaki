@@ -190,14 +190,14 @@ ${routingJson ? routedFetch(routingJson.trim()) : plainFetch()}`;
 /// The worker's fetch without a routing config.
 function plainFetch() {
   return `export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     // Static files go to the Assets binding (dist/worker/assets: dist/client under _nowaki/, and
     // public/ at the top).
     if (env.ASSETS && (url.pathname.startsWith("/_nowaki/") || ((request.method === "GET" || request.method === "HEAD") && isPublic(url.pathname)))) {
       return withSecurityHeaders(await env.ASSETS.fetch(request));
     }
-    return handler(request, env);
+    return handler(request, env, undefined, ctx);
   },
 };
 `;
@@ -212,7 +212,7 @@ import { frontHeaders, frontLocale, frontStep, withHeaderDefaults, withVary } fr
 const rules = compileRules(${routing});
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const headers = rules ? frontHeaders(rules, url.pathname) : [];
     const step = rules && frontStep(rules, request.method, url);
@@ -230,12 +230,12 @@ export default {
       const r = new Response(null, { status: locale.redirect.status, headers: { ...locale.headers, location: locale.redirect.location } });
       return withSecurityHeaders(withHeaderDefaults(r, headers));
     }
-    const response = await serve(request, env, url, step, headers);
+    const response = await serve(request, env, url, step, headers, ctx);
     return locale ? withVary(response) : response;
   },
 };
 
-async function serve(request, env, url, step, headers) {
+async function serve(request, env, url, step, headers, ctx) {
   const routePath = step ? step.routePath : url.pathname;
   // Static files go to the Assets binding (dist/worker/assets: dist/client under
   // <basePath>/_nowaki/, and public/ under basePath), looked up by the route path.
@@ -245,8 +245,8 @@ async function serve(request, env, url, step, headers) {
     return withSecurityHeaders(withHeaderDefaults(await env.ASSETS.fetch(asset), headers));
   }
   // A /__nowaki/* endpoint under basePath: the handler dispatches it by the root URL.
-  if (step?.internal) return handler(new Request(new URL(routePath + url.search, url), request), env, { headers });
-  return handler(request, env, { routePath: step ? routePath : undefined, headers });
+  if (step?.internal) return handler(new Request(new URL(routePath + url.search, url), request), env, { headers }, ctx);
+  return handler(request, env, { routePath: step ? routePath : undefined, headers }, ctx);
 }
 `;
 }

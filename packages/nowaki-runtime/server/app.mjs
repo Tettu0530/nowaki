@@ -26,6 +26,9 @@ import { compileRules } from "./rules.mjs";
 import { compileI18n } from "./i18n.mjs";
 import { LOCALE_VARY, frontHeaders, frontLocale, frontStep, withVaryHeaders } from "./front.mjs";
 import { setBasePath } from "./base-path.mjs";
+import { traceFromEnv } from "./trace.mjs";
+import { logError } from "./log.mjs";
+import { HEALTH_BODY, HEALTH_HEADERS, isHealth } from "./health.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
 // Bun and Deno don't implement Node's module.register; their SSR keeps the old behavior.
@@ -272,6 +275,8 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
   if (rules) env.trailingSlash = rules.trailing;
   // i18n: null without it (handler.mjs checks it once per request).
   env.i18n = compileI18n(routing);
+  // Server-Timing (NOWAKI_SERVER_TIMING=1) and OpenTelemetry (OTEL_*): null when both are off.
+  env.trace = traceFromEnv(process.env, { runtime: globalThis.Bun ? "bun" : globalThis.Deno ? "deno" : "node" });
 
   const handle = async (req, res) => {
     // Set before the response's own headers, which override any of these by name.
@@ -307,6 +312,11 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
           localeVary = true;
           res.setHeader("vary", LOCALE_VARY);
         }
+      }
+
+      if (isHealth(req.method, pathname)) {
+        res.writeHead(200, HEALTH_HEADERS).end(req.method === "HEAD" ? undefined : HEALTH_BODY);
+        return;
       }
 
       if (pathname.startsWith("/_nowaki/")) {
@@ -354,7 +364,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
       if (localeVary) result.headers = withVaryHeaders(result.headers);
       await sendResult(res, applyCsp(result));
     } catch (err) {
-      console.error("[nowaki]", err);
+      logError("", err);
       res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
       res.end("Internal Server Error");
     }
