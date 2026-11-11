@@ -54,7 +54,10 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), "nowaki-sourcemap-e2e-"));
 const children = new Set();
 process.on("exit", () => {
   for (const c of children) c.kill("SIGKILL");
-  rmSync(tmp, { recursive: true, force: true });
+  try {
+    // Windows can still hold the dir of a just-killed server (EBUSY); a leftover temp dir isn't a failure.
+    rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  } catch {}
 });
 process.on("SIGINT", () => process.exit(130));
 
@@ -78,7 +81,8 @@ for (const [file, text] of Object.entries(FILES)) {
   writeFileSync(path.join(app, file), text);
 }
 linkModules(path.join(ROOT, "examples/hello/node_modules"), path.join(app, "node_modules"));
-const realApp = realpathSync(app);
+// .native expands Windows 8.3 short names (RUNNER~1), as the paths in Node stacks are.
+const realApp = realpathSync.native(app);
 
 const get = (port, p) =>
   new Promise((resolve) => {
@@ -118,11 +122,14 @@ function frameFor(log, file, line) {
     if (process.platform === "win32") p = p.replace(/^\/([A-Za-z]:)/, "$1");
     p = decodeURIComponent(p);
     try {
-      p = realpathSync(p);
+      p = realpathSync.native(p);
     } catch {
       return false; // not a file on disk: the path is wrong
     }
-    return path.normalize(p) === path.normalize(want) && Number(loc[2]) === line;
+    const same = process.platform === "win32"
+      ? path.normalize(p).toLowerCase() === path.normalize(want).toLowerCase()
+      : path.normalize(p) === path.normalize(want);
+    return same && Number(loc[2]) === line;
   });
 }
 
