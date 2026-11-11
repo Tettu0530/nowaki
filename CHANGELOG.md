@@ -229,6 +229,14 @@ benchmark (uncached, ISR, CSP, build, dev) found no regression.
   types `env` and `import.meta.env` from the schemas. Public names must start
   with `PUBLIC_` and server names must not. New core API:
   `NowakiCore::set_public_env`.
+### Added
+- **`nowaki prerender --skip-build`:** render static HTML from an existing
+  `nowaki build` output (`dist/`) without re-running the transform, content
+  index, or route JS budgets. Routing for requests and static `_redirects` /
+  `_headers` comes from the built `dist/server/routing.json`. With `env.ts`, the
+  check must pass and every `PUBLIC_*` value must match
+  `dist/server/env-public.json` (what the client bundle inlined); app source or
+  public env changes require a new build.
 - **i18n routing.** With `i18n: { locales: ["en", "ja"], defaultLocale: "en" }`
   in nowaki.config, every locale except the default is a URL prefix
   (`/ja/about`); the default has none (`/about`), and `/en/about` redirects

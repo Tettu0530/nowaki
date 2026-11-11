@@ -53,30 +53,39 @@ fn available_parallelism() -> usize {
 }
 
 /// Static site generation: build → start a temporary prod server → render each static route to HTML → write out.
-pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
+/// With `skip_build`, the transform/content steps are skipped and existing `dist/` is used (must be from `nowaki build`).
+pub async fn run(root: PathBuf, out: PathBuf, skip_build: bool) -> Result<()> {
     // Checked before building: the build writes dist/, and clearing `out` must never reach it.
     let clear_out = check_out(&root, &out)?;
-    let plugin_host = crate::plugins::spawn(&root, true)?;
-    let env_check = crate::env_schema::start(&root)?;
-    let (_plugin_host, config) = plugin_host.finish()?;
-    let config = config?;
-    let mut core = NowakiCore::new(root.clone());
-    if let Some(host) = &_plugin_host {
-        core.set_plugins(host.bridge.clone());
+    if skip_build {
+        ensure_built(&root)?;
+        let env_check = crate::env_schema::start(&root)?;
+        crate::env_schema::finish_skip_build(env_check, &root)?;
+        println!("[nowaki] prerender: using existing dist/ (--skip-build)");
+    } else {
+        // The plugin host also reads and checks nowaki.config, alongside the env.ts check.
+        let plugin_host = crate::plugins::spawn(&root, true)?;
+        let env_check = crate::env_schema::start(&root)?;
+        let (_plugin_host, config) = plugin_host.finish()?;
+        let config = config?;
+        let mut core = NowakiCore::new(root.clone());
+        if let Some(host) = &_plugin_host {
+            core.set_plugins(host.bridge.clone());
+        }
+        // env.ts: validated before the build, which inlines its public values.
+        crate::env_schema::finish(env_check, &mut core)?;
+        crate::remote_images::configure(&mut core, &root, &config)?;
+        crate::site::configure(&mut core, &config)?;
+        let (report, client) = core.build_with_client(&root.join("dist"))?;
+        println!(
+            "[nowaki] build: client {} / server {} modules",
+            report.modules, report.server_modules
+        );
+        crate::content::build(&root, &root.join("dist"), &config)?;
+        crate::site::write(&root.join("dist"), &config)?;
+        crate::fonts::build_dist(&root, &root.join("dist"), &config)?;
+        crate::check_route_budgets(&core, &report, &client)?;
     }
-    // env.ts: validated before the build, which inlines its public values.
-    crate::env_schema::finish(env_check, &mut core)?;
-    crate::remote_images::configure(&mut core, &root, &config)?;
-    crate::site::configure(&mut core, &config)?;
-    let (report, client) = core.build_with_client(&root.join("dist"))?;
-    println!(
-        "[nowaki] build: client {} / server {} modules",
-        report.modules, report.server_modules
-    );
-    crate::content::build(&root, &root.join("dist"), &config)?;
-    crate::site::write(&root.join("dist"), &config)?;
-    crate::fonts::build_dist(&root, &root.join("dist"), &config)?;
-    crate::check_route_budgets(&core, &report, &client)?;
     let routing_file = root.join("dist/server/routing.json");
     let routing: nowaki_core::rules::RoutingConfig = match std::fs::read_to_string(&routing_file) {
         Ok(text) => serde_json::from_str(&text)?,
@@ -348,6 +357,24 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         stop_prod_server(server).await;
     }
     println!("[nowaki] prerender done: {count} pages → {}", out.display());
+    Ok(())
+}
+
+/// `dist/client` and `dist/server/routes` must exist (`nowaki build` output).
+fn ensure_built(root: &Path) -> Result<()> {
+    let dist = root.join("dist");
+    if !dist.join("client/manifest.json").is_file() {
+        anyhow::bail!(
+            "Not built yet. Run `nowaki build {}` first, or omit --skip-build.",
+            root.display()
+        );
+    }
+    if !dist.join("server/routes").is_dir() {
+        anyhow::bail!(
+            "dist/server/routes is missing (incomplete build). Run `nowaki build {}` first.",
+            root.display()
+        );
+    }
     Ok(())
 }
 
@@ -945,6 +972,18 @@ mod tests {
         assert!(check_out(&root, &root.join("./dist/site")).unwrap());
         assert!(!check_out(&root, &root.join("public-site")).unwrap());
         assert!(!check_out(&root, &root.join("distro")).unwrap());
+    }
+
+    #[test]
+    fn skip_build_requires_a_prior_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert!(ensure_built(root).is_err());
+        std::fs::create_dir_all(root.join("dist/client")).unwrap();
+        std::fs::write(root.join("dist/client/manifest.json"), "{}").unwrap();
+        assert!(ensure_built(root).is_err());
+        std::fs::create_dir_all(root.join("dist/server/routes")).unwrap();
+        ensure_built(root).unwrap();
     }
 
     #[test]
