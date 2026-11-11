@@ -91,3 +91,10 @@ export function createPageCache({ ttlMs = 30000, max = 32, now = () => Date.now(
     },
   };
 }
+
+// Whether a client navigation runs as a View Transition: something opted in (the link, the page
+// left or the page entered), the browser has document.startViewTransition, and the visitor doesn't
+// prefer reduced motion. Otherwise the router swaps the page synchronously, as without them.
+export function shouldTransition(optedIn, supported, reducedMotion) {
+  return !!optedIn && !!supported && !reducedMotion;
+}

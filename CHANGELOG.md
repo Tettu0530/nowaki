@@ -44,6 +44,20 @@ milestone's worth of work; the codename is noted per entry.
   is `client/refresh.js`, written for Nowaki on the public Preact API (Preact 10 and 11, no
   new dependency) on top of oxc's React Refresh transform, which `nowaki-core` applies only
   to dev browser modules of the app (`NowakiCore::set_dev_refresh`). Builds are unchanged.
+- **View Transitions in the client router (opt-in).** `<Link viewTransition>` (or
+  `data-nowaki-transition` on an `<a>` or an element around links) runs that navigation inside
+  `document.startViewTransition`; `export const viewTransition = true` on a route does it for
+  every navigation to and from the page and adds `@view-transition { navigation: auto }`, so full
+  page loads between such pages (zero-JS pages, static output) transition too. Slot modals
+  (intercepting routes) transition the same way. The transition carries the type `forward` or
+  `back`. It is skipped when the browser lacks the API, the visitor prefers reduced motion, or
+  the browser already animated a back gesture; the page is then swapped as before. Hydration,
+  page scripts and `nowaki:page-load` run after the new page is in, and a navigation superseded
+  during a transition swaps nothing. `transitionName(name)` from
+  `@nowaki-dev/runtime/navigation` returns a `style` with a valid `view-transition-name`, for an
+  element that should morph into the next page's (a list card into the detail page). Pages
+  without the export render byte-identical HTML; the code is in the lazy router chunk
+  (+276 bytes gzip), and first-load JS is unchanged.
 
 ### Changed
 - Dependencies: `oxc` 0.146 → 0.158 (`oxc_resolver` stays at 11.24.3, the latest). oxc

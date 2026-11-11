@@ -75,6 +75,13 @@ fi
 # NOT eagerly preloaded (it loads on idle, keeping first-load JS small).
 curl -sf http://127.0.0.1:3300/ | grep -q 'id="nowaki-runtime"[^>]*data-router='
 ! curl -s http://127.0.0.1:3300/ | grep -qE 'modulepreload[^>]*/router\.[0-9a-f]+\.js'
+# View Transitions are opt-in per route: `export const viewTransition` puts the router's <meta> and
+# the cross-document @view-transition style in the head region; other pages get neither.
+curl -sf http://127.0.0.1:3300/vt | grep -q '<meta name="nowaki-view-transition" content="1" />'
+curl -sf http://127.0.0.1:3300/vt | grep -q '<style>@media (prefers-reduced-motion:no-preference){@view-transition{navigation:auto}}</style>'
+curl -sf http://127.0.0.1:3300/vt | grep -q '<a id="vt-island-ssr" href="/about" data-nowaki-transition>'
+! curl -s http://127.0.0.1:3300/ | grep -qE 'nowaki-view-transition|@view-transition|data-nowaki-transition'
+! curl -s http://127.0.0.1:3300/about | grep -qE 'nowaki-view-transition|@view-transition'
 curl -sf http://127.0.0.1:3300/live | grep -q 'nowaki-live name="LiveCounter"'
 curl -sf http://127.0.0.1:3300/live | grep -q 'live\.'  # live.js script
 # v0.8 server functions in production: allowlist written, no impl leaked to

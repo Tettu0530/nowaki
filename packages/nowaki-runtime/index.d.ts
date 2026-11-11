@@ -464,3 +464,15 @@ export declare class ServerFnError extends Error {
   readonly status: number;
   readonly data?: unknown;
 }
+
+/**
+ * `export const viewTransition = true` on a page route: client navigations to and from the page
+ * run as View Transitions (`document.startViewTransition`), and full page loads between two such
+ * pages get a cross-document one (`@view-transition { navigation: auto }`), also on pages that
+ * ship no JS. Skipped when the browser lacks the API or the visitor prefers reduced motion. For a
+ * single link, use `<Link viewTransition>` (or `data-nowaki-transition` on an `<a>`) instead, and
+ * `transitionName()` from `@nowaki-dev/runtime/navigation` to morph an element into the next
+ * page's. Off by default: a page without it gets nothing added to its HTML.
+ * @example export const viewTransition = true;
+ */
+export type ViewTransition = boolean;

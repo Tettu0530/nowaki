@@ -359,6 +359,22 @@ code locations and CI coverage.
   `scriptPreload`), counted by `budget.rs`. The tags come from `handler.mjs`
   `withScripts` via `env.routeScripts` (`app.mjs`, `web.mjs`, dev `sidecar.mjs`);
   `client/router.js` `loadPageScripts` + `nowaki:page-load` on navigation.
+- **View Transitions (opt-in)** — per link: `<Link viewTransition>` (`navigation.js`) renders
+  `data-nowaki-transition`, which the router also honours on a plain `<a>` or an ancestor. Per
+  route: `export const viewTransition = true`; `document.mjs` `pageMeta` appends
+  `<meta name="nowaki-view-transition">` and a `@view-transition { navigation: auto }` style
+  (cross-document, inside `prefers-reduced-motion: no-preference`) to the head region, so it
+  reaches every front that uses `pageMeta` (dev `render.mjs`, `prodDocument` / `prodShell`,
+  `prod-sidecar.mjs` → `start.rs::assemble`) and is nonced like any other `<style>`. Without the
+  export the HTML is byte-identical. Client: `client/router.js` `apply` → `swap` wraps the DOM
+  swap (title, `syncHead`, body or slot) in `document.startViewTransition` when
+  `router-core.js` `shouldTransition` agrees (opted in, API present, no reduced motion); hydration,
+  page scripts and `nowaki:page-load` run after `updateCallbackDone`, and the `navToken` check
+  runs inside the update callback. Types `forward` / `back` (`history.state.i` orders entries;
+  skipped on `hasUAVisualTransition`). `transitionName()` in `navigation.js` gives a `style` its
+  `viewTransitionName`. All of it is in the lazy router chunk (`lazyBytes`, budget +350 B gzip).
+  Tests: `scripts/router-test.mjs`, `scripts/router-browser-test.mjs` (also with
+  `NOWAKI_CSP=enforce` and `BASE=…/app`), `scripts/ci/e2e-{dev,prod,adapters}.sh` (`/vt`).
 - **`public/`** — rules (path safety, dotfiles, reserved prefixes, content types) in
   `crates/nowaki-core/src/public.rs`; copied to `dist/public` by `build_with_client`.
   Served by `dev.rs` `serve_public` (straight from `public/`), `start.rs`
