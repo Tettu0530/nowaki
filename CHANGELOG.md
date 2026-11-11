@@ -233,6 +233,11 @@ benchmark (uncached, ISR, CSP, build, dev) found no regression.
   is unchanged: servers use the request's path and static output `x/index.html` with a slash.
 - An error while saving a request's session (a store failure, a cookie over 4 KB) now renders
   the 500 page instead of escaping the request handler.
+- **`nowaki prerender`:** above 256 pages (default), up to one Node render
+  worker per CPU receives pages round-robin; output order is unchanged. Override
+  the cutoff with `NOWAKI_PRERENDER_POOL_THRESHOLD` (`0` keeps a single worker).
+  Cap workers with `NOWAKI_PRERENDER_WORKERS` (each worker loads the full server
+  build and content collections in memory).
 - `localePath` from `@nowaki-dev/runtime/navigation` returns an `Href` when given a static route
   or a `route()` href, so `<Link href={localePath(route("/photo/[id]", { id }))}>` type-checks
   once `nowaki typegen` has registered the routes. Before, the `string` it returned was refused

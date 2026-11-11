@@ -6,10 +6,51 @@ use futures_util::StreamExt;
 use nowaki_core::rules::{I18nConfig, TrailingSlash};
 use nowaki_core::NowakiCore;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 
 /// Pages requested from the temporary prod server at once.
 const PRERENDER_JOBS: usize = 8;
+
+/// Use multiple Node render workers when the page count is at least this many (`NOWAKI_PRERENDER_POOL_THRESHOLD=0` disables the pool).
+const DEFAULT_POOL_THRESHOLD: usize = 256;
+
+struct ProdServer {
+    child: Child,
+    port: u16,
+    drain: tokio::task::JoinHandle<()>,
+}
+
+/// How many Node `start.mjs` processes to run for HTML rendering (always 1 below the pool threshold).
+fn render_worker_count(
+    page_count: usize,
+    pool_threshold: usize,
+    parallelism: usize,
+    max_workers: Option<usize>,
+) -> usize {
+    if pool_threshold == 0 || page_count < pool_threshold {
+        return 1;
+    }
+    let cap = max_workers.unwrap_or(parallelism).max(1);
+    page_count.min(cap).max(1)
+}
+
+fn pool_settings() -> (usize, Option<usize>) {
+    let threshold = std::env::var("NOWAKI_PRERENDER_POOL_THRESHOLD")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_POOL_THRESHOLD);
+    let max_workers = std::env::var("NOWAKI_PRERENDER_WORKERS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n > 0);
+    (threshold, max_workers)
+}
+
+fn available_parallelism() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+}
 
 /// Static site generation: build → start a temporary prod server → render each static route to HTML → write out.
 /// With `skip_build`, the transform/content steps are skipped and existing `dist/` is used (must be from `nowaki build`).
@@ -65,79 +106,61 @@ pub async fn run(root: PathBuf, out: PathBuf, skip_build: bool) -> Result<()> {
         ));
     }
 
-    let mut child = Command::new("node")
-        .arg("--enable-source-maps")
-        .arg(&entry)
-        .current_dir(&root)
-        .env("PORT", "0")
-        // Static pages: live islands render their first HTML without live.js (see app.mjs).
-        .env("NOWAKI_PRERENDER", "1")
-        // Exits with this process, however it ends (server/exit-with-parent.mjs).
-        .env("NOWAKI_EXIT_WITH_PARENT", "1")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .kill_on_drop(true)
-        .spawn()
-        .context("failed to start node")?;
-
-    let stdout = child.stdout.take().expect("piped stdout");
-    let ready = async move {
-        let mut reader = BufReader::new(stdout);
-        let mut line = Vec::new();
-        loop {
-            line.clear();
-            if reader.read_until(b'\n', &mut line).await? == 0 {
-                return Err(anyhow!("prod server exited without reporting READY"));
-            }
-            let text = String::from_utf8_lossy(&line);
-            if let Some(rest) = text.trim_end().strip_prefix("NOWAKI_START_READY ") {
-                let port = rest.trim().parse::<u16>().context("failed to parse port")?;
-                return Ok((port, reader));
-            }
-            print!("{text}"); // the app's own logs
-        }
-    };
-    // Both are Node processes that only read dist/; starting them together hides one Node startup.
-    let (ready, dynamic_pages) = tokio::join!(ready, static_paths(&root));
-    let (port, mut server_out) = ready?;
-    // Keep draining the server's stdout for the whole run: Node writes to a pipe synchronously
-    // on Linux, so once app logs fill it (~64 KiB) the renderer would block and every request
-    // would hang. (stderr is inherited, so it's never a pipe of ours.)
-    let mut drain = tokio::spawn(async move {
-        let mut buf = vec![0u8; 16 * 1024];
-        let mut stdout = tokio::io::stdout();
-        let mut forward = true;
-        // Read to the end even if our own stdout goes away: the reading is what matters.
-        while let Ok(n @ 1..) = server_out.read(&mut buf).await {
-            if forward {
-                forward = stdout.write_all(&buf[..n]).await.is_ok();
-            }
-        }
-    });
+    // static-paths and route enumeration only read dist/; one Node server can start alongside them.
+    let routes_dir = root.join("dist/server/routes");
+    let (dynamic_pages, static_urls, first_server) = tokio::join!(
+        static_paths(&root),
+        async { nowaki_core::routes::enumerate_static_prerender_urls(&routes_dir) },
+        start_prod_server(&root, &entry),
+    );
+    let dynamic_pages = dynamic_pages?;
+    let static_urls = static_urls?;
+    let first_server = first_server?;
 
     let i18n = read_i18n(&routing_file);
-    let mut pages: Vec<(String, PathBuf)> = locale_urls(
-        i18n.as_ref(),
-        nowaki_core::routes::enumerate_static_prerender_urls(&root.join("dist/server/routes"))?,
-    )
-    .into_iter()
-    .map(|url| {
-        let file = out_file_for(&out, &url, trailing);
-        (url, file)
-    })
-    .collect();
-    for (url, file, page) in dynamic_pages? {
+    let mut pages: Vec<(String, PathBuf)> = locale_urls(i18n.as_ref(), static_urls)
+        .into_iter()
+        .map(|url| {
+            let file = out_file_for(&out, &url, trailing);
+            (url, file)
+        })
+        .collect();
+    for (url, file, page) in dynamic_pages {
         let file = if page {
-            page_file(&file, trailing)
+            out.join(page_file(&file, trailing))
         } else {
-            file
+            out.join(file)
         };
-        pages.push((url, out.join(file)));
+        pages.push((url, file));
     }
     if pages.is_empty() {
         return Err(anyhow!("no static routes to prerender"));
     }
+
+    let (pool_threshold, max_workers) = pool_settings();
+    let workers = render_worker_count(
+        pages.len(),
+        pool_threshold,
+        available_parallelism(),
+        max_workers,
+    );
+    let mut servers = vec![first_server];
+    if workers > servers.len() {
+        let extra = futures_util::future::try_join_all(
+            (servers.len()..workers).map(|_| start_prod_server(&root, &entry)),
+        )
+        .await?;
+        servers.extend(extra);
+    }
+    if workers > 1 {
+        println!(
+            "[nowaki] prerender: {workers} Node render workers ({} pages, pool threshold {pool_threshold})",
+            pages.len()
+        );
+    }
+    let ports: Vec<u16> = servers.iter().map(|s| s.port).collect();
+    let primary_port = ports[0];
+    let render_jobs = workers.saturating_mul(PRERENDER_JOBS);
 
     // Don't follow redirects; skip non-200 responses.
     let client = reqwest::Client::builder()
@@ -148,13 +171,17 @@ pub async fn run(root: PathBuf, out: PathBuf, skip_build: bool) -> Result<()> {
         nowaki_core::build::clear_dir(&out)?;
     }
     std::fs::create_dir_all(&out)?;
-    // A few requests in flight keep the single-threaded renderer busy while Rust waits on the
+    // A few requests in flight keep each single-threaded renderer busy while Rust waits on the
     // socket and writes files (2 already saturates a plain app; I/O-bound loaders gain more).
-    // `buffered` keeps the original order, so logs and the first error stay deterministic.
-    let mut rendered = futures_util::stream::iter(&pages)
-        .map(|(url_path, file)| {
-            let client = &client;
-            let request = request_path(url_path);
+    // Round-robin workers when the pool is on; `buffered` keeps the original order, so logs and
+    // the first error stay deterministic.
+    let mut rendered = futures_util::stream::iter(pages.iter().enumerate())
+        .map(|(i, (url_path, file))| {
+            let client = client.clone();
+            let url_path = url_path.clone();
+            let file = file.clone();
+            let port = ports[i % ports.len()];
+            let request = request_path(&url_path);
             async move {
                 let resp = client
                     .get(format!("http://127.0.0.1:{port}{request}"))
@@ -179,17 +206,17 @@ pub async fn run(root: PathBuf, out: PathBuf, skip_build: bool) -> Result<()> {
                     tokio::fs::create_dir_all(parent).await?;
                 }
                 tokio::fs::write(file, bytes).await?;
-                Ok(Some((url_path.as_str(), live)))
+                Ok(Some((url_path, live)))
             }
         })
-        .buffered(PRERENDER_JOBS);
+        .buffered(render_jobs);
     let mut count = 0;
     let mut live_pages = Vec::new();
     while let Some(written) = rendered.next().await {
         if let Some((url, live)) = written? {
             count += 1;
             if live {
-                live_pages.push(url.to_string());
+                live_pages.push(url);
             }
         }
     }
@@ -212,7 +239,10 @@ pub async fn run(root: PathBuf, out: PathBuf, skip_build: bool) -> Result<()> {
             continue;
         }
         let resp = client
-            .get(format!("http://127.0.0.1:{port}{}", request_path(url)))
+            .get(format!(
+                "http://127.0.0.1:{primary_port}{}",
+                request_path(url)
+            ))
             .send()
             .await?;
         if resp.status().is_success() {
@@ -225,7 +255,10 @@ pub async fn run(root: PathBuf, out: PathBuf, skip_build: bool) -> Result<()> {
     // Rendered for /404, since a static page can't know the path that was actually requested.
     if root.join("dist/server/routes/_404.js").exists() {
         let resp = client
-            .get(format!("http://127.0.0.1:{port}{}", request_path("/404")))
+            .get(format!(
+                "http://127.0.0.1:{primary_port}{}",
+                request_path("/404")
+            ))
             .send()
             .await?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
@@ -234,7 +267,10 @@ pub async fn run(root: PathBuf, out: PathBuf, skip_build: bool) -> Result<()> {
         // i18n: one per locale directory, rendered in that locale.
         for (url, file) in locale_404s(i18n.as_ref()) {
             let resp = client
-                .get(format!("http://127.0.0.1:{port}{}", request_path(&url)))
+                .get(format!(
+                    "http://127.0.0.1:{primary_port}{}",
+                    request_path(&url)
+                ))
                 .send()
                 .await?;
             if resp.status() == reqwest::StatusCode::NOT_FOUND {
@@ -249,7 +285,9 @@ pub async fn run(root: PathBuf, out: PathBuf, skip_build: bool) -> Result<()> {
 
     // The SPA router fetches this once; a static host has no server to answer it.
     let boundaries = client
-        .get(format!("http://127.0.0.1:{port}/__nowaki/boundaries"))
+        .get(format!(
+            "http://127.0.0.1:{primary_port}/__nowaki/boundaries"
+        ))
         .send()
         .await?;
     if boundaries.status().is_success() {
@@ -311,15 +349,9 @@ pub async fn run(root: PathBuf, out: PathBuf, skip_build: bool) -> Result<()> {
         ),
     )?;
 
-    // Closing stdin ends the server (exit-with-parent.mjs); its last logs then reach EOF here.
-    // Killed on drop if it doesn't exit in time.
-    let grace = std::time::Duration::from_secs(5);
-    drop(child.stdin.take());
-    let _ = tokio::time::timeout(grace, child.wait()).await;
-    if tokio::time::timeout(grace, &mut drain).await.is_err() {
-        drain.abort();
+    for server in servers {
+        stop_prod_server(server).await;
     }
-    drop(child);
     println!("[nowaki] prerender done: {count} pages → {}", out.display());
     Ok(())
 }
@@ -340,6 +372,71 @@ fn ensure_built(root: &Path) -> Result<()> {
         );
     }
     Ok(())
+}
+
+async fn start_prod_server(root: &Path, entry: &Path) -> Result<ProdServer> {
+    let mut child = Command::new("node")
+        .arg("--enable-source-maps")
+        .arg(entry)
+        .current_dir(root)
+        .env("PORT", "0")
+        // Static pages: live islands render their first HTML without live.js (see app.mjs).
+        .env("NOWAKI_PRERENDER", "1")
+        // Exits with this process, however it ends (server/exit-with-parent.mjs).
+        .env("NOWAKI_EXIT_WITH_PARENT", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()
+        .context("failed to start node")?;
+
+    let stdout = child.stdout.take().expect("piped stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = Vec::new();
+    let port = loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line).await? == 0 {
+            return Err(anyhow!("prod server exited without reporting READY"));
+        }
+        let text = String::from_utf8_lossy(&line);
+        if let Some(rest) = text.trim_end().strip_prefix("NOWAKI_START_READY ") {
+            break rest.trim().parse::<u16>().context("failed to parse port")?;
+        }
+        print!("{text}"); // the app's own logs
+    };
+    let drain = spawn_stdout_drain(reader);
+    Ok(ProdServer { child, port, drain })
+}
+
+/// Keep draining the server's stdout for the whole run: Node writes to a pipe synchronously on
+/// Linux, so once app logs fill it (~64 KiB) the renderer would block and every request would hang.
+fn spawn_stdout_drain(
+    mut server_out: BufReader<tokio::process::ChildStdout>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut buf = vec![0u8; 16 * 1024];
+        let mut stdout = tokio::io::stdout();
+        let mut forward = true;
+        while let Ok(n @ 1..) = server_out.read(&mut buf).await {
+            if forward {
+                forward = stdout.write_all(&buf[..n]).await.is_ok();
+            }
+        }
+    })
+}
+
+async fn stop_prod_server(mut server: ProdServer) {
+    let grace = std::time::Duration::from_secs(5);
+    drop(server.child.stdin.take());
+    let _ = tokio::time::timeout(grace, server.child.wait()).await;
+    if tokio::time::timeout(grace, &mut server.drain)
+        .await
+        .is_err()
+    {
+        server.drain.abort();
+    }
+    drop(server.child);
 }
 
 /// Refuses an `--out` that is, contains, or sits inside a part of the build it renders from
@@ -722,6 +819,19 @@ fn copy_dir(from: &Path, to: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn render_worker_count_respects_threshold_and_cap() {
+        assert_eq!(render_worker_count(10, 256, 8, None), 1);
+        assert_eq!(render_worker_count(255, 256, 8, None), 1);
+        assert_eq!(render_worker_count(256, 256, 8, None), 8);
+        assert_eq!(render_worker_count(500, 256, 8, None), 8);
+        assert_eq!(render_worker_count(3, 256, 8, None), 1);
+        assert_eq!(render_worker_count(500, 256, 4, Some(2)), 2);
+        assert_eq!(render_worker_count(1, 256, 8, Some(4)), 1);
+        assert_eq!(render_worker_count(500, 0, 8, None), 1);
+        assert_eq!(render_worker_count(10_000, 100, 6, None), 6);
+    }
 
     #[test]
     fn out_may_not_be_or_contain_the_build() {
