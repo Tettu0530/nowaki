@@ -10,6 +10,10 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Upgrade notes
+- **Building Nowaki from source needs Rust 1.97 or newer** (was 1.95), because oxc 0.158
+  does. `rust-version` and the MSRV CI job are 1.97. The npm packages are unaffected.
+
 ### Added
 - **On-demand revalidation.** `revalidatePath(path)` and `revalidateTag(tag)` from
   `@nowaki-dev/runtime` purge ISR pages, and `export const tags` (an array, or a function of
@@ -25,11 +29,6 @@ milestone's worth of work; the codename is noted per entry.
   the calls; static output and the deploy adapters ignore them for now (warned once).
 - Page actions and API routes now run inside the request context, so `getContext()` works there.
 
-### Upgrade notes
-- **Building Nowaki from source needs Rust 1.97 or newer** (was 1.95), because oxc 0.158
-  does. `rust-version` and the MSRV CI job are 1.97. The npm packages are unaffected.
-
-### Added
 - HMR keeps island state (Fast Refresh). In `nowaki dev`, editing an island, or a module
   that only islands import, swaps the components in place: hook state survives, and a
   changed hook list (an added or removed hook) remounts that component. Only the edited
