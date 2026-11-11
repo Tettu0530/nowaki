@@ -46,10 +46,22 @@ pub struct RedirectRule {
     pub destination: String,
     #[serde(default = "default_status")]
     pub status: u16,
+    /// With i18n configured, `false` matches the source against the path with its locale prefix
+    /// and leaves the destination as written. Default `true`: see [`Rules::apply`].
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub locale: bool,
 }
 
 fn default_status() -> u16 {
     307
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -58,6 +70,9 @@ pub struct RewriteRule {
     pub source: String,
     /// An internal path only.
     pub destination: String,
+    /// See [`RedirectRule::locale`].
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub locale: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -65,6 +80,9 @@ pub struct RewriteRule {
 pub struct HeaderRule {
     pub source: String,
     pub headers: Vec<Header>,
+    /// See [`RedirectRule::locale`].
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub locale: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -151,6 +169,8 @@ struct Destination {
 struct Rule<T> {
     index: usize,
     segs: Vec<Seg>,
+    /// `locale: false`: matched against the path with its locale prefix.
+    raw: bool,
     target: T,
 }
 
@@ -159,6 +179,8 @@ struct RuleSet<T> {
     rules: Vec<Rule<T>>,
     /// All-literal sources: decoded segments joined by `/` → first rule index.
     literals: HashMap<String, usize>,
+    /// The same for `locale: false` rules (looked up with the locale prefix kept).
+    raw_literals: HashMap<String, usize>,
     /// Indexes into `rules` of the other sources, in order.
     patterns: Vec<usize>,
 }
@@ -169,8 +191,8 @@ struct Redirect {
     dest: Destination,
 }
 
-/// A header rule's source and its `(lowercase name, value)` pairs.
-type HeaderSet = (Vec<Seg>, Vec<(String, String)>);
+/// A header rule's source, its `(lowercase name, value)` pairs, and `locale: false`.
+type HeaderSet = (Vec<Seg>, Vec<(String, String)>, bool);
 
 /// Compiled rules. Build with [`Rules::compile`]; [`Rules::is_empty`] means a front can skip
 /// them entirely.
@@ -182,6 +204,16 @@ pub struct Rules {
     rewrites: RuleSet<Destination>,
     headers: Vec<HeaderSet>,
     detect: Option<Detect>,
+    /// `i18n`, when configured: rule sources match the path without its locale prefix.
+    locales: Option<Locales>,
+}
+
+/// The configured locales, for matching rules without the locale prefix.
+#[derive(Debug, Clone)]
+struct Locales {
+    locales: Vec<String>,
+    default: usize,
+    prefix_default: bool,
 }
 
 /// `i18n` with `detect: true`.
@@ -229,11 +261,22 @@ impl Rules {
                 }
                 pairs.push((key.to_ascii_lowercase(), value.clone()));
             }
-            headers.push((segs, pairs));
+            headers.push((segs, pairs, !h.locale));
         }
         let detect = match &config.i18n {
             Some(i18n) if i18n.detect => Some(compile_detect(i18n)?),
             _ => None,
+        };
+        let locales = match &config.i18n {
+            Some(i18n) => {
+                let d = compile_detect(i18n)?;
+                Some(Locales {
+                    locales: d.locales,
+                    default: d.default,
+                    prefix_default: d.prefix_default,
+                })
+            }
+            None => None,
         };
         Ok(Rules {
             base,
@@ -242,6 +285,7 @@ impl Rules {
             rewrites,
             headers,
             detect,
+            locales,
         })
     }
 
@@ -308,6 +352,13 @@ impl Rules {
 
     /// Applies basePath, the trailing-slash policy, then the first matching redirect, then the
     /// first matching rewrite. `path` is the raw (percent-encoded) request path.
+    ///
+    /// With i18n configured, sources match the path without its locale prefix (`/ja/login` as
+    /// `/login`), unless the rule has `locale: false`. An internal redirect destination becomes
+    /// the destination's URL in the request's locale (no prefix for the default locale unless
+    /// `prefixDefaultLocale`); a rewrite destination gets the request's locale prefix back, so the
+    /// renderer sees the locale. A destination whose first segment is a configured locale is left
+    /// as written.
     pub fn apply(&self, method: &str, path: &str) -> Outcome {
         if self.no_rules() {
             return Outcome::Pass(path.to_string());
@@ -340,9 +391,20 @@ impl Rules {
                 });
             }
         }
-        if let Some((rule, params)) = find_rule(&self.redirects, &decoded) {
+        let hit = self.locale_hit(p);
+        let localized = if hit.is_some() {
+            &decoded[1..]
+        } else {
+            &decoded[..]
+        };
+        if let Some((rule, params)) = find_rule(&self.redirects, localized, &decoded) {
             let dest = &rule.target.dest;
-            let path = substitute(&dest.segs, &params);
+            let mut path = substitute(&dest.segs, &params);
+            if dest.origin.is_empty() && !rule.raw {
+                if let Some(l) = self.redirect_locale(hit, &dest.segs) {
+                    path = with_locale(l, &path);
+                }
+            }
             let location = if dest.origin.is_empty() {
                 format!("{}{}", self.browser_path(&path, dest.slash), dest.tail)
             } else if dest.bare {
@@ -356,10 +418,36 @@ impl Rules {
                 location,
             });
         }
-        if let Some((rule, params)) = find_rule(&self.rewrites, &decoded) {
-            return guard(Outcome::Rewrite(substitute(&rule.target.segs, &params)));
+        if let Some((rule, params)) = find_rule(&self.rewrites, localized, &decoded) {
+            let mut path = substitute(&rule.target.segs, &params);
+            if let (Some(i), false, Some(l)) = (hit, rule.raw, &self.locales) {
+                if !starts_with_locale(l, &rule.target.segs) {
+                    path = with_locale(&l.locales[i], &path);
+                }
+            }
+            return guard(Outcome::Rewrite(path));
         }
         Outcome::Pass(p.to_string())
+    }
+
+    /// The configured locale (an index) the route path `p` starts with. Compared on the raw first
+    /// segment, as the handler's `splitLocale` does, so `/%6Aa/x` and `//ja/x` carry no locale.
+    fn locale_hit(&self, p: &str) -> Option<usize> {
+        let l = self.locales.as_ref()?;
+        let first = p.get(1..)?.split('/').next().filter(|s| !s.is_empty())?;
+        l.locales.iter().position(|x| x == first)
+    }
+
+    /// The locale prefix an internal redirect destination gets: the request's locale, `None` for
+    /// the default locale without `prefixDefaultLocale` (and without i18n, or when the destination
+    /// already names a locale).
+    fn redirect_locale(&self, hit: Option<usize>, dest: &[Seg]) -> Option<&str> {
+        let l = self.locales.as_ref()?;
+        if starts_with_locale(l, dest) {
+            return None;
+        }
+        let i = hit.unwrap_or(l.default);
+        (i != l.default || l.prefix_default).then(|| l.locales[i].as_str())
     }
 
     /// The config headers for a request path, in rule order; a later rule wins for the same
@@ -369,11 +457,20 @@ impl Rules {
         if self.headers.is_empty() {
             return out;
         }
-        let Some(decoded) = self.strip_base(path).and_then(|(p, _)| decode_parts(p)) else {
+        let Some((p, _)) = self.strip_base(path) else {
             return out;
         };
-        for (segs, pairs) in &self.headers {
-            if match_segments(segs, &decoded).is_none() {
+        let Some(decoded) = decode_parts(p) else {
+            return out;
+        };
+        let localized = if self.locale_hit(p).is_some() {
+            &decoded[1..]
+        } else {
+            &decoded[..]
+        };
+        for (segs, pairs, raw) in &self.headers {
+            let parts = if *raw { &decoded[..] } else { localized };
+            if match_segments(segs, parts).is_none() {
                 continue;
             }
             for (k, v) in pairs {
@@ -426,6 +523,20 @@ impl Rules {
         }
         out
     }
+}
+
+/// `path` under `/<locale>` (`/` becomes `/<locale>`).
+fn with_locale(locale: &str, path: &str) -> String {
+    if path == "/" {
+        format!("/{locale}")
+    } else {
+        format!("/{locale}{path}")
+    }
+}
+
+/// Whether a destination's first segment is a configured locale, written literally.
+fn starts_with_locale(l: &Locales, dest: &[Seg]) -> bool {
+    matches!(dest.first(), Some(Seg::Lit(s)) if l.locales.contains(s))
 }
 
 /// `encodeURIComponent`, with `.` and `..` escaped so a capture can't step up a directory.
@@ -550,25 +661,38 @@ fn match_segments(segs: &[Seg], parts: &[String]) -> Option<HashMap<String, Capt
 }
 
 /// First matching rule in config order: a literal source by one map lookup, patterns in order.
+/// `localized` is `decoded` without its locale prefix (all of it without i18n); `locale: false`
+/// rules match `decoded`.
 fn find_rule<'a, T>(
     set: &'a RuleSet<T>,
+    localized: &[String],
     decoded: &[String],
 ) -> Option<(&'a Rule<T>, HashMap<String, Capture>)> {
     if set.rules.is_empty() {
         return None;
     }
     // A literal segment never holds "/", so a decoded %2F can't match one.
-    let best = if !set.literals.is_empty() && !decoded.iter().any(|p| p.contains('/')) {
-        set.literals.get(&decoded.join("/")).copied()
-    } else {
-        None
+    let lookup = |map: &HashMap<String, usize>, parts: &[String]| {
+        if map.is_empty() || parts.iter().any(|p| p.contains('/')) {
+            None
+        } else {
+            map.get(&parts.join("/")).copied()
+        }
+    };
+    let best = match (
+        lookup(&set.literals, localized),
+        lookup(&set.raw_literals, decoded),
+    ) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
     };
     for &i in &set.patterns {
         let rule = &set.rules[i];
         if best.is_some_and(|b| rule.index > b) {
             break;
         }
-        if let Some(params) = match_segments(&rule.segs, decoded) {
+        let parts = if rule.raw { decoded } else { localized };
+        if let Some(params) = match_segments(&rule.segs, parts) {
             return Some((rule, params));
         }
     }
@@ -910,6 +1034,7 @@ where
     let mut set = RuleSet {
         rules: Vec::new(),
         literals: HashMap::new(),
+        raw_literals: HashMap::new(),
         patterns: Vec::new(),
     };
     for (index, r) in list.iter().enumerate() {
@@ -922,15 +1047,22 @@ where
                 _ => None,
             })
             .collect();
+        let raw = !r.locale();
         match literal_segs {
             Some(literal_segs) => {
-                set.literals.entry(literal_segs.join("/")).or_insert(index);
+                let map = if raw {
+                    &mut set.raw_literals
+                } else {
+                    &mut set.literals
+                };
+                map.entry(literal_segs.join("/")).or_insert(index);
             }
             None => set.patterns.push(index),
         }
         set.rules.push(Rule {
             index,
             segs,
+            raw,
             target: t,
         });
     }
@@ -939,17 +1071,24 @@ where
 
 trait HasSource {
     fn source(&self) -> &str;
+    fn locale(&self) -> bool;
 }
 
 impl HasSource for RedirectRule {
     fn source(&self) -> &str {
         &self.source
     }
+    fn locale(&self) -> bool {
+        self.locale
+    }
 }
 
 impl HasSource for RewriteRule {
     fn source(&self) -> &str {
         &self.source
+    }
+    fn locale(&self) -> bool {
+        self.locale
     }
 }
 

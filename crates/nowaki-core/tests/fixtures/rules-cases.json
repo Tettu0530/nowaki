@@ -345,6 +345,216 @@
     },
     {"name": "error: detection with a defaultLocale outside locales", "config": {"i18n": {"locales": ["en", "ja"], "defaultLocale": "fr", "detect": true}}, "error": true},
     {"name": "error: detection with a locale that isn't a plain tag", "config": {"i18n": {"locales": ["en", "ja/../x"], "defaultLocale": "en", "detect": true}}, "error": true},
+    {
+      "name": "i18n: sources match the locale-stripped path, destinations get the locale back",
+      "config": {
+        "redirects": [
+          { "source": "/login-old", "destination": "/login", "status": 307 },
+          { "source": "/blog/[slug]", "destination": "/posts/[slug]", "status": 308 },
+          { "source": "/", "destination": "/home", "status": 307 },
+          { "source": "/ext", "destination": "https://example.com/x", "status": 307 },
+          { "source": "/to-ja", "destination": "/ja/welcome", "status": 307 }
+        ],
+        "rewrites": [
+          { "source": "/p/[id]", "destination": "/photo/[id]" },
+          { "source": "/old-root", "destination": "/" }
+        ],
+        "headers": [
+          { "source": "/login", "headers": [{ "key": "x-robots-tag", "value": "noindex" }] },
+          { "source": "/[...all]", "headers": [{ "key": "x-all", "value": "1" }] }
+        ],
+        "i18n": { "locales": ["en", "ja", "pt-BR"], "defaultLocale": "en" }
+      },
+      "requests": [
+        { "path": "/login-old", "expect": { "redirect": { "status": 307, "location": "/login" } } },
+        { "path": "/ja/login-old", "expect": { "redirect": { "status": 307, "location": "/ja/login" } } },
+        { "path": "/pt-BR/login-old", "expect": { "redirect": { "status": 307, "location": "/pt-BR/login" } } },
+        { "path": "/en/login-old", "expect": { "redirect": { "status": 307, "location": "/login" } } },
+        { "path": "/fr/login-old", "expect": { "pass": "/fr/login-old" } },
+        { "path": "/JA/login-old", "expect": { "pass": "/JA/login-old" } },
+        { "path": "/%6Aa/login-old", "expect": { "pass": "/%6Aa/login-old" } },
+        { "path": "//ja/login-old", "expect": { "pass": "//ja/login-old" } },
+        { "path": "/", "expect": { "redirect": { "status": 307, "location": "/home" } } },
+        { "path": "/ja", "expect": { "redirect": { "status": 307, "location": "/ja/home" } } },
+        { "path": "/ja/", "expect": { "redirect": { "status": 307, "location": "/ja/home" } } },
+        { "path": "/ja/blog/a", "expect": { "redirect": { "status": 308, "location": "/ja/posts/a" } } },
+        { "path": "/blog/a", "expect": { "redirect": { "status": 308, "location": "/posts/a" } } },
+        { "path": "/ja/ext", "expect": { "redirect": { "status": 307, "location": "https://example.com/x" } } },
+        { "path": "/to-ja", "expect": { "redirect": { "status": 307, "location": "/ja/welcome" } } },
+        { "path": "/ja/to-ja", "expect": { "redirect": { "status": 307, "location": "/ja/welcome" } } },
+        { "path": "/ja/p/1", "expect": { "rewrite": "/ja/photo/1" } },
+        { "path": "/p/1", "expect": { "rewrite": "/photo/1" } },
+        { "path": "/en/p/1", "expect": { "rewrite": "/en/photo/1" } },
+        { "path": "/ja/old-root", "expect": { "rewrite": "/ja" } },
+        { "path": "/old-root", "expect": { "rewrite": "/" } },
+        { "path": "/ja/photo/1", "expect": { "pass": "/ja/photo/1" } },
+        { "method": "POST", "path": "/ja/login-old", "expect": { "redirect": { "status": 307, "location": "/ja/login" } } },
+        { "path": "/ja/login", "expect": { "pass": "/ja/login" }, "headers": [["x-robots-tag", "noindex"], ["x-all", "1"]] },
+        { "path": "/login", "expect": { "pass": "/login" }, "headers": [["x-robots-tag", "noindex"], ["x-all", "1"]] },
+        { "path": "/en/login", "expect": { "pass": "/en/login" }, "headers": [["x-robots-tag", "noindex"], ["x-all", "1"]] },
+        { "path": "/fr/login", "expect": { "pass": "/fr/login" }, "headers": [["x-all", "1"]] },
+        { "path": "/ja/x", "expect": { "pass": "/ja/x" }, "headers": [["x-all", "1"]] }
+      ]
+    },
+    {
+      "name": "i18n: locale false matches the path with its locale prefix",
+      "config": {
+        "redirects": [
+          { "source": "/ja/old", "destination": "/ja/new", "status": 307, "locale": false },
+          { "source": "/old", "destination": "/new", "status": 307 },
+          { "source": "/raw/[x]", "destination": "/r/[x]", "status": 307, "locale": false }
+        ],
+        "rewrites": [{ "source": "/ja/p", "destination": "/x", "locale": false }],
+        "headers": [
+          { "source": "/ja/[...rest]", "headers": [{ "key": "x-ja", "value": "1" }], "locale": false },
+          { "source": "/ja/[...rest]", "headers": [{ "key": "x-stripped", "value": "1" }] }
+        ],
+        "i18n": { "locales": ["en", "ja"], "defaultLocale": "en" }
+      },
+      "requests": [
+        { "path": "/ja/old", "expect": { "redirect": { "status": 307, "location": "/ja/new" } } },
+        { "path": "/old", "expect": { "redirect": { "status": 307, "location": "/new" } } },
+        { "path": "/raw/1", "expect": { "redirect": { "status": 307, "location": "/r/1" } } },
+        { "path": "/ja/raw/1", "expect": { "pass": "/ja/raw/1" } },
+        { "path": "/ja/p", "expect": { "rewrite": "/x" } },
+        { "path": "/p", "expect": { "pass": "/p" } },
+        { "path": "/ja/a", "expect": { "pass": "/ja/a" }, "headers": [["x-ja", "1"]] },
+        { "path": "/ja/ja/a", "expect": { "pass": "/ja/ja/a" }, "headers": [["x-ja", "1"], ["x-stripped", "1"]] }
+      ]
+    },
+    {
+      "name": "i18n: config order across locale and locale false rules",
+      "config": {
+        "redirects": [
+          { "source": "/[x]", "destination": "/p/[x]", "status": 307 },
+          { "source": "/ja/b", "destination": "/lit", "status": 307, "locale": false },
+          { "source": "/c", "destination": "/c2", "status": 307 }
+        ],
+        "i18n": { "locales": ["en", "ja"], "defaultLocale": "en" }
+      },
+      "requests": [
+        { "path": "/ja/b", "expect": { "redirect": { "status": 307, "location": "/ja/p/b" } } },
+        { "path": "/ja/c", "expect": { "redirect": { "status": 307, "location": "/ja/p/c" } } },
+        { "path": "/ja", "expect": { "pass": "/ja" } }
+      ]
+    },
+    {
+      "name": "i18n with basePath and trailingSlash never",
+      "config": {
+        "basePath": "/app",
+        "trailingSlash": "never",
+        "redirects": [
+          { "source": "/a", "destination": "/b", "status": 307 },
+          { "source": "/", "destination": "/home", "status": 307 }
+        ],
+        "rewrites": [{ "source": "/p/[id]", "destination": "/photo/[id]" }],
+        "headers": [{ "source": "/login", "headers": [{ "key": "x-robots-tag", "value": "noindex" }] }],
+        "i18n": { "locales": ["en", "ja"], "defaultLocale": "en" }
+      },
+      "requests": [
+        { "path": "/app/ja/a", "expect": { "redirect": { "status": 307, "location": "/app/ja/b" } } },
+        { "path": "/app/a", "expect": { "redirect": { "status": 307, "location": "/app/b" } } },
+        { "path": "/app/ja/a/", "expect": { "redirect": { "status": 308, "location": "/app/ja/a" } } },
+        { "path": "/app/ja", "expect": { "redirect": { "status": 307, "location": "/app/ja/home" } } },
+        { "path": "/app/ja/", "expect": { "redirect": { "status": 308, "location": "/app/ja" } } },
+        { "path": "/app", "expect": { "redirect": { "status": 307, "location": "/app/home" } } },
+        { "path": "/app/ja/p/1", "expect": { "rewrite": "/ja/photo/1" } },
+        { "path": "/ja/a", "expect": { "notFound": true } },
+        { "path": "/app/ja/login", "expect": { "pass": "/ja/login" }, "headers": [["x-robots-tag", "noindex"]] },
+        { "path": "/app/login", "expect": { "pass": "/login" }, "headers": [["x-robots-tag", "noindex"]] },
+        { "path": "/ja/login", "expect": { "notFound": true }, "headers": [] }
+      ]
+    },
+    {
+      "name": "i18n with trailingSlash always",
+      "config": {
+        "trailingSlash": "always",
+        "redirects": [
+          { "source": "/a", "destination": "/b", "status": 307 },
+          { "source": "/old-root", "destination": "/", "status": 307 },
+          { "source": "/f", "destination": "/feed.xml", "status": 307 }
+        ],
+        "i18n": { "locales": ["en", "ja"], "defaultLocale": "en" }
+      },
+      "requests": [
+        { "path": "/ja/a", "expect": { "redirect": { "status": 308, "location": "/ja/a/" } } },
+        { "path": "/ja/a/", "expect": { "redirect": { "status": 307, "location": "/ja/b/" } } },
+        { "path": "/ja/old-root/", "expect": { "redirect": { "status": 307, "location": "/ja/" } } },
+        { "path": "/old-root/", "expect": { "redirect": { "status": 307, "location": "/" } } },
+        { "path": "/ja/f/", "expect": { "redirect": { "status": 307, "location": "/ja/feed.xml" } } }
+      ]
+    },
+    {
+      "name": "i18n with trailingSlash ignore keeps the destination's slash",
+      "config": {
+        "redirects": [{ "source": "/a", "destination": "/b/", "status": 307 }],
+        "i18n": { "locales": ["en", "ja"], "defaultLocale": "en" }
+      },
+      "requests": [
+        { "path": "/ja/a", "expect": { "redirect": { "status": 307, "location": "/ja/b/" } } },
+        { "path": "/ja/a/", "expect": { "redirect": { "status": 307, "location": "/ja/b/" } } },
+        { "path": "/a", "expect": { "redirect": { "status": 307, "location": "/b/" } } }
+      ]
+    },
+    {
+      "name": "i18n with prefixDefaultLocale",
+      "config": {
+        "redirects": [{ "source": "/a", "destination": "/b", "status": 307 }],
+        "rewrites": [{ "source": "/p/[id]", "destination": "/photo/[id]" }],
+        "i18n": { "locales": ["en", "ja"], "defaultLocale": "en", "prefixDefaultLocale": true }
+      },
+      "requests": [
+        { "path": "/en/a", "expect": { "redirect": { "status": 307, "location": "/en/b" } } },
+        { "path": "/a", "expect": { "redirect": { "status": 307, "location": "/en/b" } } },
+        { "path": "/ja/a", "expect": { "redirect": { "status": 307, "location": "/ja/b" } } },
+        { "path": "/en/p/1", "expect": { "rewrite": "/en/photo/1" } },
+        { "path": "/p/1", "expect": { "rewrite": "/photo/1" } }
+      ]
+    },
+    {
+      "name": "i18n: open redirect attempts under a locale stay on the site",
+      "config": {
+        "redirects": [
+          { "source": "/old/[...rest]", "destination": "/[...rest]", "status": 308 },
+          { "source": "/go/[to]", "destination": "/[to]", "status": 307 }
+        ],
+        "rewrites": [{ "source": "/r/[to]", "destination": "/[to]" }],
+        "i18n": { "locales": ["en", "ja"], "defaultLocale": "en" }
+      },
+      "requests": [
+        { "path": "/ja/old//evil.com", "expect": { "redirect": { "status": 308, "location": "/ja/evil.com" } } },
+        { "path": "/ja/old/%2F%2Fevil.com", "expect": { "redirect": { "status": 308, "location": "/ja/%2F%2Fevil.com" } } },
+        { "path": "/ja/go/%2F%2Fevil.com", "expect": { "redirect": { "status": 307, "location": "/ja/%2F%2Fevil.com" } } },
+        { "path": "/ja/go/%5C%5Cevil.com", "expect": { "redirect": { "status": 307, "location": "/ja/%5C%5Cevil.com" } } },
+        { "path": "/ja//go/%2F%2Fevil.com", "expect": { "redirect": { "status": 307, "location": "/ja/%2F%2Fevil.com" } } },
+        { "path": "/en/go/%2F%2Fevil.com", "expect": { "redirect": { "status": 307, "location": "/%2F%2Fevil.com" } } },
+        { "path": "/en/old//evil.com", "expect": { "redirect": { "status": 308, "location": "/evil.com" } } },
+        { "path": "/en/go/%5Cevil.com", "expect": { "redirect": { "status": 307, "location": "/%5Cevil.com" } } },
+        { "path": "/ja/go/..", "expect": { "redirect": { "status": 307, "location": "/ja/%2E%2E" } } },
+        { "path": "/ja/go/https:%2F%2Fevil.com", "expect": { "redirect": { "status": 307, "location": "/ja/https%3A%2F%2Fevil.com" } } },
+        { "path": "/ja/go/a%0D%0ASet-Cookie:%20x=1", "expect": { "redirect": { "status": 307, "location": "/ja/a%0D%0ASet-Cookie%3A%20x%3D1" } } },
+        { "path": "/ja/r/%2F%2Fevil.com", "expect": { "rewrite": "/ja/%2F%2Fevil.com" } },
+        { "path": "/en/r/%2F%2Fevil.com", "expect": { "rewrite": "/en/%2F%2Fevil.com" } },
+        { "path": "//ja/go/x", "expect": { "pass": "//ja/go/x" } }
+      ]
+    },
+    {
+      "name": "no i18n: locale-looking segments are plain segments, locale false changes nothing",
+      "config": {
+        "redirects": [
+          { "source": "/login-old", "destination": "/login", "status": 307 },
+          { "source": "/a", "destination": "/b", "status": 307, "locale": false }
+        ],
+        "headers": [{ "source": "/login", "headers": [{ "key": "x-robots-tag", "value": "noindex" }] }]
+      },
+      "requests": [
+        { "path": "/login-old", "expect": { "redirect": { "status": 307, "location": "/login" } } },
+        { "path": "/ja/login-old", "expect": { "pass": "/ja/login-old" } },
+        { "path": "/a", "expect": { "redirect": { "status": 307, "location": "/b" } } },
+        { "path": "/ja/login", "expect": { "pass": "/ja/login" }, "headers": [] }
+      ]
+    },
+    { "name": "error: i18n defaultLocale outside locales with rules", "config": { "redirects": [{ "source": "/a", "destination": "/b", "status": 307 }], "i18n": { "locales": ["en"], "defaultLocale": "ja" } }, "error": true },
     { "name": "error: destination param missing from source", "config": { "redirects": [{ "source": "/a/[x]", "destination": "/b/[y]", "status": 307 }] }, "error": true },
     { "name": "error: catch-all used as a single param", "config": { "rewrites": [{ "source": "/a/[...x]", "destination": "/b/[x]" }] }, "error": true },
     { "name": "error: catch-all not last", "config": { "redirects": [{ "source": "/a/[...x]/b", "destination": "/c", "status": 307 }] }, "error": true },

@@ -112,6 +112,25 @@ eq(
   "i18n defaults",
 );
 eq(
+  await routing({
+    redirects: [
+      { source: "/ja/a", destination: "/ja/b", locale: false },
+      { source: "/c", destination: "/d", locale: true },
+    ],
+    rewrites: [{ source: "/ja/p", destination: "/x", locale: false }],
+    headers: [{ source: "/ja/[...rest]", headers: { "x-a": "1" }, locale: false }],
+  }),
+  {
+    redirects: [
+      { source: "/ja/a", destination: "/ja/b", status: 307, locale: false },
+      { source: "/c", destination: "/d", status: 307 },
+    ],
+    rewrites: [{ source: "/ja/p", destination: "/x", locale: false }],
+    headers: [{ source: "/ja/[...rest]", headers: [{ key: "x-a", value: "1" }], locale: false }],
+  },
+  "locale: false is kept, true (the default) left out",
+);
+eq(
   (await normalizeConfig({ images: { remotePatterns: [{ protocol: "https", hostname: "Images.Example.com", pathname: "/photos/**" }] } }))
     .images,
   { remotePatterns: [{ protocol: "https", hostname: "images.example.com", pathname: "/photos/**" }] },
@@ -143,6 +162,9 @@ await rejects({ rewrites: [{ source: "/x", destination: "/__nowaki/live-render" 
 await rejects({ headers: [{ source: "/a", headers: { "x-a": "1\r\nSet-Cookie: s=1" } }] }, /CR, LF or NUL/, "CRLF header value");
 await rejects({ headers: [{ source: "/a", headers: { "x a": "1" } }] }, /header name/, "non-token header name");
 await rejects({ headers: [{ source: "/a", headers: {} }] }, /empty/, "empty headers");
+await rejects({ redirects: [{ source: "/a", destination: "/b", locale: "no" }] }, /locale must be a boolean/, "redirect locale must be a boolean");
+await rejects({ rewrites: [{ source: "/a", destination: "/b", locale: 0 }] }, /locale must be a boolean/, "rewrite locale must be a boolean");
+await rejects({ headers: [{ source: "/a", headers: { "x-a": "1" }, locale: null }] }, /locale must be a boolean/, "headers locale must be a boolean");
 await rejects({ i18n: { locales: ["en"], defaultLocale: "ja" } }, /defaultLocale/, "defaultLocale outside locales");
 await rejects({ i18n: { locales: ["en", "en_US"], defaultLocale: "en" } }, /locale tag/, "malformed locale tag");
 await rejects({ i18n: { locales: ["en", "EN"], defaultLocale: "en" } }, /twice/, "duplicate locale");

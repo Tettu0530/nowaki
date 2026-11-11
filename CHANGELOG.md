@@ -10,6 +10,22 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Changed
+- **Behavior change: with `i18n` configured, config `redirects` / `rewrites` / `headers`
+  are locale-aware.** A rule's source now matches the path without its locale prefix, so a
+  `/login` rule matches `/login` and `/ja/login` (before, only `/login`). An internal
+  redirect destination lands on that page in the request's locale (`/ja/old` → `/ja/new`;
+  `/en/old` → `/new` without `prefixDefaultLocale`), and a rewrite keeps the request's locale
+  prefix, so `ctx.locale` / `getLocale()` stay right after it. External destinations, and
+  destinations that start with a locale themselves, are kept as written. The new
+  `locale: false` field on a rule matches the path with the locale prefix (the 0.18.0
+  behavior) and leaves the destination as written. Without `i18n` nothing changes, and
+  routing.json is the same. Both engines (`nowaki_core::rules`, `server/rules.mjs`) share
+  the new fixture cases. Vercel gets one native redirect route per locale (plus the
+  unprefixed one) and header routes with an optional locale segment. Static `_redirects` /
+  `_headers` get a line or block per locale; a static host has no lookahead, so a source that
+  starts with a parameter also matches locale-prefixed paths there (the build warns).
+
 ## [0.18.0] — 2026-11-10 · "Sirocco": routing for real apps
 
 Packages: `nowaki` / `nowaki-core` 0.18.0 (crates.io, npm), `@nowaki-dev/runtime`
