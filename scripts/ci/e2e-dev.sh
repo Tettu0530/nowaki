@@ -274,6 +274,10 @@ curl -sf $B/virtual | grep -q 'nowaki-island name="VirtualBadge"'
 # typed navigation: <Link href> renders an <a href>, route() builds dynamic
 # hrefs (encoded params, catch-all joined with /).
 curl -sf $B/nav | grep -q '<a href="/about" data-testid="link-about">'
+# `export const viewTransition` in dev (render.mjs shares document.mjs pageMeta), and nothing on
+# pages without it
+curl -sf $B/vt | grep -q '<meta name="nowaki-view-transition" content="1" />'
+! curl -sf $B/about | grep -qE 'nowaki-view-transition|@view-transition'
 curl -sf $B/nav | grep -q 'href="/blog/hello" data-testid="link-blog"'
 curl -sf $B/nav | grep -q 'href="/files/docs/intro" data-testid="link-files"'
 
