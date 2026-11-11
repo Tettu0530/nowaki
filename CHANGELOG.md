@@ -10,28 +10,15 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **`href(path, { locale, basePath })`** from `@nowaki-dev/runtime/navigation` (and
+  `@nowaki-dev/runtime`): a path as the browser requests it, built the way `<Link>` builds its
+  href (the current locale, then basePath), for URLs `<Link>` doesn't build, such as
+  `<form action={href("/logout")}>`, `fetch` or `location`. `locale` picks another locale
+  (`false`: no prefix), `basePath: false` leaves the base out. Works on the server and in islands.
+  `examples/gallery` uses it instead of reading `import.meta.env.BASE_URL` by hand.
+
 ### Changed
-
-- `nowaki build`, `nowaki dev` and the static prerender read nowaki.config in one Node process:
-  the plugin host now also normalizes `site` / `fonts` / routing / `images` (what
-  `server/site-config.mjs` did in a second Node start and config import), and it starts before
-  typegen and the env.ts check instead of after them. In 0.18.0 an app with only `site` paid
-  for two Node starts in a row (site-config.mjs ≈ 29 ms, then the plugin host ≈ 45 ms); it now
-  pays for one, partly overlapped. Medians of 7 interleaved runs on a busy Apple M2:
-  `nowaki build` of a one-page `site`-only app 206 → 138 ms, `benchmarks/ci-perf-app`
-  338 → 273 ms; `nowaki dev` startup of the same apps 313 → 231 ms and 417 → 286 ms,
-  examples/hello 638 → 410 ms. A runtime older than this release still works (the CLI falls back
-  to site-config.mjs). Output is unchanged.
-
-### Fixed
-
-- Stack traces from `nowaki start` (and the adapters' Node servers) name the real source file.
-  The server build's inline source maps listed `sources` relative to the app root, which Node
-  resolves against each emitted file's directory, so a throw in
-  `routes/(account)/_middleware.ts` was reported at
-  `dist/server/routes/(account)/routes/(account)/_middleware.ts`. `sources` is now relative to the
-  emitted file (`../../../../routes/(account)/_middleware.ts`); dev SSR was already right. Covered
-  by `scripts/sourcemap-e2e.mjs` (start and dev).
 - **Behavior change: with `i18n` configured, config `redirects` / `rewrites` / `headers`
   are locale-aware.** A rule's source now matches the path without its locale prefix, so a
   `/login` rule matches `/login` and `/ja/login` (before, only `/login`). An internal
@@ -46,15 +33,16 @@ milestone's worth of work; the codename is noted per entry.
   unprefixed one) and header routes with an optional locale segment. Static `_redirects` /
   `_headers` get a line or block per locale; a static host has no lookahead, so a source that
   starts with a parameter also matches locale-prefixed paths there (the build warns).
-### Added
-- **`href(path, { locale, basePath })`** from `@nowaki-dev/runtime/navigation` (and
-  `@nowaki-dev/runtime`): a path as the browser requests it, built the way `<Link>` builds its
-  href (the current locale, then basePath), for URLs `<Link>` doesn't build, such as
-  `<form action={href("/logout")}>`, `fetch` or `location`. `locale` picks another locale
-  (`false`: no prefix), `basePath: false` leaves the base out. Works on the server and in islands.
-  `examples/gallery` uses it instead of reading `import.meta.env.BASE_URL` by hand.
-
-### Changed
+- `nowaki build`, `nowaki dev` and the static prerender read nowaki.config in one Node process:
+  the plugin host now also normalizes `site` / `fonts` / routing / `images` (what
+  `server/site-config.mjs` did in a second Node start and config import), and it starts before
+  typegen and the env.ts check instead of after them. In 0.18.0 an app with only `site` paid
+  for two Node starts in a row (site-config.mjs ≈ 29 ms, then the plugin host ≈ 45 ms); it now
+  pays for one, partly overlapped. Medians of 7 interleaved runs on a busy Apple M2:
+  `nowaki build` of a one-page `site`-only app 206 → 138 ms, `benchmarks/ci-perf-app`
+  338 → 273 ms; `nowaki dev` startup of the same apps 313 → 231 ms and 417 → 286 ms,
+  examples/hello 638 → 410 ms. A runtime older than this release still works (the CLI falls back
+  to site-config.mjs). Output is unchanged.
 - **`<Link>` keeps the current locale** when nowaki.config has `i18n`: on `/ja/x`,
   `<Link href="/about">` renders `/ja/about`. An href that already has a locale prefix keeps it,
   `locale="en"` switches as before, and `locale={false}` leaves the href as written (the base is
@@ -64,6 +52,13 @@ milestone's worth of work; the codename is noted per entry.
   such as `examples/hello`, ship the same bytes.
 
 ### Fixed
+- Stack traces from `nowaki start` (and the adapters' Node servers) name the real source file.
+  The server build's inline source maps listed `sources` relative to the app root, which Node
+  resolves against each emitted file's directory, so a throw in
+  `routes/(account)/_middleware.ts` was reported at
+  `dist/server/routes/(account)/routes/(account)/_middleware.ts`. `sources` is now relative to the
+  emitted file (`../../../../routes/(account)/_middleware.ts`); dev SSR was already right. Covered
+  by `scripts/sourcemap-e2e.mjs` (start and dev).
 - **i18n's per-request cost.** A localized request built the `data-nowaki-i18n` JSON and its
   escaped attribute string, and (with `site`) the hreflang tags, on every request, and went
   through an extra async function. They are now built once per locale (the attribute) and per
