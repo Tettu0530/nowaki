@@ -537,6 +537,67 @@ fn prerender_refuses_an_out_that_is_the_build() {
     }
 }
 
+#[test]
+fn prerender_skip_build_requires_dist() {
+    let root = example_root();
+    if !deps_installed(&root) {
+        eprintln!("skip: examples/hello deps not installed");
+        return;
+    }
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    let app = budget_app("{ js: 100 }");
+    let run = Command::new(bin)
+        .arg("prerender")
+        .arg(app.path())
+        .arg("--skip-build")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(!run.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("Not built yet"),
+        "must refuse without dist/: {stderr}"
+    );
+}
+
+#[test]
+fn prerender_skip_build_reuses_dist() {
+    let root = example_root();
+    if !deps_installed(&root) {
+        eprintln!("skip: examples/hello deps not installed");
+        return;
+    }
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    let app = budget_app("{ js: 100 }");
+    let built = Command::new(bin)
+        .arg("build")
+        .arg(app.path())
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let out = app.path().join("dist/static-skip");
+    let run = Command::new(bin)
+        .arg("prerender")
+        .arg(app.path())
+        .args(["--out", out.to_str().unwrap()])
+        .arg("--skip-build")
+        .output()
+        .unwrap();
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(run.status.success(), "{combined}");
+    assert!(combined.contains("--skip-build"), "{combined}");
+    assert!(out.join("index.html").is_file(), "{combined}");
+    assert!(out.join("about/index.html").is_file(), "{combined}");
+}
+
 /// An app that logs ~1 MiB to stdout per render: Node's pipe writes are synchronous on Linux,
 /// so prerender has to keep reading the server's stdout after READY or every request hangs. (On
 /// macOS Node buffers instead; there the test still checks that the logs are passed through.)
