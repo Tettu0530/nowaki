@@ -1,8 +1,9 @@
 name: Publish npm packages
 
-# Publishes the platform-independent npm packages (runtime / create-nowaki / create-nowaki-app).
+# Publishes the platform-independent npm packages (runtime / markdoc / create-nowaki / create-nowaki-app).
 # Per-platform CLI binaries are handled by release.yml.
-# Bump the version in package.json first, then run this workflow manually.
+# Bump the version in package.json first, then run this workflow manually. A version that is
+# already on npm is skipped (scripts/ci/npm-publish-if-new.sh), so `all` is safe after a partial bump.
 # Requires NPM_TOKEN (a 2FA-bypass Automation/Granular token) in repo Secrets.
 
 on:
@@ -15,6 +16,7 @@ on:
         options:
           - all
           - runtime
+          - markdoc
           - create-nowaki
           - create-nowaki-app
 
@@ -36,21 +38,28 @@ jobs:
 
       - name: Publish @nowaki-dev/runtime
         if: ${{ inputs.package == 'all' || inputs.package == 'runtime' }}
-        run: npm publish --access public
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/npm-publish-if-new.sh"
         working-directory: packages/nowaki-runtime
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @nowaki-dev/markdoc
+        if: ${{ inputs.package == 'all' || inputs.package == 'markdoc' }}
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/npm-publish-if-new.sh"
+        working-directory: packages/nowaki-markdoc
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish create-nowaki
         if: ${{ inputs.package == 'all' || inputs.package == 'create-nowaki' }}
-        run: npm publish --access public
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/npm-publish-if-new.sh"
         working-directory: packages/create-nowaki
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish create-nowaki-app
         if: ${{ inputs.package == 'all' || inputs.package == 'create-nowaki-app' }}
-        run: npm publish --access public
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/npm-publish-if-new.sh"
         working-directory: packages/create-nowaki-app
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

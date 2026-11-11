@@ -387,7 +387,7 @@ pub fn build_server(
                 .with_context(|| format!("failed to relativize: {}", path.display()))?;
             let out_path = server_dir.join(with_js_ext(rel));
             let source = core.read_source(path)?;
-            let code = transform_for_server(path, &source, core, &server_assets)?;
+            let code = transform_for_server(path, &out_path, &source, core, &server_assets)?;
             Ok((out_path, code))
         })
         .collect();
@@ -515,6 +515,7 @@ impl ServerAssets {
 
 fn transform_for_server(
     path: &Path,
+    out_path: &Path,
     source: &str,
     core: &NowakiCore,
     assets: &ServerAssets,
@@ -544,12 +545,16 @@ fn transform_for_server(
             _ => None,
         };
         let Some(lit) = source_lit else { continue };
+        // A specifier with a lone surrogate isn't a path or package name: left as written.
+        let Some(mut spec) = lit.value.as_str() else {
+            continue;
+        };
         // React packages → preact/compat (left bare for Node to resolve).
-        if let Some(aliased) = crate::resolve::alias_specifier(lit.value.as_str()) {
+        if let Some(aliased) = crate::resolve::alias_specifier(spec) {
             lit.value = allocator.alloc_str(aliased).into();
             lit.raw = None;
+            spec = aliased;
         }
-        let spec = lit.value.as_str();
         // Inline virtual modules as data: (assumed self-contained ESM).
         if !spec.starts_with('.') && !spec.starts_with('/') && !spec.contains("://") {
             if let Some(data) = core.virtual_ssr_module(dir, spec) {
@@ -641,11 +646,9 @@ fn transform_for_server(
     .visit_program(&mut program);
 
     // SSR isn't minified, so the inline source map is exact (for node --enable-source-maps).
-    // Don't expose absolute paths of out-of-root deps (dist/server isn't served, but kept consistent).
-    let rel = client_source_name(&core.root, path);
     let ret = Codegen::new()
         .with_options(CodegenOptions {
-            source_map_path: Some(rel),
+            source_map_path: Some(server_source_name(&core.root, path, out_path)),
             ..CodegenOptions::default()
         })
         .build(&program);
@@ -667,10 +670,12 @@ struct DynamicImportSpecs<'a> {
 impl<'a> VisitMut<'a> for DynamicImportSpecs<'a> {
     fn visit_import_expression(&mut self, it: &mut ImportExpression<'a>) {
         if let Expression::StringLiteral(lit) = &mut it.source {
-            let spec = lit.value.as_str();
-            let rewritten = match crate::resolve::alias_specifier(spec) {
-                Some(aliased) => Some(aliased.to_string()),
-                None => rewrite_server_spec(spec),
+            let rewritten = match lit.value.as_str() {
+                Some(spec) => match crate::resolve::alias_specifier(spec) {
+                    Some(aliased) => Some(aliased.to_string()),
+                    None => rewrite_server_spec(spec),
+                },
+                None => None,
             };
             if let Some(rewritten) = rewritten {
                 lit.value = self.allocator.alloc_str(&rewritten).into();
@@ -733,6 +738,27 @@ struct EmitCtx {
     asset_out: u64,
     /// The client entry being emitted (island or page script), for import-chain errors.
     entry: Option<PathBuf>,
+}
+
+/// `sources` entry of a server module's inline map: the source relative to the emitted file's
+/// directory (`../../../../routes/(account)/_middleware.ts` for
+/// `dist/server/routes/(account)/_middleware.js`), which is how Node's `--enable-source-maps`
+/// resolves it, so stack traces name the real file. Relative, so no absolute path is embedded.
+fn server_source_name(root: &Path, path: &Path, out_path: &Path) -> PathBuf {
+    let from: Vec<_> = out_path.parent().unwrap_or(out_path).components().collect();
+    let to: Vec<_> = path.components().collect();
+    let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    if common == 0 {
+        return client_source_name(root, path);
+    }
+    let mut parts: Vec<String> = vec!["..".to_string(); from.len() - common];
+    parts.extend(
+        to[common..]
+            .iter()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned()),
+    );
+    // `/` on every platform: a source map URL, not a native path.
+    PathBuf::from(parts.join("/"))
 }
 
 /// Name to put in the source map's `sources`. Made root-relative so the client .map doesn't
@@ -1100,11 +1126,19 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
             _ => None,
         };
         let Some(lit) = source_lit else { continue };
-        if let Some(aliased) = crate::resolve::alias_specifier(lit.value.as_str()) {
+        // A specifier with a lone surrogate can't name a file or package.
+        let Some(mut spec) = lit.value.as_str() else {
+            return Err(anyhow!(
+                "failed to resolve {} (from {})",
+                lit.value.display(),
+                dir.display()
+            ));
+        };
+        if let Some(aliased) = crate::resolve::alias_specifier(spec) {
             lit.value = allocator.alloc_str(aliased).into();
             lit.raw = None;
+            spec = aliased;
         }
-        let spec = lit.value.as_str();
         let remote = core
             .resolve_remote_image(spec)
             .transpose()
@@ -1218,4 +1252,34 @@ fn render_manifest(
         island_fields.join(",\n"),
         preload_fields.join(",\n")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    #[test]
+    fn server_source_names_resolve_from_the_emitted_file() {
+        let root = Path::new("/app");
+        let name = |src: &str, out: &str| {
+            super::server_source_name(root, Path::new(src), Path::new(out))
+                .to_string_lossy()
+                .into_owned()
+        };
+        assert_eq!(
+            name(
+                "/app/routes/(account)/_middleware.ts",
+                "/app/dist/server/routes/(account)/_middleware.js"
+            ),
+            "../../../../routes/(account)/_middleware.ts"
+        );
+        assert_eq!(
+            name("/app/env.ts", "/app/dist/server/env.js"),
+            "../../env.ts"
+        );
+        assert_eq!(
+            name("/app/lib/db.ts", "/elsewhere/server/lib/db.js"),
+            "../../../app/lib/db.ts"
+        );
+    }
 }

@@ -47,15 +47,16 @@ export function handleRequest(env, info) {
   return env.i18n ? localizedRequest(env, info) : routeRequest(env, info);
 }
 
-// `localized` ({ path, match }) comes from localizedRequest, which has split the locale off the
-// route path and matched the rest already.
+// `localized` (the localeState() of the request) comes from localizedRequest, which has split the
+// locale off the route path.
 async function routeRequest(env, info, localized) {
   const { method, url, version } = info;
   const table = await env.routeTable(version);
   // What routing, middleware and the 404 see; ctx.url stays the URL the browser asked for.
-  let path, match;
-  if (localized) ({ path, match } = localized);
-  else match = matchRoute(table.routes, (path = resolveRequestPath(env, info, url)));
+  const path = localized ? localized.path : resolveRequestPath(env, info, url);
+  let match = matchRoute(table.routes, path);
+  // With prefixDefaultLocale, an unprefixed page is a 404 (API and file routes still answer).
+  if (match && localized && !localized.prefixed && localized.i18n.prefixDefault && !match.isApi) match = null;
   const ctx = makeContext({ ...info, params: match?.params ?? {} });
   // The site's URL (NOWAKI_SITE / nowaki.config `site`), for absolute links in feeds and the like.
   // Parsed on first read: most requests never look at it.
@@ -160,7 +161,8 @@ function resolveRequestPath(env, info, url) {
 // prefix (`/en/about` without `prefixDefaultLocale`) redirects (308) to the unprefixed URL; with
 // `prefixDefaultLocale`, an unprefixed page is a 404 (API and file routes still answer) and `/`
 // redirects (307) to the default locale's root.
-async function localizedRequest(env, info) {
+// Not async, like handleRequest: routeRequest's promise is the request's.
+function localizedRequest(env, info) {
   const { url } = info;
   const routed = resolveRequestPath(env, info, url);
   // Framework endpoints (RPC, live events, boundaries) have no locale.
@@ -178,16 +180,15 @@ async function localizedRequest(env, info) {
     // `<base>/` under "always"), so the redirect lands on the canonical URL in one hop.
     const loc = browserPathFor(prefix === i18n.base ? i18n : { ...i18n, base: prefix }, s.path) + url.search;
     // `/en//evil.com` must not become a protocol-relative redirect.
-    if (!/^\/[/\\]/.test(loc)) return { status: 308, headers: { location: loc } };
+    if (!/^\/[/\\]/.test(loc)) return Promise.resolve({ status: 308, headers: { location: loc } });
   }
   if (prefix !== null && !s.prefixed && i18n.prefixDefault && s.path === "/") {
-    return { status: 307, headers: { location: browserPathFor(prefix === i18n.base ? i18n : { ...i18n, base: prefix }, `/${i18n.defaultLocale}`) + url.search } };
+    return Promise.resolve({ status: 307, headers: { location: browserPathFor(prefix === i18n.base ? i18n : { ...i18n, base: prefix }, `/${i18n.defaultLocale}`) + url.search } });
   }
-  const table = await env.routeTable(info.version);
-  let match = matchRoute(table.routes, s.path);
-  if (match && !s.prefixed && i18n.prefixDefault && !match.isApi) match = null;
-  const state = { locale: s.locale, i18n, path: s.path, prefix };
-  return runWithLocale(state, () => routeRequest(localizedEnv(env), { ...info, locale: s.locale }, { path: s.path, match }));
+  const state = { locale: s.locale, i18n, path: s.path, prefixed: s.prefixed, prefix };
+  // The caller's own object: one property instead of a copy of it per request.
+  info.locale = s.locale;
+  return runWithLocale(state, () => routeRequest(localizedEnv(env), info, state));
 }
 
 // The env of a localized request: documents get `<html lang>` from the locale (unless the page set
@@ -207,22 +208,56 @@ function localizedEnv(env) {
   return out;
 }
 
-function localeMeta(env, mod, meta) {
-  const st = localeState();
-  if (!st) return meta;
-  const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-  const next = { ...(meta ?? {}) };
-  if (typeof next.lang !== "string" && typeof mod?.lang !== "string") next.lang = st.locale;
-  const html = isObj(next.htmlAttrs) ? next.htmlAttrs : isObj(mod?.htmlAttrs) ? mod.htmlAttrs : {};
-  next.htmlAttrs = { ...html, "data-nowaki-i18n": clientI18n(st.i18n, st.locale) };
-  // hreflang needs absolute URLs, so only with a site URL: one built from the request's Host
-  // could end up in a shared (ISR, CDN) copy of the page.
-  if (st.prefix !== null && env.site) {
-    const tags = hreflangTags(localeAlternates(st.i18n, st.path), st.i18n.defaultLocale, {
+const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const hasKeys = (o) => {
+  for (const _ in o) return true;
+  return false;
+};
+
+// Built once per process instead of per request: the `<html data-nowaki-i18n>` attributes per
+// i18n config and locale, and the hreflang tags per env and route path (bounded, since paths come
+// from requests).
+const i18nAttrs = new WeakMap();
+const hreflangCache = new WeakMap();
+const HREFLANG_MAX = 2048;
+
+function localeAttrs(i18n, locale) {
+  let byLocale = i18nAttrs.get(i18n);
+  if (!byLocale) i18nAttrs.set(i18n, (byLocale = new Map()));
+  let attrs = byLocale.get(locale);
+  if (!attrs) byLocale.set(locale, (attrs = Object.freeze({ "data-nowaki-i18n": clientI18n(i18n, locale) })));
+  return attrs;
+}
+
+function hreflangFor(env, st) {
+  let byPath = hreflangCache.get(env);
+  if (!byPath) hreflangCache.set(env, (byPath = new Map()));
+  let tags = byPath.get(st.path);
+  if (tags === undefined) {
+    tags = hreflangTags(localeAlternates(st.i18n, st.path), st.i18n.defaultLocale, {
       site: env.site,
       trailingSlash: env.trailingSlash,
       staticOutput: env.staticOutput === true,
     });
+    if (byPath.size >= HREFLANG_MAX) byPath.clear();
+    byPath.set(st.path, tags);
+  }
+  return tags;
+}
+
+function localeMeta(env, mod, meta) {
+  const st = localeState();
+  if (!st) return meta;
+  const next = { ...meta };
+  if (typeof next.lang !== "string" && typeof mod?.lang !== "string") next.lang = st.locale;
+  const html = isObj(next.htmlAttrs) ? next.htmlAttrs : isObj(mod?.htmlAttrs) ? mod.htmlAttrs : null;
+  const attrs = localeAttrs(st.i18n, st.locale);
+  // Pages without htmlAttrs (most) get the shared frozen object, whose string document.mjs caches.
+  next.htmlAttrs = html && hasKeys(html) ? { ...html, ...attrs } : attrs;
+  // hreflang needs absolute URLs, so only with a site URL: one built from the request's Host
+  // could end up in a shared (ISR, CDN) copy of the page.
+  if (st.prefix !== null && env.site) {
+    const tags = hreflangFor(env, st);
     const head = typeof next.head === "string" ? next.head : typeof mod?.head === "string" ? mod.head : "";
     next.head = head ? `${head}\n${tags}` : tags;
   }

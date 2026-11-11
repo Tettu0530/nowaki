@@ -33,29 +33,27 @@ pub struct DevState {
     fs_allow: Vec<PathBuf>,
     /// Whether --host exposes all interfaces. Used for WS Origin/Host checks.
     pub(crate) expose: bool,
-    /// nowaki.config routing from `.nowaki/routing.json` (read at startup; a change needs a restart).
+    /// nowaki.config routing from `.nowaki/routing.json` (read at startup; a change needs a restart,
+    /// which `apply_changes` says).
     front: Option<Arc<crate::front::Front>>,
 }
 
 pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<()> {
     let started = Instant::now();
 
-    crate::typegen::write(&root).ok();
-    // nowaki.config is read through Node while the sidecar and plugin host start, and joined
-    // before serving: routing (.nowaki/routing.json) must be in place for the first request.
-    let config = {
-        let root = root.clone();
-        std::thread::spawn(move || crate::site::config(&root))
-    };
-
+    // The plugin host imports nowaki.config (plugins, and the build-time config site-config.mjs
+    // normalizes) while typegen runs and the sidecar starts; it's waited for before serving:
+    // routing (.nowaki/routing.json) must be in place for the first request.
+    let plugin_host = crate::plugins::spawn(&root, true)?;
     // env.ts is checked in Node while the sidecar and plugin host start.
     let env_check = crate::env_schema::start(&root)?;
+    crate::typegen::write(&root).ok();
 
     let live_hub = crate::live::LiveHub::new();
     let errors = crate::mcp::ErrorLog::new(&root);
     let sidecar = sidecar::spawn(&root, port, live_hub.clone(), errors.clone()).await?;
 
-    let plugin_host = crate::plugins::start(&root)?;
+    let (plugin_host, config) = plugin_host.finish()?;
     let mut core = NowakiCore::new(root.clone());
     if let Some(ph) = &plugin_host {
         core.set_plugins(ph.bridge.clone());
@@ -65,13 +63,10 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
     crate::env_schema::finish(env_check, &mut core)?;
 
     // An invalid config is reported (site-config.mjs printed why) and dev runs without it.
-    let config = config
-        .join()
-        .map_err(|_| anyhow::anyhow!("reading nowaki.config panicked"))?
-        .unwrap_or_else(|e| {
-            eprintln!("[nowaki] {e:#}");
-            serde_json::Value::Object(Default::default())
-        });
+    let config = config.unwrap_or_else(|e| {
+        eprintln!("[nowaki] {e:#}");
+        serde_json::Value::Object(Default::default())
+    });
     if let Err(e) = crate::site::write_dev(&root, &config) {
         eprintln!("[nowaki] {e:#}");
     }
@@ -279,8 +274,43 @@ fn under(root: &Path, p: &Path, names: &[&str]) -> bool {
         .any(|c| names.iter().any(|n| c.as_os_str() == *n))
 }
 
+/// App-root files `nowaki dev` reads only at startup: nowaki.config (plugins, routing, site),
+/// env.ts (checked, public values inlined into browser modules) and the .env files the sidecar
+/// loads. (session.ts is re-imported for each SSR version.)
+const STARTUP_FILES: &[&str] = &[
+    "nowaki.config.mjs",
+    "nowaki.config.js",
+    "env.ts",
+    "env.mts",
+    "env.js",
+    "env.mjs",
+    ".env",
+    ".env.local",
+];
+
+/// The changed files in `paths` that only take effect after a restart, as root-relative names.
+fn needs_restart(root: &Path, paths: &[PathBuf]) -> Vec<String> {
+    let mut out: Vec<String> = paths
+        .iter()
+        .filter(|p| p.parent() == Some(root))
+        .filter_map(|p| p.file_name()?.to_str())
+        .filter(|n| STARTUP_FILES.contains(n))
+        .map(str::to_string)
+        .collect();
+    out.dedup();
+    out
+}
+
 fn apply_changes(state: &DevState, relevant: Vec<PathBuf>) {
     let root = &state.core.root;
+    let restart = needs_restart(root, &relevant);
+    if !restart.is_empty() {
+        let (files, it) = (
+            restart.join(", "),
+            if restart.len() == 1 { "it" } else { "them" },
+        );
+        eprintln!("[nowaki] {files} changed; restart nowaki dev to apply {it}");
+    }
     if relevant.iter().any(|p| under(root, p, &["routes"])) {
         crate::typegen::write(root).ok();
     }
@@ -1213,5 +1243,32 @@ mod tests {
         ] {
             assert_eq!(app_file(&root, bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn startup_files_need_a_restart_others_do_not() {
+        let root = Path::new("/app");
+        let paths: Vec<PathBuf> = [
+            "/app/.env",
+            "/app/env.ts",
+            "/app/nowaki.config.mjs",
+            "/app/routes/index.tsx",
+            "/app/session.ts",
+            "/app/.env.example",
+            "/app/lib/env.ts",
+            "/app/routes/nowaki.config.mjs",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+        assert_eq!(
+            needs_restart(root, &paths),
+            [".env", "env.ts", "nowaki.config.mjs"]
+        );
+        assert!(needs_restart(root, &[PathBuf::from("/app/islands/A.tsx")]).is_empty());
+        assert_eq!(
+            needs_restart(root, &[PathBuf::from("/app/.env.local")]),
+            [".env.local"]
+        );
     }
 }

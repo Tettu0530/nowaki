@@ -213,7 +213,7 @@ try {
 } finally {
   for (const s of sockets) s.destroy();
   server.close();
-  rmSync(tmp, { recursive: true, force: true });
+  try { rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
 }
 
 async function endToEnd() {
@@ -318,8 +318,8 @@ export default function Index() {
     const redirected = await build({ NOWAKI_IMAGES_ALLOW_LOOPBACK_FOR_TESTS: "1" });
     check("e2e: a redirect to a disallowed host fails the build", redirected.code !== 0 && /redirect to https:\/\/evil\.test/.test(redirected.log), redirected.log);
   } finally {
-    rmSync(app, { recursive: true, force: true });
-    for (const d of cacheDirs) rmSync(d, { recursive: true, force: true });
+    try { rmSync(app, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
+    for (const d of cacheDirs) try { rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
   }
 }
 

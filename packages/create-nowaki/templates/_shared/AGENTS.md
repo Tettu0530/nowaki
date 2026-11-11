@@ -38,7 +38,11 @@ islands/     interactive components — THE ONLY things that ship JS and hydrate
 components/  shared server components (no client JS)
 lib/         shared server code
 actions/     "use server" RPC modules (optional)
-nowaki.config.mjs   plugins (optional)
+content/     content collections (optional), declared in content/config.ts
+public/      files served as-is at their own path (favicon.ico, robots.txt)
+nowaki.config.mjs   site, fonts, images, routing rules, i18n, plugins (optional)
+env.ts       typed env schema (optional)
+session.ts   ctx.session options (optional)
 ```
 
 ## Rules — follow these when generating code
@@ -142,6 +146,68 @@ nowaki.config.mjs   plugins (optional)
     <a href={route("/blog/[slug]", { slug })}>Post</a>      // dynamic, params typed
     ```
     Unknown paths, missing params, and wrong param keys are compile errors.
+11. **Markdoc (optional)** — [Markdoc](https://markdoc.dev) via the official
+    `@nowaki-dev/markdoc` plugin (`npm install @nowaki-dev/markdoc`). Register it
+    in `nowaki.config.mjs` and import `.mdoc` files from routes; they are not
+    routes themselves. Upstream docs: `packages/nowaki-markdoc/README.md`.
+    ```js
+    // nowaki.config.mjs
+    import { markdoc } from "@nowaki-dev/markdoc";
+    export default {
+      plugins: [markdoc({ components: "./markdoc/components.tsx", tags: { /* … */ } })],
+    };
+    ```
+12. **Content collections** — each directory under `content/` is a collection of
+    `.md` / `.mdx` (or `type: "data"`: `.json` / `.yaml`) files, declared as a
+    named export of `content/config.ts` with a Standard Schema for the frontmatter.
+    Entries have `data`, `slug`, and `html` (Markdown) or `render()` (MDX):
+    ```ts
+    // content/config.ts
+    import { z } from "zod";
+    import { defineCollection } from "@nowaki-dev/runtime/content";
+    export const blog = defineCollection({ schema: z.object({ title: z.string() }) });
+    // in a loader
+    import { getCollection, getEntry } from "@nowaki-dev/runtime/content";
+    const posts = await getCollection("blog");
+    ```
+    Add `export const staticPaths = [{ slug: "hello" }]` (or a function) to a
+    dynamic route to prerender it.
+13. **Images and SEO** — `import hero from "../assets/hero.jpg?image"` +
+    `<Image src={hero} alt="…" />` from `@nowaki-dev/runtime/image` (srcset, AVIF,
+    width/height from the file, lazy by default). Remote images need
+    `images.remotePatterns` in nowaki.config. Page metadata is
+    `export const meta = { title, description, openGraph, … }` (or a function of
+    `{ data, params, url }`); a layout's `meta` applies to the pages under it. Set
+    `site` in nowaki.config for absolute URLs and the generated `/sitemap.xml` and
+    `/robots.txt`.
+14. **Routing config** in `nowaki.config.mjs` (sources use the route syntax),
+    applied by `nowaki dev`, `nowaki start`, and every adapter:
+    ```js
+    export default {
+      site: "https://example.com",
+      basePath: "/docs",                  // everything lives under /docs
+      trailingSlash: "never",             // or "always" / "ignore" (default)
+      redirects: [{ source: "/old/[slug]", destination: "/blog/[slug]", permanent: true }],
+      rewrites: [{ source: "/p/[slug]", destination: "/blog/[slug]" }],
+      headers: [{ source: "/api/[...rest]", headers: { "cache-control": "no-store" } }],
+      i18n: { locales: ["en", "ja"], defaultLocale: "en", detect: true },
+    };
+    ```
+    Under `basePath`, `<Link>` and `ctx.redirect` add the base; rules are relative
+    to it. With `i18n`, non-default locales get a prefix (`/ja/about`; `detect`
+    sends a first visit to `/` by `Accept-Language`), rules match the path
+    without it, and `getLocale()` / `ctx.locale` give the locale.
+    `<Link href="/about">` keeps the current locale; `<Link locale="ja">` switches
+    it. For URLs `<Link>` doesn't build (form actions, `fetch`), use `href("/x")`
+    from `@nowaki-dev/runtime/navigation`, which adds the locale and base the same
+    way. Don't concatenate `import.meta.env.BASE_URL` by hand. `nowaki dev`
+    reads nowaki.config at startup: restart it after a change.
+15. **Sessions** — `ctx.session` (and `getContext().session`) is an encrypted
+    cookie: `await ctx.session.get("userId")`, `set`, `delete`. Call
+    `await ctx.session.regenerate()` on sign-in and `destroy()` on sign-out.
+    Options go in `session.ts` (`export default defineSession({ maxAge })` from
+    `@nowaki-dev/runtime/session`).
+    Reading it makes the page vary by cookie, so ISR no longer shares one cached copy.
 
 ## Security
 
@@ -163,8 +229,9 @@ nowaki.config.mjs   plugins (optional)
   mutations in middleware unless you validate the caller yourself. API routes log a
   warning and still accept cross-site POSTs unless you `export const csrf = true` on
   the route (recommended for cookie-authenticated APIs).
-- **Production checklist** (when you deploy): set `NOWAKI_LIVE_SECRET` if the app
-  uses Jetstream live islands; try `NOWAKI_CSP=report-only` before `enforce`; behind
+- **Production checklist** (when you deploy): set `NOWAKI_SESSION_SECRET` (at
+  least 32 characters) if the app uses `ctx.session`; set `NOWAKI_LIVE_SECRET` if
+  the app uses Jetstream live islands; try `NOWAKI_CSP=report-only` before `enforce`; behind
   a reverse proxy on `nowaki start`, set `NOWAKI_TRUST_PROXY=1` and forward the public
   host as `x-forwarded-host`. See the upstream [SECURITY.md](https://github.com/Tettu0530/nowaki/blob/main/SECURITY.md).
 - **Do not embed secrets** in client islands, loaders returned to the page, or static

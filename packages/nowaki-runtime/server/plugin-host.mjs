@@ -33,13 +33,25 @@ async function loadConfig() {
     const p = path.join(appRoot, name);
     if (existsSync(p)) {
       const mod = await import(pathToFileURL(p).href);
-      return mod.default ?? mod.config ?? {};
+      return { name, config: mod.default ?? mod.config ?? {} };
     }
   }
-  return {};
+  return { name: null, config: {} };
 }
 
-const config = await loadConfig();
+const { name: configName, config } = await loadConfig();
+
+// NOWAKI_SITE_CONFIG=1: the CLI also wants site-config.mjs's normalized config (site, fonts,
+// routing, images), answered in /caps. Doing it here saves a second Node start and config import.
+let siteConfig;
+if (process.env.NOWAKI_SITE_CONFIG === "1") {
+  try {
+    const { normalizeConfig } = await import("./site-config.mjs");
+    siteConfig = { ok: configName ? await normalizeConfig(config) : {} };
+  } catch (e) {
+    siteConfig = { error: `${configName}: ${e?.message ?? e}` };
+  }
+}
 const plugins = (config.plugins ?? []).filter((p) => p && typeof p === "object");
 const transformers = plugins.filter((p) => typeof p.transform === "function");
 const resolvers = plugins.filter((p) => typeof p.resolveId === "function");
@@ -112,6 +124,7 @@ const server = createServer(async (req, res) => {
         hasTsrx: !!tsrxCompile,
         hasResolveId: resolvers.length > 0,
         hasLoad: loaders.length > 0,
+        siteConfig,
       });
       return;
     }

@@ -116,7 +116,7 @@ pub fn hint_for_island(path: &Path, source: &str) -> Option<Hint> {
             if d.import_kind.is_type() {
                 continue;
             }
-            let src = d.source.value.as_str();
+            let src = d.source.value.as_str().unwrap_or_default();
             let ok = matches!(
                 src,
                 "preact" | "preact/hooks" | "preact/compat" | "react" | "react/jsx-runtime"

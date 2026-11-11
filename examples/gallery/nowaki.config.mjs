@@ -9,8 +9,9 @@ export default {
   // `detect` sends a first visit to /gallery to /gallery/ja when the browser prefers Japanese; the
   // language switcher's choice (the nowaki_locale cookie) wins over Accept-Language.
   i18n: { locales: ["en", "ja"], defaultLocale: "en", detect: true },
-  // Rules see the path after the base and before the locale split: `/photos/1` matches here,
-  // `/ja/photos/1` does not.
+  // Rules see the path after the base and without the locale: `/photos/1` and `/ja/photos/1`
+  // both match here, and the redirect keeps the locale (`/ja/photo/1`). `locale: false` on a rule
+  // would match the path with its locale prefix instead.
   redirects: [{ source: "/photos/[id]", destination: "/photo/[id]", permanent: true }],
   headers: [{ source: "/login", headers: { "x-robots-tag": "noindex" } }],
 };

@@ -32,19 +32,47 @@ const FILES = {
 export default function Home() { return <main id="home">{\`HOME \${getLocale()}\`}</main>; }\n`,
   "routes/switch.tsx": `import Switcher from "../islands/Switcher.tsx";
 export default function Switch() { return <main><Switcher /></main>; }\n`,
-  "islands/Switcher.tsx": `import { useEffect } from "preact/hooks";
-import { Link } from "@nowaki-dev/runtime/navigation";
+  "islands/Switcher.tsx": `import { useEffect, useState } from "preact/hooks";
+import { href, Link } from "@nowaki-dev/runtime/navigation";
 export default function Switcher() {
-  useEffect(() => { document.body.dataset.ready = "1"; }, []);
-  return <nav><Link href="/" locale="ja">ja</Link> <Link href="/" locale="en">en</Link></nav>;
+  // Rendered only in the browser, so these hrefs come from the client's reading of <html>.
+  const [later, setLater] = useState(false);
+  useEffect(() => { setLater(true); }, []);
+  useEffect(() => { if (later) document.body.dataset.ready = "1"; }, [later]);
+  return (
+    <nav>
+      <Link href="/" locale="ja">ja</Link> <Link href="/" locale="en">en</Link>
+      {later && <Link id="later" href="/switch">later</Link>}
+      {later && <form id="later-form" action={href("/switch")}></form>}
+    </nav>
+  );
 }\n`,
 };
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "nowaki-locale-browser-"));
+// Chrome's profile gets its own directory: Chrome keeps writing to it for a moment after SIGKILL,
+// which made removing `tmp` race (ENOTEMPTY).
+const profile = mkdtempSync(path.join(os.tmpdir(), "nowaki-locale-chrome-"));
 const children = new Set();
+// Best-effort: a leftover temp dir never changes the exit code.
+const removeDirs = () => {
+  for (const dir of [tmp, profile]) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch {}
+  }
+};
+// Kill the children and wait (bounded) for them to exit, so nothing still writes to the
+// directories while they are removed.
+async function stopChildren() {
+  const exits = [...children].map((c) => (c.exitCode !== null || c.signalCode !== null ? null : new Promise((r) => c.once("exit", r))));
+  for (const c of children) c.kill("SIGKILL");
+  await Promise.race([Promise.all(exits), sleep(5000)]);
+  children.clear();
+}
 process.on("exit", () => {
   for (const c of children) c.kill("SIGKILL");
-  rmSync(tmp, { recursive: true, force: true });
+  removeDirs();
 });
 process.on("SIGINT", () => process.exit(130));
 
@@ -131,7 +159,7 @@ try {
     `--remote-debugging-port=${CDP_PORT}`,
     "--no-first-run",
     "--no-default-browser-check",
-    `--user-data-dir=${path.join(tmp, "chrome")}`,
+    `--user-data-dir=${profile}`,
     "about:blank",
   ]);
   children.add(chrome);
@@ -166,6 +194,9 @@ try {
   await language("en");
   await go("/switch");
   check("the island hydrated", await waitFor(cdp, `document.body.dataset.ready === "1"`));
+  const later = () => cdp.eval(`return [document.getElementById("later")?.getAttribute("href"), document.getElementById("later-form")?.getAttribute("action")].join(" ");`);
+  let l = await later();
+  check("client: <Link> and href() in the default locale add no prefix", l === "/switch /switch", l);
   await cdp.eval(`document.querySelector('a[hreflang="ja"]').click(); return true;`);
   await waitFor(cdp, `location.pathname === "/ja"`);
   s = await state(cdp);
@@ -178,6 +209,8 @@ try {
   await language("ja");
   await go("/ja/switch");
   check("the island hydrated under /ja", await waitFor(cdp, `document.body.dataset.ready === "1"`));
+  l = await later();
+  check("client: <Link> and href() keep the page's locale", l === "/ja/switch /ja/switch", l);
   await cdp.eval(`document.querySelector('a[hreflang="en"]').click(); return true;`);
   await sleep(500);
   s = await state(cdp);
@@ -190,5 +223,7 @@ try {
   failures++;
 }
 
+await stopChildren();
+removeDirs();
 console.log(failures ? `\nLOCALE BROWSER TEST FAILED (${failures})` : "\nLOCALE BROWSER TEST PASSED");
 process.exit(failures ? 1 : 0);

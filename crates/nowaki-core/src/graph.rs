@@ -72,13 +72,19 @@ pub(crate) fn import_specifiers(abs: &Path, source: &str) -> Result<Vec<(String,
     for stmt in &program.body {
         match stmt {
             Statement::ImportDeclaration(d) if !d.import_kind.is_type() => {
-                out.push((d.source.value.to_string(), false));
+                if let Some(spec) = d.source.value.as_str() {
+                    out.push((spec.to_string(), false));
+                }
             }
             Statement::ExportFromDeclaration(d) if !d.export_kind.is_type() => {
-                out.push((d.source.value.to_string(), false));
+                if let Some(spec) = d.source.value.as_str() {
+                    out.push((spec.to_string(), false));
+                }
             }
             Statement::ExportAllDeclaration(d) if !d.export_kind.is_type() => {
-                out.push((d.source.value.to_string(), false));
+                if let Some(spec) = d.source.value.as_str() {
+                    out.push((spec.to_string(), false));
+                }
             }
             _ => {}
         }
@@ -94,7 +100,9 @@ struct DynamicImports(Vec<String>);
 impl<'a> Visit<'a> for DynamicImports {
     fn visit_import_expression(&mut self, it: &ImportExpression<'a>) {
         if let Expression::StringLiteral(s) = &it.source {
-            self.0.push(s.value.to_string());
+            if let Some(spec) = s.value.as_str() {
+                self.0.push(spec.to_string());
+            }
         }
         walk::walk_import_expression(self, it);
     }
@@ -147,8 +155,11 @@ mod tests {
             export type { U } from "./u.ts";
             const lazy = () => import("./lazy.tsx");
             const computed = (n) => import(n);
+            import "./\uD800.ts";
+            const lone = () => import("./\uDC00.ts");
         "#;
         let specs = import_specifiers(Path::new("x.tsx"), src).unwrap();
+        // Specifiers with a lone surrogate name no file, so they're left out.
         assert_eq!(
             specs,
             vec![

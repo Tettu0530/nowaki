@@ -86,6 +86,7 @@ const safeDecode = (p) => {
 };
 
 let native = 0;
+let nativeI18n = 0;
 const extra = ["/old/a%20b", "/old/./x", "/go/.", "/go/...", "/go/a.b", "/old/a/", "/old//a", "/blog/x/", "/og/..png", "/og/.x.png"];
 for (const c of fixture.cases) {
   if (c.error) continue;
@@ -98,6 +99,7 @@ for (const c of fixture.cases) {
     const got = runVercel(routes, r.path);
     if (got) {
       native++;
+      if (c.config.i18n) nativeI18n++;
       eq(got, want, `vercel: ${c.name}: ${r.path}`);
     }
     // If Vercel matched the decoded path instead, a native answer must still stay on the site.
@@ -110,6 +112,50 @@ for (const c of fixture.cases) {
   }
 }
 eq(native >= 20, true, `vercel: the fixture exercises native redirects (${native})`);
+eq(nativeI18n >= 25, true, `vercel: the fixture exercises native redirects under i18n (${nativeI18n})`);
+
+// Native header routes add what ruleHeaders returns for every fixture request that lists headers
+// (except a malformed percent-encoding, which the function never routes to a page anyway).
+let nativeHeaders = 0;
+for (const c of fixture.cases) {
+  if (c.error) continue;
+  const routes = vercelHeaders(compileRules(c.config));
+  for (const r of c.requests) {
+    if (!r.headers || safeDecode(r.path) === null) continue;
+    const got = [];
+    for (const x of routes) {
+      if (!new RegExp(x.src).test(r.path)) continue;
+      for (const [k, v] of Object.entries(x.headers)) {
+        const i = got.findIndex((e) => e[0] === k);
+        if (i >= 0) got[i] = [k, v];
+        else got.push([k, v]);
+      }
+    }
+    nativeHeaders++;
+    eq(got, r.headers, `vercel headers: ${c.name}: ${r.path}`);
+  }
+}
+eq(nativeHeaders >= 10, true, `vercel headers: the fixture exercises header routes (${nativeHeaders})`);
+{
+  // A locale-aware rule is one route per locale plus the unprefixed one; locale: false is one.
+  const r = compileRules({
+    redirects: [
+      { source: "/a", destination: "/b", status: 307 },
+      { source: "/ja/c", destination: "/d", status: 307, locale: false },
+    ],
+    i18n: { locales: ["en", "ja"], defaultLocale: "en" },
+  });
+  const routes = vercelRedirects(r);
+  eq(routes.length, 4, "vercel i18n: per-locale routes, then the locale: false rule");
+  eq(runVercel(routes, "/ja/a"), { redirect: { status: 307, location: "/ja/b" } }, "vercel i18n: /ja/a");
+  eq(runVercel(routes, "/en/a"), { redirect: { status: 307, location: "/b" } }, "vercel i18n: /en/a");
+  eq(runVercel(routes, "/ja/c"), { redirect: { status: 307, location: "/d" } }, "vercel i18n: locale: false");
+  const catchAll = vercelRedirects(
+    compileRules({ redirects: [{ source: "/[...all]", destination: "/x/[...all]", status: 308 }], i18n: { locales: ["en", "ja"], defaultLocale: "en" } }),
+  );
+  eq(runVercel(catchAll, "/ja/a/b"), { redirect: { status: 308, location: "/ja/x/a/b" } }, "vercel i18n: a catch-all keeps the locale out of the capture");
+  eq(runVercel(catchAll, "/ja"), null, "vercel i18n: a locale root is not a catch-all match");
+}
 
 // A rule the platform can't express stops the native list, so later rules can't jump ahead of it.
 {

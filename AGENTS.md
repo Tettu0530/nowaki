@@ -24,12 +24,15 @@ packages/nowaki-runtime/   JS the framework runs: server/ (SSR sidecar, handler,
                       app, functions, plugin-host) + client/ (islands, router, live, hmr).
 packages/create-nowaki, create-nowaki-app   scaffolders (npm create nowaki).
 packages/nowaki-cli   the `nowaki` npm wrapper (prebuilt binary shim).
+packages/nowaki-markdoc   `@nowaki-dev/markdoc`, the official Markdoc plugin (`.mdoc`).
 examples/hello/       kitchen-sink app used by CLI tests + e2e.
 examples/gallery/     the v0.18 exit-criteria app (basePath, i18n, modal routes, sessions, env.ts);
                       scripts/gallery-e2e.mjs + gallery-browser-test.mjs.
 benchmarks/           bench.mjs, head-to-head.mjs (Next/Astro), check-regression.mjs,
                       ci-perf.mjs + ci-perf-app/ (CI perf gate: head vs base vs last release,
                       all on the fixed ci-perf-app).
+benchmarks/compare/   scaled benchmark against Astro / SvelteKit / Next / Nuxt
+                      (build, TTFB, throughput; results in BENCHMARKS.md).
 ```
 
 ## Build, test, lint (run before you claim done)
@@ -181,6 +184,11 @@ code locations and CI coverage.
   WS session, not wired into a server yet.
 - **Plugins / virtual modules** — `PluginBridge` (`transform`, `compile_tsrx`,
   `resolve_id`, `load`); `NowakiCore::resolve_spec` + the `VirtualResolve` trait.
+  The host (`server/plugin-host.mjs`, started by `plugins::spawn` before typegen) also
+  normalizes the build-time config with site-config.mjs's `normalizeConfig` and returns it in
+  `/caps` (`siteConfig`, under `NOWAKI_SITE_CONFIG=1`), so build / dev / prerender import
+  nowaki.config once. `runtime::check` (`MIN_RUNTIME`) refuses runtimes older than that,
+  so the CLI has no fallback paths for them.
 - **Scope hoisting / chunking** — `crates/nowaki-core/src/chunk.rs`.
 - **Deploy adapters** — `crates/nowaki/src/adapter.rs` (+ `server/edge-build.mjs`).
 - **Images (`?image`, `<Image>`)** — `crates/nowaki-core/src/image.rs` (widths, AVIF via ravif
@@ -193,9 +201,9 @@ code locations and CI coverage.
   downloads in `server/images-fetch.mjs` via `crates/nowaki/src/remote_images.rs`; the matcher
   exists in both, driven by `crates/nowaki-core/tests/fixtures/remote-patterns-cases.json`
   (`tests/remote_patterns.rs`, `scripts/images-fetch-test.mjs`).
-- **Fonts** — `crates/nowaki/src/fonts.rs` (faces, size-adjusted fallbacks from ttf-parser
-  metrics, `dist/server/fonts.json`; dev: `.nowaki/fonts`), Google downloads in
-  `server/fonts-fetch.mjs`, config via `site.rs` + `server/site-config.mjs`; the links go into
+- **Fonts** — `crates/nowaki/src/fonts.rs` (faces, size-adjusted fallbacks from metrics
+  read from head / hhea / OS/2 by hand, `dist/server/fonts.json`; dev: `.nowaki/fonts`), Google downloads in
+  `server/fonts-fetch.mjs`, config via `site.rs` / `plugins.rs` (normalized by `server/site-config.mjs`); the links go into
   every page from `handler.mjs` `withFonts` (`env.fonts`).
 - **MDX** — `crates/nowaki-core/src/mdx.rs` (markdown-rs mdast → TSX: hoisted ESM, JSX
   pass-through, `headings`, images via `?image`, code via `highlight.rs`); applied in
@@ -228,27 +236,31 @@ code locations and CI coverage.
   page URLs from `server/isr-urls.mjs` `pageUrls`, shaped by `pagePath` per `trailingSlash`
   (`env.trailingSlash`; the static output files from `prerender.rs` `out_file_for` match it).
   The site comes from `crates/nowaki/src/site.rs`
-  (`dist/server/site.json`, via `server/site-config.mjs`), `NOWAKI_SITE` winning. Unit checks:
+  (`dist/server/site.json`, normalized by `server/site-config.mjs`), `NOWAKI_SITE` winning. Unit checks:
   `scripts/seo-unit-test.mjs`.
 - **Routing config (`basePath`, `trailingSlash`, `redirects`, `rewrites`, `headers`)** —
-  normalized and validated by `server/site-config.mjs`, read by `site.rs` before the build and
+  normalized and validated by `server/site-config.mjs`, read before the build (in the plugin
+  host's Node process, `plugins.rs` `spawn`, or by `site.rs` `config` on its own) and
   written to `dist/server/routing.json` (dev: `.nowaki/routing.json`). The compiler / matcher
   exists twice, `crates/nowaki-core/src/rules.rs` and `server/rules.mjs`, driven by one fixture
   (`crates/nowaki-core/tests/fixtures/rules-cases.json`, run by `tests/rules.rs` and
   `scripts/rules-test.mjs`); change both together. The segment grammar is shared with the router
-  through `server/segments.mjs`.
-- **Route groups (`routes/(name)/`)** — no URL segment. JS: `server/router.mjs` `scanRoutes`
-  (URL without groups, `dir` stays physical, collision error; group `_middleware` marked
-  `group` and run by containment in `handler.mjs` `runMiddleware`; boundaries carry a
-  group-free `urlPrefix` for the client). Rust: `routes.rs` `strip_route_groups` (in
-  `url_pattern_from_stem`) and `check_url_conflicts` (called by `build_with_client`). Layout /
-  CSS lookups stay on physical dirs. Tests: `scripts/router-test.mjs`, `routes.rs` units.
   through `server/segments.mjs`. Applied at the fronts by `crates/nowaki/src/front.rs`
   (`start.rs` `handle`, `dev.rs` `serve_or_proxy`, the headers layer; the route path reaches the
   sidecars in `x-nowaki-route-path` → `info.routePath`) and `server/front.mjs` (`app.mjs` `handle`,
   the worker `fetch` from `edge-build.mjs`); Vercel platform routes from `server/vercel-routes.mjs`,
   static `_redirects` / `_headers` from `prerender.rs`. Without a routing config each front does
-  one null check. Tests: `scripts/rules-front-test.mjs`, `scripts/rules-e2e.mjs` (every front).
+  one null check. With `i18n`, the engines match rule sources without the locale prefix
+  (`locale: false` opts a rule out) and put the locale back on internal destinations; the
+  handler then splits the locale off the route path once, as for any request. Tests:
+  `scripts/rules-front-test.mjs`, `scripts/rules-e2e.mjs` (every front).
+- **Route groups (`routes/(name)/`)** — no URL segment. JS: `server/router.mjs` `scanRoutes`
+  (URL without groups, `dir` stays physical, collision error; group `_middleware` marked
+  `group` and run by containment in `handler.mjs` `runMiddleware`; boundaries keep their
+  physical `prefix` for the server and a group-free `urlPrefix`, and reach the client with the
+  routes they cover from `handler.mjs` `groupRoutes`). Rust: `routes.rs` `strip_route_groups` (in
+  `url_pattern_from_stem`) and `check_url_conflicts` (called by `build_with_client`). Layout /
+  CSS lookups stay on physical dirs. Tests: `scripts/router-test.mjs`, `routes.rs` units.
 - **`basePath`** — build: `NowakiCore::set_base_path` (asset URLs via `asset_base()`, the server
   function proxy path, the `import.meta.env.BASE_URL` define, plus `__NOWAKI_BASE_URL__` for the
   classic-script `client/live.js`), set by `site::configure`; fonts and content images read
@@ -269,8 +281,12 @@ code locations and CI coverage.
   request when off), which runs the request inside `server/i18n-context.mjs` (an
   AsyncLocalStorage published on `globalThis[Symbol.for("nowaki.locale")]`, so `getLocale()` /
   `getCollection` never import `node:async_hooks`) and renders through `localizedEnv` (`<html
-  lang>`, `data-nowaki-i18n`, hreflang from `seo.mjs` `hreflangTags`). `env.i18n` is set by
-  `app.mjs`, `web.mjs` (`routing`, passed by `edge-build.mjs`) and dev `sidecar.mjs`
+  lang>`, `data-nowaki-i18n`, hreflang from `seo.mjs` `hreflangTags`; the attributes are cached per
+  locale in `localeAttrs`, the hreflang tags per route path in `hreflangFor`, and document.mjs
+  caches the string of a frozen htmlAttrs object: keep the per-request work to the split and the
+  AsyncLocalStorage `run`). `<Link>` and `href()` (`navigation.js`) add the current locale
+  (server: the request's locale state, browser: `data-nowaki-i18n`) unless the href has a locale
+  prefix or `locale={false}`, then the base. `env.i18n` is set by `app.mjs`, `web.mjs` (`routing`, passed by `edge-build.mjs`) and dev `sidecar.mjs`
   (`.nowaki/routing.json`). Content locales: `content.rs` `split_locale` (locales from the routing
   config). Per-locale URLs: `isr-urls.mjs` `localeUrls`, `static-paths.mjs` `localePages`,
   `prerender.rs` `locale_urls` / `locale_404s` / `locale_redirects`; `locale_url` and
@@ -339,9 +355,16 @@ code locations and CI coverage.
 
 ## Releasing (maintainers)
 
-Versions are synced across `Cargo.toml` (`[workspace.package]`), the `nowaki`
-crate's `nowaki-core` path-dep version, and the four npm `package.json`s +
-`create-nowaki/template`. After bumping, run `pnpm install` so `pnpm-lock.yaml`
-matches (CI uses a frozen lockfile). Then: `cargo publish -p nowaki-core` →
-`-p nowaki`; push a `vX.Y.Z` tag (triggers `release.yml` for the CLI binaries);
-`gh workflow run publish-npm.yml -f package=all` for runtime + scaffolders.
+The packages are versioned independently today: the CLI and crates are 0.18.x
+(`Cargo.toml` `[workspace.package]`, the `nowaki` crate's `nowaki-core` path-dep
+version, `packages/nowaki-cli`), `@nowaki-dev/runtime` is 0.17.x,
+`create-nowaki` / `create-nowaki-app` are 0.19.x, and `@nowaki-dev/markdoc`
+(`packages/nowaki-markdoc`) is 0.1.x. The scaffold template
+(`packages/create-nowaki/templates/_shared/package.json`) pins the current CLI
+and runtime. From 0.19.0 the CLI, runtime, and create-* versions move together
+(markdoc keeps its own semver). After bumping, run `pnpm install` so
+`pnpm-lock.yaml` matches (CI uses a frozen lockfile). Then: `cargo publish -p
+nowaki-core` → `-p nowaki`; push a `vX.Y.Z` tag (triggers `release.yml` for the
+CLI binaries); `gh workflow run publish-npm.yml -f package=all` for runtime,
+markdoc, and scaffolders (a version already on npm is skipped, via
+`scripts/ci/npm-publish-if-new.sh`). See [docs/RELEASING.md](docs/RELEASING.md).

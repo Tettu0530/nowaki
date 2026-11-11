@@ -13,6 +13,7 @@ mod mcp;
 mod plugins;
 mod prerender;
 mod remote_images;
+mod runtime;
 mod security_headers;
 mod shutdown;
 mod sidecar;
@@ -82,6 +83,9 @@ enum Command {
         /// Output directory (relative to dir, or absolute)
         #[arg(short, long, default_value = "dist/static")]
         out: PathBuf,
+        /// Render from existing `dist/` (`nowaki build`); skips the transform and content-index steps
+        #[arg(long)]
+        skip_build: bool,
     },
     /// Update nowaki (CLI) and @nowaki-dev/runtime to the latest version
     Upgrade {
@@ -110,6 +114,7 @@ fn main() -> anyhow::Result<()> {
             open,
         } => {
             let root = dunce::canonicalize(&dir)?;
+            runtime::check(&root)?;
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
@@ -117,22 +122,26 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Build { dir, adapter } => {
             let root = dunce::canonicalize(&dir)?;
-            typegen::write(&root)?;
+            runtime::check(&root)?;
             // The static adapter delegates to prerender (build → temporary server → render each route).
             if adapter == Adapter::Static {
+                typegen::write(&root)?;
                 let out = root.join("dist/static");
                 return tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()?
-                    .block_on(prerender::run(root.clone(), out));
+                    .block_on(prerender::run(root.clone(), out, false));
             }
-            let dist = root.join("dist");
-            // env.ts is checked in Node alongside the config read and the plugin host start.
+            // One Node process imports nowaki.config for the plugins and the build-time config,
+            // starting while typegen runs and env.ts is checked (in another Node process).
+            let plugin_host = plugins::spawn(&root, true)?;
             let env_check = env_schema::start(&root)?;
-            // Before the build: an invalid config fails before anything is built.
-            let config = site::config(&root)?;
-            // Keep alive until the build finishes (drop kills the host).
-            let plugin_host = plugins::start(&root)?;
+            typegen::write(&root)?;
+            let dist = root.join("dist");
+            // Before the build: an invalid config fails before anything is built. The host stays
+            // alive until the build finishes (drop kills it).
+            let (plugin_host, config) = plugin_host.finish()?;
+            let config = config?;
             let mut core = nowaki_core::NowakiCore::new(root.clone());
             if let Some(host) = &plugin_host {
                 core.set_plugins(host.bridge.clone());
@@ -179,14 +188,20 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Start { dir, port, host } => {
             let root = dunce::canonicalize(&dir)?;
+            runtime::check(&root)?;
             // Rust (axum) serves static files + assembles HTML; the Node prod-sidecar renders components.
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
                 .block_on(start::run(root, port, host))
         }
-        Command::Prerender { dir, out } => {
+        Command::Prerender {
+            dir,
+            out,
+            skip_build,
+        } => {
             let root = dunce::canonicalize(&dir)?;
+            runtime::check(&root)?;
             let out = if out.is_absolute() {
                 out
             } else {
@@ -195,7 +210,7 @@ fn main() -> anyhow::Result<()> {
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
-                .block_on(prerender::run(root, out))
+                .block_on(prerender::run(root, out, skip_build))
         }
         Command::Upgrade { dir, to } => {
             let root = dunce::canonicalize(&dir)?;

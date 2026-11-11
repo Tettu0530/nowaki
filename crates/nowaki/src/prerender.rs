@@ -6,35 +6,86 @@ use futures_util::StreamExt;
 use nowaki_core::rules::{I18nConfig, TrailingSlash};
 use nowaki_core::NowakiCore;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 
 /// Pages requested from the temporary prod server at once.
 const PRERENDER_JOBS: usize = 8;
 
+/// Use multiple Node render workers when the page count is at least this many (`NOWAKI_PRERENDER_POOL_THRESHOLD=0` disables the pool).
+const DEFAULT_POOL_THRESHOLD: usize = 256;
+
+struct ProdServer {
+    child: Child,
+    port: u16,
+    drain: tokio::task::JoinHandle<()>,
+}
+
+/// How many Node `start.mjs` processes to run for HTML rendering (always 1 below the pool threshold).
+fn render_worker_count(
+    page_count: usize,
+    pool_threshold: usize,
+    parallelism: usize,
+    max_workers: Option<usize>,
+) -> usize {
+    if pool_threshold == 0 || page_count < pool_threshold {
+        return 1;
+    }
+    let cap = max_workers.unwrap_or(parallelism).max(1);
+    page_count.min(cap).max(1)
+}
+
+fn pool_settings() -> (usize, Option<usize>) {
+    let threshold = std::env::var("NOWAKI_PRERENDER_POOL_THRESHOLD")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_POOL_THRESHOLD);
+    let max_workers = std::env::var("NOWAKI_PRERENDER_WORKERS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n > 0);
+    (threshold, max_workers)
+}
+
+fn available_parallelism() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+}
+
 /// Static site generation: build → start a temporary prod server → render each static route to HTML → write out.
-pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
+/// With `skip_build`, the transform/content steps are skipped and existing `dist/` is used (must be from `nowaki build`).
+pub async fn run(root: PathBuf, out: PathBuf, skip_build: bool) -> Result<()> {
     // Checked before building: the build writes dist/, and clearing `out` must never reach it.
     let clear_out = check_out(&root, &out)?;
-    let env_check = crate::env_schema::start(&root)?;
-    let config = crate::site::config(&root)?;
-    let _plugin_host = crate::plugins::start(&root)?;
-    let mut core = NowakiCore::new(root.clone());
-    if let Some(host) = &_plugin_host {
-        core.set_plugins(host.bridge.clone());
+    if skip_build {
+        ensure_built(&root)?;
+        let env_check = crate::env_schema::start(&root)?;
+        crate::env_schema::finish_skip_build(env_check, &root)?;
+        println!("[nowaki] prerender: using existing dist/ (--skip-build)");
+    } else {
+        // The plugin host also reads and checks nowaki.config, alongside the env.ts check.
+        let plugin_host = crate::plugins::spawn(&root, true)?;
+        let env_check = crate::env_schema::start(&root)?;
+        let (_plugin_host, config) = plugin_host.finish()?;
+        let config = config?;
+        let mut core = NowakiCore::new(root.clone());
+        if let Some(host) = &_plugin_host {
+            core.set_plugins(host.bridge.clone());
+        }
+        // env.ts: validated before the build, which inlines its public values.
+        crate::env_schema::finish(env_check, &mut core)?;
+        crate::remote_images::configure(&mut core, &root, &config)?;
+        crate::site::configure(&mut core, &config)?;
+        let (report, client) = core.build_with_client(&root.join("dist"))?;
+        println!(
+            "[nowaki] build: client {} / server {} modules",
+            report.modules, report.server_modules
+        );
+        crate::content::build(&root, &root.join("dist"), &config)?;
+        crate::site::write(&root.join("dist"), &config)?;
+        crate::fonts::build_dist(&root, &root.join("dist"), &config)?;
+        crate::check_route_budgets(&core, &report, &client)?;
     }
-    // env.ts: validated before the build, which inlines its public values.
-    crate::env_schema::finish(env_check, &mut core)?;
-    crate::remote_images::configure(&mut core, &root, &config)?;
-    crate::site::configure(&mut core, &config)?;
-    let (report, client) = core.build_with_client(&root.join("dist"))?;
-    println!(
-        "[nowaki] build: client {} / server {} modules",
-        report.modules, report.server_modules
-    );
-    crate::content::build(&root, &root.join("dist"), &config)?;
-    crate::site::write(&root.join("dist"), &config)?;
-    crate::fonts::build_dist(&root, &root.join("dist"), &config)?;
-    crate::check_route_budgets(&core, &report, &client)?;
     let routing_file = root.join("dist/server/routing.json");
     let routing: nowaki_core::rules::RoutingConfig = match std::fs::read_to_string(&routing_file) {
         Ok(text) => serde_json::from_str(&text)?,
@@ -57,79 +108,61 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         ));
     }
 
-    let mut child = Command::new("node")
-        .arg("--enable-source-maps")
-        .arg(&entry)
-        .current_dir(&root)
-        .env("PORT", "0")
-        // Static pages: live islands render their first HTML without live.js (see app.mjs).
-        .env("NOWAKI_PRERENDER", "1")
-        // Exits with this process, however it ends (server/exit-with-parent.mjs).
-        .env("NOWAKI_EXIT_WITH_PARENT", "1")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .kill_on_drop(true)
-        .spawn()
-        .context("failed to start node")?;
-
-    let stdout = child.stdout.take().expect("piped stdout");
-    let ready = async move {
-        let mut reader = BufReader::new(stdout);
-        let mut line = Vec::new();
-        loop {
-            line.clear();
-            if reader.read_until(b'\n', &mut line).await? == 0 {
-                return Err(anyhow!("prod server exited without reporting READY"));
-            }
-            let text = String::from_utf8_lossy(&line);
-            if let Some(rest) = text.trim_end().strip_prefix("NOWAKI_START_READY ") {
-                let port = rest.trim().parse::<u16>().context("failed to parse port")?;
-                return Ok((port, reader));
-            }
-            print!("{text}"); // the app's own logs
-        }
-    };
-    // Both are Node processes that only read dist/; starting them together hides one Node startup.
-    let (ready, dynamic_pages) = tokio::join!(ready, static_paths(&root));
-    let (port, mut server_out) = ready?;
-    // Keep draining the server's stdout for the whole run: Node writes to a pipe synchronously
-    // on Linux, so once app logs fill it (~64 KiB) the renderer would block and every request
-    // would hang. (stderr is inherited, so it's never a pipe of ours.)
-    let mut drain = tokio::spawn(async move {
-        let mut buf = vec![0u8; 16 * 1024];
-        let mut stdout = tokio::io::stdout();
-        let mut forward = true;
-        // Read to the end even if our own stdout goes away: the reading is what matters.
-        while let Ok(n @ 1..) = server_out.read(&mut buf).await {
-            if forward {
-                forward = stdout.write_all(&buf[..n]).await.is_ok();
-            }
-        }
-    });
+    // static-paths and route enumeration only read dist/; one Node server can start alongside them.
+    let routes_dir = root.join("dist/server/routes");
+    let (dynamic_pages, static_urls, first_server) = tokio::join!(
+        static_paths(&root),
+        async { nowaki_core::routes::enumerate_static_prerender_urls(&routes_dir) },
+        start_prod_server(&root, &entry),
+    );
+    let dynamic_pages = dynamic_pages?;
+    let static_urls = static_urls?;
+    let first_server = first_server?;
 
     let i18n = read_i18n(&routing_file);
-    let mut pages: Vec<(String, PathBuf)> = locale_urls(
-        i18n.as_ref(),
-        nowaki_core::routes::enumerate_static_prerender_urls(&root.join("dist/server/routes"))?,
-    )
-    .into_iter()
-    .map(|url| {
-        let file = out_file_for(&out, &url, trailing);
-        (url, file)
-    })
-    .collect();
-    for (url, file, page) in dynamic_pages? {
+    let mut pages: Vec<(String, PathBuf)> = locale_urls(i18n.as_ref(), static_urls)
+        .into_iter()
+        .map(|url| {
+            let file = out_file_for(&out, &url, trailing);
+            (url, file)
+        })
+        .collect();
+    for (url, file, page) in dynamic_pages {
         let file = if page {
-            page_file(&file, trailing)
+            out.join(page_file(&file, trailing))
         } else {
-            file
+            out.join(file)
         };
-        pages.push((url, out.join(file)));
+        pages.push((url, file));
     }
     if pages.is_empty() {
         return Err(anyhow!("no static routes to prerender"));
     }
+
+    let (pool_threshold, max_workers) = pool_settings();
+    let workers = render_worker_count(
+        pages.len(),
+        pool_threshold,
+        available_parallelism(),
+        max_workers,
+    );
+    let mut servers = vec![first_server];
+    if workers > servers.len() {
+        let extra = futures_util::future::try_join_all(
+            (servers.len()..workers).map(|_| start_prod_server(&root, &entry)),
+        )
+        .await?;
+        servers.extend(extra);
+    }
+    if workers > 1 {
+        println!(
+            "[nowaki] prerender: {workers} Node render workers ({} pages, pool threshold {pool_threshold})",
+            pages.len()
+        );
+    }
+    let ports: Vec<u16> = servers.iter().map(|s| s.port).collect();
+    let primary_port = ports[0];
+    let render_jobs = workers.saturating_mul(PRERENDER_JOBS);
 
     // Don't follow redirects; skip non-200 responses.
     let client = reqwest::Client::builder()
@@ -140,13 +173,17 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         nowaki_core::build::clear_dir(&out)?;
     }
     std::fs::create_dir_all(&out)?;
-    // A few requests in flight keep the single-threaded renderer busy while Rust waits on the
+    // A few requests in flight keep each single-threaded renderer busy while Rust waits on the
     // socket and writes files (2 already saturates a plain app; I/O-bound loaders gain more).
-    // `buffered` keeps the original order, so logs and the first error stay deterministic.
-    let mut rendered = futures_util::stream::iter(&pages)
-        .map(|(url_path, file)| {
-            let client = &client;
-            let request = request_path(url_path);
+    // Round-robin workers when the pool is on; `buffered` keeps the original order, so logs and
+    // the first error stay deterministic.
+    let mut rendered = futures_util::stream::iter(pages.iter().enumerate())
+        .map(|(i, (url_path, file))| {
+            let client = client.clone();
+            let url_path = url_path.clone();
+            let file = file.clone();
+            let port = ports[i % ports.len()];
+            let request = request_path(&url_path);
             async move {
                 let resp = client
                     .get(format!("http://127.0.0.1:{port}{request}"))
@@ -171,17 +208,17 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
                     tokio::fs::create_dir_all(parent).await?;
                 }
                 tokio::fs::write(file, bytes).await?;
-                Ok(Some((url_path.as_str(), live)))
+                Ok(Some((url_path, live)))
             }
         })
-        .buffered(PRERENDER_JOBS);
+        .buffered(render_jobs);
     let mut count = 0;
     let mut live_pages = Vec::new();
     while let Some(written) = rendered.next().await {
         if let Some((url, live)) = written? {
             count += 1;
             if live {
-                live_pages.push(url.to_string());
+                live_pages.push(url);
             }
         }
     }
@@ -204,7 +241,10 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
             continue;
         }
         let resp = client
-            .get(format!("http://127.0.0.1:{port}{}", request_path(url)))
+            .get(format!(
+                "http://127.0.0.1:{primary_port}{}",
+                request_path(url)
+            ))
             .send()
             .await?;
         if resp.status().is_success() {
@@ -217,7 +257,10 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     // Rendered for /404, since a static page can't know the path that was actually requested.
     if root.join("dist/server/routes/_404.js").exists() {
         let resp = client
-            .get(format!("http://127.0.0.1:{port}{}", request_path("/404")))
+            .get(format!(
+                "http://127.0.0.1:{primary_port}{}",
+                request_path("/404")
+            ))
             .send()
             .await?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
@@ -226,7 +269,10 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         // i18n: one per locale directory, rendered in that locale.
         for (url, file) in locale_404s(i18n.as_ref()) {
             let resp = client
-                .get(format!("http://127.0.0.1:{port}{}", request_path(&url)))
+                .get(format!(
+                    "http://127.0.0.1:{primary_port}{}",
+                    request_path(&url)
+                ))
                 .send()
                 .await?;
             if resp.status() == reqwest::StatusCode::NOT_FOUND {
@@ -241,7 +287,9 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
 
     // The SPA router fetches this once; a static host has no server to answer it.
     let boundaries = client
-        .get(format!("http://127.0.0.1:{port}/__nowaki/boundaries"))
+        .get(format!(
+            "http://127.0.0.1:{primary_port}/__nowaki/boundaries"
+        ))
         .send()
         .await?;
     if boundaries.status().is_success() {
@@ -254,7 +302,9 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
     let assets = out.join("_nowaki");
     nowaki_core::build::clear_dir(&assets)?;
     std::fs::create_dir_all(&assets)?;
-    copy_dir(&root.join("dist/client"), &assets)?;
+    // Hashed client chunks are immutable; hard links avoid duplicating them under `out/_nowaki`
+    // when `dist/client` lives on the same filesystem (falls back to copy on EXDEV).
+    link_client_dir(&root.join("dist/client"), &assets)?;
     // public/ files at their own path, last, so they win over a page at the same path (as on a
     // server). A `_headers` of the app's own comes first in the generated one.
     let mut own_headers = String::new();
@@ -303,17 +353,94 @@ pub async fn run(root: PathBuf, out: PathBuf) -> Result<()> {
         ),
     )?;
 
-    // Closing stdin ends the server (exit-with-parent.mjs); its last logs then reach EOF here.
-    // Killed on drop if it doesn't exit in time.
-    let grace = std::time::Duration::from_secs(5);
-    drop(child.stdin.take());
-    let _ = tokio::time::timeout(grace, child.wait()).await;
-    if tokio::time::timeout(grace, &mut drain).await.is_err() {
-        drain.abort();
+    for server in servers {
+        stop_prod_server(server).await;
     }
-    drop(child);
     println!("[nowaki] prerender done: {count} pages → {}", out.display());
     Ok(())
+}
+
+/// `dist/client` and `dist/server/routes` must exist (`nowaki build` output).
+fn ensure_built(root: &Path) -> Result<()> {
+    let dist = root.join("dist");
+    if !dist.join("client/manifest.json").is_file() {
+        anyhow::bail!(
+            "Not built yet. Run `nowaki build {}` first, or omit --skip-build.",
+            root.display()
+        );
+    }
+    if !dist.join("server/routes").is_dir() {
+        anyhow::bail!(
+            "dist/server/routes is missing (incomplete build). Run `nowaki build {}` first.",
+            root.display()
+        );
+    }
+    Ok(())
+}
+
+async fn start_prod_server(root: &Path, entry: &Path) -> Result<ProdServer> {
+    let mut child = Command::new("node")
+        .arg("--enable-source-maps")
+        .arg(entry)
+        .current_dir(root)
+        .env("PORT", "0")
+        // Static pages: live islands render their first HTML without live.js (see app.mjs).
+        .env("NOWAKI_PRERENDER", "1")
+        // Exits with this process, however it ends (server/exit-with-parent.mjs).
+        .env("NOWAKI_EXIT_WITH_PARENT", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()
+        .context("failed to start node")?;
+
+    let stdout = child.stdout.take().expect("piped stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = Vec::new();
+    let port = loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line).await? == 0 {
+            return Err(anyhow!("prod server exited without reporting READY"));
+        }
+        let text = String::from_utf8_lossy(&line);
+        if let Some(rest) = text.trim_end().strip_prefix("NOWAKI_START_READY ") {
+            break rest.trim().parse::<u16>().context("failed to parse port")?;
+        }
+        print!("{text}"); // the app's own logs
+    };
+    let drain = spawn_stdout_drain(reader);
+    Ok(ProdServer { child, port, drain })
+}
+
+/// Keep draining the server's stdout for the whole run: Node writes to a pipe synchronously on
+/// Linux, so once app logs fill it (~64 KiB) the renderer would block and every request would hang.
+fn spawn_stdout_drain(
+    mut server_out: BufReader<tokio::process::ChildStdout>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut buf = vec![0u8; 16 * 1024];
+        let mut stdout = tokio::io::stdout();
+        let mut forward = true;
+        while let Ok(n @ 1..) = server_out.read(&mut buf).await {
+            if forward {
+                forward = stdout.write_all(&buf[..n]).await.is_ok();
+            }
+        }
+    })
+}
+
+async fn stop_prod_server(mut server: ProdServer) {
+    let grace = std::time::Duration::from_secs(5);
+    drop(server.child.stdin.take());
+    let _ = tokio::time::timeout(grace, server.child.wait()).await;
+    if tokio::time::timeout(grace, &mut server.drain)
+        .await
+        .is_err()
+    {
+        server.drain.abort();
+    }
+    drop(server.child);
 }
 
 /// Refuses an `--out` that is, contains, or sits inside a part of the build it renders from
@@ -382,9 +509,6 @@ fn normalize(p: &Path) -> PathBuf {
 /// page rather than a file route).
 async fn static_paths(root: &Path) -> Result<Vec<(String, String, bool)>> {
     let script = root.join("node_modules/@nowaki-dev/runtime/server/static-paths.mjs");
-    if !script.exists() {
-        return Ok(Vec::new()); // older runtime: dynamic routes stay unrendered, as before
-    }
     let output = Command::new("node")
         .arg(&script)
         .arg(root.join("dist/server"))
@@ -530,6 +654,12 @@ struct StaticHostRules {
 /// `:x`, `[...x]` becomes `*` in a source and `:splat` in a destination, rewrites are 200 rules.
 /// Rules a static host can't express are left out with a warning. `rendered` lists the prerendered
 /// page URLs (a rewrite can only reach a page that exists as a file).
+///
+/// With i18n, a rule matches without the locale prefix (as `Rules::apply` does): redirects and
+/// rewrites get one line per locale ahead of the unprefixed one (`/ja/a /ja/b`), header rules one
+/// block per prefixed locale. A static host has no lookahead, so the unprefixed line of a source
+/// starting with a parameter also matches locale-prefixed paths (warned); a header rule starting
+/// with a catch-all already covers them and gets no extra blocks.
 fn static_host_rules(
     config: &nowaki_core::rules::RoutingConfig,
     rendered: &[&str],
@@ -557,14 +687,29 @@ fn static_host_rules(
             d.to_string()
         }
     };
+    let i18n = config.i18n.as_ref();
+    let param_first = |source: &str| source.split('/').nth(1).is_some_and(|s| s.starts_with('['));
+    let warn_param = |out: &mut StaticHostRules, kind: &str, source: &str| {
+        out.warnings.push(format!(
+            "{kind} {source}: a static host also matches it against locale-prefixed paths (it starts with a parameter); add locale: false or a literal first segment"
+        ));
+    };
     for r in &config.redirects {
         match (static_pattern(&r.source, true), static_pattern(&r.destination, false)) {
-            (Some(from), Some(to)) => out.redirects.push_str(&format!(
-                "{} {} {}\n",
-                internal(&from),
-                internal(&to),
-                r.status
-            )),
+            (Some(from), Some(to)) => {
+                let i18n = i18n.filter(|_| r.locale);
+                for (from, to) in locale_lines(i18n, &from, &to, &r.destination, true) {
+                    out.redirects.push_str(&format!(
+                        "{} {} {}\n",
+                        internal(&from),
+                        internal(&to),
+                        r.status
+                    ));
+                }
+                if i18n.is_some() && param_first(&r.source) {
+                    warn_param(&mut out, "redirect", &r.source);
+                }
+            }
             _ => out.warnings.push(format!(
                 "redirect {} → {} can't be written for a static host (a [x].ext segment or a param name other than letters, digits and _); left out",
                 r.source, r.destination
@@ -591,8 +736,14 @@ fn static_host_rules(
                 r.source, r.destination
             ));
         }
-        out.redirects
-            .push_str(&format!("{} {} 200\n", internal(&from), internal(&to)));
+        let locale_aware = i18n.filter(|_| r.locale);
+        for (from, to) in locale_lines(locale_aware, &from, &to, &r.destination, false) {
+            out.redirects
+                .push_str(&format!("{} {} 200\n", internal(&from), internal(&to)));
+        }
+        if locale_aware.is_some() && param_first(&r.source) {
+            warn_param(&mut out, "rewrite", &r.source);
+        }
     }
     let defaults: Vec<&str> = crate::security_headers::DEFAULTS
         .iter()
@@ -607,8 +758,22 @@ fn static_host_rules(
             ));
             continue;
         };
-        out.headers.push_str(&internal(&from));
-        out.headers.push('\n');
+        let mut paths = Vec::new();
+        if let Some(i18n) = i18n.filter(|_| h.locale) {
+            let first = h.source.split('/').nth(1).unwrap_or("");
+            if first.starts_with('[') && !first.starts_with("[...") {
+                warn_param(&mut out, "headers for", &h.source);
+            } else if !first.starts_with('[') {
+                paths.extend(
+                    i18n.locales
+                        .iter()
+                        .filter(|l| **l != i18n.default_locale || i18n.prefix_default_locale)
+                        .map(|l| under_locale(l, &from)),
+                );
+            }
+        }
+        paths.push(from);
+        let mut block = String::new();
         for header in &h.headers {
             let name = header.key.to_ascii_lowercase();
             if defaults.contains(&name.as_str()) {
@@ -617,10 +782,61 @@ fn static_host_rules(
                     h.source
                 ));
             }
-            out.headers
-                .push_str(&format!("  {}: {}\n", header.key, header.value));
+            block.push_str(&format!("  {}: {}\n", header.key, header.value));
+        }
+        for path in paths {
+            out.headers.push_str(&internal(&path));
+            out.headers.push('\n');
+            out.headers.push_str(&block);
         }
     }
+    out
+}
+
+/// `path` (a `_redirects` path) under `/<locale>`.
+fn under_locale(locale: &str, path: &str) -> String {
+    if path == "/" {
+        format!("/{locale}")
+    } else {
+        format!("/{locale}{path}")
+    }
+}
+
+/// The `_redirects` lines (source, destination) of one redirect or rewrite: as written without
+/// i18n (or with `locale: false`); otherwise one per locale, then the unprefixed one. An internal
+/// destination goes under the locale, except the default one without `prefixDefaultLocale` (a
+/// redirect from an unprefixed path goes to the default locale's URL). A destination that is
+/// external or names a locale itself is kept.
+fn locale_lines(
+    i18n: Option<&I18nConfig>,
+    from: &str,
+    to: &str,
+    destination: &str,
+    redirect: bool,
+) -> Vec<(String, String)> {
+    let Some(i18n) = i18n else {
+        return vec![(from.to_string(), to.to_string())];
+    };
+    let first = destination.split('/').nth(1).unwrap_or("");
+    let keep = !to.starts_with('/') || i18n.locales.iter().any(|l| l == first);
+    let dest = |l: &str| {
+        if keep || (l == i18n.default_locale && !i18n.prefix_default_locale) {
+            to.to_string()
+        } else {
+            under_locale(l, to)
+        }
+    };
+    let mut out: Vec<(String, String)> = i18n
+        .locales
+        .iter()
+        .map(|l| (under_locale(l, from), dest(l)))
+        .collect();
+    let unprefixed = if redirect {
+        dest(&i18n.default_locale)
+    } else {
+        to.to_string()
+    };
+    out.push((from.to_string(), unprefixed));
     out
 }
 
@@ -678,24 +894,58 @@ fn route_could_match(pattern: &str, url: &str) -> bool {
         .all(|(p, u)| p.starts_with('[') || p == u)
 }
 
-fn copy_dir(from: &Path, to: &Path) -> Result<()> {
+fn link_client_dir(from: &Path, to: &Path) -> Result<()> {
+    std::fs::create_dir_all(to)?;
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
         let src = entry.path();
         let dst = to.join(entry.file_name());
-        if src.is_dir() {
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
             std::fs::create_dir_all(&dst)?;
-            copy_dir(&src, &dst)?;
+            link_client_dir(&src, &dst)?;
         } else {
-            std::fs::copy(&src, &dst)?;
+            hard_link_or_copy(&src, &dst)?;
         }
     }
     Ok(())
 }
 
+/// Hard-link `src` to `dst` when both paths share a volume; otherwise copy the file bytes.
+fn hard_link_or_copy(src: &Path, dst: &Path) -> Result<()> {
+    match std::fs::hard_link(src, dst) {
+        Ok(()) => Ok(()),
+        Err(e) if hard_link_copy_fallback(&e) => {
+            std::fs::copy(src, dst)?;
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn hard_link_copy_fallback(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::CrossesDevices | std::io::ErrorKind::Unsupported
+    ) || (cfg!(windows) && err.raw_os_error() == Some(17)) // ERROR_NOT_SAME_DEVICE
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn render_worker_count_respects_threshold_and_cap() {
+        assert_eq!(render_worker_count(10, 256, 8, None), 1);
+        assert_eq!(render_worker_count(255, 256, 8, None), 1);
+        assert_eq!(render_worker_count(256, 256, 8, None), 8);
+        assert_eq!(render_worker_count(500, 256, 8, None), 8);
+        assert_eq!(render_worker_count(3, 256, 8, None), 1);
+        assert_eq!(render_worker_count(500, 256, 4, Some(2)), 2);
+        assert_eq!(render_worker_count(1, 256, 8, Some(4)), 1);
+        assert_eq!(render_worker_count(500, 0, 8, None), 1);
+        assert_eq!(render_worker_count(10_000, 100, 6, None), 6);
+    }
 
     #[test]
     fn out_may_not_be_or_contain_the_build() {
@@ -719,6 +969,41 @@ mod tests {
         assert!(check_out(&root, &root.join("./dist/site")).unwrap());
         assert!(!check_out(&root, &root.join("public-site")).unwrap());
         assert!(!check_out(&root, &root.join("distro")).unwrap());
+    }
+
+    #[test]
+    fn skip_build_requires_a_prior_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert!(ensure_built(root).is_err());
+        std::fs::create_dir_all(root.join("dist/client")).unwrap();
+        std::fs::write(root.join("dist/client/manifest.json"), "{}").unwrap();
+        assert!(ensure_built(root).is_err());
+        std::fs::create_dir_all(root.join("dist/server/routes")).unwrap();
+        ensure_built(root).unwrap();
+    }
+
+    #[test]
+    fn client_dir_uses_hard_links_on_the_same_filesystem() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("client");
+        let to = dir.path().join("out/_nowaki");
+        std::fs::create_dir_all(from.join("sub")).unwrap();
+        std::fs::write(from.join("sub/a.js"), b"chunk").unwrap();
+        std::fs::write(from.join("manifest.json"), b"{}").unwrap();
+        link_client_dir(&from, &to).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(to.join("sub/a.js")).unwrap(),
+            "chunk"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(
+                std::fs::metadata(from.join("sub/a.js")).unwrap().ino(),
+                std::fs::metadata(to.join("sub/a.js")).unwrap().ino()
+            );
+        }
     }
 
     fn routing(json: &str) -> nowaki_core::rules::RoutingConfig {
@@ -787,6 +1072,56 @@ mod tests {
             &[],
         );
         assert!(no_detect.warnings.is_empty());
+    }
+
+    #[test]
+    fn static_host_rules_per_locale() {
+        let host = static_host_rules(
+            &routing(
+                r#"{"basePath":"/app",
+                "redirects":[
+                    {"source":"/a","destination":"/b","status":307},
+                    {"source":"/old/[...rest]","destination":"/[...rest]","status":308},
+                    {"source":"/ja/x","destination":"/y","status":307,"locale":false},
+                    {"source":"/to","destination":"/ja/welcome","status":307},
+                    {"source":"/[slug]","destination":"https://example.com/[slug]","status":302}
+                ],
+                "rewrites":[{"source":"/p/[id]","destination":"/photo/[id]"}],
+                "headers":[
+                    {"source":"/login","headers":[{"key":"x-robots-tag","value":"noindex"}]},
+                    {"source":"/[...all]","headers":[{"key":"x-all","value":"1"}]},
+                    {"source":"/ja/[...rest]","headers":[{"key":"x-ja","value":"1"}],"locale":false}
+                ],
+                "i18n":{"locales":["en","ja"],"defaultLocale":"en"}}"#,
+            ),
+            &["/photo/1", "/ja/photo/1"],
+        );
+        assert_eq!(
+            host.redirects,
+            "/app/en/a /app/b 307\n/app/ja/a /app/ja/b 307\n/app/a /app/b 307\n\
+             /app/en/old/* /app/:splat 308\n/app/ja/old/* /app/ja/:splat 308\n/app/old/* /app/:splat 308\n\
+             /app/ja/x /app/y 307\n\
+             /app/en/to /app/ja/welcome 307\n/app/ja/to /app/ja/welcome 307\n/app/to /app/ja/welcome 307\n\
+             /app/en/:slug https://example.com/:slug 302\n/app/ja/:slug https://example.com/:slug 302\n/app/:slug https://example.com/:slug 302\n\
+             /app/en/p/:id /app/photo/:id 200\n/app/ja/p/:id /app/ja/photo/:id 200\n/app/p/:id /app/photo/:id 200\n"
+        );
+        assert_eq!(
+            host.headers,
+            "/app/ja/login\n  x-robots-tag: noindex\n/app/login\n  x-robots-tag: noindex\n\
+             /app/*\n  x-all: 1\n/app/ja/*\n  x-ja: 1\n"
+        );
+        assert!(host.warnings.iter().any(|w| w.contains("redirect /[slug]")));
+        let prefixed = static_host_rules(
+            &routing(
+                r#"{"redirects":[{"source":"/a","destination":"/b","status":307}],
+                "i18n":{"locales":["en","ja"],"defaultLocale":"en","prefixDefaultLocale":true}}"#,
+            ),
+            &[],
+        );
+        assert_eq!(
+            prefixed.redirects,
+            "/en/a /en/b 307\n/ja/a /ja/b 307\n/a /en/b 307\n"
+        );
     }
 
     #[test]

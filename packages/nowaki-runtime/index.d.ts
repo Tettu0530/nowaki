@@ -313,7 +313,10 @@ export interface Live<S = any> {
    * Makes this a room island: every instance with the same room id (1-120 characters, no
    * whitespace) shares one state, `shared()`. Handlers then receive and return the shared state,
    * and every member gets the new HTML. Held in the server process's memory (`nowaki dev` /
-   * `nowaki start`); not shared across instances, and lost on restart.
+   * `nowaki start`); not shared across instances. `nowaki start` saves rooms to
+   * `.nowaki/live-rooms.json` (at most every 2 s, and on SIGTERM / SIGINT) and loads them back on
+   * the next start (`NOWAKI_LIVE_ROOMS_FILE` picks the file, `off` disables it); under `nowaki dev`
+   * they are lost on restart.
    */
   room?: (props: any) => string;
   /** Initial shared state of a room (`live.room`). */
@@ -348,6 +351,15 @@ export function getLocale(): string | undefined;
  * fragment are kept. Returns `path` unchanged without i18n.
  */
 export function localePath(path: string, locale?: string): string;
+
+/**
+ * `path` as the browser requests it, built the way `<Link>` builds its href: in the current locale
+ * (with `i18n`; a path that already has a locale prefix keeps it) and under nowaki.config
+ * `basePath`. For URLs `<Link>` doesn't build: `<form action={href("/logout")}>`, `fetch`,
+ * `location`. `locale` picks another locale (`false`: no prefix); `basePath: false` leaves the base
+ * out. Works on the server and in islands; without i18n and basePath, returns `path` as it is.
+ */
+export function href(path: string, options?: { locale?: string | false; basePath?: boolean }): string;
 
 /**
  * Remembers `locale` as the visitor's choice when nowaki.config has `i18n.detect`: sets the

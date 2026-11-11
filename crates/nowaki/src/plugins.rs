@@ -88,34 +88,79 @@ impl Drop for PluginHost {
 }
 
 /// None if the config, hooks, or runtime is missing (no host is started, zero overhead).
+#[cfg(test)]
 pub fn start(root: &Path) -> Result<Option<PluginHost>> {
+    Ok(spawn(root, false)?.finish()?.0)
+}
+
+/// A plugin host that was spawned but not waited for (see [`spawn`]).
+pub struct Spawned {
+    child: Option<Child>,
+    /// The host was asked for site-config.mjs's normalized config too.
+    site_config: bool,
+}
+
+/// Starts the plugin host without waiting for it, so Node starts and imports nowaki.config while
+/// the CLI does other work. With `with_config` the same process also normalizes the build-time
+/// config (see crate::site; [`Spawned::finish`] returns it).
+pub fn spawn(root: &Path, with_config: bool) -> Result<Spawned> {
     let has_config = ["nowaki.config.mjs", "nowaki.config.js"]
         .iter()
         .any(|n| root.join(n).exists());
     // If @tsrx/preact is present, start the host for .tsrx even without a config.
     let has_tsrx = root.join("node_modules/@tsrx/preact").is_dir();
+    let none = || Spawned {
+        child: None,
+        site_config: false,
+    };
     if !has_config && !has_tsrx {
-        return Ok(None);
+        return Ok(none());
     }
     let script = root.join("node_modules/@nowaki-dev/runtime/server/plugin-host.mjs");
     if !script.exists() {
         eprintln!(
             "[nowaki] nowaki.config found, but @nowaki-dev/runtime is missing, so plugins can't be loaded"
         );
-        return Ok(None);
+        return Ok(none());
     }
+    let site_config = with_config && crate::site::mentions(root);
 
-    let mut child = Command::new("node")
-        .arg(&script)
+    let mut cmd = Command::new("node");
+    cmd.arg(&script)
         .current_dir(root)
         // Exits with this process, however it ends (server/exit-with-parent.mjs).
         .env("NOWAKI_EXIT_WITH_PARENT", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .context("failed to start plugin host (node)")?;
+        .stderr(Stdio::inherit());
+    if site_config {
+        cmd.env("NOWAKI_SITE_CONFIG", "1");
+    }
+    let child = cmd.spawn().context("failed to start plugin host (node)")?;
+    Ok(Spawned {
+        child: Some(child),
+        site_config,
+    })
+}
 
+impl Spawned {
+    /// Waits for the host. Returns it (None without hooks: the host is killed) and, for
+    /// `spawn(_, true)`, the build-time parts of nowaki.config normalized by the runtime
+    /// (`{ site?, fonts?, routing?, images? }`; `{}` when the config names none of them, an `Err`
+    /// for an invalid config, already explained on stderr).
+    pub fn finish(self) -> Result<(Option<PluginHost>, Result<serde_json::Value>)> {
+        // No host: no nowaki.config, or no runtime (so no site-config.mjs either).
+        let Some(child) = self.child else {
+            return Ok((None, Ok(serde_json::Value::Object(Default::default()))));
+        };
+        self::finish(child, self.site_config)
+    }
+}
+
+fn finish(
+    mut child: Child,
+    site_config: bool,
+) -> Result<(Option<PluginHost>, Result<serde_json::Value>)> {
     let stdout = child.stdout.take().expect("piped stdout");
     let mut reader = BufReader::new(stdout);
     let mut port = None;
@@ -130,7 +175,14 @@ pub fn start(root: &Path) -> Result<Option<PluginHost>> {
             break;
         }
     }
-    let port = port.ok_or_else(|| anyhow!("plugin host did not report READY"))?;
+    let Some(port) = port else {
+        let _ = child.wait();
+        if site_config {
+            // Importing nowaki.config failed (Node printed why).
+            return Err(anyhow!("nowaki.config is invalid (see above)"));
+        }
+        return Err(anyhow!("plugin host did not report READY"));
+    };
     // Keep reading the host's stdout for as long as it runs. Dropping the reader here would close
     // the pipe, and the host's next stdout write (a plugin writing to process.stdout) would die
     // with EPIPE, taking every later transform with it.
@@ -138,9 +190,23 @@ pub fn start(root: &Path) -> Result<Option<PluginHost>> {
         let _ = std::io::copy(&mut reader, &mut std::io::stderr());
     });
 
-    // No transform hook and no tsrx means no bridge is needed (kill the host).
     let (_, caps_body) = http_get(port, "/caps")?;
     let caps: serde_json::Value = serde_json::from_str(&caps_body).unwrap_or_default();
+    let config = if !site_config {
+        Ok(serde_json::Value::Object(Default::default()))
+    } else if let Some(ok) = caps.pointer("/siteConfig/ok") {
+        Ok(ok.clone())
+    } else if let Some(err) = caps.pointer("/siteConfig/error").and_then(|e| e.as_str()) {
+        eprintln!("{err}");
+        Err(anyhow!("nowaki.config is invalid (see above)"))
+    } else {
+        // Every supported runtime (crate::runtime::MIN_RUNTIME) answers it.
+        Err(anyhow!(
+            "the plugin host did not return nowaki.config (is @nowaki-dev/runtime up to date?)"
+        ))
+    };
+
+    // No transform hook and no tsrx means no bridge is needed (kill the host).
     let cap = |k: &str| caps.get(k).and_then(|b| b.as_bool()).unwrap_or(false);
     let has_transform = cap("hasTransform");
     let has_tsrx = cap("hasTsrx");
@@ -149,7 +215,7 @@ pub fn start(root: &Path) -> Result<Option<PluginHost>> {
     if !has_transform && !has_tsrx && !has_resolve_id && !has_load {
         let _ = child.kill();
         let _ = child.wait();
-        return Ok(None);
+        return Ok((None, config));
     }
 
     let bridge: Arc<dyn PluginBridge> = Arc::new(HttpPluginBridge {
@@ -168,7 +234,7 @@ pub fn start(root: &Path) -> Result<Option<PluginHost>> {
         feats.push("virtual modules (resolveId/load)");
     }
     println!("[nowaki] loaded plugins ({})", feats.join(" + "));
-    Ok(Some(PluginHost { child, bridge }))
+    Ok((Some(PluginHost { child, bridge }), config))
 }
 
 // Connection: close, so reading the body to EOF is enough.
@@ -264,5 +330,51 @@ mod tests {
         host.child.wait().unwrap();
         let err = host.bridge.transform("/a.ts", "ok").unwrap_err();
         assert!(format!("{err:#}").contains("not responding"), "{err:#}");
+    }
+
+    #[test]
+    fn the_host_reads_the_build_time_config_in_the_same_process() {
+        let config = r#"export default {
+            site: "https://e.x/",
+            basePath: "/app/",
+            plugins: [{ name: "p", transform: () => null }],
+        };"#;
+        let app = app_with_config(config);
+        let (host, read) = spawn(app.path(), true).unwrap().finish().unwrap();
+        assert!(host.is_some(), "the plugin stays loaded");
+        let read = read.unwrap();
+        assert_eq!(read["site"], "https://e.x", "normalized");
+        assert_eq!(read["routing"]["basePath"], "/app");
+
+        // No plugins: the host goes away, the config is still read.
+        let app = app_with_config(r#"export default { site: "https://e.x" };"#);
+        let (host, read) = spawn(app.path(), true).unwrap().finish().unwrap();
+        assert!(host.is_none());
+        assert_eq!(read.unwrap()["site"], "https://e.x");
+
+        // Without the config keys nothing is normalized.
+        let app = app_with_config("export default {};");
+        let (_, read) = spawn(app.path(), true).unwrap().finish().unwrap();
+        assert_eq!(read.unwrap(), serde_json::json!({}));
+    }
+
+    #[test]
+    fn an_invalid_build_time_config_is_an_error() {
+        let app = app_with_config(
+            r#"export default { headers: [{ source: "/a", headers: { "x-a": "1\r\n2" } }] };"#,
+        );
+        let (_, read) = spawn(app.path(), true).unwrap().finish().unwrap();
+        let err = read.unwrap_err();
+        assert!(
+            format!("{err:#}").contains("nowaki.config is invalid"),
+            "{err:#}"
+        );
+
+        let app = app_with_config("export default { site: ");
+        let err = spawn(app.path(), true).unwrap().finish().err().unwrap();
+        assert!(
+            format!("{err:#}").contains("nowaki.config is invalid"),
+            "{err:#}"
+        );
     }
 }

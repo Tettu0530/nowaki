@@ -21,7 +21,7 @@ pub fn start(root: &Path) -> Result<Pending> {
     let script = root.join("node_modules/@nowaki-dev/runtime/server/env-check.mjs");
     if !script.exists() {
         return Err(anyhow!(
-            "env.ts needs @nowaki-dev/runtime 0.18 or newer (server/env-check.mjs not found)"
+            "env.ts needs @nowaki-dev/runtime 0.17 or newer (server/env-check.mjs not found)"
         ));
     }
     let child = std::process::Command::new("node")
@@ -54,6 +54,68 @@ pub fn finish(pending: Pending, core: &mut NowakiCore) -> Result<()> {
         .ok_or_else(|| anyhow!("env.ts check printed no result"))?;
     core.set_public_env(&vars)?;
     println!("[nowaki] env: env.ts checked ({} public)", vars.len());
+    Ok(())
+}
+
+/// Validates env.ts on `--skip-build` and checks that `PUBLIC_*` values matches
+/// `dist/server/env-public.json` from the prior build (what the client bundle inlined).
+pub fn finish_skip_build(pending: Pending, root: &Path) -> Result<()> {
+    let Some(child) = pending.0 else {
+        return Ok(());
+    };
+    let out = child
+        .wait_with_output()
+        .context("failed to run node for the env.ts check")?;
+    if !out.status.success() {
+        eprint!("{}", String::from_utf8_lossy(&out.stderr));
+        return Err(anyhow!(
+            "environment variables don't match env.ts (listed above)"
+        ));
+    }
+    let vars = parse_ok(&String::from_utf8_lossy(&out.stdout))
+        .ok_or_else(|| anyhow!("env.ts check printed no result"))?;
+    let public: Vec<_> = vars
+        .iter()
+        .filter(|(n, _)| n.starts_with("PUBLIC_"))
+        .collect();
+    let built_path = root.join("dist/server/env-public.json");
+    if built_path.is_file() {
+        let built: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&std::fs::read_to_string(&built_path)?)?;
+        for (name, literal) in &public {
+            let current: serde_json::Value = serde_json::from_str(literal)
+                .with_context(|| format!("public env {name}: invalid JSON from env.ts"))?;
+            match built.get(name.as_str()) {
+                Some(b) if b == &current => {}
+                Some(b) => {
+                    return Err(anyhow!(
+                        "public env {name} ({current}) doesn't match the build ({b}). \
+                         The client still carries the values from `nowaki build`; rebuild or align your environment."
+                    ));
+                }
+                None => {
+                    return Err(anyhow!(
+                        "public env {name} isn't in dist/server/env-public.json; run `nowaki build` again."
+                    ));
+                }
+            }
+        }
+        for key in built.keys() {
+            if !public.iter().any(|(n, _)| n == key) {
+                return Err(anyhow!(
+                    "public env {key} from the build is missing in the current environment"
+                ));
+            }
+        }
+    } else if nowaki_core::env::env_file(root).is_some() {
+        return Err(anyhow!(
+            "dist/server/env-public.json is missing (incomplete build). Run `nowaki build` first."
+        ));
+    }
+    println!(
+        "[nowaki] env: env.ts checked ({} public, matches the build)",
+        public.len()
+    );
     Ok(())
 }
 

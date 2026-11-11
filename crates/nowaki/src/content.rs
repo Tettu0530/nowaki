@@ -174,7 +174,7 @@ pub fn write(root: &Path, out_dir: &Path, images: &Images, locales: &[String]) -
 /// `nowaki build` / `prerender`: writes `dist/server/content/index.json` (content/config is
 /// compiled with the other server modules) and validates every entry in Node. Fails the build on
 /// an invalid entry, listing each one.
-/// `config` is nowaki.config as `site::config` read it (its i18n locales split the entries).
+/// `config` is nowaki.config as the plugin host read it (its i18n locales split the entries).
 pub fn build(root: &Path, dist: &Path, config: &Value) -> Result<()> {
     if !enabled(root) {
         return Ok(());
@@ -206,7 +206,7 @@ pub fn build(root: &Path, dist: &Path, config: &Value) -> Result<()> {
 }
 
 /// The i18n locales of a routing config (`dist/server/routing.json`, `.nowaki/routing.json`, or
-/// `routing` from `site::config`); empty without i18n.
+/// `routing` from the plugin host's config); empty without i18n.
 pub fn locales(routing: Option<&Value>) -> Vec<String> {
     routing
         .and_then(|r| r.pointer("/i18n/locales"))

@@ -12,6 +12,3 @@ packages:
 # With pnpm 10+'s default of false they're fetched from the registry, and a just-published version
 # trips the minimumReleaseAge policy. Published package.json files keep plain semver.
 linkWorkspacePackages: true
-minimumReleaseAgeExclude:
-  - '@tsrx/core@0.1.30'
-  - '@tsrx/preact@0.1.30'

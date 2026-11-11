@@ -378,33 +378,118 @@ struct Metrics {
 /// else hhea), and OS/2 xAvgCharWidth.
 fn metrics(path: &Path) -> Result<Metrics> {
     let data = std::fs::read(path)?;
-    let face = ttf_parser::Face::parse(&data, 0).map_err(|e| anyhow!("{}: {e}", path.display()))?;
-    let os2 = face.tables().os2;
-    let (ascent, descent, line_gap) = match os2 {
-        Some(t) if t.use_typographic_metrics() => (
-            t.typographic_ascender() as f64,
-            t.typographic_descender() as f64,
-            t.typographic_line_gap() as f64,
-        ),
-        _ => (
-            face.ascender() as f64,
-            face.descender() as f64,
-            face.line_gap() as f64,
-        ),
+    parse_metrics(&data).ok_or_else(|| {
+        anyhow!(
+            "{}: not a TrueType / OpenType font with head, hhea and OS/2 average width",
+            path.display()
+        )
+    })
+}
+
+/// Reads [`Metrics`] from a TrueType / OpenType font (the first face of a collection). Only the
+/// `head`, `hhea` and `OS/2` tables are read; the rules match what ttf-parser (used before 0.18.2)
+/// returned for a face at its default variation coordinates.
+fn parse_metrics(data: &[u8]) -> Option<Metrics> {
+    let u16_at = |b: &[u8], at: usize| b.get(at..at + 2).map(|s| u16::from_be_bytes([s[0], s[1]]));
+    let i16_at = |b: &[u8], at: usize| u16_at(b, at).map(|v| v as i16);
+    let u32_at = |b: &[u8], at: usize| {
+        b.get(at..at + 4)
+            .map(|s| u32::from_be_bytes([s[0], s[1], s[2], s[3]]))
     };
-    // xAvgCharWidth is the second field of OS/2 (ttf-parser doesn't expose it).
-    let avg = face
-        .raw_face()
-        .table(ttf_parser::Tag::from_bytes(b"OS/2"))
-        .filter(|t| t.len() >= 4)
-        .map(|t| i16::from_be_bytes([t[2], t[3]]) as f64)
-        .filter(|a| *a > 0.0)
-        .ok_or_else(|| anyhow!("{}: no OS/2 average width", path.display()))?;
-    Ok(Metrics {
-        upm: face.units_per_em() as f64,
-        ascent,
-        descent,
-        line_gap,
+    // A collection (`ttcf`): the first font's offset table.
+    let start = if data.get(0..4)? == b"ttcf" {
+        if u32_at(data, 8)? == 0 {
+            return None;
+        }
+        u32_at(data, 12)? as usize
+    } else {
+        0
+    };
+    // TrueType (0x00010000 or `true`) or CFF (`OTTO`).
+    if !matches!(
+        data.get(start..start + 4)?,
+        [0, 1, 0, 0] | b"true" | b"OTTO"
+    ) {
+        return None;
+    }
+    let num_tables = u16_at(data, start + 4)? as usize;
+    let table = |tag: &[u8; 4]| -> Option<&[u8]> {
+        (0..num_tables).find_map(|i| {
+            let rec = start + 12 + i * 16;
+            if data.get(rec..rec + 4)? != tag {
+                return None;
+            }
+            let offset = u32_at(data, rec + 8)? as usize;
+            let len = u32_at(data, rec + 12)? as usize;
+            data.get(offset..offset.checked_add(len)?)
+        })
+    };
+    // Table lengths are checked against their minimum only: some fonts pad them.
+    let head = table(b"head").filter(|t| t.len() >= 54)?;
+    let upm = u16_at(head, 18)?;
+    if !(16..=16384).contains(&upm) {
+        return None;
+    }
+    let hhea = table(b"hhea").filter(|t| t.len() >= 36)?;
+    let (h_asc, h_desc, h_gap) = (i16_at(hhea, 4)?, i16_at(hhea, 6)?, i16_at(hhea, 8)?);
+    let os2_raw = table(b"OS/2");
+    // The parsed OS/2 fields need a known version and that version's full length.
+    let os2 = os2_raw.filter(|t| {
+        let min = match u16_at(t, 0) {
+            Some(0) => 78,
+            Some(1) => 86,
+            Some(2..=4) => 96,
+            Some(5) => 100,
+            _ => return false,
+        };
+        t.len() >= min
+    });
+    let (ascent, descent, line_gap) = match os2 {
+        // fsSelection bit 7, USE_TYPO_METRICS (OS/2 version 4 and later).
+        Some(t) if u16_at(t, 0)? >= 4 && u16_at(t, 62)? & (1 << 7) != 0 => {
+            (i16_at(t, 68)?, i16_at(t, 70)?, i16_at(t, 72)?)
+        }
+        _ => {
+            let (typo_asc, typo_desc, typo_gap) = match os2 {
+                Some(t) => (i16_at(t, 68)?, i16_at(t, 70)?, i16_at(t, 72)?),
+                None => (0, 0, 0),
+            };
+            let (win_asc, win_desc) = match os2 {
+                Some(t) => (i16_at(t, 74)?, i16_at(t, 76)?.wrapping_neg()),
+                None => (0, 0),
+            };
+            // A zero hhea value falls back to the typographic one, then to the Windows one.
+            let pick = |h: i16, typo: i16, win: i16| match (h, os2.is_some()) {
+                (0, true) if typo != 0 => typo,
+                (0, true) => win,
+                _ => h,
+            };
+            let gap = if (h_asc == 0 || h_desc == 0) && os2.is_some() {
+                if typo_asc != 0 || typo_desc != 0 {
+                    typo_gap
+                } else {
+                    0
+                }
+            } else {
+                h_gap
+            };
+            (
+                pick(h_asc, typo_asc, win_asc),
+                pick(h_desc, typo_desc, win_desc),
+                gap,
+            )
+        }
+    };
+    // xAvgCharWidth is the second field of OS/2, read whatever the table's version.
+    let avg = os2_raw
+        .and_then(|t| i16_at(t, 2))
+        .map(f64::from)
+        .filter(|a| *a > 0.0)?;
+    Some(Metrics {
+        upm: f64::from(upm),
+        ascent: f64::from(ascent),
+        descent: f64::from(descent),
+        line_gap: f64::from(line_gap),
         avg,
     })
 }
@@ -510,6 +595,134 @@ mod tests {
     fn metrics_are_sane() {
         let m = metrics(&example_font()).unwrap();
         assert!(m.upm >= 1000.0 && m.ascent > 0.0 && m.descent < 0.0 && m.avg > 0.0);
+        // The values ttf-parser read from this file (USE_TYPO_METRICS is set).
+        let got = (m.upm, m.ascent, m.descent, m.line_gap, m.avg);
+        assert_eq!(got, (1000.0, 950.0, -290.0, 0.0, 534.0));
+    }
+
+    /// OS/2 fields: version, xAvgCharWidth, fsSelection, typo (asc, desc, gap), win (asc, desc).
+    type Os2 = (u16, i16, u16, (i16, i16, i16), (u16, u16));
+
+    /// A minimal sfnt with `head`, `hhea` and (optionally) `OS/2`, wrapped in a collection when
+    /// `ttc`.
+    struct Font {
+        upm: u16,
+        hhea: (i16, i16, i16),
+        os2: Option<Os2>,
+        ttc: bool,
+    }
+
+    impl Font {
+        fn bytes(&self) -> Vec<u8> {
+            let mut head = vec![0u8; 54];
+            head[18..20].copy_from_slice(&self.upm.to_be_bytes());
+            let mut hhea = vec![0u8; 36];
+            hhea[4..6].copy_from_slice(&self.hhea.0.to_be_bytes());
+            hhea[6..8].copy_from_slice(&self.hhea.1.to_be_bytes());
+            hhea[8..10].copy_from_slice(&self.hhea.2.to_be_bytes());
+            let mut tables: Vec<(&[u8; 4], Vec<u8>)> = vec![(b"head", head), (b"hhea", hhea)];
+            if let Some((version, avg, fs, typo, win)) = self.os2 {
+                let mut os2 = vec![0u8; 100];
+                os2[0..2].copy_from_slice(&version.to_be_bytes());
+                os2[2..4].copy_from_slice(&avg.to_be_bytes());
+                os2[62..64].copy_from_slice(&fs.to_be_bytes());
+                os2[68..70].copy_from_slice(&typo.0.to_be_bytes());
+                os2[70..72].copy_from_slice(&typo.1.to_be_bytes());
+                os2[72..74].copy_from_slice(&typo.2.to_be_bytes());
+                os2[74..76].copy_from_slice(&win.0.to_be_bytes());
+                os2[76..78].copy_from_slice(&win.1.to_be_bytes());
+                tables.push((b"OS/2", os2));
+            }
+            let start: usize = if self.ttc { 16 } else { 0 };
+            let mut out = Vec::new();
+            if self.ttc {
+                out.extend_from_slice(b"ttcf");
+                out.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+                out.extend_from_slice(&1u32.to_be_bytes());
+                out.extend_from_slice(&(start as u32).to_be_bytes());
+            }
+            out.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+            out.extend_from_slice(&(tables.len() as u16).to_be_bytes());
+            out.extend_from_slice(&[0; 6]);
+            let mut offset = start + 12 + tables.len() * 16;
+            for (tag, data) in &tables {
+                out.extend_from_slice(*tag);
+                out.extend_from_slice(&[0; 4]);
+                out.extend_from_slice(&(offset as u32).to_be_bytes());
+                out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+                offset += data.len();
+            }
+            for (_, data) in &tables {
+                out.extend_from_slice(data);
+            }
+            out
+        }
+    }
+
+    fn read(font: &Font) -> Option<(f64, f64, f64, f64, f64)> {
+        parse_metrics(&font.bytes()).map(|m| (m.upm, m.ascent, m.descent, m.line_gap, m.avg))
+    }
+
+    #[test]
+    fn metrics_follow_use_typo_metrics_and_the_hhea_fallbacks() {
+        let font = |hhea, os2| Font {
+            upm: 2048,
+            hhea,
+            os2,
+            ttc: false,
+        };
+        // USE_TYPO_METRICS (bit 7) on OS/2 v4: the typographic values win over hhea.
+        let typo = font(
+            (900, -300, 10),
+            Some((4, 1100, 0x80, (800, -200, 50), (1000, 400))),
+        );
+        assert_eq!(read(&typo), Some((2048.0, 800.0, -200.0, 50.0, 1100.0)));
+        // The bit means nothing before OS/2 v4: hhea.
+        let v3 = font(
+            (900, -300, 10),
+            Some((3, 1100, 0x80, (800, -200, 50), (1000, 400))),
+        );
+        assert_eq!(read(&v3), Some((2048.0, 900.0, -300.0, 10.0, 1100.0)));
+        // A zero hhea ascent / descent falls back to typographic, and the gap follows.
+        let zero = font((0, 0, 10), Some((4, 1100, 0, (800, -200, 50), (1000, 400))));
+        assert_eq!(read(&zero), Some((2048.0, 800.0, -200.0, 50.0, 1100.0)));
+        // ...then to the Windows values (descent negated), with no gap.
+        let win = font((0, 0, 10), Some((4, 1100, 0, (0, 0, 50), (1000, 400))));
+        assert_eq!(read(&win), Some((2048.0, 1000.0, -400.0, 0.0, 1100.0)));
+        // The first face of a collection.
+        let ttc = Font {
+            upm: 1000,
+            hhea: (900, -300, 10),
+            os2: Some((4, 500, 0, (0, 0, 0), (0, 0))),
+            ttc: true,
+        };
+        assert_eq!(read(&ttc), Some((1000.0, 900.0, -300.0, 10.0, 500.0)));
+    }
+
+    #[test]
+    fn metrics_reject_what_has_no_fallback_values() {
+        let ok = || Font {
+            upm: 1000,
+            hhea: (900, -300, 0),
+            os2: Some((4, 500, 0, (0, 0, 0), (0, 0))),
+            ttc: false,
+        };
+        assert!(read(&ok()).is_some());
+        // No OS/2 (no average width), a zero average width, an out-of-range unitsPerEm.
+        assert_eq!(read(&Font { os2: None, ..ok() }), None);
+        assert_eq!(
+            read(&Font {
+                os2: Some((4, 0, 0, (0, 0, 0), (0, 0))),
+                ..ok()
+            }),
+            None
+        );
+        assert_eq!(read(&Font { upm: 8, ..ok() }), None);
+        // Not an sfnt, truncated data, a woff2.
+        let bytes = ok().bytes();
+        assert!(parse_metrics(&bytes[..bytes.len() / 2]).is_none());
+        assert!(parse_metrics(b"wOF2 not really").is_none());
+        assert!(parse_metrics(b"").is_none());
     }
 
     #[test]

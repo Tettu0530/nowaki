@@ -438,6 +438,69 @@ fn build_writes_routing_json_and_rejects_an_invalid_config_first() {
 }
 
 #[test]
+fn build_compiles_markdoc_through_the_official_plugin() {
+    let root = example_root();
+    if !deps_installed(&root) {
+        eprintln!("skip: examples/hello deps not installed");
+        return;
+    }
+    if !root.join("node_modules/@nowaki-dev/markdoc").exists() {
+        eprintln!("skip: @nowaki-dev/markdoc not installed");
+        return;
+    }
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    let app = budget_app("{ js: 100 }");
+    std::fs::create_dir_all(app.path().join("markdoc")).unwrap();
+    std::fs::write(
+        app.path().join("nowaki.config.mjs"),
+        r#"import { markdoc } from "@nowaki-dev/markdoc";
+export default { plugins: [markdoc()] };
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        app.path().join("markdoc/page.mdoc"),
+        "---\ntitle: Doc\n---\n\n# Hello Markdoc\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.path().join("routes/doc.tsx"),
+        r#"import Doc from "../markdoc/page.mdoc";
+export default function Page() { return <Doc />; }
+"#,
+    )
+    .unwrap();
+    let ok = Command::new(bin)
+        .arg("build")
+        .arg(app.path())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&ok.stderr);
+    assert!(ok.status.success(), "{stderr}");
+    let compiled = std::fs::read_to_string(app.path().join("dist/server/markdoc/page.js")).unwrap();
+    assert!(
+        compiled.contains("renderMarkdoc") && compiled.contains("Hello Markdoc"),
+        "{compiled}"
+    );
+    let route = std::fs::read_to_string(app.path().join("dist/server/routes/doc.js")).unwrap();
+    assert!(route.contains("markdoc/page"), "{route}");
+
+    std::fs::write(app.path().join("markdoc/page.mdoc"), "{% nope /%}\n").unwrap();
+    std::fs::remove_dir_all(app.path().join("dist")).unwrap();
+    let bad = Command::new(bin)
+        .arg("build")
+        .arg(app.path())
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&bad.stderr);
+    assert!(!bad.status.success(), "invalid Markdoc must fail the build");
+    assert!(
+        err.contains("Markdoc validation failed") || err.contains("Undefined tag"),
+        "{err}"
+    );
+}
+
+#[test]
 fn prerender_refuses_an_out_that_is_the_build() {
     let root = example_root();
     if !deps_installed(&root) {
@@ -472,6 +535,67 @@ fn prerender_refuses_an_out_that_is_the_build() {
         );
         assert!(app.path().join("dist/client").is_dir(), "--out {out}");
     }
+}
+
+#[test]
+fn prerender_skip_build_requires_dist() {
+    let root = example_root();
+    if !deps_installed(&root) {
+        eprintln!("skip: examples/hello deps not installed");
+        return;
+    }
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    let app = budget_app("{ js: 100 }");
+    let run = Command::new(bin)
+        .arg("prerender")
+        .arg(app.path())
+        .arg("--skip-build")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(!run.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("Not built yet"),
+        "must refuse without dist/: {stderr}"
+    );
+}
+
+#[test]
+fn prerender_skip_build_reuses_dist() {
+    let root = example_root();
+    if !deps_installed(&root) {
+        eprintln!("skip: examples/hello deps not installed");
+        return;
+    }
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    let app = budget_app("{ js: 100 }");
+    let built = Command::new(bin)
+        .arg("build")
+        .arg(app.path())
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let out = app.path().join("dist/static-skip");
+    let run = Command::new(bin)
+        .arg("prerender")
+        .arg(app.path())
+        .args(["--out", out.to_str().unwrap()])
+        .arg("--skip-build")
+        .output()
+        .unwrap();
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(run.status.success(), "{combined}");
+    assert!(combined.contains("--skip-build"), "{combined}");
+    assert!(out.join("index.html").is_file(), "{combined}");
+    assert!(out.join("about/index.html").is_file(), "{combined}");
 }
 
 /// An app that logs ~1 MiB to stdout per render: Node's pipe writes are synchronous on Linux,
@@ -517,4 +641,160 @@ fn prerender_keeps_reading_a_chatty_servers_stdout() {
     assert!(app.path().join("dist/static/about/index.html").is_file());
     // The app's logs are passed through.
     assert!(out.contains(&"x".repeat(4096)));
+}
+
+fn prerender_multi_page_app(extra_routes: usize) -> tempfile::TempDir {
+    let app = budget_app("{ js: 100 }");
+    std::fs::write(
+        app.path().join("routes/index.tsx"),
+        "export default function Home() { return <p>home</p>; }\n",
+    )
+    .unwrap();
+    for i in 0..extra_routes {
+        std::fs::write(
+            app.path().join(format!("routes/p{i}.tsx")),
+            format!("export default function P{i}() {{ return <p>{i}</p>; }}\n"),
+        )
+        .unwrap();
+    }
+    app
+}
+
+/// Walk `dir` and collect relative path → file contents (directories only as path keys for files).
+fn dir_snapshot(dir: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    let mut out = std::collections::BTreeMap::new();
+    fn walk(
+        base: &std::path::Path,
+        root: &std::path::Path,
+        out: &mut std::collections::BTreeMap<String, Vec<u8>>,
+    ) {
+        let read_dir = match std::fs::read_dir(base) {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        for ent in read_dir.flatten() {
+            let path = ent.path();
+            let meta = ent.metadata().expect("metadata");
+            if meta.is_dir() {
+                walk(&path, root, out);
+            } else if meta.is_file() {
+                let rel = path.strip_prefix(root).expect("under root");
+                out.insert(
+                    rel.to_string_lossy().into_owned(),
+                    std::fs::read(&path).expect("read file"),
+                );
+            }
+        }
+    }
+    walk(dir, dir, &mut out);
+    out
+}
+
+/// With `NOWAKI_PRERENDER_POOL_THRESHOLD=1`, several workers split the same pages as a single worker.
+#[test]
+fn prerender_worker_pool_matches_single_worker_output() {
+    let root = example_root();
+    if !deps_installed(&root) {
+        eprintln!("skip: examples/hello deps not installed");
+        return;
+    }
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    // index, about, and p0..p2 → pool (threshold 1) with NOWAKI_PRERENDER_WORKERS=2 uses 2 workers.
+    let app = prerender_multi_page_app(3);
+    let single_out = app.path().join("dist/static-single");
+    let pool_out = app.path().join("dist/static-pool");
+    let _ = std::fs::remove_dir_all(single_out.parent().unwrap());
+
+    let single = Command::new(bin)
+        .arg("prerender")
+        .arg(app.path())
+        .arg("--out")
+        .arg(&single_out)
+        .env("NOWAKI_PRERENDER_POOL_THRESHOLD", "0")
+        .output()
+        .unwrap();
+    let single_stdout = String::from_utf8_lossy(&single.stdout);
+    assert!(
+        single.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&single.stderr),
+        single_stdout
+    );
+    assert!(
+        !single_stdout.contains("Node render workers"),
+        "threshold 0 must not start a pool:\n{single_stdout}"
+    );
+
+    let pool = Command::new(bin)
+        .arg("prerender")
+        .arg(app.path())
+        .arg("--out")
+        .arg(&pool_out)
+        .env("NOWAKI_PRERENDER_POOL_THRESHOLD", "1")
+        .env("NOWAKI_PRERENDER_WORKERS", "2")
+        .output()
+        .unwrap();
+    let pool_stdout = String::from_utf8_lossy(&pool.stdout);
+    let pool_stderr = String::from_utf8_lossy(&pool.stderr);
+    assert!(pool.status.success(), "{pool_stderr}\n{pool_stdout}");
+    assert!(
+        pool_stdout.contains("2 Node render workers"),
+        "expected a 2-worker pool:\n{pool_stdout}"
+    );
+    assert!(pool_stdout.contains("prerender done"), "{pool_stdout}");
+
+    let a = dir_snapshot(&single_out);
+    let b = dir_snapshot(&pool_out);
+    assert_eq!(a.len(), b.len(), "file count differs");
+    for (path, bytes) in &a {
+        assert_eq!(b.get(path), Some(bytes), "mismatch at {path}");
+    }
+}
+
+#[test]
+fn every_server_command_refuses_a_runtime_older_than_the_cli_supports() {
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let app = dir.path();
+    std::fs::create_dir_all(app.join("routes")).unwrap();
+    std::fs::write(
+        app.join("routes/index.tsx"),
+        "export default function Home() { return <p>hi</p>; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("nowaki.config.mjs"),
+        "export default { basePath: \"/app\" };\n",
+    )
+    .unwrap();
+    let runtime = app.join("node_modules/@nowaki-dev/runtime");
+    std::fs::create_dir_all(&runtime).unwrap();
+    std::fs::write(
+        runtime.join("package.json"),
+        r#"{"name":"@nowaki-dev/runtime","version":"0.16.3"}"#,
+    )
+    .unwrap();
+    // Ports in case a command got past the check (it must not).
+    for args in [
+        &["dev", "--port", "5420"][..],
+        &["build"],
+        &["start", "--port", "5421"],
+        &["prerender"],
+    ] {
+        let out = Command::new(bin)
+            .args(&args[..1])
+            .arg(app)
+            .args(&args[1..])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{args:?} must fail:\n{stderr}");
+        assert!(
+            stderr.contains("@nowaki-dev/runtime 0.16.3 is too old")
+                && stderr.contains(env!("CARGO_PKG_VERSION"))
+                && stderr.contains("npm i @nowaki-dev/runtime@^"),
+            "{args:?}:\n{stderr}"
+        );
+    }
+    assert!(!app.join("dist").exists(), "nothing is built");
 }

@@ -3,13 +3,13 @@ resolver = "2"
 members = ["crates/nowaki-core", "crates/nowaki"]
 
 [workspace.package]
-version = "0.18.0"
+version = "0.18.2"
 edition = "2021"
 license = "MIT"
 authors = ["Tettu0530"]
 repository = "https://github.com/Tettu0530/nowaki"
 homepage = "https://nowaki.dev"
-rust-version = "1.95"
+rust-version = "1.97"
 
 # The AVIF encoder (for `?image`) is unusably slow unoptimized; debug builds (`cargo build`, CI's
 # e2e) optimize just it and the image codecs.
