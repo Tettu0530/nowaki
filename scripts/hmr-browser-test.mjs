@@ -1,8 +1,11 @@
 // HMR in a real browser (Chrome over CDP) on `nowaki dev`: Fast Refresh keeps island state across
 // edits, a new hook remounts, an edited util reaches the island, a live (Jetstream) island keeps
 // its server state, and global CSS / a CSS Module / an island's plain CSS change with no
-// navigation. Runs twice: without a CSP and under NOWAKI_CSP=enforce. Prints the update latency
-// (file written -> DOM updated) for each kind of edit.
+// navigation. Route, layout and server-only module edits re-render the page in place (island and
+// live state, scroll and an open intercepting slot kept); a broken edit falls back to a reload and
+// recovers once fixed. Runs without a CSP, under NOWAKI_CSP=enforce, and (page edits only) under
+// a basePath with the CSP. Prints the update latency (file written -> DOM updated) for each kind
+// of edit.
 // Builds a small app under target/ (linked to examples/hello's node_modules).
 //   PORT=5500 CDP_PORT=5501 node scripts/hmr-browser-test.mjs
 // NOWAKI_BIN overrides the binary (default target/debug/nowaki), CHROME the browser.
@@ -30,12 +33,29 @@ const check = (label, cond, detail = "") => {
 const FILES = {
   "package.json": `{ "name": "hmr-browser-test", "private": true, "type": "module" }\n`,
   "routes/_layout.tsx": `import "../styles/global.css";
-export default function Layout({ children }: { children: unknown }) { return <div id="layout">{children}</div>; }\n`,
+export default function Layout({ children }: { children: unknown }) {
+  return <div id="layout"><nav id="nav"><a href="/photos">photos</a></nav>{children}</div>;
+}\n`,
   "routes/index.tsx": `import Counter from "../islands/Counter.tsx";
 import Styled from "../islands/Styled.tsx";
-export default function Home() { return <main><h1 id="title">HMR</h1><Counter /><Styled /></main>; }\n`,
+import { greeting } from "../lib/greeting.ts";
+export const head = "<style>#page-style { color: rgb(30, 30, 30); }</style>";
+export default function Home() {
+  return <main><h1 id="title">HMR</h1><Counter /><Styled /><p id="greeting">{greeting}</p><p id="page-style">styled</p><div style="height:4000px"></div><p id="bottom">bottom</p></main>;
+}\n`,
   "routes/live.tsx": `import LiveCount from "../islands/LiveCount.tsx";
 export default function Live() { return <main><LiveCount /></main>; }\n`,
+  // A server-only module only a route imports.
+  "lib/greeting.ts": `export const greeting = "hello from lib";\n`,
+  // An intercepting slot (a modal over the list), with an island on the list page.
+  "routes/photos/_layout.tsx": `export default function PhotosLayout({ children, slots }: { children: unknown; slots: { modal: unknown } }) {
+  return <div>{children}{slots.modal}</div>;
+}\n`,
+  "routes/photos/index.tsx": `import Counter from "../../islands/Counter.tsx";
+export default function Photos() { return <main><h2 id="photos">photo list</h2><a id="open" href="/photos/1">photo 1</a><Counter /></main>; }\n`,
+  "routes/photos/[id].tsx": `export default function Photo({ params }: { params: { id: string } }) { return <main id="photo-page">photo {params.id}</main>; }\n`,
+  "routes/photos/@modal/default.tsx": `export default function NoModal() { return <p id="no-modal">none</p>; }\n`,
+  "routes/photos/@modal/(.)[id].tsx": `export default function Modal({ params }: { params: { id: string } }) { return <aside id="modal">modal {params.id}</aside>; }\n`,
   "styles/global.css": `#title { color: rgb(1, 2, 3); }\n`,
   "lib/label.ts": `export const label = (s: string) => s;\n`,
   "islands/Counter.tsx": `import { useEffect, useState } from "preact/hooks";
@@ -108,6 +128,7 @@ class CDP {
     this.ws = new WebSocket(wsUrl);
     this.id = 0;
     this.pending = new Map();
+    this.cspLogs = 0; // CSP violations Chrome logged, in any document this target showed
     this.ready = new Promise((res, rej) => {
       this.ws.onopen = () => res();
       this.ws.onerror = (e) => rej(e);
@@ -121,6 +142,7 @@ class CDP {
       }
       if (msg.method === "Log.entryAdded" && msg.params.entry.level === "error" && !/favicon/.test(msg.params.entry.url ?? "")) {
         console.log("  page log:", msg.params.entry.text, msg.params.entry.url ?? "");
+        if (/Content Security Policy/.test(msg.params.entry.text)) this.cspLogs++;
       }
       if (msg.id && this.pending.has(msg.id)) {
         const { resolve, reject } = this.pending.get(msg.id);
@@ -200,13 +222,15 @@ async function run(mode) {
     writeFileSync(path.join(dir, file), text);
   }
   linkModules(path.join(ROOT, "examples/hello/node_modules"), path.join(dir, "node_modules"));
-  const env = { ...process.env, NOWAKI_CSP: mode === "csp" ? "enforce" : "" };
-  if (mode !== "csp") delete env.NOWAKI_CSP;
+  const prefix = mode === "base" ? "/app" : "";
+  if (prefix) writeFileSync(path.join(dir, "nowaki.config.mjs"), `export default { basePath: "${prefix}" };\n`);
+  const env = { ...process.env, NOWAKI_CSP: mode === "plain" ? "" : "enforce" };
+  if (mode === "plain") delete env.NOWAKI_CSP;
   const server = spawn(BIN, ["dev", dir, "--port", String(PORT)], { stdio: ["ignore", "inherit", "inherit"], env });
   children.add(server);
   let up = false;
   for (let i = 0; i < 240 && !up; i++) {
-    up = await fetch(`${BASE}/`).then((r) => r.ok, () => false);
+    up = await fetch(`${BASE}${prefix}/`).then((r) => r.ok, () => false);
     if (!up) await sleep(250);
   }
   if (!up) throw new Error(`nowaki dev did not listen on ${PORT}`);
@@ -238,7 +262,8 @@ async function run(mode) {
     await sleep(300);
     await waitFor(cdp, `document.readyState === "complete"`);
     // Marks this document: a reload or navigation drops it.
-    await cdp.eval(`window.__sameDoc = 1; window.__violations = [];
+    await cdp.eval(`window.__sameDoc = 1; window.__violations = []; window.__hmrPage = 0;
+      addEventListener("nowaki:hmr", (e) => { if (e.detail.type === "page") window.__hmrPage++; });
       addEventListener("securitypolicyviolation", (e) => window.__violations.push(e.violatedDirective + " " + e.blockedURI));
       return true;`);
   };
@@ -255,12 +280,27 @@ async function run(mode) {
     }, id, times);
   const tag = `[${mode}]`;
 
-  await go("/");
+  await go(prefix + "/");
   check(`${tag} the island hydrated`, await waitFor(cdp, `document.body.dataset.hydrated === "1"`));
   // Wait for the HMR socket too, or the first edit's message can arrive before it is open.
   await sleep(500);
   await click("inc", 3);
   check(`${tag} counter at 3`, await waitFor(cdp, `document.getElementById("count")?.textContent === "count: 3"`), await text("count"));
+
+  // Under a basePath (with a CSP): page edits re-render in place there too.
+  if (mode === "base") {
+    await cdp.eval("window.scrollTo(0, 300); return true;");
+    let ok = await edit(cdp, dir, "routes/index.tsx", `<h1 id="title">HMR</h1>`, `<h1 id="title">HMR base</h1>`, `document.getElementById("title")?.textContent === "HMR base"`, "route text (basePath)");
+    const s = await cdp.eval(`return { same: window.__sameDoc === 1, y: Math.round(scrollY), count: document.getElementById("count")?.textContent, path: location.pathname };`);
+    check(`${tag} route edit under /app: in place, count and scroll kept`, ok && s.same && s.y === 300 && s.count === "count: 3" && s.path === "/app/", JSON.stringify(s));
+    ok = await edit(cdp, dir, "lib/greeting.ts", `"hello from lib"`, `"base lib"`, `document.getElementById("greeting")?.textContent === "base lib"`, "server-only lib (basePath)");
+    check(`${tag} server-only lib edit under /app: in place`, ok && (await cdp.eval("return window.__sameDoc === 1;")), await text("greeting"));
+    check(`${tag} no CSP violation logged under /app`, cdp.cspLogs === 0, String(cdp.cspLogs));
+    cdp.ws.close();
+    await stop(chrome);
+    await stop(server);
+    return;
+  }
 
   // Edit the island's JSX: the text changes, the state stays.
   let ok = await edit(cdp, dir, "islands/Counter.tsx", `{label("count")}: {n}`, `{label("clicks")}: {n}`, `document.getElementById("count")?.textContent === "clicks: 3"`, "island JSX");
@@ -299,6 +339,41 @@ async function run(mode) {
   const violations = await cdp.eval("return window.__violations;");
   check(`${tag} no CSP violations`, violations.length === 0, violations.join(", "));
 
+  // Route / layout edits re-render the page in place: the DOM updates, the island keeps its
+  // count, the scroll position stays, and no navigation happens.
+  await cdp.eval("window.scrollTo(0, 600); window.__pageLoads = 0; document.addEventListener('nowaki:page-load', () => window.__pageLoads++); return true;");
+  const samePage = async (label) => {
+    const s = await cdp.eval(`return { same: window.__sameDoc === 1 && performance.getEntriesByType('navigation').length === 1, y: Math.round(scrollY), count: document.getElementById("count")?.textContent };`);
+    check(`${tag} ${label}: same document, count kept, scroll kept`, s.same && s.y === 600 && s.count === "CLICKS: 2", JSON.stringify(s));
+  };
+  ok = await edit(cdp, dir, "routes/index.tsx", `<h1 id="title">HMR</h1>`, `<h1 id="title">HMR page</h1>`, `document.getElementById("title")?.textContent === "HMR page"`, "route text");
+  check(`${tag} route edit: text updated in place`, ok, await text("title"));
+  await samePage("route edit");
+  check(`${tag} route edit: nowaki:page-load fired`, (await cdp.eval("return window.__pageLoads;")) === 1);
+  check(`${tag} the route's global.css still applies`, (await color("title")) === "rgb(4, 5, 6)", await color("title"));
+  ok = await edit(cdp, dir, "routes/_layout.tsx", `<a href="/photos">photos</a>`, `<a href="/photos">all photos</a>`, `document.getElementById("nav")?.textContent === "all photos"`, "layout nav");
+  check(`${tag} layout edit: nav updated in place`, ok, await text("nav"));
+  await samePage("layout edit");
+  ok = await edit(cdp, dir, "lib/greeting.ts", `"hello from lib"`, `"hi from lib"`, `document.getElementById("greeting")?.textContent === "hi from lib"`, "server-only lib");
+  check(`${tag} server-only lib edit: the page re-rendered with it`, ok, await text("greeting"));
+  await samePage("server-only lib edit");
+  // The route's own head (a <style> in the head region, nonced under CSP) follows.
+  check(`${tag} the route's head <style> applies`, (await color("page-style")) === "rgb(30, 30, 30)", await color("page-style"));
+  ok = await edit(cdp, dir, "routes/index.tsx", "rgb(30, 30, 30)", "rgb(31, 32, 33)", `getComputedStyle(document.getElementById("page-style")).color === "rgb(31, 32, 33)"`, "route head");
+  check(`${tag} route head edit: the new <style> applies`, ok, await color("page-style"));
+  await samePage("route head edit");
+  // An island the route passes other props to is a new one, which hydrates; the counter stays.
+  const styledIsland = `document.querySelector('nowaki-island[src$="Styled.tsx"]')`;
+  await cdp.eval(`${styledIsland}.__old = 1; return true;`);
+  ok = await edit(cdp, dir, "routes/index.tsx", "<Styled />", '<Styled tone="x" />', `${styledIsland}?.getAttribute("props") === '{"tone":"x"}'`, "island props");
+  check(`${tag} new island props: a new island element, hydrated`, ok && (await waitFor(cdp, `${styledIsland}.__nowakiHydrated === true && !${styledIsland}.__old`)));
+  await samePage("island props edit");
+  // The kept island is still the live one.
+  await click("inc");
+  check(`${tag} the kept island still works`, await waitFor(cdp, `document.getElementById("count")?.textContent === "CLICKS: 3"`), await text("count"));
+  const pageViolations = await cdp.eval("return window.__violations;");
+  check(`${tag} no CSP violations through the page edits`, pageViolations.length === 0, pageViolations.join(", "));
+
   // A live (Jetstream) island: its server state survives an edit, and the socket renders the
   // new code afterwards.
   await go("/live");
@@ -316,10 +391,52 @@ async function run(mode) {
   const liveViolations = await cdp.eval("return window.__violations;");
   check(`${tag} no CSP violations on /live`, liveViolations.length === 0, liveViolations.join(", "));
 
-  // A route edit still reloads the page (until routes re-render in place).
-  await cdp.eval("window.__sameDoc = 1; return true;");
-  writeFileSync(path.join(dir, "routes/live.tsx"), readFileSync(path.join(dir, "routes/live.tsx"), "utf8").replace("<main>", '<main id="edited">'));
-  check(`${tag} route edit: the page reloads with it`, await waitFor(cdp, `!window.__sameDoc && document.getElementById("edited")`));
+  // A route edit around a live island: the page updates in place, the island keeps its server
+  // state (and its socket).
+  ok = await edit(cdp, dir, "routes/live.tsx", "<main>", '<main id="edited">', `document.getElementById("edited")`, "route (live island)");
+  check(`${tag} route edit on /live: updated in place, live state 3 kept`, ok && (await text("live")) === "LIVE 3" && (await cdp.eval("return window.__sameDoc === 1;")), await text("live"));
+  await click("live-inc");
+  check(`${tag} the kept live island takes events`, await waitFor(cdp, `document.getElementById("live")?.textContent === "LIVE 4"`), await text("live"));
+
+  // An intercepting slot: the modal opened by a client navigation stays open through route edits.
+  await go("/photos");
+  check(`${tag} /photos hydrated`, await waitFor(cdp, `document.getElementById("count")`));
+  await sleep(500);
+  await click("inc", 2);
+  await cdp.call(() => {
+    const a = document.getElementById("open");
+    a.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    a.click();
+    return true;
+  });
+  check(
+    `${tag} the modal opened over the list`,
+    await waitFor(cdp, `location.pathname === "/photos/1" && document.getElementById("modal") && document.getElementById("photos") && history.state?.slot`),
+  );
+  ok = await edit(cdp, dir, "routes/photos/@modal/(.)[id].tsx", "modal {params.id}", "MODAL {params.id}", `document.getElementById("modal")?.textContent === "MODAL 1"`, "slot route");
+  check(`${tag} slot route edit: the modal updated, still open over the list`, ok && (await cdp.eval(`return !!document.getElementById("photos") && !document.getElementById("photo-page");`)), await text("modal"));
+  await cdp.eval("window.__hmrPage = 0; return true;");
+  ok = await edit(cdp, dir, "routes/photos/index.tsx", "photo list", "PHOTO LIST", `document.getElementById("modal")?.textContent === "MODAL 1" && window.__hmrPage`, "slot (list route)");
+  const slotState = await cdp.eval(`return { modal: document.getElementById("modal")?.textContent, list: !!document.getElementById("photos"), count: document.getElementById("count")?.textContent, same: window.__sameDoc === 1, path: location.pathname };`);
+  check(`${tag} list route edit: the modal stays open, the list's island keeps its count`, slotState.modal === "MODAL 1" && slotState.list && slotState.count === "CLICKS: 2" && slotState.same && slotState.path === "/photos/1", JSON.stringify(slotState));
+  const slotViolations = await cdp.eval("return window.__violations;");
+  check(`${tag} no CSP violations with the slot`, slotViolations.length === 0, slotViolations.join(", "));
+
+  // A broken edit (a syntax error): the page falls back to a reload (the error page), and fixing
+  // it brings the page back.
+  await go("/");
+  await sleep(500);
+  const good = readFileSync(path.join(dir, "routes/index.tsx"), "utf8");
+  writeFileSync(path.join(dir, "routes/index.tsx"), good.replace("export default function Home() {", "export default function Home() {{ <"));
+  check(`${tag} broken route edit: reloaded to the error page`, await waitFor(cdp, `!window.__sameDoc && /error/i.test(document.title)`, 10000), await cdp.eval("return document.title;"));
+  const t0 = Date.now();
+  writeFileSync(path.join(dir, "routes/index.tsx"), good);
+  const back = await waitFor(cdp, `document.getElementById("title")?.textContent === "HMR page" && document.body.dataset.hydrated === "1"`, 10000);
+  if (back) (latencies["recover after fix (reload)"] ??= []).push(Date.now() - t0);
+  check(`${tag} fixed: the page is back and hydrated`, back, await cdp.eval("return document.title;"));
+  await sleep(300);
+  // (Chrome's log covers the documents a reload replaced, the error page included.)
+  check(`${tag} no CSP violation logged in any document`, cdp.cspLogs === 0, String(cdp.cspLogs));
 
   cdp.ws.close();
   await stop(chrome);
@@ -329,6 +446,7 @@ async function run(mode) {
 try {
   await run("plain");
   await run("csp");
+  await run("base");
 } catch (e) {
   console.error(e);
   failures++;

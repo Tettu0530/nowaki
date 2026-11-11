@@ -124,7 +124,9 @@ code locations and CI coverage.
 - **The CSP nonce covers everything Nowaki inserts.** `csp.rs` / `server/csp.mjs`
   stamp `<script>` / `<style>` in HTML responses; client code that inserts a
   `<style>` (CSS shims, router head/body swaps, boundaries) must set
-  `window.__nowakiNonce` on it. Re-run the browser tests with
+  `window.__nowakiNonce` on it. Fetched HTML goes through `router-core.js` `nonceStyles`
+  before `DOMParser` (its document shares this one's CSP, so another response's nonce is a
+  violation as it parses). Re-run the browser tests with
   `NOWAKI_CSP=enforce` when touching those paths.
 - **Live handlers see only allowlisted request headers.** `live::context_headers`
   picks cookie / authorization / accept-language / user-agent and the public
@@ -191,6 +193,14 @@ code locations and CI coverage.
   that registers components imports `client/refresh.js` (families + an `options.vnode`
   proxy, public Preact API). `client/hmr.js` applies the messages. Live islands re-render
   through `/__nowaki/live-event`; `live::handle_versioned` reads the SSR version per render.
+  `page` (routes, layouts, server-only modules only routes reach; sent after `css` / `hot` of
+  the same batch): `hmr.js` `page` refetches `location.href` with the router's
+  `x-nowaki-nav` (the open slot's fragment with `x-nowaki-intercept`), syncs the head region
+  (a copy of `router.js` `syncHead` that keeps unchanged nodes) and `morphTree`s the body:
+  the top-level `<nowaki-island>` / `<nowaki-live>` at each index is moved over when `src` +
+  `props` (live: `name`) match, other nodes are patched in place or replaced; reloads on a
+  non-200, a redirect or a page without head markers (the dev error page). It fires
+  `nowaki:hmr`, on which `router.js` clears its Router Cache.
   Builds never see any of it. Browser test: `scripts/hmr-browser-test.mjs` (in e2e-dev).
 
 - **On-demand revalidation (`revalidatePath` / `revalidateTag`, `export const tags`)** —

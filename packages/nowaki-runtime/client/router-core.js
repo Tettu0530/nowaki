@@ -92,6 +92,14 @@ export function createPageCache({ ttlMs = 30000, max = 32, now = () => Date.now(
   };
 }
 
+// A fetched page's HTML with every <style> carrying `nonce` (this document's, under NOWAKI_CSP).
+// The document DOMParser makes shares this one's CSP, so a <style> with the nonce of the response
+// it came from is a style-src-elem violation the moment it parses. The tags the server nonced
+// (server/csp.mjs injectNonce: `<style nonce="…"`) get this document's nonce instead.
+export function nonceStyles(html, nonce) {
+  return nonce ? html.replace(/<style(?=[\s>/])(\s+nonce="[^"]*")?/gi, `<style nonce="${nonce}"`) : html;
+}
+
 // Whether a client navigation runs as a View Transition: something opted in (the link, the page
 // left or the page entered), the browser has document.startViewTransition, and the visitor doesn't
 // prefer reduced motion. Otherwise the router swaps the page synchronously, as without them.
