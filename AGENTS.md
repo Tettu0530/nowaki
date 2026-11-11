@@ -197,8 +197,8 @@ code locations and CI coverage.
   downloads in `server/images-fetch.mjs` via `crates/nowaki/src/remote_images.rs`; the matcher
   exists in both, driven by `crates/nowaki-core/tests/fixtures/remote-patterns-cases.json`
   (`tests/remote_patterns.rs`, `scripts/images-fetch-test.mjs`).
-- **Fonts** — `crates/nowaki/src/fonts.rs` (faces, size-adjusted fallbacks from ttf-parser
-  metrics, `dist/server/fonts.json`; dev: `.nowaki/fonts`), Google downloads in
+- **Fonts** — `crates/nowaki/src/fonts.rs` (faces, size-adjusted fallbacks from metrics
+  read from head / hhea / OS/2 by hand, `dist/server/fonts.json`; dev: `.nowaki/fonts`), Google downloads in
   `server/fonts-fetch.mjs`, config via `site.rs` + `server/site-config.mjs`; the links go into
   every page from `handler.mjs` `withFonts` (`env.fonts`).
 - **MDX** — `crates/nowaki-core/src/mdx.rs` (markdown-rs mdast → TSX: hoisted ESM, JSX

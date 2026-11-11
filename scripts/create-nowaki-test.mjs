@@ -76,10 +76,10 @@ try {
     const r = run([".", "-t", "minimal", "-y", "--no-install", "--no-git"], dotDir);
     check("scaffolds into empty current directory (.)", r.status === 0 && existsSync(path.join(dotDir, "routes/index.tsx")));
   } finally {
-    rmSync(dotDir, { recursive: true, force: true });
+    try { rmSync(dotDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
   }
 } finally {
-  rmSync(work, { recursive: true, force: true });
+  try { rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
 }
 
 console.log(failures ? `\nCREATE-NOWAKI TEST FAILED (${failures})` : "\nCREATE-NOWAKI TEST PASSED");

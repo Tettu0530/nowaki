@@ -10,6 +10,25 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Changed
+- Font fallback metrics (units per em, ascent / descent / line gap, average width) are read
+  from the `head`, `hhea` and `OS/2` tables by a small built-in reader instead of
+  `ttf-parser`, which is unmaintained (RUSTSEC-2026-0192). The generated CSS does not change:
+  the reader gave the same values as `ttf-parser` for all 579 fonts installed on a macOS
+  machine.
+- Removed the stale `minimumReleaseAgeExclude` entries for `@tsrx/*@0.1.30` from
+  `pnpm-workspace.yaml`. The lockfile no longer uses those versions.
+
+### Fixed
+- The e2e and browser test scripts remove their temp directories on a best-effort basis
+  (`maxRetries`, errors ignored), so a Windows EBUSY or an ENOTEMPTY can no longer fail a
+  test that passed. `locale-browser-test.mjs` keeps Chrome's profile in its own directory
+  and waits for Chrome to exit before removing it.
+
+### Security
+- `rustix` 1.1.4 → 1.1.6 (RUSTSEC-2026-0486, unsound xattr functions with a zero-length
+  buffer; Nowaki does not call them).
+
 ## [0.18.1] — 2026-11-11 · patch
 
 Packages: `nowaki` / `nowaki-core` 0.18.1 (crates.io, npm), `@nowaki-dev/runtime`

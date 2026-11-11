@@ -50,10 +50,29 @@ export default function Switcher() {
 };
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "nowaki-locale-browser-"));
+// Chrome's profile gets its own directory: Chrome keeps writing to it for a moment after SIGKILL,
+// which made removing `tmp` race (ENOTEMPTY).
+const profile = mkdtempSync(path.join(os.tmpdir(), "nowaki-locale-chrome-"));
 const children = new Set();
+// Best-effort: a leftover temp dir never changes the exit code.
+const removeDirs = () => {
+  for (const dir of [tmp, profile]) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch {}
+  }
+};
+// Kill the children and wait (bounded) for them to exit, so nothing still writes to the
+// directories while they are removed.
+async function stopChildren() {
+  const exits = [...children].map((c) => (c.exitCode !== null || c.signalCode !== null ? null : new Promise((r) => c.once("exit", r))));
+  for (const c of children) c.kill("SIGKILL");
+  await Promise.race([Promise.all(exits), sleep(5000)]);
+  children.clear();
+}
 process.on("exit", () => {
   for (const c of children) c.kill("SIGKILL");
-  rmSync(tmp, { recursive: true, force: true });
+  removeDirs();
 });
 process.on("SIGINT", () => process.exit(130));
 
@@ -140,7 +159,7 @@ try {
     `--remote-debugging-port=${CDP_PORT}`,
     "--no-first-run",
     "--no-default-browser-check",
-    `--user-data-dir=${path.join(tmp, "chrome")}`,
+    `--user-data-dir=${profile}`,
     "about:blank",
   ]);
   children.add(chrome);
@@ -204,5 +223,7 @@ try {
   failures++;
 }
 
+await stopChildren();
+removeDirs();
 console.log(failures ? `\nLOCALE BROWSER TEST FAILED (${failures})` : "\nLOCALE BROWSER TEST PASSED");
 process.exit(failures ? 1 : 0);

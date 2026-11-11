@@ -50,7 +50,10 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), "nowaki-gallery-e2e-"));
 const children = new Set();
 const cleanup = () => {
   for (const c of children) c.kill("SIGKILL");
-  rmSync(tmp, { recursive: true, force: true });
+  try {
+    // Windows can still hold files of a just-killed child (EBUSY); a leftover temp dir isn't a failure.
+    rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch {}
 };
 process.on("exit", cleanup);
 process.on("SIGINT", () => process.exit(130));
