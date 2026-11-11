@@ -11,7 +11,10 @@ Nowaki follows [SemVer](https://semver.org/). During **0.x alpha**, however:
 - Once the public API (CLI commands, authoring conventions, the public exports
   of `@nowaki-dev/runtime`) is mostly settled, we go to **1.0.0**; from then on
   breaking changes happen only in a major.
-- All crate and npm packages share the same version (released from the same commit).
+- Packages are versioned independently today: `nowaki` / `nowaki-core` (crates
+  and the npm CLI) are 0.18.x, `@nowaki-dev/runtime` is 0.17.x, `create-nowaki` /
+  `create-nowaki-app` are 0.19.x, and `@nowaki-dev/markdoc` is 0.1.x. From 0.19.0
+  the CLI, runtime, and create-* packages share one version; markdoc keeps its own.
 - Every release has a matching `vX.Y.Z` tag and CHANGELOG entry.
 
 ## Distribution channels
@@ -19,7 +22,7 @@ Nowaki follows [SemVer](https://semver.org/). During **0.x alpha**, however:
 Nowaki ships through two channels:
 
 - **crates.io**: `nowaki` / `nowaki-core` (`cargo install nowaki`)
-- **npm**: `nowaki` (wrapper for the prebuilt binaries) + 5× `@nowaki-dev/cli-<platform>`, `@nowaki-dev/runtime`, `create-nowaki`
+- **npm**: `nowaki` (wrapper for the prebuilt binaries) + 5× `@nowaki-dev/cli-<platform>`, `@nowaki-dev/runtime`, `@nowaki-dev/markdoc`, `create-nowaki`, `create-nowaki-app`
 
 The npm CLI follows the esbuild/biome approach. Per-platform binaries ship as
 `optionalDependencies`, and `packages/nowaki-cli/bin/nowaki.js` (a shim that
@@ -32,11 +35,15 @@ token with publish rights to the `@nowaki-dev` org and the unscoped `nowaki`).
 
 ## Bumping the version
 
-Set all of the following to the same version:
+For a CLI release, set all of the following to the same version:
 
 1. `[workspace.package] version` in `Cargo.toml` (the crate version; `build-npm.mjs` reads it from here too)
-2. `version` in `packages/nowaki-cli/package.json` and each `@nowaki-dev/cli-*` in its `optionalDependencies`
-3. (If needed) `devDependencies.nowaki` in `packages/create-nowaki/template/package.json`
+2. The `nowaki-core` path-dependency version in `crates/nowaki/Cargo.toml`
+3. `version` in `packages/nowaki-cli/package.json` and each `@nowaki-dev/cli-*` in its `optionalDependencies`
+4. (If needed) `devDependencies.nowaki` and `dependencies["@nowaki-dev/runtime"]` in
+   `packages/create-nowaki/templates/_shared/package.json`
+
+Then run `pnpm install` so `pnpm-lock.yaml` matches (CI uses a frozen lockfile).
 
 ## Publishing
 
@@ -62,21 +69,25 @@ git push origin v0.1.2
 - `publish-wrapper` job: publishes the `nowaki` wrapper after all builds finish.
 - A manual run (workflow_dispatch) with `dry_run=true` only runs the builds.
 
-### npm runtime / create-nowaki
+### npm runtime / markdoc / create-nowaki
 
 Bump the version in each `package.json`, then manually run the
 `Publish npm packages` workflow (`.github/workflows/publish-npm.yml`). Pick the
-target with the `package` input; the default `all` covers runtime,
-create-nowaki, and create-nowaki-app. It uses the same `NPM_TOKEN` as release.yml.
+target with the `package` input; the default `all` covers runtime, markdoc,
+create-nowaki, and create-nowaki-app. A package whose version is already on npm
+is skipped with a notice (`scripts/ci/npm-publish-if-new.sh`), so `all` works
+when only some packages were bumped. It uses the same `NPM_TOKEN` as release.yml.
 
-Note: `@nowaki-dev/runtime` shares its version with the CLI, since both are
-released from the same commit. Bump the scaffold template's
-`@nowaki-dev/runtime` dependency to match.
+Note: until 0.19.0 the runtime does not share the CLI's version. Keep the
+scaffold template's `@nowaki-dev/runtime` and `nowaki` dependencies on the
+versions just published. From 0.19.0 the CLI, runtime, and create-* packages
+are bumped together.
 
 To publish by hand from your machine (while logged in to npm):
 
 ```bash
 cd packages/nowaki-runtime && npm publish
+cd packages/nowaki-markdoc && npm publish
 cd packages/create-nowaki   && npm publish
 cd packages/create-nowaki-app && npm publish
 ```

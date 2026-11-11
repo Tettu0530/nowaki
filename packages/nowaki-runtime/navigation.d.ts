@@ -88,9 +88,11 @@ export function href(path: string, options?: HrefOptions): string;
 export function getLocale(): string | undefined;
 
 /**
- * `path` in `locale`, default the current one (see `localePath` in `@nowaki-dev/runtime`). A
- * static route or a `route()` href stays a `<Link href>`:
- * `<Link href={localePath(route("/photo/[id]", { id }))}>`.
+ * `path` in `locale`, default the current one (see `localePath` in `@nowaki-dev/runtime`), without
+ * basePath: `localePath(route("/photo/[id]", { id: "1" }), "ja")` → `"/ja/photo/1"`. A link
+ * doesn't need it (`<Link href>` already keeps the current locale, and `<Link locale="ja">`
+ * switches it); use it for a path in another locale outside a link, or `href()` for one under
+ * basePath.
  */
 export function localePath(path: StaticRoutePath | Href, locale?: string): Href;
 export function localePath(path: string, locale?: string): string;
