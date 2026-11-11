@@ -34,13 +34,14 @@ pub fn red(s: &str) -> String {
     paint("31", s)
 }
 
-/// File change → HMR log. `kind` is "update" (island hot swap) / "reload" (full reload).
+/// File change → HMR log. `kind` is "hot" (islands swapped in place), "css" (stylesheets
+/// replaced), "page" or "reload" (the page reloads).
 pub fn hmr_log(kind: &str, files: &[String]) {
     let list = files.join(", ");
-    if kind == "update" {
-        println!("  {} {}  {}", cyan("hmr"), dim("update"), list);
+    if matches!(kind, "hot" | "css") {
+        println!("  {} {}  {}", cyan("hmr"), dim(kind), list);
     } else {
-        println!("  {} {}  {}", yellow("hmr"), dim("reload"), list);
+        println!("  {} {}  {}", yellow("hmr"), dim(kind), list);
     }
 }
 

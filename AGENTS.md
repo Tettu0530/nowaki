@@ -154,6 +154,11 @@ code locations and CI coverage.
   that path. The POST transport (`server/live-event.mjs`, `/__nowaki/live-event`)
   goes through the same `liveRender` and keeps the RPC-style CSRF gate (JSON +
   `x-nowaki-live` + `isCrossSite`) and its 64 KiB body cap ahead of parsing.
+- **ISR purges come only from the sidecar.** `start.rs` reads `x-nowaki-purge` / `x-nowaki-tags`
+  from the sidecar's reply (never from the client: `forward::passes` drops them) and strips them,
+  and any new internal response header, on **both** branches of `proxy`. The stdout channel needs
+  `NOWAKI_PUBLISH_TOKEN`. `POST /__nowaki/revalidate` stays off unless `NOWAKI_REVALIDATE_SECRET`
+  is set, and compares it in constant time.
 - **ISR keys must include learned `Vary` inputs** (`context.mjs` `__vary()` →
   `x-nowaki-vary`, folded in `isr_key` in `start.rs`) so cached pages cannot
   bleed across users. The query string is part of the key only when the route reads
@@ -173,7 +178,30 @@ code locations and CI coverage.
   Streamable HTTP, tools, error ring buffer); route table + island registry from
   the dev sidecar's `/__nowaki/dev-info` (`server/sidecar.mjs`); imports /
   importers from `crates/nowaki-core/src/graph.rs`. E2E: `scripts/mcp-e2e.mjs`.
+- **Dev HMR / Fast Refresh** — `crates/nowaki/src/dev.rs` `apply_changes` →
+  `plan_changes` (`css` / `hot` / `page` / `reload`, from the import graph walked up to
+  island entries) → `hmr_messages` (bumps hot versions via `NowakiCore::bump_dev_version`;
+  `transform.rs` `map_specifier` appends `?t=<n>`). The refresh transform runs only for dev
+  browser modules of the app (`NowakiCore::set_dev_refresh`, `transform_file_dev`); a module
+  that registers components imports `client/refresh.js` (families + an `options.vnode`
+  proxy, public Preact API). `client/hmr.js` applies the messages. Live islands re-render
+  through `/__nowaki/live-event`; `live::handle_versioned` reads the SSR version per render.
+  Builds never see any of it. Browser test: `scripts/hmr-browser-test.mjs` (in e2e-dev).
 
+- **On-demand revalidation (`revalidatePath` / `revalidateTag`, `export const tags`)** —
+  `server/revalidate.mjs` (validation, path expansion over basePath / locales / trailingSlash,
+  the `t:<tag>` / `p:<browser path>` entry encoding, `POST /__nowaki/revalidate`). Calls inside a
+  request (page actions and API routes now run in `runWithContext`, like server functions and live
+  events) collect on `ctx.__purge`; `handler.mjs` `finalize` hands them over before the response
+  returns: `x-nowaki-purge` on `nowaki start` (`env.isrStore`, set by `prod-sidecar.mjs`), and the
+  adapter seams `env.purge(entries)` / `env.cacheTagHeader(entries)` (unset for now). Outside a
+  request, or after its response was built (`ctx.__purgeClosed`, set only on those wrapped
+  requests): a `NOWAKI_PURGE <token>` stdout line (`start.rs::run`) or `env.purge`. ISR renders with tags send
+  `x-nowaki-tags` (static arrays cached per module). Rust side: `start.rs` `IsrCache::purge` (one
+  scan, delete) and `insert` (a purge epoch log keeps an in-flight render from re-storing purged
+  content). The store is per process. Dev only records calls (dev-info `revalidations`); static
+  output warns. Encoding fixture: `crates/nowaki/tests/fixtures/purge-cases.json` (`start.rs`
+  units, `scripts/revalidate-test.mjs`); e2e in `scripts/ci/e2e-prod.sh` (`routes/isr-tagged.tsx`).
 - **Server functions (`"use server"`)** — `crates/nowaki-core/src/server_fn.rs`
   (detect, id, client proxy, discover) + `packages/nowaki-runtime/server/functions.mjs`
   (dispatch + `getContext`). Allowlist: `dist/server/functions.json`.
@@ -331,6 +359,22 @@ code locations and CI coverage.
   `scriptPreload`), counted by `budget.rs`. The tags come from `handler.mjs`
   `withScripts` via `env.routeScripts` (`app.mjs`, `web.mjs`, dev `sidecar.mjs`);
   `client/router.js` `loadPageScripts` + `nowaki:page-load` on navigation.
+- **View Transitions (opt-in)** — per link: `<Link viewTransition>` (`navigation.js`) renders
+  `data-nowaki-transition`, which the router also honours on a plain `<a>` or an ancestor. Per
+  route: `export const viewTransition = true`; `document.mjs` `pageMeta` appends
+  `<meta name="nowaki-view-transition">` and a `@view-transition { navigation: auto }` style
+  (cross-document, inside `prefers-reduced-motion: no-preference`) to the head region, so it
+  reaches every front that uses `pageMeta` (dev `render.mjs`, `prodDocument` / `prodShell`,
+  `prod-sidecar.mjs` → `start.rs::assemble`) and is nonced like any other `<style>`. Without the
+  export the HTML is byte-identical. Client: `client/router.js` `apply` → `swap` wraps the DOM
+  swap (title, `syncHead`, body or slot) in `document.startViewTransition` when
+  `router-core.js` `shouldTransition` agrees (opted in, API present, no reduced motion); hydration,
+  page scripts and `nowaki:page-load` run after `updateCallbackDone`, and the `navToken` check
+  runs inside the update callback. Types `forward` / `back` (`history.state.i` orders entries;
+  skipped on `hasUAVisualTransition`). `transitionName()` in `navigation.js` gives a `style` its
+  `viewTransitionName`. All of it is in the lazy router chunk (`lazyBytes`, budget +350 B gzip).
+  Tests: `scripts/router-test.mjs`, `scripts/router-browser-test.mjs` (also with
+  `NOWAKI_CSP=enforce` and `BASE=…/app`), `scripts/ci/e2e-{dev,prod,adapters}.sh` (`/vt`).
 - **`public/`** — rules (path safety, dotfiles, reserved prefixes, content types) in
   `crates/nowaki-core/src/public.rs`; copied to `dist/public` by `build_with_client`.
   Served by `dev.rs` `serve_public` (straight from `public/`), `start.rs`

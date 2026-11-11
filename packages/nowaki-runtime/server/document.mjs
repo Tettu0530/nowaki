@@ -8,15 +8,23 @@ export function pageMeta(meta, mod) {
   const str = (v) => (typeof v === "string" ? v : undefined);
   const html = isAttrs(meta?.htmlAttrs) ? meta.htmlAttrs : isAttrs(mod?.htmlAttrs) ? mod.htmlAttrs : {};
   const body = isAttrs(meta?.bodyAttrs) ? meta.bodyAttrs : isAttrs(mod?.bodyAttrs) ? mod.bodyAttrs : {};
+  const head = str(meta?.head) ?? str(mod?.head) ?? "";
   return {
     title: str(meta?.title) ?? str(mod?.title) ?? "Nowaki App",
-    head: str(meta?.head) ?? str(mod?.head) ?? "",
+    head: mod?.viewTransition === true ? (head ? `${head}\n${VIEW_TRANSITION}` : VIEW_TRANSITION) : head,
     // `export const lang` / meta().lang win; htmlAttrs.lang (say, from a layout) is the fallback.
     lang: str(meta?.lang) ?? str(mod?.lang) ?? attrValue(html.lang) ?? "en",
     htmlAttrs: Object.isFrozen(html) ? frozenHtmlAttrs(html) : attrString(html, ["lang"]),
     bodyAttrs: attrString(body, []),
   };
 }
+
+// `export const viewTransition = true`: the client router reads the <meta> (a navigation to or
+// from the page runs as a View Transition), and the style gives full page loads between such pages
+// a cross-document one, also with no JS. Both are in the page's head region, so the router swaps
+// them with the page. The style is nonced like any other under NOWAKI_CSP (csp.rs / csp.mjs).
+const VIEW_TRANSITION =
+  '<meta name="nowaki-view-transition" content="1" />\n<style>@media (prefers-reduced-motion:no-preference){@view-transition{navigation:auto}}</style>';
 
 // A frozen htmlAttrs object (handler.mjs gives every page of a locale the same one) can't change,
 // so its attribute string is built once.

@@ -340,12 +340,30 @@ pub fn context_headers(headers: &axum::http::HeaderMap) -> serde_json::Map<Strin
     m
 }
 
+/// The module version renders of a connection ask the sidecar for. Read per render, so in
+/// `nowaki dev` a connection opened before an edit renders the edited island (a hot update keeps
+/// the socket and its state).
+pub type Version = Arc<dyn Fn() -> String + Send + Sync>;
+
 pub async fn handle(
-    mut socket: WebSocket,
+    socket: WebSocket,
     hub: Arc<LiveHub>,
     http: reqwest::Client,
     sidecar_port: u16,
     version: String,
+    request_headers: serde_json::Map<String, Value>,
+) {
+    let version: Version = Arc::new(move || version.clone());
+    handle_versioned(socket, hub, http, sidecar_port, version, request_headers).await
+}
+
+/// [`handle`] with a version that can change while the connection is open.
+pub async fn handle_versioned(
+    mut socket: WebSocket,
+    hub: Arc<LiveHub>,
+    http: reqwest::Client,
+    sidecar_port: u16,
+    version: Version,
     request_headers: serde_json::Map<String, Value>,
 ) {
     // Over the cap: send an error, then close (the client degrades to the initial SSR).
@@ -489,7 +507,7 @@ struct RenderCtx {
     hub: Arc<LiveHub>,
     http: reqwest::Client,
     sidecar_port: u16,
-    version: String,
+    version: Version,
     timeout: Duration,
     request: Arc<Value>,
 }
@@ -577,7 +595,7 @@ async fn render(
         let key = format!(
             "{topic}\u{1f}{}\u{1f}{name}\u{1f}{}\u{1f}{st}",
             ctx.hub.topic_generation(&topic),
-            ctx.version
+            (ctx.version)()
         );
         let slot = ctx.hub.shared_render(key);
         let mut mine = None;
@@ -672,7 +690,7 @@ async fn render_once(
         "sig": sig,
         "handler": ev.handler,
         "payload": ev.payload,
-        "version": ctx.version,
+        "version": (ctx.version)(),
         "request": *ctx.request,
         "load": ev.load.as_ref().map(|topic| json!({ "topic": topic })),
     });
@@ -988,7 +1006,7 @@ mod tests {
             hub,
             http: reqwest::Client::new(),
             sidecar_port: port,
-            version: "v".into(),
+            version: Arc::new(|| "v".to_string()),
             timeout: Duration::from_secs(5),
             request: Arc::new(json!({ "headers": {} })),
         };

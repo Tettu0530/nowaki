@@ -14,6 +14,50 @@ milestone's worth of work; the codename is noted per entry.
 - **Building Nowaki from source needs Rust 1.97 or newer** (was 1.95), because oxc 0.158
   does. `rust-version` and the MSRV CI job are 1.97. The npm packages are unaffected.
 
+### Added
+- **On-demand revalidation.** `revalidatePath(path)` and `revalidateTag(tag)` from
+  `@nowaki-dev/runtime` purge ISR pages, and `export const tags` (an array, or a function of
+  `{ params, data }`) tags them. `revalidatePath` takes an app path, as in `<Link href>`, and
+  purges every query and `Vary` variant, every locale, the basePath form, and both
+  trailing-slash forms under `"ignore"`. Purged pages are deleted, so the next request renders
+  fresh. Called from a page action, an API route, a server function or a live handler, the purge
+  happens under `nowaki start` before that response is sent, so the redirect after an action
+  already shows new content; calls outside a request (or after its response was sent) reach the cache through the sidecar's
+  stdout. The ISR cache is per process: to fan a purge out, set `NOWAKI_REVALIDATE_SECRET` and
+  send `POST /__nowaki/revalidate` (`Authorization: Bearer <secret>`, JSON `{ paths, tags }`) to
+  each instance; the endpoint is off (404) without it. `nowaki dev` has no cache and only records
+  the calls; static output and the deploy adapters ignore them for now (warned once).
+- Page actions and API routes now run inside the request context, so `getContext()` works there.
+
+- HMR keeps island state (Fast Refresh). In `nowaki dev`, editing an island, or a module
+  that only islands import, swaps the components in place: hook state survives, and a
+  changed hook list (an added or removed hook) remounts that component. Only the edited
+  modules and their importers up to the island are loaded again (`?t=<n>`), so unchanged
+  modules such as shared stores keep one instance. Live (Jetstream) islands are re-rendered
+  on the server with the state they hold, and their open socket renders the new code. CSS
+  updates without a reload: a stylesheet an island imports is replaced in its `<style>`,
+  a linked route / layout stylesheet is swapped once the new one has loaded (no flash,
+  nonce-stamped under `NOWAKI_CSP`), and a CSS Module whose class names changed re-imports
+  its islands. Route, layout and server-only edits still reload the page (in-place page
+  updates come later), as do nowaki.config, `env.ts`, `.env` and `session.ts`. The runtime
+  is `client/refresh.js`, written for Nowaki on the public Preact API (Preact 10 and 11, no
+  new dependency) on top of oxc's React Refresh transform, which `nowaki-core` applies only
+  to dev browser modules of the app (`NowakiCore::set_dev_refresh`). Builds are unchanged.
+- **View Transitions in the client router (opt-in).** `<Link viewTransition>` (or
+  `data-nowaki-transition` on an `<a>` or an element around links) runs that navigation inside
+  `document.startViewTransition`; `export const viewTransition = true` on a route does it for
+  every navigation to and from the page and adds `@view-transition { navigation: auto }`, so full
+  page loads between such pages (zero-JS pages, static output) transition too. Slot modals
+  (intercepting routes) transition the same way. The transition carries the type `forward` or
+  `back`. It is skipped when the browser lacks the API, the visitor prefers reduced motion, or
+  the browser already animated a back gesture; the page is then swapped as before. Hydration,
+  page scripts and `nowaki:page-load` run after the new page is in, and a navigation superseded
+  during a transition swaps nothing. `transitionName(name)` from
+  `@nowaki-dev/runtime/navigation` returns a `style` with a valid `view-transition-name`, for an
+  element that should morph into the next page's (a list card into the detail page). Pages
+  without the export render byte-identical HTML; the code is in the lazy router chunk
+  (+276 bytes gzip), and first-load JS is unchanged.
+
 ### Changed
 - Dependencies: `oxc` 0.146 → 0.158 (`oxc_resolver` stays at 11.24.3, the latest). oxc
   string literals are now `JSStr`, which can hold a lone surrogate; `nowaki-core` leaves an

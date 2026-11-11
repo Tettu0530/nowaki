@@ -180,6 +180,10 @@ mod tests {
             "x-nowaki-page",
             "x-nowaki-vary",
             "x-nowaki-revalidate",
+            // Response headers the sidecar sends Rust: a client copy on the request means nothing,
+            // and must never be able to purge (start.rs only reads them from the sidecar's reply).
+            "x-nowaki-purge",
+            "x-nowaki-tags",
             // Set by the front for rewrites / basePath; a client value would pick the route.
             crate::front::ROUTE_PATH_HEADER,
         ] {
@@ -201,5 +205,7 @@ mod tests {
         assert!(is_internal_path("/__nowaki/isr-urls"));
         assert!(is_internal_path("/__nowaki/mcp"));
         assert!(!is_internal_path("/__nowaki/mcpx"));
+        // Client-facing (behind NOWAKI_REVALIDATE_SECRET), so it is proxied.
+        assert!(!is_internal_path("/__nowaki/revalidate"));
     }
 }

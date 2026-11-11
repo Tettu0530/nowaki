@@ -94,9 +94,9 @@ oxc_parser (TSX) → oxc_transformer { strip TS types, JSX automatic (importSour
 
 ### 3.2 HMR (MVP → future)
 
-- Protocol: WebSocket with JSON messages `{type: "reload"}` / `{type: "update", path, version}` / `{type: "error", message}`.
+- Protocol: WebSocket with JSON messages `{type: "hot", islands, modules}` / `{type: "css", files}` / `{type: "page"}` / `{type: "reload"}` / `{type: "error", message}`.
 - MVP: notify detects a change → invalidate the affected cache entry + increment the global `ssr_version` → broadcast `reload` (a full reload; SSR is fast, so it feels fast enough). Transform errors send `error` for the overlay.
-- Phase 3: keep reverse-dependency edges in the module graph, and do per-island-module `update` + state-preserving hot swap with prefresh (Preact Fast Refresh).
+- v0.19 (implemented): `dev.rs` walks reverse import edges from each change up to the island entries. An island-only chain gets new hot versions (`?t=<n>` on just those import URLs) and a `hot` message; the browser re-imports the islands, and `client/refresh.js` (oxc's React Refresh transform + a hand-written runtime on the public Preact API, not prefresh) swaps components in place with their state. Stylesheets get `css`. A chain reaching `routes/` gets `page` (a reload until pages re-render in place).
 
 ### 3.3 Production build (`nowaki build`): staged strategy
 

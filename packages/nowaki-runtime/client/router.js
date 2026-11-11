@@ -1,7 +1,7 @@
 // Client router. Intercepts internal <a> clicks, fetches the target HTML,
 // swaps the body, and re-hydrates only the new islands (zero-JS pages do full navigations).
 
-import { matchBoundary, matchPattern, createPageCache } from "./router-core.js";
+import { matchBoundary, matchPattern, createPageCache, shouldTransition } from "./router-core.js";
 
 // The eager runtime (islands.js) exposes hydrate on window.
 // Not importing islands.js here keeps the router a separate lazy chunk.
@@ -14,6 +14,8 @@ let curKey; // history key of the entry on screen (history.state has already mov
 let curDoc; // path + query of the document on screen, null while a boundary shows
 let boundariesPromise = null; // result of /__nowaki/boundaries (fetched once)
 let navToken = 0; // token guarding against racing navigations
+let histIdx = 0; // history.state.i of the entry on screen (tells back from forward on popstate)
+let navVt, navType; // the latest navigation's `vt` and `type` (see navigate)
 
 // <meta name="nowaki-router-cache" content="seconds"> overrides the Router Cache TTL (default 30s, 0 disables).
 function readCacheTtl() {
@@ -119,14 +121,19 @@ function prefetch(url) {
 }
 
 // `intercept`: whether a slot on screen may take the URL (not when going back to an entry that
-// showed the full page).
-async function navigate(url, { push = true, intercept = push } = {}) {
+// showed the full page). `vt`: the element that opted the link into a View Transition
+// (data-nowaki-transition), false when the browser already animated a back/forward gesture, or
+// null / undefined to let the pages decide. `type`: the transition's type, "forward" or "back".
+async function navigate(url, { push = true, intercept = push, vt, type = "forward" } = {}) {
   const slot = intercept ? interceptFor(url) : null;
   const token = ++navToken;
+  const go = (entry) => apply(entry, slot, push, token, url.hash);
+  navVt = vt;
+  navType = type;
 
   // Immediate Router Cache hit (no loading shown).
   const cached = pageCache.get(cacheKey(url, slot));
-  if (cached) return apply(cached, slot, push, token, url.hash);
+  if (cached) return go(cached);
 
   const body = document.body;
   const pending = fetchPage(url, slot).catch(() => 0);
@@ -161,37 +168,83 @@ async function navigate(url, { push = true, intercept = push } = {}) {
     return;
   }
   if (result.status === 200) pageCache.set(cacheKey(url, result.slot), result);
-  return apply(result, slot, push, token, url.hash);
+  return go(result);
 }
 
-// Returns the URL to scroll for, or undefined after a slot swap (the page stays where it is).
+// Applies a cached/fetched page (cloning its body keeps the cache intact), or a slot's fragment.
+// Pages are cached without the #hash, and the link's own goes on the pushed URL. Resolves to the
+// URL to scroll for, or to nothing after a slot swap (the page stays where it is) and after a swap
+// a newer navigation superseded.
 function apply(entry, slot, push, token, hash) {
+  const { doc, finalUrl } = entry;
+  // Opted in by the link, else by the page on screen or the one coming (`export const
+  // viewTransition`, whose <meta> document.mjs puts in the head). A fragment has no head of its own.
+  const opted = navVt ?? (vtPage(document) || vtPage(doc));
   if (!entry.slot) {
-    applyDocument(entry, push, token, hash);
-    return entry.finalUrl;
+    return swap(opted, token, () => {
+      if (push) scrollPos.set(curKey, window.scrollY);
+      document.title = doc.title;
+      syncHead(doc);
+      document.body.replaceWith(stampNonce(doc.body.cloneNode(true)));
+      if (push) history.pushState({ nowaki: (curKey = newKey()), i: ++histIdx }, "", finalUrl + hash);
+      curDoc = location.pathname + location.search;
+    }, () => {
+      hydrateIslands(document);
+      loadPageScripts(doc.head);
+      syncLive();
+      removeProgressBar();
+      // Page scripts run once (they are modules); this is their cue to set up the new page's DOM.
+      document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl } }));
+      return finalUrl;
+    });
   }
-  if (push) {
-    scrollPos.set(curKey, window.scrollY);
-    saveSlots(curKey);
-  }
-  const { doc } = entry;
   // The fragment's stylesheets and page scripts (<template data-nowaki-head>), into the page's
   // head region so the next page swaps them out.
   const tpl = doc.querySelector("template[data-nowaki-head]");
-  if (tpl) {
-    const end = headRegion(document)?.[1];
-    for (const l of tpl.content.querySelectorAll("link")) {
-      if (document.head.querySelector(`link[href="${CSS.escape(l.getAttribute("href"))}"]`)) continue;
-      end ? end.before(l.cloneNode()) : document.head.append(l.cloneNode());
-    }
-    loadPageScripts(tpl.content);
-  }
   const body = stampNonce(doc.body.cloneNode(true));
   body.querySelector("template[data-nowaki-head]")?.remove();
-  slot.replaceChildren(...body.childNodes);
-  if (push) history.pushState({ nowaki: (curKey = newKey()), slot: 1 }, "", entry.finalUrl + hash);
-  slotShown(slot);
-  document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: entry.finalUrl, slot: slot.getAttribute("name") } }));
+  return swap(opted, token, () => {
+    if (push) {
+      scrollPos.set(curKey, window.scrollY);
+      saveSlots(curKey);
+    }
+    if (tpl) {
+      const end = headRegion(document)?.[1];
+      for (const l of tpl.content.querySelectorAll("link")) {
+        if (document.head.querySelector(`link[href="${CSS.escape(l.getAttribute("href"))}"]`)) continue;
+        end ? end.before(l.cloneNode()) : document.head.append(l.cloneNode());
+      }
+    }
+    slot.replaceChildren(...body.childNodes);
+    if (push) history.pushState({ nowaki: (curKey = newKey()), i: ++histIdx, slot: 1 }, "", finalUrl + hash);
+  }, () => {
+    if (tpl) loadPageScripts(tpl.content);
+    slotShown(slot);
+    document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl, slot: slot.getAttribute("name") } }));
+  });
+}
+
+// View Transitions are opt-in: a link with data-nowaki-transition (<Link viewTransition>), on the
+// <a> or an ancestor, or a page that exports `viewTransition` (this <meta> in its head region).
+const vtPage = (d) => !!d.querySelector('meta[name="nowaki-view-transition"]');
+
+// Runs `update` (the DOM swap) and then `done` (hydration, page scripts, nowaki:page-load), only
+// while `token` is still the latest navigation: checked when the swap runs, which a transition
+// delays to the next frame. Inside document.startViewTransition when shouldTransition says so,
+// else synchronously (as without View Transitions). Resolves to what `done` returns, or to false
+// when a newer navigation superseded this one.
+async function swap(opted, token, update, done) {
+  let ran;
+  const run = () => (ran = token === navToken) && update();
+  if (!shouldTransition(opted, document.startViewTransition, matchMedia("(prefers-reduced-motion:reduce)").matches)) {
+    run();
+  } else {
+    const t = document.startViewTransition(run);
+    // A transition type (:active-view-transition-type(back)) where the browser has them.
+    t.types?.add(navType);
+    await t.updateCallbackDone;
+  }
+  return ran && done();
 }
 
 // After a slot's content changed: hydrate its islands, join live islands, done loading.
@@ -219,25 +272,6 @@ function restoreSlots(key) {
   for (const [el, nodes] of save.slots) el.replaceChildren(...nodes);
   for (const [el] of save.slots) slotShown(el);
   return true;
-}
-
-// Apply a cached/fetched document to the live DOM (clones body to keep the cache intact).
-// Pages are cached without the #hash, and the link's own goes on the pushed URL.
-function applyDocument(entry, push, token, hash = "") {
-  if (token !== undefined && token !== navToken) return;
-  const { doc, finalUrl } = entry;
-  if (push) scrollPos.set(curKey, window.scrollY);
-  document.title = doc.title;
-  syncHead(doc);
-  document.body.replaceWith(stampNonce(doc.body.cloneNode(true)));
-  if (push) history.pushState({ nowaki: (curKey = newKey()) }, "", finalUrl + hash);
-  curDoc = location.pathname + location.search;
-  hydrateIslands(document);
-  loadPageScripts(doc.head);
-  syncLive();
-  removeProgressBar();
-  // Page scripts run once (they are modules); this is their cue to set up the new page's DOM.
-  document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl } }));
 }
 
 // Page scripts (`export const scripts`) of the page navigated to. A module runs once per URL, so
@@ -411,11 +445,13 @@ function syncAttrs(cur, next, always) {
 
 const newKey = () => Math.random().toString(36).slice(2);
 
-// The current entry's key. Entries the browser added (a #hash link) get one on first sight.
+// The current entry's key. Entries the browser added (a #hash link) get one on first sight, and
+// an index after the entry they were added from. histIdx follows the entry.
 function historyKey() {
   if (!history.state?.nowaki) {
-    history.replaceState({ ...(history.state ?? {}), nowaki: newKey() }, "");
+    history.replaceState({ ...(history.state ?? {}), nowaki: newKey(), i: histIdx + 1 }, "");
   }
+  histIdx = history.state.i | 0;
   return history.state.nowaki;
 }
 
@@ -448,7 +484,7 @@ export function installRouter() {
       return; // leave same-page (hash etc.) to the browser
     }
     e.preventDefault();
-    navigate(url, { push: true }).then((final) => final && scrollToHash(url.hash));
+    navigate(url, { push: true, vt: e.target.closest("[data-nowaki-transition]") }).then((final) => final && scrollToHash(url.hash));
   });
 
   const onHover = (e) => {
@@ -459,10 +495,11 @@ export function installRouter() {
   document.addEventListener("touchstart", onHover, { passive: true });
 
   // Back/forward, and #hash links (the browser scrolls to those after this event).
-  window.addEventListener("popstate", () => {
+  window.addEventListener("popstate", (e) => {
     // The entry left is curKey: history.state is already the one returned to.
     scrollPos.set(curKey, window.scrollY);
     saveSlots(curKey);
+    const from = histIdx;
     const key = (curKey = historyKey());
     const restore = () => {
       const y = scrollPos.get(key);
@@ -477,7 +514,13 @@ export function installRouter() {
       return restore();
     }
     // An entry a slot showed (and nothing kept) asks for the fragment again.
-    navigate(new URL(location.href), { push: false, intercept: !!history.state?.slot }).then((final) => final && key === curKey && restore());
+    // A swipe the browser already animated (hasUAVisualTransition) gets no View Transition on top.
+    navigate(new URL(location.href), {
+      push: false,
+      intercept: !!history.state?.slot,
+      vt: e.hasUAVisualTransition ? false : null,
+      type: histIdx < from ? "back" : "forward",
+    }).then((final) => final && key === curKey && restore());
   });
 
   // disable the browser's default scroll restoration (we manage it)

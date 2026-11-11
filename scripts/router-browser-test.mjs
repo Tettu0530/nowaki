@@ -314,6 +314,118 @@ try {
   check(`a cross-origin redirect is a full navigation (${JSON.stringify(away)})`,
     away.origin !== new URL(BASE).origin && away.path === "/about" && /About/.test(away.h1) && !away.error);
 
+  // View Transitions (opt-in). A spy around document.startViewTransition records each transition
+  // (its types are read after the router added them), and nowaki:page-load records what the page
+  // showed then: it must come after the swap. CSP violations are counted throughout.
+  await cdp.send("Page.navigate", { url: BASE + "/vt" });
+  await sleep(1000);
+  const SPY = `
+    window.__nav = (href, attrs = {}) => { const a=document.createElement('a'); a.href=href; a.textContent=href;
+      for (const [k, v] of Object.entries(attrs)) a.setAttribute(k, v); document.body.appendChild(a); a.click(); };
+    window.__vt = []; window.__loads = [];
+    const orig = Document.prototype.startViewTransition;
+    document.startViewTransition = function (arg) { const t = orig.call(this, arg); window.__vt.push(t); return t; };
+    document.addEventListener('nowaki:page-load', () => window.__loads.push({ path: location.pathname, h1: document.querySelector('h1')?.id ?? null }));
+    return true;`;
+  await cdp.evalAsync(SPY);
+  const vtState = () =>
+    cdp.evalAsync(`return { path: location.pathname, h1: document.querySelector('h1')?.id ?? null, n: window.__vt.length,
+      types: window.__vt.map((t) => (t.types ? [...t.types].join() : '?')), loads: window.__loads.slice() };`);
+  const hasApi = await cdp.evalAsync(`return typeof Document.prototype.startViewTransition === 'function';`);
+  check("this Chrome has document.startViewTransition", hasApi);
+  const head = await cdp.evalAsync(`const s = [...document.head.querySelectorAll('style')].find((s) => s.textContent.includes('@view-transition'));
+    return { meta: !!document.querySelector('meta[name="nowaki-view-transition"]'), style: !!s, nonced: (s?.nonce ?? '') === (window.__nowakiNonce ?? '') };`);
+  // Under NOWAKI_CSP the style carries the response's nonce (the page's own, then the router's re-stamp).
+  check(`an opted route has the <meta> and the @view-transition style (${JSON.stringify(head)})`, head.meta && head.style && head.nonced);
+  const island = await cdp.evalAsync(`return { ssr: document.getElementById('vt-island-ssr')?.hasAttribute('data-nowaki-transition'),
+    client: document.getElementById('vt-island-client')?.hasAttribute('data-nowaki-transition') };`);
+  check(`<Link viewTransition> in an island, server- and client-rendered (${JSON.stringify(island)})`, island.ssr === true && island.client === true);
+
+  // List → detail on an opted route: a transition, typed forward; the shared name morphs.
+  await cdp.evalAsync(`document.getElementById('vt-card').click(); return true;`);
+  await sleep(900);
+  let vs = await vtState();
+  const hero = await cdp.evalAsync(`return getComputedStyle(document.getElementById('vt-detail') || document.body).viewTransitionName;`);
+  check(`list → detail runs a View Transition typed "forward" (${JSON.stringify(vs)})`, vs.path === "/vt/detail" && vs.h1 === "vt-detail" && vs.n === 1 && vs.types[0] === "forward");
+  check(`nowaki:page-load fires after the swap (${JSON.stringify(vs.loads)})`, vs.loads.length === 1 && vs.loads[0].h1 === "vt-detail");
+  check(`transitionName() names the detail's heading (${hero})`, hero === "vt-hero");
+  check("the swapped-in @view-transition style has this document's nonce", await cdp.evalAsync(`
+    const s = [...document.head.querySelectorAll('style')].find((s) => s.textContent.includes('@view-transition'));
+    return !!s && s.nonce === (window.__nowakiNonce ?? '');`));
+  await cdp.evalAsync(`history.back(); return true;`);
+  await sleep(900);
+  vs = await vtState();
+  check(`back runs one typed "back" (${JSON.stringify(vs)})`, vs.path === "/vt" && vs.h1 === "vt-list" && vs.n === 2 && vs.types[1] === "back");
+  await cdp.evalAsync(`history.forward(); return true;`);
+  await sleep(900);
+  vs = await vtState();
+  check(`forward runs one typed "forward" (${JSON.stringify(vs)})`, vs.path === "/vt/detail" && vs.n === 3 && vs.types[2] === "forward");
+  // Leaving an opted page (to one that isn't) transitions; between two pages that aren't, nothing does.
+  await cdp.evalAsync(`window.__nav('/about'); return true;`);
+  await sleep(900);
+  vs = await vtState();
+  check(`leaving an opted page transitions, and drops its <meta> (${JSON.stringify(vs)})`,
+    vs.path === "/about" && vs.n === 4 && !(await cdp.evalAsync(`return !!document.querySelector('meta[name="nowaki-view-transition"]');`)));
+  await cdp.evalAsync(`window.__nav('/'); return true;`);
+  await sleep(900);
+  vs = await vtState();
+  check(`no transition between pages that don't opt in (${JSON.stringify(vs)})`, vs.path === "/" && vs.n === 4 && vs.loads.length === 5);
+  // A link opts in with data-nowaki-transition, on itself or an ancestor.
+  await cdp.evalAsync(`window.__nav('/about', { 'data-nowaki-transition': '' }); return true;`);
+  await sleep(900);
+  vs = await vtState();
+  check(`a link with data-nowaki-transition transitions (${JSON.stringify(vs)})`, vs.path === "/about" && vs.n === 5);
+  await cdp.evalAsync(`const d = document.createElement('div'); d.setAttribute('data-nowaki-transition', ''); document.body.append(d);
+    const a = document.createElement('a'); a.href = ${JSON.stringify(P)} + '/'; a.textContent = 'home'; d.append(a); a.click(); return true;`);
+  await sleep(900);
+  vs = await vtState();
+  check(`a link inside a data-nowaki-transition element transitions (${JSON.stringify(vs)})`, vs.path === "/" && vs.n === 6);
+
+  // prefers-reduced-motion: reduce, and a browser without the API: the same swap, no transition.
+  await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  await cdp.evalAsync(`window.__nav('/vt/detail', { 'data-nowaki-transition': '' }); return true;`);
+  await sleep(900);
+  vs = await vtState();
+  check(`reduced motion: swapped without a transition (${JSON.stringify(vs)})`, vs.path === "/vt/detail" && vs.h1 === "vt-detail" && vs.n === 6 && vs.loads.at(-1).h1 === "vt-detail");
+  await cdp.send("Emulation.setEmulatedMedia", { features: [] });
+  await cdp.evalAsync(`window.__saved = document.startViewTransition; document.startViewTransition = undefined; window.__nav('/about', { 'data-nowaki-transition': '' }); return true;`);
+  await sleep(900);
+  vs = await vtState();
+  check(`no startViewTransition: swapped without one (${JSON.stringify(vs)})`, vs.path === "/about" && vs.n === 6 && vs.loads.at(-1).h1 !== "vt-detail");
+  await cdp.evalAsync(`document.startViewTransition = window.__saved; return true;`);
+
+  // Racing navigations: a transition whose update runs after a newer navigation started does
+  // nothing (no swap, no history entry); the newer one wins.
+  await cdp.evalAsync(`window.__nav('/vt'); return true;`);
+  await sleep(900);
+  // (/vt/detail is in the Router Cache, so the first navigation reaches its transition at once.)
+  const { n: n0, loads: l0 } = await vtState();
+  await cdp.evalAsync(`document.getElementById('vt-card').click(); window.__nav('/about'); return true;`);
+  await sleep(1200);
+  vs = await vtState();
+  check(`a superseded transition doesn't swap (${JSON.stringify(vs)})`, vs.path === "/about" && vs.h1 !== "vt-detail" && vs.n === n0 + 2 && vs.loads.length === l0.length + 1 && vs.loads.at(-1).path === "/about");
+  await cdp.evalAsync(`history.back(); return true;`);
+  await sleep(900);
+  check("nor push: back from there returns to the list", (await vtState()).path === "/vt");
+
+  // An intercepting slot (photos/@modal): the opted link opens the modal in a transition, and the
+  // page under it stays.
+  await cdp.evalAsync(`window.__nav('/photos'); return true;`);
+  await sleep(900);
+  const nSlot = (await vtState()).n;
+  await cdp.evalAsync(`window.__nav('/photos/1', { 'data-nowaki-transition': '' }); return true;`);
+  await sleep(900);
+  vs = await vtState();
+  const modal = await cdp.evalAsync(`return { modal: !!document.getElementById('photo-intercepted'), list: !!document.getElementById('photos') };`);
+  check(`a slot modal opens in a transition (${JSON.stringify({ ...vs, ...modal })})`, vs.path === "/photos/1" && modal.modal && modal.list && vs.n === nSlot + 1);
+  await cdp.evalAsync(`history.back(); return true;`);
+  await sleep(700);
+  const closed = await cdp.evalAsync(`return { path: location.pathname, modal: !!document.getElementById('photo-intercepted'), list: !!document.getElementById('photos') };`);
+  check(`back closes the modal (${JSON.stringify(closed)})`, closed.path === "/photos" && !closed.modal && closed.list);
+  // (Under NOWAKI_CSP every <style> on screen must carry this document's nonce. Chrome also reports the
+  // fetched pages' styles while DOMParser parses them, which predates View Transitions.)
+  check("every <style> on screen has this document's nonce", await cdp.evalAsync(`return [...document.querySelectorAll('style')].every((s) => s.nonce === (window.__nowakiNonce ?? ''));`));
+
   // Under a basePath, a same-origin link outside it belongs to another app: a full load.
   if (P) {
     await cdp.send("Page.navigate", { url: BASE + "/" });

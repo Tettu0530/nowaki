@@ -10,7 +10,9 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { scanRoutes, matchRoute, underPrefix, routeUnderPrefix, isRouteGroup, stripRouteGroups, interceptTarget } from "../packages/nowaki-runtime/server/router.mjs";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
-import { matchBoundary } from "../packages/nowaki-runtime/client/router-core.js";
+import { matchBoundary, shouldTransition } from "../packages/nowaki-runtime/client/router-core.js";
+import { pageMeta, prodDocument, prodShell } from "../packages/nowaki-runtime/server/document.mjs";
+import { Link, transitionName } from "../packages/nowaki-runtime/navigation.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const app = path.join(ROOT, "examples/hello");
@@ -564,6 +566,74 @@ eq(stripRouteGroups("/(.)/x"), "/(.)/x", "(.) stays literal");
   const ck = await get("/api/me", { cookie: "_ga=50%; sid=a%20b" });
   eq([ck.status, ck.body], [200, "sid:a b ga:50%"], "a malformed cookie keeps its raw value; others decode");
   await rm(dir, { recursive: true, force: true });
+}
+
+// View Transitions: when the client router transitions, the route export's document output, and
+// what <Link viewTransition> / transitionName() render.
+{
+  eq(
+    [
+      shouldTransition(true, () => {}, false),
+      shouldTransition({ tagName: "A" }, () => {}, false), // the element that opted in
+      shouldTransition(null, () => {}, false), // nothing opted in
+      shouldTransition(false, () => {}, false), // the browser animated the gesture itself
+      shouldTransition(true, undefined, false), // no document.startViewTransition
+      shouldTransition(true, () => {}, true), // prefers-reduced-motion: reduce
+    ],
+    [true, true, false, false, false, false],
+    "shouldTransition: opted in, supported, and no reduced motion",
+  );
+
+  const VT = '<meta name="nowaki-view-transition" content="1" />\n<style>@media (prefers-reduced-motion:no-preference){@view-transition{navigation:auto}}</style>';
+  const manifest = { runtime: "islands.1.js", routerRuntime: "router.1.js", islands: { C: "C.1.js" }, preload: {} };
+  const page = (mod, meta) => prodDocument(manifest, { mod, body: '<nowaki-island name="C"></nowaki-island>', meta });
+  const meta = { title: "T", head: '<link rel="stylesheet" href="/a.css" />' };
+  // A route without the export renders exactly what it did before View Transitions existed.
+  const golden = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>T</title>
+<meta name="nowaki-head" content="start" />
+<link rel="modulepreload" href="/_nowaki/islands.1.js" />
+<link rel="modulepreload" href="/_nowaki/C.1.js" />
+<link rel="stylesheet" href="/a.css" />
+<meta name="nowaki-head" content="end" />
+</head>
+<body>
+<nowaki-island name="C"></nowaki-island>
+<script id="nowaki-runtime" type="module" src="/_nowaki/islands.1.js" data-router="/_nowaki/router.1.js"></script>
+
+</body>
+</html>`;
+  eq(page({ title: "x" }, meta), golden, "a route without viewTransition: prod HTML byte-identical");
+  eq([page({ viewTransition: false }, meta), page({ viewTransition: "yes" }, meta)], [golden, golden], "viewTransition other than true adds nothing");
+  eq(pageMeta(meta, { viewTransition: true }).head, `${meta.head}\n${VT}`, "viewTransition = true: <meta> + @view-transition after the page's head");
+  eq(pageMeta({}, { viewTransition: true }).head, VT, "viewTransition = true on a page without a head");
+  const opted = page({ viewTransition: true }, meta);
+  eq(opted.indexOf(VT) > 0 && opted.indexOf(VT) < opted.indexOf('<meta name="nowaki-head" content="end" />'), true, "inside the head region (the router swaps it with the page)");
+  const shell = prodShell(manifest, { viewTransition: true }, meta).head;
+  eq(shell.includes(VT), true, "streaming shells get it too");
+
+  const runtimeRequire = createRequire(path.join(ROOT, "packages/nowaki-runtime/server/handler.mjs"));
+  const esm = (pkg, file) => pathToFileURL(path.join(path.dirname(runtimeRequire.resolve(`${pkg}/package.json`)), file)).href;
+  const { render } = await import(esm("preact-render-to-string", "dist/index.mjs"));
+  const { h } = await import(esm("preact", "dist/preact.mjs"));
+  eq(render(h(Link, { href: "/x", viewTransition: true }, "x")), '<a href="/x" data-nowaki-transition>x</a>', "<Link viewTransition> renders data-nowaki-transition");
+  eq(render(h(Link, { href: "/x", viewTransition: false }, "x")), '<a href="/x">x</a>', "<Link viewTransition={false}> renders nothing extra");
+  eq(render(h(Link, { href: "/x" }, "x")), '<a href="/x">x</a>', "<Link> without it is unchanged");
+  const prevBase = globalThis.__nowakiBase;
+  globalThis.__nowakiBase = "/app";
+  eq(render(h(Link, { href: "/x", viewTransition: true }, "x")), '<a href="/app/x" data-nowaki-transition>x</a>', "<Link viewTransition> under basePath");
+  globalThis.__nowakiBase = prevBase;
+
+  eq(
+    ["photo-1", 1, "-1", "--x", "-", "", "none", "AUTO", "revert-layer", "revert-layers", "a b/c", "\u00e9t\u00e9", "_x"].map((n) => transitionName(n).viewTransitionName),
+    ["photo-1", "_1", "_-1", "--x", "_-", "_", "_none", "_AUTO", "_revert-layer", "revert-layers", "a_b_c", "\u00e9t\u00e9", "_x"],
+    "transitionName: a CSS identifier, not a keyword",
+  );
+  eq(render(h("img", { style: transitionName("photo-1") })), '<img style="view-transition-name:photo-1;"/>', "transitionName in a style prop (SSR)");
 }
 
 console.log(failed ? `\nROUTER TEST FAILED (${failed})` : "\nROUTER TEST PASSED");
