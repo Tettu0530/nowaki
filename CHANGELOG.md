@@ -10,6 +10,29 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Changed
+
+- `nowaki build`, `nowaki dev` and the static prerender read nowaki.config in one Node process:
+  the plugin host now also normalizes `site` / `fonts` / routing / `images` (what
+  `server/site-config.mjs` did in a second Node start and config import), and it starts before
+  typegen and the env.ts check instead of after them. In 0.18.0 an app with only `site` paid
+  for two Node starts in a row (site-config.mjs ≈ 29 ms, then the plugin host ≈ 45 ms); it now
+  pays for one, partly overlapped. Medians of 7 interleaved runs on a busy Apple M2:
+  `nowaki build` of a one-page `site`-only app 206 → 138 ms, `benchmarks/ci-perf-app`
+  338 → 273 ms; `nowaki dev` startup of the same apps 313 → 231 ms and 417 → 286 ms,
+  examples/hello 638 → 410 ms. A runtime older than this release still works (the CLI falls back
+  to site-config.mjs). Output is unchanged.
+
+### Fixed
+
+- Stack traces from `nowaki start` (and the adapters' Node servers) name the real source file.
+  The server build's inline source maps listed `sources` relative to the app root, which Node
+  resolves against each emitted file's directory, so a throw in
+  `routes/(account)/_middleware.ts` was reported at
+  `dist/server/routes/(account)/routes/(account)/_middleware.ts`. `sources` is now relative to the
+  emitted file (`../../../../routes/(account)/_middleware.ts`); dev SSR was already right. Covered
+  by `scripts/sourcemap-e2e.mjs` (start and dev).
+
 ## [0.18.0] — 2026-11-10 · "Sirocco": routing for real apps
 
 Packages: `nowaki` / `nowaki-core` 0.18.0 (crates.io, npm), `@nowaki-dev/runtime`

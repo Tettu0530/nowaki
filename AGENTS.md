@@ -181,6 +181,10 @@ code locations and CI coverage.
   WS session, not wired into a server yet.
 - **Plugins / virtual modules** — `PluginBridge` (`transform`, `compile_tsrx`,
   `resolve_id`, `load`); `NowakiCore::resolve_spec` + the `VirtualResolve` trait.
+  The host (`server/plugin-host.mjs`, started by `plugins::spawn` before typegen) also
+  normalizes the build-time config with site-config.mjs's `normalizeConfig` and returns it in
+  `/caps` (`siteConfig`, under `NOWAKI_SITE_CONFIG=1`), so build / dev / prerender import
+  nowaki.config once; `site::config` (its own Node start) is the fallback for older runtimes.
 - **Scope hoisting / chunking** — `crates/nowaki-core/src/chunk.rs`.
 - **Deploy adapters** — `crates/nowaki/src/adapter.rs` (+ `server/edge-build.mjs`).
 - **Images (`?image`, `<Image>`)** — `crates/nowaki-core/src/image.rs` (widths, AVIF via ravif

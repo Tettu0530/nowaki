@@ -26,12 +26,9 @@ const KEYS: &[&str] = &[
 
 /// `{ site?, fonts?, routing?, images? }` from nowaki.config. Starts Node only when the config
 /// mentions one of them.
+/// `plugins::spawn(root, true)` reads it in the plugin host's Node process instead.
 pub fn config(root: &Path) -> Result<Value> {
-    let mentions = ["nowaki.config.mjs", "nowaki.config.js"]
-        .iter()
-        .filter_map(|n| std::fs::read_to_string(root.join(n)).ok())
-        .any(|src| KEYS.iter().any(|k| src.contains(k)));
-    if !mentions {
+    if !mentions(root) {
         return Ok(Value::Object(Default::default()));
     }
     let script = root.join("node_modules/@nowaki-dev/runtime/server/site-config.mjs");
@@ -48,6 +45,14 @@ pub fn config(root: &Path) -> Result<Value> {
         return Err(anyhow!("nowaki.config is invalid (see above)"));
     }
     serde_json::from_slice(&output.stdout).context("site-config.mjs printed invalid JSON")
+}
+
+/// Whether nowaki.config names one of the keys `config` reads.
+pub fn mentions(root: &Path) -> bool {
+    ["nowaki.config.mjs", "nowaki.config.js"]
+        .iter()
+        .filter_map(|n| std::fs::read_to_string(root.join(n)).ok())
+        .any(|src| KEYS.iter().any(|k| src.contains(k)))
 }
 
 /// nowaki.config `basePath` from `config` (`""` without one).
