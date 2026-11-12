@@ -9,9 +9,11 @@ import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveSite } from "./seo.mjs";
-import { compileI18n } from "./i18n.mjs";
+import { compileI18n, splitLocale } from "./i18n.mjs";
 import { loadEnv } from "./env.mjs";
 import { requestOrigin } from "./origin.mjs";
+import { traceFromEnv } from "./trace.mjs";
+import { HEALTH_BODY, HEALTH_HEADERS, HEALTH_PATH } from "./health.mjs";
 
 // load .env before routes so routes/loaders can read process.env
 loadEnv();
@@ -20,7 +22,7 @@ loadEnv();
 register(new URL("./loader-hooks.mjs", import.meta.url), { data: { root: process.cwd() } });
 register(new URL("./react-alias-hooks.mjs", import.meta.url));
 
-const { scanRoutes } = await import("./router.mjs");
+const { scanRoutes, matchRoute, routeUnderPrefix, underPrefix } = await import("./router.mjs");
 const { loadIslandRegistry, renderDocument, renderShell, errorPage } = await import("./render.mjs");
 const { handleRequest, sendResult } = await import("./handler.mjs");
 const { liveRender, liveContext, liveShareable, liveSigStatus, LiveForbiddenError } = await import("./live.mjs");
@@ -112,7 +114,7 @@ async function ensureSession(version) {
 
 // nowaki.config basePath: `nowaki dev` writes .nowaki/routing.json before it serves, after this
 // process starts, so it's read on the first request.
-const { setBasePath } = await import("./base-path.mjs");
+const { setBasePath, basePath } = await import("./base-path.mjs");
 let baseRead = false;
 function ensureBasePath() {
   baseRead = true;
@@ -227,6 +229,44 @@ async function devInfo(version) {
   return { routes, conventions, islands, revalidations: recentRevalidations() };
 }
 
+// For the dev MCP `page` tool and the dev toolbar (`/__nowaki/dev-info?url=…`): what serves one
+// browser path. The base and the locale come off first, as for a request (rewrites don't apply).
+// Rust adds the islands (from the module graph) and the JS estimate.
+async function devPage(browserPath, version) {
+  if (!baseRead) ensureBasePath();
+  const table = await scanRoutes(appRoot);
+  let routePath = browserPath.split(/[?#]/)[0] || "/";
+  const base = basePath();
+  if (base && (routePath === base || routePath.startsWith(base + "/"))) routePath = routePath.slice(base.length) || "/";
+  let locale = null;
+  const i18n = env.i18n;
+  if (i18n) ({ locale, path: routePath } = splitLocale(i18n, routePath));
+  const match = matchRoute(table, routePath);
+  const route = match && table.routes.find((r) => r.file === match.file);
+  const layouts = (table.layouts ?? []).filter((e) => (route ? routeUnderPrefix(route, e.prefix) : !e.prefix)).map((e) => rel(e.file));
+  const middleware = (table.middleware ?? [])
+    .filter((e) => (e.group ? route && routeUnderPrefix(route, e.prefix) : underPrefix(routePath, e.prefix)))
+    .map((e) => rel(e.file));
+  const page = { path: browserPath, routePath, locale, layouts, middleware, route: null };
+  if (!route) {
+    page.notFound = table.notFound ? rel(table.notFound) : null;
+    return page;
+  }
+  const info = { pattern: routePattern(route.segments), file: rel(route.file), kind: route.fileExt ? "file" : route.isApi ? "api" : "page", params: match.params };
+  try {
+    const mod = await env.importModule(route.file, version);
+    if (mod.revalidate !== undefined) info.revalidate = mod.revalidate;
+    // An array is listed; a function runs per request (with params and the loader's data).
+    if (Array.isArray(mod.tags)) info.tags = mod.tags.map(String);
+    else if (typeof mod.tags === "function") info.tags = "function";
+    if (mod.streaming !== undefined) info.streaming = mod.streaming;
+  } catch (err) {
+    info.loadError = String(err?.message ?? err);
+  }
+  page.route = info;
+  return page;
+}
+
 // NOWAKI_SITE, else `site` in nowaki.config, and its `trailingSlash` (read once; restart dev
 // after changing them).
 const devConfig = await (async () => {
@@ -338,12 +378,24 @@ const env = {
 };
 // Dev has no ISR cache: revalidate*() calls are only recorded (dev-info `revalidations`).
 setRevalidateEnv(env);
+// Server-Timing is always on in dev (OTEL_* still decides about spans).
+env.trace = traceFromEnv(process.env, { timing: true });
 
 const server = createServer(async (req, res) => {
+  if (req.url === HEALTH_PATH) {
+    res.writeHead(200, HEALTH_HEADERS).end(HEALTH_BODY);
+    return;
+  }
   if (req.method === "GET" && req.url.split("?")[0] === "/__nowaki/dev-info") {
     try {
-      const version = new URL(req.url, "http://localhost").searchParams.get("v") ?? "0";
-      const info = await devInfo(version);
+      const query = new URL(req.url, "http://localhost").searchParams;
+      const version = query.get("v") ?? "0";
+      const pagePath = query.get("url");
+      const info = pagePath
+        ? { page: await devPage(pagePath, version), revalidations: recentRevalidations() }
+        : query.get("only") === "revalidations"
+          ? { revalidations: recentRevalidations() }
+          : await devInfo(version);
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(info));
     } catch (err) {

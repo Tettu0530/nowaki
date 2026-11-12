@@ -11,6 +11,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { exportRooms, importRooms, onRoomsChange } from "./live.mjs";
+import { logWarn } from "./log.mjs";
 
 const FORMAT = 1;
 const WRITE_EVERY_MS = 2000;
@@ -26,7 +27,7 @@ export function loadRooms(file) {
   try {
     text = fs.readFileSync(file, "utf8");
   } catch (err) {
-    if (err.code !== "ENOENT") console.warn(`[nowaki live] could not read ${file}: ${err.message}`);
+    if (err.code !== "ENOENT") logWarn(`could not read ${file}: ${err.message}`, { scope: "live" });
     return 0;
   }
   try {
@@ -34,7 +35,7 @@ export function loadRooms(file) {
     if (data?.format !== FORMAT || typeof data.rooms !== "object") throw new Error("unknown format");
     return importRooms(data.rooms);
   } catch (err) {
-    console.warn(`[nowaki live] ignoring ${file} (${err.message}); rooms start empty`);
+    logWarn(`ignoring ${file} (${err.message}); rooms start empty`, { scope: "live" });
     return 0;
   }
 }
@@ -45,7 +46,7 @@ export function saveRooms(file) {
     json = JSON.stringify({ format: FORMAT, savedAt: new Date().toISOString(), rooms: exportRooms() });
   } catch (err) {
     // A shared state that JSON can't hold (BigInt, a cycle): keep running, just don't persist.
-    console.warn(`[nowaki live] rooms not saved: shared state is not JSON (${err.message})`);
+    logWarn(`rooms not saved: shared state is not JSON (${err.message})`, { scope: "live" });
     return false;
   }
   try {
@@ -55,7 +56,7 @@ export function saveRooms(file) {
     fs.renameSync(tmp, file);
     return true;
   } catch (err) {
-    console.warn(`[nowaki live] could not write ${file}: ${err.message}`);
+    logWarn(`could not write ${file}: ${err.message}`, { scope: "live" });
     return false;
   }
 }

@@ -14,6 +14,9 @@ export default function Layout({ children, slots, url }: LayoutProps) {
           {import.meta.env.PUBLIC_GALLERY_TITLE} {t("gallery")}
         </Link>
         <nav>
+          <Link id="posts-link" href="/posts">
+            {t("posts")}
+          </Link>
           <Link id="account-link" href="/account">
             {t("account")}
           </Link>

@@ -61,7 +61,7 @@ importers:
   packages/create-nowaki-app:
     dependencies:
       create-nowaki:
-        specifier: ^0.19.2
+        specifier: ^0.19.3
         version: link:../create-nowaki
 
   packages/nowaki-markdoc:

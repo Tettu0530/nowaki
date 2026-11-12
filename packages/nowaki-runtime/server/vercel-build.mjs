@@ -4,6 +4,7 @@
 // Usage: node vercel-build.mjs <serverDir> <clientDir> <outputDir> <appRoot>
 
 import { readFile, writeFile, mkdir, cp, rm } from "node:fs/promises";
+import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { missingSecurityHeaders } from "./security-headers.mjs";
 import { indexPublic } from "./public-files.mjs";
@@ -57,15 +58,22 @@ for (const dep of ["@nowaki-dev/runtime", "preact", "preact-render-to-string"]) 
   });
 }
 
+// revalidatePath / revalidateTag purge Vercel's CDN through @vercel/functions when the app has it
+// installed: it goes into the function with its dependencies (purge-vercel.mjs loads it lazily).
+const vercelFunctions = await copyWithDeps("@vercel/functions", appRoot, nodeModules);
+
 const handler = `// Generated: Vercel serverless function (Node).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "@nowaki-dev/runtime/server/app.mjs";
+import { vercelCdn } from "@nowaki-dev/runtime/server/purge-vercel.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const { handle } = await createApp({
   clientDir: path.join(here, "client"),
   serverDir: path.join(here, "server"),
+  // ISR pages carry Vercel-Cache-Tag; revalidate*() deletes those tags (@vercel/functions).
+  cdn: vercelCdn(),
 });
 export default handle;
 `;
@@ -143,8 +151,43 @@ function publicRoutes() {
   return out;
 }
 
+/// Copies the package `name` as the app resolves it, plus its `dependencies` (each resolved from
+/// the package's real directory, so pnpm's layout works too), flat into `dest`. Returns false when
+/// the app doesn't have the package. A dependency that can't be found is skipped with a warning.
+async function copyWithDeps(name, fromDir, dest, seen = new Set()) {
+  if (seen.has(name)) return true;
+  const dir = findPackage(name, fromDir);
+  if (!dir) return false;
+  seen.add(name);
+  const real = realpathSync(dir);
+  await cp(real, path.join(dest, name), {
+    recursive: true,
+    dereference: true,
+    filter: (s) => !path.relative(real, s).split(path.sep).includes("node_modules"),
+  });
+  const pkg = JSON.parse(await readFile(path.join(real, "package.json"), "utf8"));
+  for (const dep of Object.keys(pkg.dependencies ?? {})) {
+    if (!(await copyWithDeps(dep, real, dest, seen))) console.warn(`[nowaki] vercel adapter: ${name} needs ${dep}, which isn't installed`);
+  }
+  return true;
+}
+
+// Node's lookup: `node_modules/<name>` in `from` or any parent directory.
+function findPackage(name, from) {
+  for (let dir = path.resolve(from); ; dir = path.dirname(dir)) {
+    const candidate = path.join(dir, "node_modules", name);
+    if (existsSync(path.join(candidate, "package.json"))) return candidate;
+    if (path.dirname(dir) === dir) return null;
+  }
+}
+
 function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 console.log(`[nowaki] vercel adapter: .vercel/output ready (static + index.func) → ${outputDir}`);
+console.log(
+  vercelFunctions
+    ? "[nowaki] vercel adapter: @vercel/functions included: revalidatePath / revalidateTag purge the CDN by tag"
+    : "[nowaki] vercel adapter: no @vercel/functions in the app, so revalidatePath / revalidateTag can't purge the CDN (npm i @vercel/functions to enable)",
+);

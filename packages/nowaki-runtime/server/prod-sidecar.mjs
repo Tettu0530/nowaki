@@ -15,6 +15,8 @@ import { persistRooms } from "./live-rooms-file.mjs";
 import { isrUrls } from "./isr-urls.mjs";
 import { requestOrigin } from "./origin.mjs";
 import { flushDetached, setRevalidateEnv } from "./revalidate.mjs";
+import { logError } from "./log.mjs";
+import { HEALTH_BODY, HEALTH_HEADERS, HEALTH_PATH } from "./health.mjs";
 
 const appRoot = process.cwd();
 persistRooms(appRoot);
@@ -31,8 +33,15 @@ env.renderDocument = ({ mod, body, meta }) => {
 // The Rust front keeps the ISR cache: pages send their tags, revalidate*() purges it.
 env.isrStore = true;
 setRevalidateEnv(env);
+// The Rust front names its SERVER span after the route the sidecar matched (x-nowaki-route, internal).
+if (env.trace) env.trace.routeHeader = true;
 
 const server = createServer(async (req, res) => {
+  // start.rs `health` pings this (and answers the public /__nowaki/health itself).
+  if (req.url === HEALTH_PATH) {
+    res.writeHead(200, HEALTH_HEADERS).end(HEALTH_BODY);
+    return;
+  }
   if (req.method === "GET" && req.url.split("?")[0] === "/__nowaki/isr-urls") {
     const max = Number(new URL(req.url, "http://x").searchParams.get("max")) || 1024;
     res.writeHead(200, { "content-type": "application/json" });
@@ -40,6 +49,9 @@ const server = createServer(async (req, res) => {
     return;
   }
   if (req.method === "POST" && req.url.split("?")[0] === "/__nowaki/live-render") {
+    // A WebSocket event or publish refresh: its span is a child of live.rs's (traceparent).
+    const tr = env.trace ? env.trace.start("POST", (n) => req.headers[n]) : null;
+    let status = 200;
     try {
       const chunks = [];
       for await (const c of req) chunks.push(c);
@@ -53,11 +65,14 @@ const server = createServer(async (req, res) => {
       }
       const entry = [...liveRegistry.values()].find((e) => e.name === name);
       if (!entry) {
+        status = 404;
         res.writeHead(404, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: "live island not found" }));
         return;
       }
+      tr?.rename(`live ${name}`);
       const ctx = liveContext(request);
+      if (tr && ctx) ctx.__trace = tr;
       const result = await runWithContext(ctx, () =>
         liveRender(entry.mod, state, handler, payload, name, sig, { load }),
       );
@@ -69,18 +84,23 @@ const server = createServer(async (req, res) => {
       res.end(JSON.stringify(result));
     } catch (err) {
       if (err?.code === "NOWAKI_LIVE_STALE") {
+        status = 409;
         res.writeHead(409, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: "stale" }));
         return;
       }
       if (err instanceof LiveForbiddenError) {
+        status = 403;
         res.writeHead(403, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: "forbidden" }));
         return;
       }
-      console.error("[nowaki live]", err);
+      status = 500;
+      logError("", err, { scope: "live", trace: tr ?? undefined });
       res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "live render failed" }));
+    } finally {
+      tr?.finish({}, status);
     }
     return;
   }
@@ -107,7 +127,7 @@ const server = createServer(async (req, res) => {
       }
     }
   } catch (err) {
-    console.error("[nowaki prod-sidecar]", err);
+    logError("", err, { scope: "prod-sidecar" });
     res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
     res.end("Internal Server Error");
   }

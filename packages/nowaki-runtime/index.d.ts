@@ -161,6 +161,21 @@ export type RouteBudget = { js: number };
  */
 export type Streaming = boolean | "early";
 
+/**
+ * `export const csrf` on a page with an `action`, an API route (`routes/api/**`), or a file route
+ * (`feed.xml.ts`). By default (`true`, so exporting `true` changes nothing) a POST / PUT / PATCH /
+ * DELETE from another site is rejected with 403 `Forbidden` before the action or handler runs: an
+ * `Origin` of another host or `null`, or `Sec-Fetch-Site: cross-site` without `Origin`. Requests
+ * without either header (curl, server-to-server, most native apps) and GET / HEAD / OPTIONS are
+ * never checked. `_middleware` runs before the check.
+ *
+ * `false` accepts cross-site writes, for webhooks and third-party callbacks. Authenticate such a
+ * route another way (a signature header, a shared secret): its cookies are the visitor's.
+ * API routes reject by default since 0.19.0.
+ * @example export const csrf = false; // routes/api/webhook.ts
+ */
+export type Csrf = boolean;
+
 /** API route handler (per-method export or default). */
 export type ApiHandler = (
   ctx: LoaderContext,
@@ -349,9 +364,27 @@ export type RouteTags =
  * after the action already shows fresh content. Calls made outside a request, or after its
  * response was sent (a timer, a queue consumer), reach the cache shortly after. The ISR cache lives in each `nowaki start` process;
  * with several instances, fan the purge out with `POST /__nowaki/revalidate` (see
- * `revalidateTag`). Under `nowaki dev` (no cache) calls are only recorded; in static output and on
- * the deploy adapters they are a no-op for now (warned once). Throws a TypeError for a path that
- * isn't root-relative (`/blog`).
+ * `revalidateTag`). Throws a TypeError for a path that isn't root-relative (`/blog`).
+ *
+ * Per server:
+ *
+ * | Server | Cached by | Purge |
+ * | --- | --- | --- |
+ * | `nowaki start` | the Rust front, in memory per process | deleted before the response is sent |
+ * | vercel adapter | Vercel's CDN (ISR pages send `Vercel-Cache-Tag`) | `dangerouslyDeleteByTag` from `@vercel/functions`, awaited up to 2 s before the response; install the package in the app (warned once without it) |
+ * | node / bun / deno adapters | whatever CDN is in front (`s-maxage`) | none: a no-op, warned once; purge that CDN through its API |
+ * | cloudflare adapter | the Worker, in the Cache API of each data center (custom domains) | the path is deleted from the local data center's cache; with `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_API_TOKEN` (Cache Purge permission) set on the Worker, a zone purge by tag clears every data center, awaited up to 2 s; without them (or on workers.dev, which has no zone) `revalidateTag` clears nothing, warned once |
+ * | static output | files | none: a no-op, warned once |
+ * | `nowaki dev` | nothing | calls are only recorded |
+ *
+ * On Vercel the path is a cache tag too (`p:<browser path>`, next to `t:<tag>`), so both functions
+ * purge by tag; a tag over 256 bytes is sent as a hash. Make the call inside the request:
+ * `@vercel/functions` purges through the invocation's context, so a call with no request behind
+ * it does nothing, and one made after the response may be cut short when the function suspends.
+ * On Cloudflare the tags go in `Cache-Tag` (a tag over 240 characters is sent as a hash; tags
+ * are case-insensitive there, so a purge can catch more than asked). The zone purge API is rate
+ * limited per account (on the Free plan 5 requests a minute, bursts of 25); a rejected purge is
+ * warned once.
  * @example revalidatePath("/blog");
  */
 export function revalidatePath(path: string): void;

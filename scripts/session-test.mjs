@@ -42,6 +42,16 @@ check("defineSession defaults", JSON.stringify(defineSession()) === JSON.stringi
 
 // --- an app: routes that read and write the session ---
 let lastError = null;
+async function probeSession(ctx) {
+  const user = (await ctx.session.get("user")) ?? null;
+  let wrote = true;
+  try {
+    await ctx.session.set("user", "mallory");
+  } catch (e) {
+    wrote = e.message;
+  }
+  return { user, wrote, readOnly: ctx.session.readOnly };
+}
 const modules = {
   "routes/whoami.tsx": {
     loader: async (ctx) => ({ user: (await ctx.session.get("user")) ?? "anon", n: (await ctx.session.get("n")) ?? 0 }),
@@ -78,17 +88,11 @@ const modules = {
     },
     default: () => h("p", null, "big"),
   },
-  "routes/api/probe.ts": {
-    POST: async (ctx) => {
-      const user = (await ctx.session.get("user")) ?? null;
-      let wrote = true;
-      try {
-        await ctx.session.set("user", "mallory");
-      } catch (e) {
-        wrote = e.message;
-      }
-      return { user, wrote, readOnly: ctx.session.readOnly };
-    },
+  "routes/api/probe.ts": { POST: (ctx) => probeSession(ctx) },
+  // A page without an action renders on POST: the session there is read-only on a cross-site request.
+  "routes/probe.tsx": {
+    loader: (ctx) => probeSession(ctx),
+    default: ({ data }) => h("pre", null, JSON.stringify(data)),
   },
   "routes/api/hook.ts": {
     csrf: false,
@@ -118,6 +122,7 @@ const table = {
     route("routes/count.tsx", "/count"),
     route("routes/big.tsx", "/big"),
     route("routes/api/probe.ts", "/api/probe"),
+    route("routes/probe.tsx", "/probe"),
     route("routes/api/hook.ts", "/api/hook"),
     route("routes/early.tsx", "/early"),
   ],
@@ -229,9 +234,12 @@ useSessions();
   check("a value that would pass 4 KB throws a clear error", big.status === 500 && /4096-byte cookie limit/.test(lastError?.message ?? ""), lastError?.message);
   check("…and no session cookie is sent", sessionCookie(big) === undefined);
 
-  // CSRF: a cross-site POST carrying a valid cookie sees an empty, read-only session.
-  const probe = await post("/api/probe", { cookie: `nowaki_session=${c1}`, origin: "http://evil.test" });
-  const pj = JSON.parse(await text(probe));
+  // CSRF: a cross-site POST to an API route is rejected; one that still renders (a page without an
+  // action) carrying a valid cookie sees an empty, read-only session.
+  const rejected = await post("/api/probe", { cookie: `nowaki_session=${c1}`, origin: "http://evil.test" });
+  check("cross-site API POST: rejected (403), no cookie goes out", rejected.status === 403 && setCookies(rejected).length === 0, rejected.status);
+  const probe = await post("/probe", { cookie: `nowaki_session=${c1}`, origin: "http://evil.test" });
+  const pj = JSON.parse((await text(probe)).replace(/^<pre>|<\/pre>$/g, "").replace(/&quot;/g, '"'));
   check("cross-site POST: the session reads as empty", pj.user === null, JSON.stringify(pj));
   check("cross-site POST: writes throw (read-only)", pj.readOnly === true && /read-only on a cross-site request/.test(String(pj.wrote)), JSON.stringify(pj));
   check("cross-site POST: no cookie goes out", setCookies(probe).length === 0);

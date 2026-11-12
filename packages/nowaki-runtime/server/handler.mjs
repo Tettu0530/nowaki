@@ -18,6 +18,7 @@ import { corsPreflight, withCorsOnResult } from "./cors.mjs";
 import { isCrossSite } from "./origin.mjs";
 import { dispatchLiveEvent, LIVE_EVENT_PATH } from "./live-event.mjs";
 import { encodeEntries, encodeTags, flushPurge, REVALIDATE_PATH, revalidateEndpoint, revalidateEndpointEnabled, TAGS_HEADER } from "./revalidate.mjs";
+import { logError } from "./log.mjs";
 
 // Internal path the client router fetches loading/error boundary HTML from, once.
 export const BOUNDARIES_PATH = "/__nowaki/boundaries";
@@ -44,9 +45,12 @@ const JSON_CT = { "content-type": "application/json; charset=utf-8" };
 ///   live (optional) -> { lookup(name, version), render } for POST /__nowaki/live-event
 ///   isrStore (optional) -> true on `nowaki start`: ISR responses carry `x-nowaki-tags`, and
 ///     revalidate*() calls ride on the response as `x-nowaki-purge` (server/revalidate.mjs)
-///   purge(entries) (optional) -> an adapter's CDN purge, awaited before the response returns
+///   purge(entries, ctx) (optional) -> an adapter's CDN purge, awaited before the response returns
+///     (`ctx`: the request's context, absent for a call made outside a request)
 ///   cacheTagHeader(entries) (optional) -> { [header]: value } an adapter's CDN keys a page by;
 ///     `entries` are the page's `t:<tag>` plus `p:<browser path>` (the form `purge` receives)
+///   trace (optional) -> server/trace.mjs `createTrace`: Server-Timing phases and spans. Null when
+///     both are off, so a request pays one check per phase.
 // Not async itself: the request's promise is routeRequest's, so an app without i18n pays this one
 // check and no extra async frame.
 export function handleRequest(env, info) {
@@ -72,6 +76,10 @@ async function routeRequest(env, info, localized) {
   // With prefixDefaultLocale, an unprefixed page is a 404 (API and file routes still answer).
   if (match && localized && !localized.prefixed && localized.i18n.prefixDefault && !match.isApi) match = null;
   const ctx = makeContext({ ...info, params: match?.params ?? {} });
+  if (env.trace) {
+    const tr = (ctx.__trace = env.trace.start(method, rawHeader(info), url.pathname));
+    if (match) tr.setRoute(routeName(table, match.file));
+  }
   // The site's URL (NOWAKI_SITE / nowaki.config `site`), for absolute links in feeds and the like.
   // Parsed on first read: most requests never look at it.
   let site;
@@ -138,23 +146,34 @@ async function routeRequest(env, info, localized) {
 
     const mod = await env.importModule(match.file, version);
 
+    // Cross-site writes to page actions and API / file routes are rejected (403) after middleware,
+    // unless the route opts out with `export const csrf = false`.
     const crossSite = crossOrigin && mod.csrf !== false;
     if (crossOrigin && !crossSite) ctx.__sessionMode = undefined;
 
     if (match.isApi) {
-      if (crossSite) {
-        // Phase 1 for API routes: warn; `export const csrf = true` enforces now.
-        if (mod.csrf === true) return finalize(ctx, FORBIDDEN, env, table, version);
-        warnCrossSiteApi(match.file, url.pathname);
-      }
+      if (crossSite) return finalize(ctx, FORBIDDEN, env, table, version);
       // Inside the request's context, so getContext() and revalidate*() work there.
-      return finalize(ctx, await inRequest(ctx, () => handleApi(mod, ctx, match.fileExt)), env, table, version);
+      const tok = ctx.__trace?.begin(null, "api");
+      let res;
+      try {
+        res = await inRequest(ctx, () => handleApi(mod, ctx, match.fileExt));
+      } finally {
+        ctx.__trace?.end(tok);
+      }
+      return finalize(ctx, res, env, table, version);
     }
 
     if (crossSite && typeof mod.action === "function") return finalize(ctx, FORBIDDEN, env, table, version);
 
     if (method !== "GET" && method !== "HEAD" && typeof mod.action === "function") {
-      const out = await inRequest(ctx, () => mod.action(ctx));
+      const tok = ctx.__trace?.begin("action", "action");
+      let out;
+      try {
+        out = await inRequest(ctx, () => mod.action(ctx));
+      } finally {
+        ctx.__trace?.end(tok);
+      }
       const res = toResult(out);
       if (res) return finalize(ctx, res, env, table, version);
       ctx.actionData = out; // data → re-render the page
@@ -290,15 +309,6 @@ function rawHeader(info) {
   return typeof h.get === "function" ? (n) => h.get(n) ?? undefined : (n) => h[n];
 }
 
-const warnedApi = new Set();
-function warnCrossSiteApi(file, pathname) {
-  if (warnedApi.has(file)) return;
-  warnedApi.add(file);
-  console.warn(
-    `[nowaki] cross-site non-GET request to API route ${pathname} was allowed. A later release rejects these by default; add \`export const csrf = true\` to reject now, or \`export const csrf = false\` to keep allowing them.`,
-  );
-}
-
 // `ctx.__commit(result)` (sessions) runs before the response headers are built, so a cookie it sets
 // goes out. Without one the result is built synchronously: the common path adds no await. A commit
 // that fails (a store error, a cookie over 4 KB) is handled here, since the promise returned from
@@ -322,7 +332,7 @@ async function commitAndFinalize(ctx, result, env, table, version) {
       await commit(result);
       out = finalizeResult(ctx, result);
     } catch (err) {
-      out = finalizeResult(ctx, table ? await render500(env, table, ctx, version, err) : plainError(err));
+      out = finalizeResult(ctx, table ? await render500(env, table, ctx, version, err) : plainError(err, ctx));
     }
   } else {
     out = finalizeResult(ctx, result);
@@ -341,8 +351,8 @@ function inRequest(ctx, fn) {
   return runWithContext(ctx, fn);
 }
 
-function plainError(err) {
-  console.error("[nowaki]", err);
+function plainError(err, ctx) {
+  logError("", err, { trace: ctx.__trace });
   return { status: 500, headers: { "content-type": "text/plain; charset=utf-8" }, body: "Internal Server Error" };
 }
 
@@ -363,6 +373,7 @@ function finalizeResult(ctx, result) {
   if (ctx.resStatus && (result.status === undefined || result.status === 200)) {
     status = ctx.resStatus;
   }
+  if (ctx.__trace) ctx.__trace.finish(headers, status);
   return { status, headers, body: result.body, stream: result.stream };
 }
 
@@ -390,7 +401,13 @@ async function runMiddleware(env, table, ctx, version, path, match) {
     const mod = await env.importModule(entry.file, version);
     const fn = mod.default ?? mod.middleware;
     if (typeof fn !== "function") continue;
-    const out = await fn(ctx);
+    const tok = ctx.__trace?.begin("mw", `middleware ${entry.prefix || "/"}`);
+    let out;
+    try {
+      out = await fn(ctx);
+    } finally {
+      ctx.__trace?.end(tok);
+    }
     const res = toResult(out);
     if (res) return res;
   }
@@ -476,50 +493,65 @@ async function renderRoute(env, table, match, mod, ctx, version, path) {
       }),
     };
   }
-  const data = mod.loader ? await mod.loader(ctx) : undefined;
-  const meta = await withDocAttrs(env, table, match.file, mod, version, withFonts(env, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data, params: ctx.params, url: ctx.url }), slotFiles)), slotFiles)));
-  const node = await wrapLayouts(env, table, match.file, h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url }), ctx, version, slots);
-
-  // With a shared Cache-Control, CDNs do ISR as-is. The `nowaki start` Rust front
-  // reads x-nowaki-revalidate and caches in memory.
-  const revalidate = isrSeconds(mod);
-
-  // Streaming SSR sends the shell immediately to cut TTFB (only in envs with env.renderShell).
-  if (mod.streaming === true && typeof env.renderShell === "function") {
-    const { head, tail } = env.renderShell({ mod, meta });
-    const bodyStream = await renderToReadableStream(node);
-    // The loaders have run (above), so the request inputs they read are known.
-    const headers = revalidate ? { ...HTML, ...sharedCacheHeaders(revalidate, ctx.__vary()) } : HTML;
-    // `nowaki start` doesn't store a streamed page (no x-nowaki-revalidate), but a CDN does.
-    if (revalidate && env.cacheTagHeader) cacheTags(env, mod, match.file, ctx, data, headers);
-    return {
-      status: 200,
-      headers,
-      stream: streamedDocument(head, bodyStream, tail),
-    };
-  }
-
-  const body = await renderToStringAsync(node);
-  let headers = HTML;
-  if (revalidate) {
-    // start.rs folds Vary into the cache key, preventing cross-user leaks and query floods.
-    const vary = ctx.__vary();
-    headers = {
-      ...HTML,
-      ...sharedCacheHeaders(revalidate, vary),
-      "x-nowaki-revalidate": String(revalidate),
-      "x-nowaki-vary": vary.headers.join(","),
-      "x-nowaki-vary-query": vary.query ? "1" : "0",
-    };
-    if (mod.tags !== undefined && env.isrStore) {
-      const tags = routeTags(mod, match.file, ctx, data);
-      if (tags) headers[TAGS_HEADER] = tags.encoded;
+  const tr = ctx.__trace;
+  let data;
+  if (mod.loader) {
+    const tok = tr?.begin("loader", "loader");
+    try {
+      data = await mod.loader(ctx);
+    } finally {
+      tr?.end(tok);
     }
-    if (env.cacheTagHeader) cacheTags(env, mod, match.file, ctx, data, headers);
   }
-  // A slot that intercepts URLs needs the client router: the page ships the runtime without islands.
-  const doc = slots && slots.some((l) => l?.some((s) => s.slot.intercepts?.some((i) => i.segments))) ? { ...meta, router: true } : meta;
-  return { status: 200, headers, body: env.renderDocument({ mod, body, meta: doc }) };
+  const tok = tr?.begin("render", "render");
+  // try / finally adds no frame: the untraced render runs exactly as before.
+  try {
+    const meta = await withDocAttrs(env, table, match.file, mod, version, withFonts(env, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data, params: ctx.params, url: ctx.url }), slotFiles)), slotFiles)));
+    const node = await wrapLayouts(env, table, match.file, h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url }), ctx, version, slots);
+
+    // With a shared Cache-Control, CDNs do ISR as-is. The `nowaki start` Rust front
+    // reads x-nowaki-revalidate and caches in memory.
+    const revalidate = isrSeconds(mod);
+
+    // Streaming SSR sends the shell immediately to cut TTFB (only in envs with env.renderShell).
+    if (mod.streaming === true && typeof env.renderShell === "function") {
+      const { head, tail } = env.renderShell({ mod, meta });
+      const bodyStream = await renderToReadableStream(node);
+      // The loaders have run (above), so the request inputs they read are known.
+      const headers = revalidate ? { ...HTML, ...sharedCacheHeaders(revalidate, ctx.__vary()) } : HTML;
+      // `nowaki start` doesn't store a streamed page (no x-nowaki-revalidate), but a CDN does.
+      if (revalidate && env.cacheTagHeader) cacheTags(env, mod, match.file, ctx, data, headers);
+      return {
+        status: 200,
+        headers,
+        stream: streamedDocument(head, bodyStream, tail),
+      };
+    }
+
+    const body = await renderToStringAsync(node);
+    let headers = HTML;
+    if (revalidate) {
+      // start.rs folds Vary into the cache key, preventing cross-user leaks and query floods.
+      const vary = ctx.__vary();
+      headers = {
+        ...HTML,
+        ...sharedCacheHeaders(revalidate, vary),
+        "x-nowaki-revalidate": String(revalidate),
+        "x-nowaki-vary": vary.headers.join(","),
+        "x-nowaki-vary-query": vary.query ? "1" : "0",
+      };
+      if (mod.tags !== undefined && env.isrStore) {
+        const tags = routeTags(mod, match.file, ctx, data);
+        if (tags) headers[TAGS_HEADER] = tags.encoded;
+      }
+      if (env.cacheTagHeader) cacheTags(env, mod, match.file, ctx, data, headers);
+    }
+    // A slot that intercepts URLs needs the client router: the page ships the runtime without islands.
+    const doc = slots && slots.some((l) => l?.some((s) => s.slot.intercepts?.some((i) => i.segments))) ? { ...meta, router: true } : meta;
+    return { status: 200, headers, body: env.renderDocument({ mod, body, meta: doc }) };
+  } finally {
+    tr?.end(tok);
+  }
 }
 
 // `export const tags`: a static array is validated and encoded once per module; a function of
@@ -532,7 +564,7 @@ function routeTags(mod, file, ctx, data) {
     try {
       list = t({ params: ctx.params, data });
     } catch (err) {
-      console.error(`[nowaki] ${file}: tags() failed:`, err);
+      logError(`${file}: tags() failed:`, err, { trace: ctx.__trace });
       return null;
     }
     const ok = encodeTags(list, file);
@@ -931,7 +963,7 @@ async function earlyError(env, table, ctx, version, err, file) {
     const url = JSON.stringify(String(to)).replace(/</g, "\\u003c");
     return `<script>location.replace(${url})</script>`;
   }
-  console.error("[nowaki]", err);
+  logError("", err, { trace: ctx.__trace });
   const route = routeOf(table, file);
   const boundary = (table.errorBoundaries ?? [])
     .filter((b) => (route ? routeUnderPrefix(route, b.prefix) : underPrefix(ctx.url.pathname, b.urlPrefix ?? b.prefix)))
@@ -1005,7 +1037,7 @@ async function render404(env, table, ctx, version) {
 async function render500(env, table, ctx, version, err) {
   // Always on record: with a custom _500 page, the built-in renderError (which logs) never runs.
   if (typeof env.onError === "function") env.onError(err, ctx);
-  else console.error(`[nowaki] ${ctx.method ?? "GET"} ${ctx.url?.pathname ?? ""}:`, err);
+  else logError(`${ctx.method ?? "GET"} ${ctx.url?.pathname ?? ""}:`, err, { trace: ctx.__trace });
   if (table.errorRoute && !ctx._inErrorPage) {
     try {
       ctx._inErrorPage = true;
@@ -1057,6 +1089,20 @@ function groupMiddleware(table, file) {
     byFile.set(file, set);
   }
   return set;
+}
+
+// A route's pattern ("/blog/[slug]") by file, for its span name; once per route table and file.
+const routeNames = new WeakMap();
+function routeName(table, file) {
+  let byFile = routeNames.get(table);
+  if (!byFile) routeNames.set(table, (byFile = new Map()));
+  let name = byFile.get(file);
+  if (name === undefined) {
+    const route = routeOf(table, file);
+    name = route ? segmentsPattern(route.segments) : null;
+    byFile.set(file, name);
+  }
+  return name;
 }
 
 function routeOf(table, file) {

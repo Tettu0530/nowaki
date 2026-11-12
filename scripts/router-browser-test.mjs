@@ -1,9 +1,15 @@
 // Client router behavior test in a real browser (Chrome).
-// Runs in CI (browser job) and locally. Drives Chrome directly over CDP (no puppeteer).
+// Runs in CI (browser job) and locally. Drives Chrome directly over CDP (no puppeteer), through
+// --remote-debugging-pipe: no debugging port to collide with, and a fresh profile directory per
+// run (CI runs this twice in a row; a fixed port and profile could still be held by the previous
+// Chrome while it shut down, and the new one then exposed no page target).
 // Usage: BASE=http://127.0.0.1:8233 node scripts/router-browser-test.mjs
 // For an app built with nowaki.config `basePath`, put the base in BASE
 // (BASE=http://127.0.0.1:8233/app): the paths below are then checked under it.
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const BASE = (process.env.BASE || "http://127.0.0.1:8233").replace(/\/$/, "");
 // The basePath in BASE ("" without one). In the page, __P is it and __path() the path without it.
@@ -12,42 +18,41 @@ const PRELUDE = `const __P = ${JSON.stringify(P)}; const __path = () => (__P && 
 const CHROME =
   process.env.CHROME ||
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const PORT = Number(process.env.CDP_PORT || 9223);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function cdpTargets() {
-  const res = await fetch(`http://127.0.0.1:${PORT}/json`);
-  return res.json();
-}
-
-// A single CDP session. Thin wrapper that runs in-page JS via Runtime.evaluate.
+// CDP over Chrome's --remote-debugging-pipe (fd 3 in, fd 4 out, NUL-separated JSON), attached to
+// the page with a flat session. Runs in-page JS via Runtime.evaluate.
 class CDP {
-  constructor(wsUrl) {
-    this.ws = new WebSocket(wsUrl);
+  constructor(input, output) {
+    this.input = input;
     this.id = 0;
     this.pending = new Map();
     this.events = []; // CDP events (method + params), for checks on requests the page made
-    this.ready = new Promise((res, rej) => {
-      this.ws.onopen = () => res();
-      this.ws.onerror = (e) => rej(e);
-    });
-    this.ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data);
-      if (msg.id && this.pending.has(msg.id)) {
-        const { resolve, reject } = this.pending.get(msg.id);
-        this.pending.delete(msg.id);
-        msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result);
-      } else if (msg.method) {
-        this.events.push(msg);
+    this.session = undefined;
+    let buf = "";
+    output.setEncoding("utf8");
+    output.on("data", (chunk) => {
+      buf += chunk;
+      let end;
+      while ((end = buf.indexOf("\0")) >= 0) {
+        const msg = JSON.parse(buf.slice(0, end));
+        buf = buf.slice(end + 1);
+        if (msg.id && this.pending.has(msg.id)) {
+          const { resolve, reject } = this.pending.get(msg.id);
+          this.pending.delete(msg.id);
+          msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result);
+        } else if (msg.method) {
+          this.events.push(msg);
+        }
       }
-    };
+    });
   }
-  send(method, params = {}) {
+  send(method, params = {}, sessionId = this.session) {
     const id = ++this.id;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.ws.send(JSON.stringify({ id, method, params }));
+      this.input.write(JSON.stringify(sessionId ? { id, method, params, sessionId } : { id, method, params }) + "\0");
     });
   }
   async evalAsync(expr) {
@@ -60,6 +65,26 @@ class CDP {
     if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails));
     return r.result.value;
   }
+  // Polls `expr` (an expression, through evalAsync) until it is truthy or `ms` pass. A page that
+  // is still loading (evaluate fails between documents) counts as not yet.
+  async waitFor(expr, ms = 10000) {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      try {
+        if (await this.evalAsync(`return !!(${expr});`)) return true;
+      } catch {}
+      await sleep(50);
+    }
+    return false;
+  }
+  // A full load of `url`: waits for the new document to finish loading and islands.js to run
+  // (its hydrate hook is set), instead of a fixed sleep.
+  async load(url) {
+    await this.send("Page.navigate", { url });
+    if (!(await this.waitFor(`document.readyState === "complete" && location.href !== "about:blank" && window.__nowakiHydrateIslands`, 20000))) {
+      throw new Error(`${url} did not finish loading`);
+    }
+  }
 }
 
 let chrome;
@@ -69,34 +94,33 @@ const check = (label, cond) => {
   if (!cond) failures++;
 };
 
+const profile = mkdtempSync(path.join(os.tmpdir(), "nowaki-router-chrome-"));
+
 try {
-  chrome = spawn(CHROME, [
-    "--headless=new",
-    `--remote-debugging-port=${PORT}`,
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--user-data-dir=/tmp/nwk-chrome-test",
-    "about:blank",
-  ]);
-  let targets;
-  // Chrome can take a while to start on CI runners; wait up to 30s for a page target.
-  for (let i = 0; i < 120; i++) {
-    try {
-      targets = await cdpTargets();
-      if (targets.some((t) => t.type === "page")) break;
-    } catch {}
-    await sleep(250);
+  chrome = spawn(
+    CHROME,
+    ["--headless=new", "--remote-debugging-pipe", "--no-first-run", "--no-default-browser-check", `--user-data-dir=${profile}`, "about:blank"],
+    { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] },
+  );
+  const exited = new Promise((r) => chrome.once("exit", r));
+  const cdp = new CDP(chrome.stdio[3], chrome.stdio[4]);
+  let page;
+  // Chrome can take a while to start on CI runners: wait up to 30s for the page target. Each
+  // Target.getTargets is raced against 250 ms, since Chrome may not answer before it is up.
+  const deadline = Date.now() + 30000;
+  while (!page && Date.now() < deadline) {
+    const r = await Promise.race([cdp.send("Target.getTargets", {}, null).catch(() => null), sleep(250), exited.then(() => "exited")]);
+    if (r === "exited") throw new Error(`Chrome exited during startup (CHROME=${CHROME})`);
+    page = r?.targetInfos?.find((t) => t.type === "page");
+    if (!page) await sleep(250);
   }
-  const page = targets?.find((t) => t.type === "page");
   if (!page) throw new Error(`Chrome exposed no page target over CDP within 30s (CHROME=${CHROME})`);
-  const cdp = new CDP(page.webSocketDebuggerUrl);
-  await cdp.ready;
+  cdp.session = (await cdp.send("Target.attachToTarget", { targetId: page.targetId, flatten: true }, null)).sessionId;
   await cdp.send("Page.enable");
   await cdp.send("Runtime.enable");
   await cdp.send("Network.enable");
 
-  await cdp.send("Page.navigate", { url: BASE + "/" });
-  await sleep(800);
+  await cdp.load(BASE + "/");
 
   // The router loads on intent only: nothing has hovered, focused, or clicked a link yet, so its
   // chunk must not have been fetched.
@@ -108,11 +132,14 @@ try {
   await cdp.evalAsync(`
     window.__nav = (href) => { const a=document.createElement('a'); a.href=href; a.textContent=href; document.body.appendChild(a); a.click(); };
     return true;`);
-  await cdp.evalAsync(`window.__nav('/about'); return true;`);
-  await sleep(500);
+  // The first click comes before the router is there: islands.js loads its chunk, then replays the
+  // click as a client navigation. That takes a fetch of the chunk and one of the page, so wait for
+  // the swap (and that it was a swap, not a full load: the same document) rather than a fixed time.
+  await cdp.evalAsync(`window.__sameDoc = 1; window.__nav('/about'); return true;`);
+  await cdp.waitFor(`location.pathname === "/about" && /About/i.test(document.querySelector('h1')?.textContent ?? '') && window.__nowakiRouter`);
   const afterAbout = await cdp.evalAsync(`
-    return { path: location.pathname, h1: document.querySelector('h1')?.textContent || '', hasIslandRuntime: !!window.__nowakiRouter };`);
-  check("SPA navigation swapped to /about", afterAbout.path === "/about" && /About/i.test(afterAbout.h1));
+    return { path: location.pathname, h1: document.querySelector('h1')?.textContent || '', hasIslandRuntime: !!window.__nowakiRouter, same: window.__sameDoc === 1 };`);
+  check(`SPA navigation swapped to /about (${JSON.stringify(afterAbout)})`, afterAbout.path === "/about" && /About/i.test(afterAbout.h1) && afterAbout.same);
 
   // Router Cache: go back, then /about again. Fetch count doesn't grow
   await cdp.evalAsync(`history.back(); return true;`);
@@ -163,9 +190,15 @@ try {
 
   // <head> styles and <html lang> follow the page on client navigation (and are dropped when leaving)
   // A style injected at runtime (as CSS-in-JS libraries do) is outside the page's head region.
-  await cdp.evalAsync(`const s = document.createElement('style'); s.id = 'runtime-css'; document.head.appendChild(s); return true;`);
+  await cdp.evalAsync(`const s = document.createElement('style'); s.id = 'runtime-css'; s.nonce = window.__nowakiNonce ?? ''; document.head.appendChild(s);
+    window.__cspViolations = []; addEventListener('securitypolicyviolation', (e) => window.__cspViolations.push(e.violatedDirective + ' ' + e.blockedURI));
+    return true;`);
   await cdp.evalAsync(`window.__nav('/styled'); return true;`);
   await sleep(600);
+  // Under NOWAKI_CSP the fetched page's <style> (another response's nonce) is parsed with this
+  // document's nonce, so DOMParser reports nothing.
+  const cspViolations = await cdp.evalAsync(`return window.__cspViolations;`);
+  check(`no CSP violations navigating to /styled (${cspViolations.join(", ")})`, cspViolations.length === 0);
   check("runtime-injected <style> survives client navigation", await cdp.evalAsync(`return !!document.getElementById('runtime-css');`));
   const styled = await cdp.evalAsync(`
     return { path: location.pathname, lang: document.documentElement.lang,
@@ -301,13 +334,12 @@ try {
   await sleep(1000);
   const json = await cdp.evalAsync(`return { path: location.pathname, type: document.contentType };`);
   check(`a JSON response is a full navigation (${JSON.stringify(json)})`, json.path === "/api/hello" && json.type === "application/json");
-  await cdp.send("Page.navigate", { url: BASE + "/" });
-  await sleep(800);
+  await cdp.load(BASE + "/");
   await cdp.evalAsync(`
     window.__nav = (href) => { const a=document.createElement('a'); a.href=href; a.textContent=href; document.body.appendChild(a); a.click(); };
     return true;`);
   await cdp.evalAsync(`window.__nav('/api/away'); return true;`);
-  await sleep(1500);
+  await cdp.waitFor(`location.origin !== ${JSON.stringify(new URL(BASE).origin)} && document.readyState === "complete" && document.querySelector('h1')`);
   const away = await cdp.evalAsync(`
     return { origin: location.origin, path: location.pathname, h1: document.querySelector('h1')?.textContent ?? '',
              error: !!document.querySelector('[data-testid="error"], [data-nowaki-reset]') };`);
@@ -317,12 +349,12 @@ try {
   // View Transitions (opt-in). A spy around document.startViewTransition records each transition
   // (its types are read after the router added them), and nowaki:page-load records what the page
   // showed then: it must come after the swap. CSP violations are counted throughout.
-  await cdp.send("Page.navigate", { url: BASE + "/vt" });
-  await sleep(1000);
+  await cdp.load(BASE + "/vt");
   const SPY = `
     window.__nav = (href, attrs = {}) => { const a=document.createElement('a'); a.href=href; a.textContent=href;
       for (const [k, v] of Object.entries(attrs)) a.setAttribute(k, v); document.body.appendChild(a); a.click(); };
     window.__vt = []; window.__loads = [];
+    window.__cspViolations = []; addEventListener('securitypolicyviolation', (e) => window.__cspViolations.push(e.violatedDirective + ' ' + e.blockedURI));
     const orig = Document.prototype.startViewTransition;
     document.startViewTransition = function (arg) { const t = orig.call(this, arg); window.__vt.push(t); return t; };
     document.addEventListener('nowaki:page-load', () => window.__loads.push({ path: location.pathname, h1: document.querySelector('h1')?.id ?? null }));
@@ -337,13 +369,17 @@ try {
     return { meta: !!document.querySelector('meta[name="nowaki-view-transition"]'), style: !!s, nonced: (s?.nonce ?? '') === (window.__nowakiNonce ?? '') };`);
   // Under NOWAKI_CSP the style carries the response's nonce (the page's own, then the router's re-stamp).
   check(`an opted route has the <meta> and the @view-transition style (${JSON.stringify(head)})`, head.meta && head.style && head.nonced);
+  // (The client-rendered link appears once the island has hydrated.)
+  await cdp.waitFor(`document.getElementById('vt-island-client')`);
   const island = await cdp.evalAsync(`return { ssr: document.getElementById('vt-island-ssr')?.hasAttribute('data-nowaki-transition'),
     client: document.getElementById('vt-island-client')?.hasAttribute('data-nowaki-transition') };`);
   check(`<Link viewTransition> in an island, server- and client-rendered (${JSON.stringify(island)})`, island.ssr === true && island.client === true);
 
   // List → detail on an opted route: a transition, typed forward; the shared name morphs.
+  // (The first click on this document: the router loads first, so wait for the swap.)
   await cdp.evalAsync(`document.getElementById('vt-card').click(); return true;`);
-  await sleep(900);
+  await cdp.waitFor(`location.pathname === "/vt/detail" && document.querySelector('h1')?.id === "vt-detail" && window.__loads.length >= 1`);
+  await sleep(200);
   let vs = await vtState();
   const hero = await cdp.evalAsync(`return getComputedStyle(document.getElementById('vt-detail') || document.body).viewTransitionName;`);
   check(`list → detail runs a View Transition typed "forward" (${JSON.stringify(vs)})`, vs.path === "/vt/detail" && vs.h1 === "vt-detail" && vs.n === 1 && vs.types[0] === "forward");
@@ -422,19 +458,20 @@ try {
   await sleep(700);
   const closed = await cdp.evalAsync(`return { path: location.pathname, modal: !!document.getElementById('photo-intercepted'), list: !!document.getElementById('photos') };`);
   check(`back closes the modal (${JSON.stringify(closed)})`, closed.path === "/photos" && !closed.modal && closed.list);
-  // (Under NOWAKI_CSP every <style> on screen must carry this document's nonce. Chrome also reports the
-  // fetched pages' styles while DOMParser parses them, which predates View Transitions.)
+  // (Under NOWAKI_CSP every <style> on screen must carry this document's nonce, and no fetched page
+  // reported a violation while DOMParser parsed it.)
   check("every <style> on screen has this document's nonce", await cdp.evalAsync(`return [...document.querySelectorAll('style')].every((s) => s.nonce === (window.__nowakiNonce ?? ''));`));
+  const vtViolations = await cdp.evalAsync(`return window.__cspViolations;`);
+  check(`no CSP violations through the View Transition navigations (${vtViolations.join(", ")})`, vtViolations.length === 0);
 
   // Under a basePath, a same-origin link outside it belongs to another app: a full load.
   if (P) {
-    await cdp.send("Page.navigate", { url: BASE + "/" });
-    await sleep(800);
+    await cdp.load(BASE + "/");
     await cdp.evalAsync(`
       window.__nav = (href) => { const a=document.createElement('a'); a.href=href; a.textContent=href; document.body.appendChild(a); a.click(); };
       return true;`);
     await cdp.evalAsync(`window.__nav('/about'); return true;`);
-    await sleep(500);
+    await cdp.waitFor(`location.pathname === "/about" && window.__nowakiRouter`);
     await cdp.evalAsync(`window.__marker = 1; window.__nav(location.origin + '/outside-base'); return true;`);
     await sleep(1000);
     const outside = await cdp.evalAsync(`return { path: location.pathname, marker: window.__marker ?? null };`);
@@ -446,6 +483,14 @@ try {
   console.error("harness error:", err);
   failures++;
 } finally {
-  if (chrome) chrome.kill();
+  // Wait for Chrome to exit before removing its profile (it writes to it while shutting down).
+  if (chrome && chrome.exitCode === null && chrome.signalCode === null) {
+    const gone = new Promise((r) => chrome.once("exit", r));
+    chrome.kill("SIGKILL");
+    await Promise.race([gone, sleep(5000)]);
+  }
+  try {
+    rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch {}
   process.exit(failures === 0 ? 0 : 1);
 }

@@ -140,7 +140,7 @@ function add(entries, label) {
     return;
   }
   if (!env || (!env.isrStore && typeof env.purge !== "function")) {
-    warnOnce("none", `[nowaki] ${label} has no effect here: only \`nowaki start\` keeps an ISR cache to purge for now.`);
+    warnOnce("none", `[nowaki] ${label} has no effect here: this server keeps no ISR cache (\`nowaki start\` does, and the Vercel adapter purges Vercel's CDN). Purge a CDN in front of it through that CDN's API.`);
     return;
   }
   const ctx = ctxOf();
@@ -222,8 +222,9 @@ export function flushPurge(ctx, headers) {
     if (rest.length) writeLines(rest);
   }
   if (typeof env?.purge === "function") {
+    // The context goes along: the Cloudflare cache deletes the paths under the request's origin.
     return Promise.resolve()
-      .then(() => env.purge(entries))
+      .then(() => env.purge(entries, ctx))
       .catch((err) => console.error("[nowaki] cache purge failed:", err));
   }
   return undefined;
