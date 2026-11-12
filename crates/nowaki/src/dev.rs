@@ -981,9 +981,13 @@ fn dev_module_url(root: &Path, path: &str, read: bool) -> bool {
 /// The app file a request path names, decoded (the renderer writes island and script URLs
 /// unencoded, so the browser asks for `/islands/Cnt%20%C3%84.tsx`). None for a malformed escape,
 /// a `.` / `..` / empty segment, a backslash or NUL, a missing file, a real path that leaves the
-/// root (via a symlink), or a sensitive file. `root` is canonical (main.rs).
+/// root (via a symlink), a sensitive file, or a file under `public/` (served at its own URL, `/x`
+/// for `public/x`, not at `/public/x` as in production). `root` is canonical (main.rs).
 fn app_file(root: &Path, url_path: &str) -> Option<PathBuf> {
     let decoded = nowaki_core::public::percent_decode(url_path)?;
+    if decoded == "/public" || decoded.starts_with("/public/") {
+        return None;
+    }
     let mut candidate = root.to_path_buf();
     for seg in decoded.strip_prefix('/')?.split('/') {
         if seg.is_empty() || seg == "." || seg == ".." || seg.contains(['\\', '\0']) {
@@ -1486,6 +1490,8 @@ mod tests {
         std::fs::create_dir_all(root.join("islands")).unwrap();
         std::fs::write(root.join("islands/Cnt Ä.tsx"), "x").unwrap();
         std::fs::write(root.join(".env"), "SECRET=1").unwrap();
+        std::fs::create_dir_all(root.join("public")).unwrap();
+        std::fs::write(root.join("public/robots.txt"), "User-agent: *").unwrap();
         assert_eq!(
             app_file(&root, "/islands/Cnt%20%C3%84.tsx"),
             Some(root.join("islands").join("Cnt Ä.tsx"))
@@ -1499,6 +1505,8 @@ mod tests {
             "/%2eenv",
             "/.env",
             "/islands/missing.tsx",
+            "/public/robots.txt",
+            "/%70ublic/robots.txt",
         ] {
             assert_eq!(app_file(&root, bad), None, "{bad}");
         }

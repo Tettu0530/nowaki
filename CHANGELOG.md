@@ -148,6 +148,12 @@ milestone's worth of work; the codename is noted per entry.
   size benchmark is unchanged). Source maps map a few more names.
 
 ### Fixed
+- `nowaki dev` no longer serves files under `public/` at `/public/<path>` as well as at
+  `/<path>`; production never did.
+- The e2e scripts' `! command` assertions could never fail (`set -e` ignores a command starting
+  with `!`). All 68 now end in `|| exit 1`; the three that had been failing silently were too broad
+  (an app header, `@import` inside a CSS comment) and are narrowed. The e2e scripts also stop the
+  servers they started when a step fails, instead of leaving them on the ports.
 - **Client navigation under `NOWAKI_CSP=enforce` no longer logs `style-src-elem` violations**
   for the fetched page's `<style>` (seen going to a page with `export const head` styles).
   The document `DOMParser` creates shares the page's CSP, and the fetched `<style>` carried

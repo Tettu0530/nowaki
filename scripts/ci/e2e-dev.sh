@@ -3,6 +3,8 @@
 # Run from the repo root after `cargo build -p nowaki` and `pnpm install`.
 set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
+# A failed step exits here: stop the servers this script started, or they keep the ports.
+trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
 cd "$(dirname "$0")/../.."
 # A request to a hung server must fail, not wait forever; and on Windows, where hangs have been
 # seen, trace every command so the log shows where one stopped.
@@ -28,7 +30,7 @@ curl -sf $B/ | grep -q 'id="nowaki-runtime"'
 BADGE_CLASS=$(curl -sf $B/ | grep -oE 'badge_[0-9a-f]{8}' | head -1)
 test -n "$BADGE_CLASS"
 echo "$BADGE_CLASS" > /tmp/nowaki-css-module-badge-class
-! curl -sf $B/ | grep -qE '/Users/|/home/[^/]+/'
+! curl -sf $B/ | grep -qE '/Users/|/home/[^/]+/' || exit 1
 curl -sf $B/ | grep -q 'data-router=.*client/router.js'
 # Server-Timing is on in dev: the sidecar's middleware / loader / render phases.
 curl -s -o /dev/null -D - $B/ | tr -d '\r' | grep -qiE '^server-timing: mw;dur=[0-9.]+, loader;dur=[0-9.]+, render;dur=[0-9.]+$'
@@ -127,18 +129,19 @@ curl -s -D - -o /dev/null "$B$FT" | grep -qi '^content-type: font/ttf'
 # conventional folders, and no SPA router on a page without islands (dev and prod alike)
 curl -sf $B/about | grep -q '<meta name="x-layout-head" content="root" />'
 curl -sf $B/about | grep -q '<p id="greeting">Hello from data/</p>'
-! curl -sf $B/about | grep -q 'id="nowaki-runtime"'
+! curl -sf $B/about | grep -q 'id="nowaki-runtime"' || exit 1
 curl -sf "$B/__nowaki/css?f=styles/site.css" | grep -q -- '--site-token: rgb(9, 8, 7)'
-! curl -sf "$B/__nowaki/css?f=styles/site.css" | grep -q '@import'
+# An @import rule left in place (tokens.css itself mentions "@import" in a comment).
+! curl -sf "$B/__nowaki/css?f=styles/site.css" | grep -qE '^[[:space:]]*@import[[:space:]]' || exit 1
 # route groups: routes/(marketing)/pricing.tsx at /pricing, with the group's layout and middleware
 curl -sf $B/pricing | grep -q '<div data-group="marketing"><main'
 curl -s -D - -o /dev/null $B/pricing | grep -qi '^x-route-group: marketing'
-! curl -sf $B/about | grep -q 'data-group="marketing"'
-! curl -s -D - -o /dev/null $B/no-such-page | grep -qi '^x-route-group'
+! curl -sf $B/about | grep -q 'data-group="marketing"' || exit 1
+! curl -s -D - -o /dev/null $B/no-such-page | grep -qi '^x-route-group' || exit 1
 # parallel routes: photos/@modal renders beside the page (its [id] file on /photos/1, default on /photos)
 curl -sf $B/photos/1 | grep -q '<h1 id="photo-page">photo 1</h1>.*<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><aside id="photo-modal" class="photo-modal">modal 1: caption of 1</aside></nowaki-slot>'
 curl -sf $B/photos | grep -q '<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><p id="modal-default">no photo open</p></nowaki-slot>'
-! curl -sf $B/photos/1 | grep -q 'photo-intercepted'
+! curl -sf $B/photos/1 | grep -q 'photo-intercepted' || exit 1
 test "$(curl -s -o /dev/null -w '%{http_code}' "$B/photos/@modal/1")" = 404
 # intercepting route: the router's x-nowaki-intercept request gets the slot fragment
 curl -sf -H 'x-nowaki-intercept: /photos/@modal' $B/photos/1 | grep -q '^<template data-nowaki-head>.*</template><aside id="photo-intercepted">intercepted 1</aside>$'
@@ -173,7 +176,7 @@ curl -sf $B/docs/intro | grep -q '<script type="application/ld+json">{"@context"
 curl -sf $B/boom | grep -q '<meta name="robots" content="noindex, follow" />'
 curl -s -D - -o /dev/null $B/sitemap.xml | grep -qi '^content-type: application/xml'
 curl -sf $B/sitemap.xml | grep -q '<loc>https://hello.nowaki.dev/docs/intro</loc>'
-! curl -sf $B/sitemap.xml | grep -qE '/boom<|/secret<|/api/|feed.xml'
+! curl -sf $B/sitemap.xml | grep -qE '/boom<|/secret<|/api/|feed.xml' || exit 1
 curl -sf $B/robots.txt | grep -q 'User-agent'   # public/robots.txt wins over the generated one
 curl -sf $B/feed.xml | grep -q '<link>https://hello.nowaki.dev/docs/intro</link>'
 # nowaki.config headers in dev (the Rust front, before routes)
@@ -193,7 +196,7 @@ test "$(curl -s -o /dev/null -w '%{http_code}' $B/og/intro.jpg)" = 404
 # htmlAttrs / bodyAttrs: route over layout, class joined, on* dropped, values escaped
 curl -sf $B/styled | grep -q '<html lang="ja" data-sheet-rev="3" data-theme="paper" data-nowaki-attrs="data-sheet-rev data-theme">'
 curl -sf $B/styled | grep -q '<body class="site styled-page" data-site="hello" data-quote="&quot;&lt;x&gt;&quot;" data-nowaki-attrs="class data-site data-quote">'
-! curl -sf $B/styled | grep -q 'onload'
+! curl -sf $B/styled | grep -q 'onload' || exit 1
 curl -sf $B/about | grep -q '<body class="site" data-site="hello" data-nowaki-attrs="class data-site">'
 # public/: files at their own path, as-is (a .css stays CSS), dotfiles hidden except .well-known
 curl -s -D - $B/robots.txt | grep -qi '^content-type: text/plain'
@@ -202,9 +205,9 @@ curl -s -D - $B/raw.css | grep -qi '^content-type: text/css'
 curl -sf $B/raw.css | grep -q '^\.raw { color: red; }'
 curl -sf "$B/media/hello%20world.txt" | grep -q 'hello from public'
 curl -sf $B/.well-known/security.txt | grep -q 'Contact:'
-! curl -sf $B/.hidden | grep -q 'never served'
-! curl -sf $B/.private/secret.txt | grep -q 'never served'
-! curl -sf $B/public/robots.txt | grep -q 'User-agent'
+! curl -sf $B/.hidden | grep -q 'never served' || exit 1
+! curl -sf $B/.private/secret.txt | grep -q 'never served' || exit 1
+! curl -sf $B/public/robots.txt | grep -q 'User-agent' || exit 1
 curl -sf $B/styled | grep -q '<link rel="stylesheet" href="/__nowaki/css?f=routes/styled.css"'
 curl -sf $B/styled | grep -q '<style>#styled-probe{color:rgb(1, 2, 3)}</style>'
 curl -s -D - "$B/__nowaki/css?f=routes/styled.css" | grep -qi '^content-type: text/css'
@@ -234,7 +237,7 @@ curl -sf "$B/islands/Counter.tsx" | grep -q 'sourceMappingURL=data'  # dev sourc
 
 # v0.5 plugin transform hook (nowaki.config.mjs rewrites a token before oxc)
 curl -sf $B/plugin | grep -q 'transformed-by-plugin'
-! curl -sf $B/plugin | grep -q '__PLUGIN_MARK__'
+! curl -sf $B/plugin | grep -q '__PLUGIN_MARK__' || exit 1
 
 # v0.5 TSRX: a .tsrx island compiled to Preact via @tsrx/preact, SSR + island wrap
 curl -sf $B/tsrx | grep -q 'nowaki-island name="TsrxCounter"'
@@ -251,7 +254,7 @@ curl -sf $B/live | grep -q 'nowaki-island name="Counter"'
 # (no impl/secret); POST /__nowaki/fn runs the real function server-side,
 # and getContext() reads the request cookie. Unknown id is rejected.
 curl -sf "$B/actions/todos.ts" | grep -q '__nowakiCall'
-! curl -sf "$B/actions/todos.ts" | grep -q 'nowaki-server-only-secret'
+! curl -sf "$B/actions/todos.ts" | grep -q 'nowaki-server-only-secret' || exit 1
 curl -sf "$B/__nowaki/server-functions" | grep -q '"export":"listTodos"'
 curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-rpc: 1' -d '{"id":"6c90d7dc921a9a3f","args":[]}' $B/__nowaki/fn | grep -q 'learn nowaki'
 curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-rpc: 1' -H 'cookie: user=alice' -d '{"id":"781de5a7f5ba2469","args":[]}' $B/__nowaki/fn | grep -q 'alice'
@@ -281,7 +284,7 @@ curl -sf $B/nav | grep -q '<a href="/about" data-testid="link-about">'
 # `export const viewTransition` in dev (render.mjs shares document.mjs pageMeta), and nothing on
 # pages without it
 curl -sf $B/vt | grep -q '<meta name="nowaki-view-transition" content="1" />'
-! curl -sf $B/about | grep -qE 'nowaki-view-transition|@view-transition'
+! curl -sf $B/about | grep -qE 'nowaki-view-transition|@view-transition' || exit 1
 curl -sf $B/nav | grep -q 'href="/blog/hello" data-testid="link-blog"'
 curl -sf $B/nav | grep -q 'href="/files/docs/intro" data-testid="link-files"'
 

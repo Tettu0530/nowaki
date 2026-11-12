@@ -3,6 +3,8 @@
 # Run from the repo root after `cargo build -p nowaki` and `pnpm install`.
 set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
+# A failed step exits here: stop the servers this script started, or they keep the ports.
+trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
 cd "$(dirname "$0")/../.."
 # A request to a hung server must fail, not wait forever; and on Windows, where hangs have been
 # seen, trace every command so the log shows where one stopped.
@@ -25,21 +27,21 @@ test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3310/__nowaki/de
 # ISR cache headers reach the CDN directly here (0.16.2): a cookie-dependent page is private, a
 # header-dependent one names the header in Vary, one that reads nothing stays public
 curl -s -D - -o /dev/null -H 'cookie: user=alice' http://127.0.0.1:3310/isr-cookie | grep -qi '^cache-control: private'
-! curl -s -D - -o /dev/null -H 'cookie: user=alice' http://127.0.0.1:3310/isr-cookie | grep -qi '^cache-control:.*s-maxage'
+! curl -s -D - -o /dev/null -H 'cookie: user=alice' http://127.0.0.1:3310/isr-cookie | grep -qi '^cache-control:.*s-maxage' || exit 1
 curl -s -D - -o /dev/null -H 'accept-language: de' http://127.0.0.1:3310/vary | grep -qi '^vary:.*accept-language'
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr | grep -qi '^cache-control: public, s-maxage='
 # no CDN tag header off the vercel adapter (nothing here could purge by it)
-! curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-tagged | grep -qi '^vercel-cache-tag:'
+! curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-tagged | grep -qi '^vercel-cache-tag:' || exit 1
 # an ISR page that sets a cookie is per-user: never shared-cacheable next to Set-Cookie
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-sets-cookie | grep -qi '^set-cookie: visited=1'
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-sets-cookie | grep -qi '^cache-control: private, no-cache'
-! curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-sets-cookie | grep -qiE '^cache-control:.*(public|s-maxage)'
+! curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-sets-cookie | grep -qiE '^cache-control:.*(public|s-maxage)' || exit 1
 # route / layout CSS: linked in the head, served as text/css (0.16.1)
 curl -sf http://127.0.0.1:3310/styled | grep -qE '<link rel="stylesheet" href="/_nowaki/styled\.[0-9a-f]+\.css"'
 curl -sf http://127.0.0.1:3310/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'
 # `export const viewTransition` through the node adapter's document (document.mjs prodDocument)
 curl -sf http://127.0.0.1:3310/vt | grep -q '<meta name="nowaki-view-transition" content="1" />'
-! curl -s http://127.0.0.1:3310/about | grep -qE 'nowaki-view-transition|@view-transition'
+! curl -s http://127.0.0.1:3310/about | grep -qE 'nowaki-view-transition|@view-transition' || exit 1
 # streaming = "early": the shell goes out before the 300 ms loader; a loader error renders
 # error.tsx in the page (status stays 200) and a loader redirect becomes location.replace (#112)
 FB=$(curl -s -N -o /tmp/nowaki-early.html -w '%{time_starttransfer}' http://127.0.0.1:3310/stream-early)
@@ -48,13 +50,13 @@ grep -q 'data-testid="early"' /tmp/nowaki-early.html
 grep -q '<title>Early streaming' /tmp/nowaki-early.html
 test "$(curl -s -o /tmp/nowaki-early-fail.html -w '%{http_code}' 'http://127.0.0.1:3310/stream-early?fail=1')" = 200
 grep -q "Couldn't display this page" /tmp/nowaki-early-fail.html
-! grep -q 'the data source is down' /tmp/nowaki-early-fail.html   # no message in production
+! grep -q 'the data source is down' /tmp/nowaki-early-fail.html || exit 1  # no message in production
 curl -s 'http://127.0.0.1:3310/stream-early?go=1' | grep -q 'location.replace("/about")'
 curl -sf http://127.0.0.1:3310/api/hello | grep -q '"hello":"nowaki"'
 # /__nowaki/health is answered before routing, never cached; no Server-Timing unless asked for
 test "$(curl -sf http://127.0.0.1:3310/__nowaki/health)" = '{"status":"ok"}'
 curl -s -D - -o /dev/null http://127.0.0.1:3310/__nowaki/health | grep -qi '^cache-control: no-store'
-! curl -s -D - -o /dev/null http://127.0.0.1:3310/ | grep -qi '^server-timing:'
+! curl -s -D - -o /dev/null http://127.0.0.1:3310/ | grep -qi '^server-timing:' || exit 1
 # sessions on the node adapter: session.ts compiled to dist/server/session.js, the cookie round-trips
 test -f examples/hello/dist/server/session.js
 SESSION_COOKIE=$(curl -s -D - -o /dev/null -XPOST -H 'origin: http://127.0.0.1:3310' -d 'op=login&user=node' http://127.0.0.1:3310/api/session | tr -d '\r' | awk 'tolower($1)=="set-cookie:" {print $2}' | cut -d';' -f1)
@@ -95,7 +97,7 @@ curl -sf http://127.0.0.1:3310/styled | grep -q '<body class="site styled-page" 
 curl -s -D - http://127.0.0.1:3310/robots.txt | grep -qi '^content-type: text/plain'
 curl -sf http://127.0.0.1:3310/raw.css | grep -q '^\.raw { color: red; }'
 curl -sf "http://127.0.0.1:3310/media/hello%20world.txt" | grep -q 'hello from public'
-! curl -sf http://127.0.0.1:3310/.hidden | grep -q 'never served'
+! curl -sf http://127.0.0.1:3310/.hidden | grep -q 'never served' || exit 1
 test "$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $(curl -s -D - -o /dev/null http://127.0.0.1:3310/robots.txt | tr -d '\r' | awk 'tolower($1)=="etag:" {print $2}')" http://127.0.0.1:3310/robots.txt)" = 304
 # default security headers on the node adapter (pages and static assets)
 curl -s -D - -o /dev/null http://127.0.0.1:3310/ | grep -qi '^x-content-type-options: nosniff'
@@ -145,13 +147,13 @@ test -f examples/hello/dist/static/about/index.html
 # between opted pages transition with no server and no JS), the others don't.
 grep -q '@view-transition{navigation:auto}' examples/hello/dist/static/vt/index.html
 grep -q '<meta name="nowaki-view-transition" content="1" />' examples/hello/dist/static/vt/detail/index.html
-! grep -qE 'nowaki-view-transition|@view-transition' examples/hello/dist/static/about/index.html
+! grep -qE 'nowaki-view-transition|@view-transition' examples/hello/dist/static/about/index.html || exit 1
 grep -q '<div data-group="marketing"><main' examples/hello/dist/static/pricing/index.html
-! test -e 'examples/hello/dist/static/(marketing)'
+! test -e 'examples/hello/dist/static/(marketing)' || exit 1
 # parallel routes in static output: slots render into the pages; slot files are not pages
 grep -q '<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><p id="modal-default">' examples/hello/dist/static/photos/index.html
 grep -q '<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><aside id="photo-modal"' examples/hello/dist/static/photos/1/index.html
-! test -e 'examples/hello/dist/static/photos/@modal'
+! test -e 'examples/hello/dist/static/photos/@modal' || exit 1
 # dynamic routes listed by `export const staticPaths` (including a catch-all), and 404.html
 grep -q 'Post: hello' examples/hello/dist/static/blog/hello/index.html
 grep -q 'Post: nowaki' examples/hello/dist/static/blog/nowaki/index.html
@@ -165,8 +167,8 @@ ls examples/hello/dist/static/_nowaki/styled.*.css >/dev/null
 # live islands on a static host: their first HTML, but no live.js (no server for its events), and
 # the build says which pages they are on (#93)
 grep -q 'nowaki-live name="LiveCounter"' examples/hello/dist/static/live/index.html
-! grep -q '/_nowaki/live\.' examples/hello/dist/static/live/index.html
-! grep -q '/_nowaki/live\.' examples/hello/dist/static/poll/index.html
+! grep -q '/_nowaki/live\.' examples/hello/dist/static/live/index.html || exit 1
+! grep -q '/_nowaki/live\.' examples/hello/dist/static/poll/index.html || exit 1
 # the SPA router's boundaries fetch is answered by a static file (no 404 on static hosts)
 node -e 'const b=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!Array.isArray(b.loading)||!Array.isArray(b.error)||!b.loading.length) process.exit(1)' examples/hello/dist/static/__nowaki/boundaries
 grep -q '/__nowaki/boundaries' examples/hello/dist/static/_headers
@@ -189,14 +191,14 @@ grep -q 'class="callout callout-warning"' examples/hello/dist/static/docs/markdo
 # SEO in the static output: sitemap.xml generated against the site, public/robots.txt kept
 # static output: page URLs end in / (the page is docs/intro/index.html)
 grep -q '<loc>https://hello.nowaki.dev/docs/intro/</loc>' examples/hello/dist/static/sitemap.xml
-! grep -qE '/boom<|/secret<' examples/hello/dist/static/sitemap.xml
+! grep -qE '/boom<|/secret<' examples/hello/dist/static/sitemap.xml || exit 1
 grep -q 'User-agent: \*' examples/hello/dist/static/robots.txt
 grep -q '<link rel="canonical" href="https://hello.nowaki.dev/docs/intro/" />' examples/hello/dist/static/docs/intro/index.html
 # file routes are written to their own path (not feed.xml/index.html), bytes intact
 grep -q '<rss version="2.0">' examples/hello/dist/static/feed.xml
 head -c 4 examples/hello/dist/static/og/intro.png | od -An -c | grep -q 'P   N   G'
 test -f examples/hello/dist/static/og/routing.png
-! test -e examples/hello/dist/static/feed.xml/index.html
+! test -e examples/hello/dist/static/feed.xml/index.html || exit 1
 grep -q '<html lang="ja" data-sheet-rev="3"' examples/hello/dist/static/styled/index.html
 grep -q '<body class="site styled-page"' examples/hello/dist/static/styled/index.html
 # public/ files at their own path in the static output, dotfiles left out
@@ -211,7 +213,7 @@ grep -qi 'x-hello-routing: config' examples/hello/dist/static/_headers
 grep -q '/api/\*' examples/hello/dist/static/_headers
 grep -qi 'cache-control: no-store' examples/hello/dist/static/_headers
 test -f examples/hello/dist/static/.well-known/security.txt
-! test -e examples/hello/dist/static/.hidden
+! test -e examples/hello/dist/static/.hidden || exit 1
 # cloudflare (edge) adapter: generates a bundled fetch-handler worker + wrangler config
 ./target/debug/nowaki build examples/hello --adapter cloudflare
 # the worker's fetch handler, called directly in Node (web.mjs end to end, no wrangler)
@@ -232,7 +234,7 @@ grep -q '"binding": "ASSETS"' examples/hello/dist/worker/wrangler.jsonc
 grep -q '"directory": "./assets"' examples/hello/dist/worker/wrangler.jsonc
 ls examples/hello/dist/worker/assets/_nowaki/manifest.json >/dev/null
 grep -q 'User-agent' examples/hello/dist/worker/assets/robots.txt
-! test -e examples/hello/dist/worker/assets/.hidden
+! test -e examples/hello/dist/worker/assets/.hidden || exit 1
 # vercel adapter: Build Output API v3 (.vercel/output): config + static + a
 # self-contained Node serverless function. Run the function (Vercel's launcher
 # invokes its default (req,res) handler) and confirm SSR + islands + API work.
@@ -245,10 +247,10 @@ grep -q '"launcherType": "Nodejs"' examples/hello/.vercel/output/functions/index
 test -d examples/hello/.vercel/output/static/_nowaki
 # public/ files are static files at their own path, with the security headers by exact-path route
 grep -q 'User-agent' examples/hello/.vercel/output/static/robots.txt
-! test -e examples/hello/.vercel/output/static/.hidden
+! test -e examples/hello/.vercel/output/static/.hidden || exit 1
 grep -q 'media/hello%20world' examples/hello/.vercel/output/config.json
 # the function must NOT carry a nested preact (would double-instance and break hooks)
-! test -d examples/hello/.vercel/output/functions/index.func/node_modules/@nowaki-dev/runtime/node_modules
+! test -d examples/hello/.vercel/output/functions/index.func/node_modules/@nowaki-dev/runtime/node_modules || exit 1
 # Started with its PID kept, so it is stopped below (a subshell left it running after the script).
 (cd examples/hello/.vercel/output/functions/index.func \
   && exec node -e 'import("./index.mjs").then(m=>require("http").createServer(m.default).listen(3320))') &
@@ -261,7 +263,7 @@ curl -sf http://127.0.0.1:3320/nav | grep -q 'href="/blog/hello"'
 # CDN purge: ISR pages carry Vercel-Cache-Tag (their tags + their path), other pages none
 curl -s -D - -o /dev/null http://127.0.0.1:3320/isr-tagged | grep -qiE '^vercel-cache-tag: t:isr-demo,p:/isr-tagged[[:space:]]*$'
 curl -s -D - -o /dev/null http://127.0.0.1:3320/isr | grep -qiE '^vercel-cache-tag: p:/isr[[:space:]]*$'
-! curl -s -D - -o /dev/null http://127.0.0.1:3320/about | grep -qi '^vercel-cache-tag:'
+! curl -s -D - -o /dev/null http://127.0.0.1:3320/about | grep -qi '^vercel-cache-tag:' || exit 1
 # revalidateTag in an action without @vercel/functions installed: a warned no-op, the redirect stands
 curl -s -o /dev/null -w '%{http_code}' -X POST -H 'origin: http://127.0.0.1:3320' -d kind=tag http://127.0.0.1:3320/isr-tagged | grep -q '^303$'
 kill $VERCEL_PID
