@@ -282,18 +282,40 @@ impl LiveHub {
         self.rooms.lock().unwrap().get(room).copied().unwrap_or(0)
     }
 
-    /// Open connections and (room, connections), sorted by room. For the dev MCP.
-    pub fn snapshot(&self) -> (usize, Vec<(String, usize)>) {
-        let mut rooms: Vec<_> = self
+    /// Read-only counters for the dev tools (MCP `live` / `dev_config`, the dev toolbar): open
+    /// connections, the cap, and connections per room, sorted by room.
+    pub fn stats(&self) -> LiveStats {
+        let mut rooms: Vec<RoomStats> = self
             .rooms
             .lock()
             .unwrap()
             .iter()
-            .map(|(r, n)| (r.clone(), *n))
+            .map(|(room, n)| RoomStats {
+                room: room.clone(),
+                connections: *n,
+            })
             .collect();
-        rooms.sort();
-        (self.count(), rooms)
+        rooms.sort_by(|a, b| a.room.cmp(&b.room));
+        LiveStats {
+            connections: self.count(),
+            max: self.max,
+            rooms,
+        }
     }
+}
+
+/// [`LiveHub::stats`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct LiveStats {
+    pub connections: usize,
+    pub max: usize,
+    pub rooms: Vec<RoomStats>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RoomStats {
+    pub room: String,
+    pub connections: usize,
 }
 
 /// Rooms this session is in: its islands' `room:<id>` topics.
@@ -1171,5 +1193,36 @@ mod tests {
         assert!(q.pop().is_none());
         receive(&mut islands, &mut page, &mut q, event).unwrap();
         assert_eq!(q.pop().map(|e| e.nid), Some("L0".into()));
+    }
+
+    #[test]
+    fn stats_count_connections_and_rooms() {
+        let hub = LiveHub::new();
+        assert_eq!(hub.stats().connections, 0);
+        assert!(hub.join().is_some());
+        assert!(hub.join().is_some());
+        hub.room_enter("b");
+        hub.room_enter("a");
+        hub.room_enter("a");
+        let s = hub.stats();
+        assert_eq!(s.connections, 2);
+        assert_eq!(
+            s.rooms,
+            vec![
+                RoomStats {
+                    room: "a".into(),
+                    connections: 2
+                },
+                RoomStats {
+                    room: "b".into(),
+                    connections: 1
+                },
+            ]
+        );
+        hub.room_exit("b");
+        hub.leave();
+        let s = hub.stats();
+        assert_eq!(s.connections, 1);
+        assert_eq!(s.rooms.len(), 1);
     }
 }

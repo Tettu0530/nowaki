@@ -138,8 +138,10 @@ async function page() {
   if (slot) headers["x-nowaki-intercept"] = slot.getAttribute("data-nowaki-slot");
   const url = location.href.split("#")[0];
   let doc;
+  let timing;
   try {
     const res = await fetch(url, { headers, cache: "no-store" });
+    timing = res.headers.get("server-timing") || "";
     const html = /html/.test(res.headers.get("content-type") || "") && !res.redirected && res.status === 200 ? await res.text() : null;
     if (html === null || (slot && !res.headers.has("x-nowaki-slot"))) return reload();
     // A <style> carrying another response's nonce would be a CSP violation as it parses.
@@ -171,7 +173,7 @@ async function page() {
   syncLive(doc);
   ownPageLoad = true;
   try {
-    const detail = slot ? { url, slot: slot.getAttribute("name") } : { url };
+    const detail = slot ? { url, slot: slot.getAttribute("name"), timing } : { url, timing };
     document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail }));
   } finally {
     ownPageLoad = false;
@@ -456,6 +458,7 @@ ws.addEventListener("message", (e) => {
   const msg = JSON.parse(e.data);
   if (msg.type === "error") {
     showOverlay(msg.message);
+    window.dispatchEvent(new CustomEvent("nowaki:hmr", { detail: { type: "error" } }));
   } else if (msg.type === "hot" || msg.type === "css" || msg.type === "page") {
     clearOverlay();
     chain = chain.then(async () => {
@@ -475,6 +478,16 @@ ws.addEventListener("message", (e) => {
     location.reload();
   }
 });
+
+// The dev toolbar (client/toolbar.js), once the page is idle. Off with `nowaki dev --no-toolbar` /
+// NOWAKI_TOOLBAR=0 (data-toolbar="0" on this script) or per browser (its close button).
+if (!document.querySelector('script[data-toolbar="0"]')) {
+  let off = false;
+  try {
+    off = localStorage.getItem("nowaki:toolbar") === "off";
+  } catch {}
+  if (!off) (window.requestIdleCallback || setTimeout)(() => import("./toolbar.js").catch((err) => console.error("[nowaki] dev toolbar:", err)));
+}
 
 ws.addEventListener("close", () => {
   // wait for the dev server to restart, then reconnect
