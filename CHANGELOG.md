@@ -10,7 +10,26 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.19.3] — 2026-11-12 · "Bora": production and dev experience
+
+Packages: `nowaki` / `nowaki-core`, `@nowaki-dev/runtime`, `create-nowaki` /
+`create-nowaki-app`, all 0.19.3 (crates.io, npm). `@nowaki-dev/markdoc` is unchanged
+(0.1.0). From this release the CLI, runtime and create-* packages share one version and
+are released together; it starts at 0.19.3 because create-* had already published
+0.19.2, so the CLI and runtime skip 0.19.0–0.19.2.
+
+Control over what is cached, smooth navigation, visibility into a running app, and edits
+that keep their state: `revalidatePath()` / `revalidateTag()` with route `tags`, purging
+the `nowaki start` ISR cache and the Vercel and Cloudflare CDNs; opt-in View Transitions;
+Server-Timing, JSON logs, OpenTelemetry traces and a health endpoint; HMR that keeps
+island state and updates routes and layouts in place; and a dev toolbar backed by the same
+data as the dev MCP endpoint. `examples/gallery` meets the v0.19 exit criteria. Everything
+is off unless used: the CI perf gate (uncached and ISR req/s, TTFB, build, dev) moved
+within noise on every v0.19 PR.
+
 ### Upgrade notes
+- **Update the CLI and `@nowaki-dev/runtime` together.** The CLI now refuses a runtime
+  older than its own version (0.19.3), naming both and the `npm i` fix.
 - **Breaking: API routes reject cross-site writes by default (CSRF).** A POST, PUT, PATCH or
   DELETE to an API route (`routes/api/**`) or a file route (`feed.xml.ts`) whose `Origin` is
   another site or `null`, or that has `Sec-Fetch-Site: cross-site` without `Origin`, now gets
