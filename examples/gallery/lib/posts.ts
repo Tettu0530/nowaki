@@ -4,9 +4,9 @@ import { getLocale } from "@nowaki-dev/runtime/navigation";
 
 // "A dune at noon.", "The sea from the cliff.", "Dusk over the town.", in English and Japanese.
 const defaults: Record<string, { en: string; ja: string }> = {
-  "1": { en: "A dune at noon.", ja: "昼の砂丘。" },
-  "2": { en: "The sea from the cliff.", ja: "崖から見た海。" },
-  "3": { en: "Dusk over the town.", ja: "町の夕暮れ。" },
+  "1": { en: "A dune at noon.", ja: "\u663c\u306e\u7802\u4e18\u3002" },
+  "2": { en: "The sea from the cliff.", ja: "\u5d16\u304b\u3089\u898b\u305f\u6d77\u3002" },
+  "3": { en: "Dusk over the town.", ja: "\u753a\u306e\u5915\u66ae\u308c\u3002" },
 };
 
 const edited = new Map<string, string>();
