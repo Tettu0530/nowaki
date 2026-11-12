@@ -128,6 +128,10 @@ async function start() {
 
 // CDP over Chrome's --remote-debugging-pipe (fd 3 in, fd 4 out, NUL-separated JSON), attached to
 // one page with a flat session (as in slot-browser-test.mjs).
+
+// A JS string literal for page code: JSON plus escapes for characters that matter in a script.
+const jsString = (v) =>
+  JSON.stringify(String(v)).replace(/[<>\/\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
 class CDP {
   constructor(input, output) {
     this.input = input;
@@ -177,9 +181,9 @@ class CDP {
   }
   // A real mouse click (move, press, release) in the middle of the element.
   async click(selector) {
-    await this.waitFor(`document.querySelector(${JSON.stringify(selector)})`);
+    await this.waitFor(`document.querySelector(${jsString(selector)})`);
     // (Scrolled into view first: a click outside the viewport hits nothing.)
-    const box = await this.eval(`const el = document.querySelector(${JSON.stringify(selector)}); el?.scrollIntoView({ block: "center", behavior: "instant" }); const r = el?.getBoundingClientRect(); return r && { x: r.x + r.width / 2, y: r.y + r.height / 2 };`);
+    const box = await this.eval(`const el = document.querySelector(${jsString(selector)}); el?.scrollIntoView({ block: "center", behavior: "instant" }); const r = el?.getBoundingClientRect(); return r && { x: r.x + r.width / 2, y: r.y + r.height / 2 };`);
     if (!box) throw new Error(`no ${selector} to click`);
     await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: box.x, y: box.y });
     await sleep(30);
@@ -229,11 +233,11 @@ async function startChrome() {
   return cdp;
 }
 
-const at = (p) => `location.pathname === ${JSON.stringify(p)}`;
+const at = (p) => `location.pathname === ${jsString(p)}`;
 const cookie = (cdp) => cdp.eval(`return document.cookie`);
 
 const TB = `document.querySelector("nowaki-toolbar")?.shadowRoot`;
-const tq = (sel) => `${TB}?.querySelector(${JSON.stringify(sel)})`;
+const tq = (sel) => `${TB}?.querySelector(${jsString(sel)})`;
 const panelText = `(${tq(".body")}?.textContent ?? "")`;
 
 try {
@@ -294,7 +298,7 @@ try {
     await cdp.eval(`document.querySelector("#login input[name=password]").value = "wrong"; document.querySelector("#login").requestSubmit(); return true;`);
     check("a wrong password shows the error", await cdp.waitFor(`document.querySelector("#login-error")`));
     await cdp.waitFor(`document.querySelector("#login input[name=password]")`);
-    await cdp.eval(`document.querySelector("#login input[name=password]").value = ${JSON.stringify(PASSWORD)}; document.querySelector("#login").requestSubmit(); return true;`);
+    await cdp.eval(`document.querySelector("#login input[name=password]").value = ${jsString(PASSWORD)}; document.querySelector("#login").requestSubmit(); return true;`);
     check("signing in shows the account page", await cdp.waitFor(`${at("/gallery/ja/account")} && document.querySelector("#signed-in strong")?.textContent === "admin"`), await cdp.eval(`return location.pathname`));
     check("the session cookie is HttpOnly (not in document.cookie)", !(await cookie(cdp)).includes("gallery_session"));
     await cdp.click("#logout");
@@ -310,7 +314,7 @@ try {
       document.addEventListener("nowaki:page-load", () => window.__loads++);
       return true;`;
     const vt = () => cdp.eval(`return { path: location.pathname, n: window.__vt.length, types: window.__vt.map((t) => (t.types ? [...t.types].join() : "?")), loads: window.__loads, same: window.__sameDoc === 1 };`);
-    const vtName = (sel) => cdp.eval(`const el = document.querySelector(${JSON.stringify(sel)}); return el ? getComputedStyle(el).viewTransitionName : null;`);
+    const vtName = (sel) => cdp.eval(`const el = document.querySelector(${jsString(sel)}); return el ? getComputedStyle(el).viewTransitionName : null;`);
     await cdp.load(`${ORIGIN}/gallery/ja/posts`);
     check("the post list (in Japanese)", await cdp.waitFor(`${at("/gallery/ja/posts")} && document.querySelector("#posts") && window.__nowakiHydrateIslands`), await cdp.eval(`return location.pathname`));
     check("this Chrome has document.startViewTransition", await cdp.eval(`return typeof Document.prototype.startViewTransition === "function";`));
