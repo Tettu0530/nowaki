@@ -19,6 +19,9 @@ PORT=3310 node examples/hello/dist/server/index.mjs &
 NODE_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3310/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3310/ | grep -q "nowaki-island"   # SSR + island marker
+# HMR and the dev toolbar are dev-only: no trace of them in a production page
+! curl -sf http://127.0.0.1:3310/ | grep -qE 'hmr\.js|toolbar\.js|refresh\.js|data-toolbar|__nowaki/(hmr|devtools)' || exit 1
+test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3310/__nowaki/devtools?url=/)" = 404
 # ISR cache headers reach the CDN directly here (0.16.2): a cookie-dependent page is private, a
 # header-dependent one names the header in Vary, one that reads nothing stays public
 curl -s -D - -o /dev/null -H 'cookie: user=alice' http://127.0.0.1:3310/isr-cookie | grep -qi '^cache-control: private'
@@ -136,6 +139,8 @@ pkill -f 'node index.mjs' 2>/dev/null || true
 ./target/debug/nowaki build examples/hello --adapter static
 test -f examples/hello/dist/static/index.html
 test -f examples/hello/dist/static/about/index.html
+# no HMR or dev toolbar in static output
+! grep -rlE 'hmr\.js|toolbar\.js|refresh\.js|data-toolbar|__nowaki/(hmr|devtools)' --include='*.html' examples/hello/dist/static || exit 1
 # View Transitions in static output: the opted route has the @view-transition style (full loads
 # between opted pages transition with no server and no JS), the others don't.
 grep -q '@view-transition{navigation:auto}' examples/hello/dist/static/vt/index.html
@@ -211,6 +216,14 @@ test -f examples/hello/dist/static/.well-known/security.txt
 ./target/debug/nowaki build examples/hello --adapter cloudflare
 # the worker's fetch handler, called directly in Node (web.mjs end to end, no wrangler)
 node scripts/edge-handler-test.mjs examples/hello/dist/worker
+# no HMR or dev toolbar in the worker's pages
+node -e 'import(require("url").pathToFileURL(process.argv[1]).href).then(async ({ default: w }) => {
+  const env = { ASSETS: { fetch: async () => new Response("", { status: 404 }) } };
+  for (const p of ["/", "/live"]) {
+    const t = await (await w.fetch(new Request("https://app.example" + p), env, { waitUntil() {} })).text();
+    if (!t.includes("<nowaki-") || /hmr\.js|toolbar\.js|refresh\.js|data-toolbar|__nowaki\/(hmr|devtools)/.test(t)) { console.error("dev tooling in worker page " + p); process.exit(1); }
+  }
+})' examples/hello/dist/worker/index.js
 test -f examples/hello/dist/worker/index.js
 test -f examples/hello/dist/worker/wrangler.jsonc
 grep -q "createFetchHandler" examples/hello/dist/worker/index.js

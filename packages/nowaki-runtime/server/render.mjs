@@ -115,10 +115,12 @@ function devScripts({ islands, live: hasLive }) {
   const live = hasLive
     ? '<script id="nowaki-live" type="module" src="/node_modules/@nowaki-dev/runtime/client/live.js"></script>\n'
     : "";
-  const hmr =
-    '<script type="module" src="/node_modules/@nowaki-dev/runtime/client/hmr.js"></script>';
-  return `${router}${live}${hmr}`;
+  return `${router}${live}${HMR_SCRIPT}`;
 }
+
+// `nowaki dev --no-toolbar` / NOWAKI_TOOLBAR=0: hmr.js then never loads the dev toolbar.
+const TOOLBAR_OFF = /^(0|off|false)$/i.test(process.env.NOWAKI_TOOLBAR ?? "");
+const HMR_SCRIPT = `<script type="module" src="/node_modules/@nowaki-dev/runtime/client/hmr.js"${TOOLBAR_OFF ? ' data-toolbar="0"' : ""}></script>`;
 
 function escapeHtml(s) {
   return String(s)
@@ -139,7 +141,7 @@ export function errorPage(message) {
 <pre style="white-space:pre-wrap;margin:0">${escapeHtml(message)}</pre>
 <div style="margin-top:1.5rem;color:#8a8f98">Fix the error and save; the page reloads automatically.</div>
 </div>
-<script type="module" src="/node_modules/@nowaki-dev/runtime/client/hmr.js"></script>
+${HMR_SCRIPT}
 </body>
 </html>`;
 }

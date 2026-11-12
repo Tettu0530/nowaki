@@ -48,8 +48,11 @@ curl -sf http://127.0.0.1:3300/ | grep -q "modulepreload"
 ! curl -s -o /dev/null -D - http://127.0.0.1:3300/ | grep -qiE '^(server-timing|x-nowaki-route):'
 curl -s -D - http://127.0.0.1:3300/__nowaki/health | tr -d '\r' | grep -qi '^cache-control: no-store'
 test "$(curl -sf http://127.0.0.1:3300/__nowaki/health)" = '{"status":"ok"}'
-# HMR and Fast Refresh are dev-only: nothing of them in production pages or client output.
-! curl -sf http://127.0.0.1:3300/ | grep -qE 'hmr\.js|refresh\.js|__nowaki/hmr'
+# HMR, Fast Refresh and the dev toolbar are dev-only: nothing of them in production pages or
+# client output, and no devtools endpoint.
+! curl -sf http://127.0.0.1:3300/ | grep -qE 'hmr\.js|refresh\.js|toolbar\.js|data-toolbar|__nowaki/(hmr|devtools)' || exit 1
+! curl -sf http://127.0.0.1:3300/live | grep -qE 'hmr\.js|toolbar\.js|__nowaki/devtools' || exit 1
+test "$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3300/__nowaki/devtools?url=/')" = 404
 ! grep -rlE 'RefreshReg|RefreshSig|__nowaki_refresh|__nowaki/hmr' examples/hello/dist/client examples/hello/dist/server
 # Pre-compressed assets and ISR pages: br / gzip by Accept-Encoding, weak ETag, 304 on a match.
 ls examples/hello/dist/client/preact.*.js.br examples/hello/dist/client/preact.*.js.gz >/dev/null

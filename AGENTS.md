@@ -139,7 +139,8 @@ code locations and CI coverage.
 - **The dev MCP stays loopback-only and dev-only.** `/__nowaki/mcp`
   (`crates/nowaki/src/mcp.rs`) answers only a loopback peer with a loopback
   `Host` and `Origin`, also under `--host`; only `nowaki dev` mounts it. Keep
-  its tools read-only. Dev errors reach its log from the sidecar through a
+  its tools read-only. The dev toolbar's `/__nowaki/devtools` sits behind the
+  same gate and stays read-only too; the toolbar is loaded only by dev `hmr.js`. Dev errors reach its log from the sidecar through a
   stdout line carrying `NOWAKI_PUBLISH_TOKEN`, like `publish()`.
 - **`publish()` has no network endpoint.** The sidecar reaches the Rust hub only
   through its stdout with `NOWAKI_PUBLISH_TOKEN`; keep it that way, and keep the
@@ -185,6 +186,22 @@ code locations and CI coverage.
   Streamable HTTP, tools, error ring buffer); route table + island registry from
   the dev sidecar's `/__nowaki/dev-info` (`server/sidecar.mjs`); imports /
   importers from `crates/nowaki-core/src/graph.rs`. E2E: `scripts/mcp-e2e.mjs`.
+  Tools `page` (dev-info `?url=` → `sidecar.mjs` `devPage`: route, layouts, middleware,
+  `revalidate` / `tags`; then `mcp.rs` `page_js`: islands from `chunk::collect_app_modules` of the
+  route + layouts + slots, `live_hint`, and the JS estimate: `module_closure` per group, dev
+  transform → `chunk::minify_chunk` (cached per module output in `MINIFIED`) → one gzip, plus
+  `dist/route-js.json` as the last build figure) and `live` (`LiveHub::stats`).
+- **Dev toolbar** — `packages/nowaki-runtime/client/toolbar.js` (plain DOM in an open Shadow DOM
+  root appended to `<html>`, outside `<body>`; a constructed stylesheet, or a nonced `<style>`),
+  imported on idle by `client/hmr.js` unless `data-toolbar="0"` (`render.mjs` `HMR_SCRIPT`, from
+  `--no-toolbar` / `NOWAKI_TOOLBAR=0`, set in `main.rs`) or `localStorage["nowaki:toolbar"]`
+  is `"off"`. Data: `GET /__nowaki/devtools?url=` (`mcp.rs` `devtools`, the same functions as the
+  MCP tools, the same `request_allowed` gate; listed in `forward::is_internal_path`). Timings come
+  from the browser: the navigation entry's `serverTiming`, else the `timing` field of
+  `nowaki:page-load` (`router.js` `fetchPage`, `hmr.js` `page`). Refreshes on `nowaki:page-load`,
+  `nowaki:hmr` (also `{ type: "error" }`) and on tab changes. Editor links from `NOWAKI_EDITOR`
+  (`mcp.rs` `EDITORS` / `editor_template`). Browser test: `scripts/toolbar-browser-test.mjs`
+  (in e2e-dev).
 - **Dev HMR / Fast Refresh** — `crates/nowaki/src/dev.rs` `apply_changes` →
   `plan_changes` (`css` / `hot` / `page` / `reload`, from the import graph walked up to
   island entries) → `hmr_messages` (bumps hot versions via `NowakiCore::bump_dev_version`;

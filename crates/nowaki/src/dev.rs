@@ -138,6 +138,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         .route("/__nowaki/fonts/{file}", get(dev_font))
         .route("/@fs/{*path}", get(serve_fs))
         .route(crate::mcp::PATH, axum::routing::any(crate::mcp::handle))
+        .route(crate::mcp::DEVTOOLS_PATH, get(crate::mcp::devtools))
         .fallback(serve_or_proxy)
         .with_state(state);
     if let Some(front) = front.filter(|f| f.has_response_layer()) {
@@ -856,7 +857,7 @@ async fn route_css(State(state): State<Arc<DevState>>, Query(q): Query<RouteCssQ
 }
 
 /// Percent-encodes a query value (unreserved characters and `/` stay as they are).
-fn query_encode(s: &str) -> String {
+pub(crate) fn query_encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~' | b'/') {

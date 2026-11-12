@@ -94,6 +94,8 @@ async function fetchPage(url, slot) {
     finalUrl: res.redirected ? res.url : url.href.split("#")[0],
     status: res.status,
     slot: slot && res.headers.has("x-nowaki-slot"),
+    // Server-Timing (on in dev), for nowaki:page-load listeners such as the dev toolbar.
+    timing: h("server-timing"),
   };
 }
 
@@ -180,7 +182,7 @@ async function navigate(url, { push = true, intercept = push, vt, type = "forwar
 // URL to scroll for, or to nothing after a slot swap (the page stays where it is) and after a swap
 // a newer navigation superseded.
 function apply(entry, slot, push, token, hash) {
-  const { doc, finalUrl } = entry;
+  const { doc, finalUrl, timing } = entry;
   // Opted in by the link, else by the page on screen or the one coming (`export const
   // viewTransition`, whose <meta> document.mjs puts in the head). A fragment has no head of its own.
   const opted = navVt ?? (vtPage(document) || vtPage(doc));
@@ -198,7 +200,7 @@ function apply(entry, slot, push, token, hash) {
       syncLive();
       removeProgressBar();
       // Page scripts run once (they are modules); this is their cue to set up the new page's DOM.
-      document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl } }));
+      document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl, timing } }));
       return finalUrl;
     });
   }
@@ -224,7 +226,7 @@ function apply(entry, slot, push, token, hash) {
   }, () => {
     if (tpl) loadPageScripts(tpl.content);
     slotShown(slot);
-    document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl, slot: slot.getAttribute("name") } }));
+    document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl, slot: slot.getAttribute("name"), timing } }));
   });
 }
 
