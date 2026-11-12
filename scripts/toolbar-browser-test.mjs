@@ -147,7 +147,10 @@ async function waitFor(cdp, expr, ms = 8000) {
 
 // The toolbar's shadow root, and a query inside it.
 const TB = `document.querySelector("nowaki-toolbar")?.shadowRoot`;
-const q = (sel) => `${TB}?.querySelector(${JSON.stringify(sel)})`;
+// A JS string literal for page code: JSON plus escapes for characters that matter in a script.
+const jsString = (v) =>
+  JSON.stringify(String(v)).replace(/[<>\/\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+const q = (sel) => `${TB}?.querySelector(${jsString(sel)})`;
 const panelText = () => `(${q(".body")}?.textContent ?? "")`;
 
 async function startDev(dir, args, env) {
