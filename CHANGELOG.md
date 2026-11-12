@@ -34,8 +34,23 @@ milestone's worth of work; the codename is noted per entry.
   response goes out, waiting at most 2 s. Add `@vercel/functions` to the app's dependencies:
   the build copies it into the function. Without it the tags are still sent (purge them from the
   dashboard or the REST API) and the first revalidate call warns once. Tags longer than Vercel's
-  256 bytes are sent as a hash. The node, bun, deno and cloudflare adapters and static output
-  have no cache to purge, so the calls stay a no-op there (warned once).
+  256 bytes are sent as a hash. The node, bun, deno adapters and static output have no cache to
+  purge, so the calls stay a no-op there (warned once).
+- **ISR cache and purge on Cloudflare.** The Worker built by the cloudflare adapter now caches
+  ISR pages in the Cache API of each data center (until now it cached nothing, as Cloudflare
+  doesn't cache what a Worker returns). It stores the same pages `nowaki start` does: an
+  `export const revalidate` render with status 200 and a shared `Cache-Control`. A page that
+  reads cookies, the session or `authorization`, sets a cookie, or streams is never stored.
+  Variants follow what the render read (headers and the query), stale pages are served while one
+  background render (`ctx.waitUntil`) replaces them, and `NOWAKI_CSP` re-nonces each cached
+  response. Responses show `x-nowaki-cache: HIT` / `STALE` / `MISS`. `revalidatePath` deletes
+  the page from the local data center's cache. With `CLOUDFLARE_ZONE_ID` and
+  `CLOUDFLARE_API_TOKEN` (Cache Purge permission) set on the Worker, `revalidatePath` /
+  `revalidateTag` also purge every data center by `Cache-Tag` through the zone purge API, waiting
+  at most 2 s before the action's response. Without them (and on workers.dev, which has no zone)
+  the purge is local only and `revalidateTag` clears nothing (warned once). Apps without ISR
+  pages run as before. The Cache API works on custom domains, not in the dashboard editor or
+  previews.
 
 - HMR keeps island state (Fast Refresh). In `nowaki dev`, editing an island, or a module
   that only islands import, swaps the components in place: hook state survives, and a

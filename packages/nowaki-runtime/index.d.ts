@@ -358,7 +358,7 @@ export type RouteTags =
  * | `nowaki start` | the Rust front, in memory per process | deleted before the response is sent |
  * | vercel adapter | Vercel's CDN (ISR pages send `Vercel-Cache-Tag`) | `dangerouslyDeleteByTag` from `@vercel/functions`, awaited up to 2 s before the response; install the package in the app (warned once without it) |
  * | node / bun / deno adapters | whatever CDN is in front (`s-maxage`) | none: a no-op, warned once; purge that CDN through its API |
- * | cloudflare adapter | nothing (the Worker caches no page) | none: a no-op, warned once |
+ * | cloudflare adapter | the Worker, in the Cache API of each data center (custom domains) | the path is deleted from the local data center's cache; with `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_API_TOKEN` (Cache Purge permission) set on the Worker, a zone purge by tag clears every data center, awaited up to 2 s; without them (or on workers.dev, which has no zone) `revalidateTag` clears nothing, warned once |
  * | static output | files | none: a no-op, warned once |
  * | `nowaki dev` | nothing | calls are only recorded |
  *
@@ -366,6 +366,10 @@ export type RouteTags =
  * purge by tag; a tag over 256 bytes is sent as a hash. Make the call inside the request:
  * `@vercel/functions` purges through the invocation's context, so a call with no request behind
  * it does nothing, and one made after the response may be cut short when the function suspends.
+ * On Cloudflare the tags go in `Cache-Tag` (a tag over 240 characters is sent as a hash; tags
+ * are case-insensitive there, so a purge can catch more than asked). The zone purge API is rate
+ * limited per account (on the Free plan 5 requests a minute, bursts of 25); a rejected purge is
+ * warned once.
  * @example revalidatePath("/blog");
  */
 export function revalidatePath(path: string): void;

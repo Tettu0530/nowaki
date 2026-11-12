@@ -231,11 +231,33 @@ code locations and CI coverage.
   | `nowaki start` | `x-nowaki-tags` (internal) | Rust ISR store, before the response |
   | vercel | `Vercel-Cache-Tag` | `@vercel/functions` `dangerouslyDeleteByTag`, awaited (2 s cap) |
   | node / bun / deno | none | warn-once no-op (no cache of their own) |
-  | cloudflare | none | warn-once no-op (the Worker caches nothing yet) |
+  | cloudflare | `Cache-Tag` (on the Cache API entry only) | local `cache.delete` of path entries + zone purge by tag with `CLOUDFLARE_ZONE_ID` / `CLOUDFLARE_API_TOKEN`, awaited (2 s cap) |
   | static | none | warn-once no-op |
 
   Tests: `scripts/purge-adapters-test.mjs` (mocked package, a generated function on port 5540);
   `scripts/ci/e2e-adapters.sh` checks the header from the built `examples/hello` function.
+- **Cloudflare Worker ISR cache** — `server/purge-cloudflare.mjs` `cloudflareCdn()`, created by
+  `web.mjs` `createFetchHandler` only when some page exports `revalidate` (else the worker runs
+  as before). `fetch` sends eligible GET / HEAD requests (no `x-nowaki-intercept`, path not in
+  the isolate's negative set) through `cached()`: `caches.default.match` of `<origin><path>`,
+  which holds either the page (it varies on nothing) or a stub (`x-nowaki-stub` generation id,
+  `x-nowaki-vary` names, query flag) pointing at the variant key
+  `<origin><path>?__nowaki=<gen>&q=…&h.<name>=…`. The Cache API ignores Vary, hence the key.
+  Stored only when `shareable(result)`: `x-nowaki-revalidate`, 200, string body (no stream),
+  no Set-Cookie, `public, s-maxage`, no per-user Vary input (the handler's own signals; nothing
+  re-derived). Entries are kept a year (`max-age`); `x-nowaki-stored` decides HIT / STALE, and
+  a stale hit re-renders once per key per isolate in `ctx.waitUntil`. The render is stored
+  before CSP (re-nonced per response); internal headers (`x-nowaki-revalidate` / `-vary` /
+  `-vary-query`, `cache-tag`) never reach the browser. `purge(entries, ctx)` bumps an epoch (an
+  in-flight render doesn't store), deletes `p:` entries at `<origin><path>` locally (dropping
+  every variant via the stub), and calls `POST /zones/<id>/purge_cache` `{ tags }` (100 per call,
+  `cfTag`: `server/cdn-tag.mjs` `cdnTag` capped at 240 characters so 65 tags fit Cloudflare's
+  16 KB header; the worker must never import `purge-vercel.mjs`, whose lazy `@vercel/functions`
+  import breaks wrangler's bundle, which `cf-cache-test.mjs` checks); a
+  timed-out purge continues in `ctx.waitUntil` (`takePending`). `revalidatePath` / `-Tag`
+  pass the request context to `env.purge` so the local delete knows the origin. Tests:
+  `scripts/cf-cache-test.mjs` (mocked `caches.default` and fetch), the built worker in
+  `scripts/edge-handler-test.mjs`.
 - **Observability (Server-Timing, JSON logs, OpenTelemetry, health)** — env vars:
   `NOWAKI_SERVER_TIMING=1` (always on in dev), `NOWAKI_LOG=json`, and the standard
   `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (tracing is on iff one is set

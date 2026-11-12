@@ -147,6 +147,8 @@ jobs:
         run: node scripts/revalidate-test.mjs
       - name: CDN purge per adapter (Vercel-Cache-Tag encoding, purge before the response, timeout, generated function)
         run: node scripts/purge-adapters-test.mjs
+      - name: Cloudflare Worker ISR cache (Cache API HIT / STALE / variants, never per-user pages, local delete, zone purge by tag)
+        run: node scripts/cf-cache-test.mjs
       - name: Observability (traceparent / sampler / OTLP shape vs the shared fixture, Server-Timing, exporter, OTel API bridge, JSON logs)
         run: node scripts/otel-test.mjs
       - name: i18n (locale split and localePath against the shared fixture, hreflang, per-locale content)

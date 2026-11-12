@@ -222,8 +222,9 @@ export function flushPurge(ctx, headers) {
     if (rest.length) writeLines(rest);
   }
   if (typeof env?.purge === "function") {
+    // The context goes along: the Cloudflare cache deletes the paths under the request's origin.
     return Promise.resolve()
-      .then(() => env.purge(entries))
+      .then(() => env.purge(entries, ctx))
       .catch((err) => console.error("[nowaki] cache purge failed:", err));
   }
   return undefined;
