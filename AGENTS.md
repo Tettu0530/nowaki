@@ -495,14 +495,13 @@ code locations and CI coverage.
 
 ## Releasing (maintainers)
 
-The packages are versioned independently today: the CLI and crates are 0.18.x
-(`Cargo.toml` `[workspace.package]`, the `nowaki` crate's `nowaki-core` path-dep
-version, `packages/nowaki-cli`), `@nowaki-dev/runtime` is 0.17.x,
-`create-nowaki` / `create-nowaki-app` are 0.19.x, and `@nowaki-dev/markdoc`
-(`packages/nowaki-markdoc`) is 0.1.x. The scaffold template
-(`packages/create-nowaki/templates/_shared/package.json`) pins the current CLI
-and runtime. From 0.19.0 the CLI, runtime, and create-* versions move together
-(markdoc keeps its own semver). After bumping, run `pnpm install` so
+Since 0.19.3 the CLI and crates (`Cargo.toml` `[workspace.package]`, the `nowaki`
+crate's `nowaki-core` path-dep version, `packages/nowaki-cli`), `@nowaki-dev/runtime`
+and `create-nowaki` / `create-nowaki-app` share one version and are bumped together;
+`@nowaki-dev/markdoc` (`packages/nowaki-markdoc`) keeps its own semver (0.1.x). The
+CLI refuses a runtime older than its own version (`runtime::MIN_RUNTIME`). The
+scaffold template (`packages/create-nowaki/templates/_shared/package.json`) pins
+that version for both. After bumping, run `pnpm install` so
 `pnpm-lock.yaml` matches (CI uses a frozen lockfile). Then: `cargo publish -p
 nowaki-core` → `-p nowaki`; push a `vX.Y.Z` tag (triggers `release.yml` for the
 CLI binaries); `gh workflow run publish-npm.yml -f package=all` for runtime,
