@@ -28,6 +28,7 @@ import { LOCALE_VARY, frontHeaders, frontLocale, frontStep, withVaryHeaders } fr
 import { setBasePath } from "./base-path.mjs";
 import { setRevalidateEnv } from "./revalidate.mjs";
 import { traceFromEnv } from "./trace.mjs";
+import { stripInternal } from "./purge-cloudflare.mjs";
 import { logError } from "./log.mjs";
 import { HEALTH_BODY, HEALTH_HEADERS, isHealth } from "./health.mjs";
 
@@ -366,6 +367,9 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
         routePath,
       });
       if (localeVary) result.headers = withVaryHeaders(result.headers);
+      // An ISR render's cache headers for `nowaki start` (x-nowaki-revalidate / -vary / -tags) stay
+      // internal: this server has no ISR store, and a CDN in front reads Cache-Control.
+      if (result?.headers?.["x-nowaki-revalidate"] !== undefined) stripInternal(result.headers);
       await sendResult(res, applyCsp(result));
     } catch (err) {
       logError("", err);
