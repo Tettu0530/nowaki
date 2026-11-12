@@ -1,0 +1,60 @@
+{
+  "traceparent": [
+    { "input": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "traceId": "4bf92f3577b34da6a3ce929d0e0e4736", "spanId": "00f067aa0ba902b7", "sampled": true },
+    { "input": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00", "traceId": "4bf92f3577b34da6a3ce929d0e0e4736", "spanId": "00f067aa0ba902b7", "sampled": false },
+    { "input": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-03", "traceId": "4bf92f3577b34da6a3ce929d0e0e4736", "spanId": "00f067aa0ba902b7", "sampled": true },
+    { "input": "01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-future", "traceId": "4bf92f3577b34da6a3ce929d0e0e4736", "spanId": "00f067aa0ba902b7", "sampled": true },
+    { "input": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-extra" },
+    { "input": "ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" },
+    { "input": "00-00000000000000000000000000000000-00f067aa0ba902b7-01" },
+    { "input": "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01" },
+    { "input": "00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01" },
+    { "input": "00-4bf92f3577b34da6a3ce929d0e0e473-00f067aa0ba902b7-01" },
+    { "input": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-1" },
+    { "input": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7" },
+    { "input": "" }
+  ],
+  "sampler": [
+    { "name": null, "arg": null, "parentSampled": null, "traceId": "4bf92f3577b34da6ffffffffffffffff", "sampled": true },
+    { "name": null, "arg": null, "parentSampled": false, "traceId": "4bf92f3577b34da60000000000000000", "sampled": false },
+    { "name": "always_off", "arg": null, "parentSampled": true, "traceId": "4bf92f3577b34da60000000000000000", "sampled": false },
+    { "name": "always_on", "arg": null, "parentSampled": false, "traceId": "4bf92f3577b34da60000000000000000", "sampled": true },
+    { "name": "traceidratio", "arg": "0.5", "parentSampled": null, "traceId": "4bf92f3577b34da60000000000000001", "sampled": true },
+    { "name": "traceidratio", "arg": "0.5", "parentSampled": null, "traceId": "4bf92f3577b34da6c000000000000000", "sampled": false },
+    { "name": "parentbased_traceidratio", "arg": "0.5", "parentSampled": true, "traceId": "4bf92f3577b34da6c000000000000000", "sampled": true },
+    { "name": "parentbased_traceidratio", "arg": "0.5", "parentSampled": null, "traceId": "4bf92f3577b34da6c000000000000000", "sampled": false },
+    { "name": "parentbased_traceidratio", "arg": "0.5", "parentSampled": null, "traceId": "4bf92f3577b34da63fffffffffffffff", "sampled": true },
+    { "name": "parentbased_always_off", "arg": null, "parentSampled": true, "traceId": "4bf92f3577b34da60000000000000000", "sampled": true },
+    { "name": "parentbased_always_off", "arg": null, "parentSampled": null, "traceId": "4bf92f3577b34da60000000000000000", "sampled": false },
+    { "name": "traceidratio", "arg": "7", "parentSampled": null, "traceId": "4bf92f3577b34da6ffffffffffffffff", "sampled": true }
+  ],
+  "span": {
+    "input": {
+      "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "spanId": "00f067aa0ba902b7",
+      "parentSpanId": "b7ad6b7169203331",
+      "name": "GET /blog/[slug]",
+      "kind": 2,
+      "start": "1700000000000000000",
+      "end": "1700000000012500000",
+      "attrs": [["http.request.method", "GET"], ["url.path", "/blog/hello"], ["http.route", "/blog/[slug]"], ["http.response.status_code", 500]],
+      "error": true
+    },
+    "otlp": {
+      "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "spanId": "00f067aa0ba902b7",
+      "parentSpanId": "b7ad6b7169203331",
+      "name": "GET /blog/[slug]",
+      "kind": 2,
+      "startTimeUnixNano": "1700000000000000000",
+      "endTimeUnixNano": "1700000000012500000",
+      "attributes": [
+        { "key": "http.request.method", "value": { "stringValue": "GET" } },
+        { "key": "url.path", "value": { "stringValue": "/blog/hello" } },
+        { "key": "http.route", "value": { "stringValue": "/blog/[slug]" } },
+        { "key": "http.response.status_code", "value": { "intValue": "500" } }
+      ],
+      "status": { "code": 2 }
+    }
+  }
+}

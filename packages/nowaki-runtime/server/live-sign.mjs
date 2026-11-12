@@ -8,6 +8,7 @@
 // replayed forever. Every patch is re-signed, so an active island never expires.
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { logWarn } from "./log.mjs";
 
 const env = globalThis.process?.env ?? {};
 const MAX_AGE_S = positiveInt(env.NOWAKI_LIVE_MAX_AGE, 86400);
@@ -30,8 +31,8 @@ function getKey() {
 /// Production servers call this once when the app has live islands.
 export function warnIfEphemeralLiveKey() {
   if (env.NOWAKI_LIVE_SECRET) return;
-  console.warn(
-    "[nowaki] NOWAKI_LIVE_SECRET is not set: live islands are signed with a random per-process key, " +
+  logWarn(
+    "NOWAKI_LIVE_SECRET is not set: live islands are signed with a random per-process key, " +
       "so their state can't resume after a restart or on another instance. Set it to a long random value.",
   );
 }

@@ -15,6 +15,10 @@ import { setServerEnv } from "./env-server.mjs";
 import { configureSessions, sessionConfigOf } from "./session.mjs";
 import { setBasePath } from "./base-path.mjs";
 import { readBodyWithLimit } from "./body-read.mjs";
+import { traceFromEnv } from "./trace.mjs";
+import { HEALTH_BODY, HEALTH_HEADERS, isHealth } from "./health.mjs";
+import { setRevalidateEnv } from "./revalidate.mjs";
+import { cloudflareCdn, stripInternal, zoneCredentials } from "./purge-cloudflare.mjs";
 
 /// `defaults`: [name, value] pairs (nowaki.config `headers`) set when the result doesn't set them,
 /// before the security headers, so they win over those.
@@ -88,10 +92,13 @@ function installIslandHook(registry, liveRegistry, live) {
 ///   trailingSlash    : nowaki.config `trailingSlash` when it isn't "ignore" (canonical / sitemap URLs)
 ///   basePath         : nowaki.config `basePath` ("/app"), when set
 ///   routing          : the routing config (dist/server/routing.json), for i18n
-/// Returns `(request, bindings?, front?) => Promise<Response>`; `bindings` (the Worker's `env`) adds
-/// its string vars and secrets to process.env for validating env.ts. `front` comes from the
+///   cdn              : options for purge-cloudflare.mjs `cloudflareCdn` (tests); `false` turns the
+///                      ISR cache and the purge off
+/// Returns `(request, bindings?, front?, exec?) => Promise<Response>`; `bindings` (the Worker's `env`)
+/// adds its string vars and secrets to process.env for validating env.ts. `front` comes from the
 /// worker's nowaki.config routing (front.mjs): `{ routePath, headers }`, the path to route by and
-/// the config headers for the response.
+/// the config headers for the response. `exec` is the Worker's execution context: with OTLP export
+/// on, the spans go out in `exec.waitUntil` after the response.
 export function createFetchHandler({
   manifest,
   modules,
@@ -109,6 +116,7 @@ export function createFetchHandler({
   trailingSlash,
   basePath,
   routing,
+  cdn: cdnOptions,
 }) {
   setBasePath(basePath);
   const assetBase = `${basePath ?? ""}/_nowaki/`;
@@ -176,6 +184,24 @@ export function createFetchHandler({
     },
   };
 
+  // Server-Timing (NOWAKI_SERVER_TIMING=1) and OpenTelemetry (OTEL_*): null when both are off.
+  env.trace = traceFromEnv(globalThis.process?.env, { runtime: "workerd" });
+
+  // The ISR cache (Cache API) and its purge, only when some page exports `revalidate`: an app
+  // without ISR pages runs exactly as before. Zone credentials come from the latest request's
+  // bindings (CLOUDFLARE_ZONE_ID / CLOUDFLARE_API_TOKEN), else process.env.
+  let latestBindings;
+  const cdn =
+    cdnOptions !== false && hasIsrPages(routeTable, modules)
+      ? cloudflareCdn({ credentials: () => zoneCredentials(latestBindings), ...(cdnOptions ?? {}) })
+      : null;
+  const isr = cdn?.cache ?? null;
+  if (cdn) {
+    env.purge = cdn.purge;
+    env.cacheTagHeader = cdn.cacheTagHeader;
+  }
+  setRevalidateEnv(env);
+
   // Content collections, inlined by the edge build: validated once, before the first request.
   const contentReady = content
     ? validateContent(content.raw, content.config, (e) => modules[e.module]).then(({ collections, errors }) => {
@@ -190,8 +216,14 @@ export function createFetchHandler({
   let envReady = null;
   if (!envPending) setServerEnv(null);
 
-  return async (request, bindings, front) => {
+  return async (request, bindings, front, exec) => {
+    // Before env.ts and content: a liveness answer needs neither.
+    const url = new URL(request.url);
+    if (isHealth(request.method, url.pathname)) {
+      return withSecurityHeaders(new Response(request.method === "HEAD" ? null : HEALTH_BODY, { headers: HEALTH_HEADERS }));
+    }
     if (typeof bindings?.NOWAKI_SESSION_SECRET === "string") sessionSecret = bindings.NOWAKI_SESSION_SECRET;
+    if (cdn) latestBindings = bindings;
     if (envPending) {
       envReady ??= initServerEnv(envModule, envSource(bindings), envPublic).catch((err) => {
         console.error(err?.message ?? err);
@@ -205,19 +237,66 @@ export function createFetchHandler({
       }
     }
     if (contentReady) await contentReady;
-    const url = new URL(request.url);
     const headers = {};
     for (const [k, v] of request.headers) headers[k.toLowerCase()] = v;
     // Web Requests may omit Host; the same-origin checks (actions, RPC) need it, and the URL has it.
     if (!headers.host) headers.host = url.host;
-    const result = await handleRequest(env, {
+    const info = {
       method: request.method,
       url,
       version: "prod",
       headers,
       readBody: () => readBodyWithLimit(request, headers),
       routePath: front?.routePath,
-    });
+    };
+    if (isr && isr.eligible(request.method, url.pathname, headers)) return cached(info, front, exec);
+    const result = await handleRequest(env, info);
+    // The ISR headers of a page rendered for a POST (an action's re-render) stay internal too.
+    if (isr && result?.headers?.["x-nowaki-revalidate"] !== undefined) stripInternal(result.headers);
+    if (env.trace?.exporter && typeof exec?.waitUntil === "function") exec.waitUntil(env.trace.flush());
+    // A zone purge the 2 s cap let go of keeps running after the response.
+    const late = cdn?.takePending();
+    if (late && typeof exec?.waitUntil === "function") exec.waitUntil(late);
     return resultToResponse(applyCsp(result), front?.headers);
   };
+
+  // A GET / HEAD through the ISR cache: a fresh entry is served as is, a stale one too while one
+  // background render (ctx.waitUntil) replaces it, and a miss renders and stores a shareable
+  // result. The cache holds the render before the CSP, so every response gets its own nonce.
+  async function cached(info, front, exec) {
+    const waitUntil = typeof exec?.waitUntil === "function" ? (p) => exec.waitUntil(p) : null;
+    const found = await isr.lookup(info.url, info.headers);
+    // Without an execution context nothing could render in the background: a stale entry is a miss.
+    if (found?.hit && (!found.stale || waitUntil)) {
+      if (found.stale) {
+        const again = isr.revalidate(found.key, async () => {
+          const epoch = isr.epoch();
+          const fresh = await handleRequest(env, { ...info, method: "GET" });
+          isr.settle(info.url, info.headers, fresh, { stub: found.stub, key: found.key }, epoch, waitUntil);
+        });
+        if (again) waitUntil(again);
+      }
+      const hit = info.method === "HEAD" ? { ...found.hit, body: null } : found.hit;
+      return resultToResponse(applyCsp(hit), front?.headers);
+    }
+    const epoch = isr.epoch();
+    const rendered = await handleRequest(env, info);
+    const miss = found?.miss ?? (found?.hit ? { stub: found.stub, key: found.key } : null);
+    const result = isr.settle(info.url, info.headers, rendered, miss, epoch, waitUntil);
+    if (env.trace?.exporter && waitUntil) waitUntil(env.trace.flush());
+    // A GET API route can call revalidate*() too.
+    const late = cdn.takePending();
+    if (late && waitUntil) waitUntil(late);
+    return resultToResponse(applyCsp(result), front?.headers);
+  }
+}
+
+// Whether any page route exports `revalidate` (a positive number of seconds).
+function hasIsrPages(routeTable, modules) {
+  for (const r of routeTable?.routes ?? []) {
+    if (r.isApi) continue;
+    const v = Number(modules?.[r.file]?.revalidate);
+    if (Number.isFinite(v) && v > 0) return true;
+  }
+  return false;
 }

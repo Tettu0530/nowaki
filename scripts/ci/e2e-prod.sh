@@ -3,6 +3,8 @@
 # Run from the repo root after `cargo build -p nowaki` and `pnpm install`.
 set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
+# A failed step exits here: stop the servers this script started, or they keep the ports.
+trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
 cd "$(dirname "$0")/../.."
 # A request to a hung server must fail, not wait forever; and on Windows, where hangs have been
 # seen, trace every command so the log shows where one stopped.
@@ -26,13 +28,13 @@ test "$(wc -c < "$PHOTO")" -lt 50000   # 256 KB → a few KB
 # scope hoisting: the cyclic lib modules are concatenated into the Cycle
 # island chunk, not emitted as separate files, and the chunk has no
 # internal ./cycle- import (the cycle is resolved within one scope).
-! ls examples/hello/dist/client/cycle-a.*.js >/dev/null 2>&1
+! ls examples/hello/dist/client/cycle-a.*.js >/dev/null 2>&1 || exit 1
 CY=$(ls examples/hello/dist/client/Cycle.*.js | head -1)
-! grep -q './cycle-' "$CY"
+! grep -q './cycle-' "$CY" || exit 1
 # v0.6 Jetstream build: the live island ships NO client component JS (only live.js),
 # is listed in the manifest, and is still built as a server module for rendering.
 grep -qE '"liveIslands": \[[^]]*"LiveCounter"' examples/hello/dist/client/manifest.json
-! ls examples/hello/dist/client/LiveCounter.*.js >/dev/null 2>&1
+! ls examples/hello/dist/client/LiveCounter.*.js >/dev/null 2>&1 || exit 1
 ls examples/hello/dist/client/live.*.js >/dev/null 2>&1
 test -f examples/hello/dist/server/islands/LiveCounter.js
 # nowaki start (Rust front) serves the live island, assembled with live.js
@@ -43,15 +45,23 @@ NOWAKI_ISR_WARM=0 NOWAKI_REVALIDATE_SECRET=e2e-revalidate-secret-0123456789 ./ta
 START_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3300/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3300/ | grep -q "modulepreload"
-# HMR and Fast Refresh are dev-only: nothing of them in production pages or client output.
-! curl -sf http://127.0.0.1:3300/ | grep -qE 'hmr\.js|refresh\.js|__nowaki/hmr'
-! grep -rlE 'RefreshReg|RefreshSig|__nowaki_refresh|__nowaki/hmr' examples/hello/dist/client examples/hello/dist/server
+# Observability is off by default: no Server-Timing (ISR hits included) and no internal route
+# header; /__nowaki/health answers 200 (it pings the sidecar), never cached.
+! curl -s -o /dev/null -D - http://127.0.0.1:3300/ | grep -qiE '^(server-timing|x-nowaki-route):' || exit 1
+curl -s -D - http://127.0.0.1:3300/__nowaki/health | tr -d '\r' | grep -qi '^cache-control: no-store'
+test "$(curl -sf http://127.0.0.1:3300/__nowaki/health)" = '{"status":"ok"}'
+# HMR, Fast Refresh and the dev toolbar are dev-only: nothing of them in production pages or
+# client output, and no devtools endpoint.
+! curl -sf http://127.0.0.1:3300/ | grep -qE 'hmr\.js|refresh\.js|toolbar\.js|data-toolbar|__nowaki/(hmr|devtools)' || exit 1
+! curl -sf http://127.0.0.1:3300/live | grep -qE 'hmr\.js|toolbar\.js|__nowaki/devtools' || exit 1
+test "$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3300/__nowaki/devtools?url=/')" = 404
+! grep -rlE 'RefreshReg|RefreshSig|__nowaki_refresh|__nowaki/hmr' examples/hello/dist/client examples/hello/dist/server || exit 1
 # Pre-compressed assets and ISR pages: br / gzip by Accept-Encoding, weak ETag, 304 on a match.
 ls examples/hello/dist/client/preact.*.js.br examples/hello/dist/client/preact.*.js.gz >/dev/null
 ASSET=http://127.0.0.1:3300/_nowaki/$(basename "$(ls examples/hello/dist/client/preact.*.js | head -1)")
 curl -s -o /dev/null -D - -H 'Accept-Encoding: gzip, br' "$ASSET" | grep -qi '^content-encoding: br'
 curl -s -o /dev/null -D - -H 'Accept-Encoding: gzip' "$ASSET" | grep -qi '^content-encoding: gzip'
-! curl -s -o /dev/null -D - "$ASSET" | grep -qi '^content-encoding'
+! curl -s -o /dev/null -D - "$ASSET" | grep -qi '^content-encoding' || exit 1
 ETAG=$(curl -s -o /dev/null -D - "$ASSET" | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]: //p')
 test "$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $ETAG" "$ASSET")" = 304
 # HEAD mirrors GET (status and headers, no body): assets, public/ files, pages
@@ -70,32 +80,32 @@ test -n "$PROD_BADGE"
 if test -f /tmp/nowaki-css-module-badge-class; then
   test "$PROD_BADGE" = "$(cat /tmp/nowaki-css-module-badge-class)"
 fi
-! curl -sf http://127.0.0.1:3300/ | grep -qE '/Users/|/home/[^/]+/'
+! curl -sf http://127.0.0.1:3300/ | grep -qE '/Users/|/home/[^/]+/' || exit 1
 # lazy SPA router: runtime script carries data-router, and the router chunk is
 # NOT eagerly preloaded (it loads on idle, keeping first-load JS small).
 curl -sf http://127.0.0.1:3300/ | grep -q 'id="nowaki-runtime"[^>]*data-router='
-! curl -s http://127.0.0.1:3300/ | grep -qE 'modulepreload[^>]*/router\.[0-9a-f]+\.js'
+! curl -s http://127.0.0.1:3300/ | grep -qE 'modulepreload[^>]*/router\.[0-9a-f]+\.js' || exit 1
 # View Transitions are opt-in per route: `export const viewTransition` puts the router's <meta> and
 # the cross-document @view-transition style in the head region; other pages get neither.
 curl -sf http://127.0.0.1:3300/vt | grep -q '<meta name="nowaki-view-transition" content="1" />'
 curl -sf http://127.0.0.1:3300/vt | grep -q '<style>@media (prefers-reduced-motion:no-preference){@view-transition{navigation:auto}}</style>'
 curl -sf http://127.0.0.1:3300/vt | grep -q '<a id="vt-island-ssr" href="/about" data-nowaki-transition>'
-! curl -s http://127.0.0.1:3300/ | grep -qE 'nowaki-view-transition|@view-transition|data-nowaki-transition'
-! curl -s http://127.0.0.1:3300/about | grep -qE 'nowaki-view-transition|@view-transition'
+! curl -s http://127.0.0.1:3300/ | grep -qE 'nowaki-view-transition|@view-transition|data-nowaki-transition' || exit 1
+! curl -s http://127.0.0.1:3300/about | grep -qE 'nowaki-view-transition|@view-transition' || exit 1
 curl -sf http://127.0.0.1:3300/live | grep -q 'nowaki-live name="LiveCounter"'
 curl -sf http://127.0.0.1:3300/live | grep -q 'live\.'  # live.js script
 # v0.8 server functions in production: allowlist written, no impl leaked to
 # the client, and the Rust front proxies /__nowaki/fn to the renderer.
 test -f examples/hello/dist/server/functions.json
 grep -q '"export": "addTodo"' examples/hello/dist/server/functions.json
-! grep -rl 'nowaki-server-only-secret' examples/hello/dist/client >/dev/null 2>&1
+! grep -rl 'nowaki-server-only-secret' examples/hello/dist/client >/dev/null 2>&1 || exit 1
 curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-rpc: 1' -d '{"id":"6c90d7dc921a9a3f","args":[]}' http://127.0.0.1:3300/__nowaki/fn | grep -q 'learn nowaki'
 # typed env (env.ts): server values through env/server, public ones inlined (the server ones never)
 test -f examples/hello/dist/server/env.js
 curl -sf http://127.0.0.1:3300/env | grep -q 'token length 15'
 curl -sf http://127.0.0.1:3300/env | grep -q 'id="env-badge">Hello from env.ts x4<'
 grep -q 'Hello from env.ts' examples/hello/dist/client/EnvBadge.*.js
-! grep -rl 'hello-dev-token' examples/hello/dist/client >/dev/null 2>&1
+! grep -rl 'hello-dev-token' examples/hello/dist/client >/dev/null 2>&1 || exit 1
 # v0.9 virtual modules: SSR inlines the plugin-generated module (data:)
 curl -sf http://127.0.0.1:3300/virtual | grep -q 'VIRTUAL_OK · nowaki-plugin'
 # ISR (export const revalidate=2): the Rust front caches assembled HTML and
@@ -120,8 +130,8 @@ isr regenerated; test "$S" = "HIT"; test "$N" -gt "$R1"
 test -z "$(curl -s -D - -o /dev/null "$ISR" | grep -i '^set-cookie:')"
 SC_ISR=http://127.0.0.1:3300/isr-sets-cookie
 curl -s -D - -o /dev/null "$SC_ISR" | grep -qi '^cache-control: private, no-cache'
-! curl -s -D - -o /dev/null "$SC_ISR" | grep -qiE '^cache-control:.*(public|s-maxage)'
-! curl -s -D - -o /dev/null "$SC_ISR" | grep -qiE '^x-nowaki-cache: (HIT|STALE)'
+! curl -s -D - -o /dev/null "$SC_ISR" | grep -qiE '^cache-control:.*(public|s-maxage)' || exit 1
+! curl -s -D - -o /dev/null "$SC_ISR" | grep -qiE '^x-nowaki-cache: (HIT|STALE)' || exit 1
 test "$(curl -s "$SC_ISR" | grep -o 'RENDER=[0-9]*')" != "$(curl -s "$SC_ISR" | grep -o 'RENDER=[0-9]*')"
 # ISR hits are compressed once and answer If-None-Match with 304.
 curl -s -o /dev/null -D - -H 'Accept-Encoding: br' http://127.0.0.1:3300/isr | grep -qi '^content-encoding: br'
@@ -136,7 +146,7 @@ tpost() { curl -s -D /tmp/tag-post.h -o /dev/null -XPOST -H 'origin: http://127.
 T1=$(tnum); test "$(tcache)" = MISS
 T2=$(tnum); test "$(tcache)" = HIT; test "$T2" = "$T1"
 # Internal headers (tags, purge, revalidate, vary) never reach the browser.
-! grep -qiE '^x-nowaki-(tags|purge|route|revalidate|vary|page)' /tmp/tag.h
+! grep -qiE '^x-nowaki-(tags|purge|route|revalidate|vary|page)' /tmp/tag.h || exit 1
 # A client-sent x-nowaki-purge purges nothing (forward.rs drops it; only the sidecar's reply counts).
 curl -s -o /dev/null -H 'x-nowaki-purge: t:isr-demo,p:/isr-tagged' "$TAG"
 curl -s -o /dev/null -XPOST -H 'origin: http://127.0.0.1:3300' -H 'x-nowaki-purge: t:isr-demo' -H 'content-type: application/json' -d '{}' http://127.0.0.1:3300/api/echo
@@ -144,7 +154,8 @@ T3=$(tnum); test "$(tcache)" = HIT; test "$T3" = "$T1"
 # The action's revalidateTag purges before its 303 goes out, so the next GET renders fresh.
 tpost tag
 grep -q '^HTTP/1.1 303' /tmp/tag-post.h
-! grep -qi '^x-nowaki-' /tmp/tag-post.h
+# Internal headers only (the app's own middleware sets x-nowaki-mw).
+! grep -qiE '^x-nowaki-(purge|tags|route|revalidate|vary)' /tmp/tag-post.h || exit 1
 T4=$(tnum); test "$(tcache)" = MISS; test "$T4" -gt "$T3"
 T5=$(tnum); test "$(tcache)" = HIT; test "$T5" = "$T4"
 # revalidatePath purges the page by its path (every query variant too).
@@ -162,7 +173,7 @@ test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'content-type: applicat
 test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'authorization: Bearer wrong' -H 'content-type: application/json' -d '{"tags":["isr-demo"]}' $REV)" = 401
 tnum >/dev/null; test "$(tcache)" = HIT
 curl -s -D /tmp/rev.h -XPOST -H 'authorization: Bearer e2e-revalidate-secret-0123456789' -H 'content-type: application/json' -d '{"paths":["/isr-tagged"]}' $REV | grep -q '"revalidated"'
-! grep -qi '^x-nowaki-purge' /tmp/rev.h
+! grep -qi '^x-nowaki-purge' /tmp/rev.h || exit 1
 T7=$(tnum); test "$(tcache)" = MISS; test "$T7" -gt "$T6"
 # loading/error boundaries are served through the Rust front too
 curl -sf http://127.0.0.1:3300/__nowaki/boundaries | grep -q 'data-nowaki-reset'
@@ -172,7 +183,7 @@ node scripts/livetest.mjs http://127.0.0.1:3300
 # --- application-security regressions (prod): no absolute build-machine path
 # leaks into client assets (#9), and ISR keys isolate per-header (no cross-user
 # leak) and collapse unused-query floods (#6/#7).
-! grep -rl "$HOME" examples/hello/dist/client
+! grep -rl "$HOME" examples/hello/dist/client || exit 1
 node scripts/security-e2e.mjs prod http://127.0.0.1:3300
 # content collections: Markdown rendered at build time, headings with anchors, a TOC from them,
 # and the docs list ordered by frontmatter
@@ -212,21 +223,21 @@ curl -s -D - -o /dev/null "http://127.0.0.1:3300$FT" | grep -qi '^content-type: 
 # conventional folders, and no SPA router on a page without islands (dev and prod alike)
 curl -sf http://127.0.0.1:3300/about | grep -q '<meta name="x-layout-head" content="root" />'
 curl -sf http://127.0.0.1:3300/about | grep -q '<p id="greeting">Hello from data/</p>'
-! curl -sf http://127.0.0.1:3300/about | grep -q 'id="nowaki-runtime"'
+! curl -sf http://127.0.0.1:3300/about | grep -q 'id="nowaki-runtime"' || exit 1
 SC=$(curl -sf http://127.0.0.1:3300/about | grep -oE '/_nowaki/site\.[0-9a-f]+\.css' | head -1)
 curl -sf "http://127.0.0.1:3300$SC" | grep -q -- '--site-token: rgb(9, 8, 7)'
-! curl -sf "http://127.0.0.1:3300$SC" | grep -q '@import'
+! curl -sf "http://127.0.0.1:3300$SC" | grep -qE '^[[:space:]]*@import[[:space:]]' || exit 1
 # route groups: routes/(marketing)/pricing.tsx at /pricing, with the group's layout and middleware
 curl -sf http://127.0.0.1:3300/pricing | grep -q '<div data-group="marketing"><main'
 curl -s -D - -o /dev/null http://127.0.0.1:3300/pricing | grep -qi '^x-route-group: marketing'
-! curl -sf http://127.0.0.1:3300/about | grep -q 'data-group="marketing"'
-! curl -s -D - -o /dev/null http://127.0.0.1:3300/about | grep -qi '^x-route-group'
-! curl -s -D - -o /dev/null http://127.0.0.1:3300/no-such-page | grep -qi '^x-route-group'
+! curl -sf http://127.0.0.1:3300/about | grep -q 'data-group="marketing"' || exit 1
+! curl -s -D - -o /dev/null http://127.0.0.1:3300/about | grep -qi '^x-route-group' || exit 1
+! curl -s -D - -o /dev/null http://127.0.0.1:3300/no-such-page | grep -qi '^x-route-group' || exit 1
 test "$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3300/(marketing)/pricing')" = 404
 # parallel routes: photos/@modal renders beside the page (its [id] file on /photos/1, default on /photos)
 curl -sf http://127.0.0.1:3300/photos/1 | grep -q '<h1 id="photo-page">photo 1</h1>.*<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><aside id="photo-modal" class="photo-modal">modal 1: caption of 1</aside></nowaki-slot>'
 curl -sf http://127.0.0.1:3300/photos | grep -q '<nowaki-slot name="modal" style="display:contents" data-nowaki-slot="/photos/@modal" data-nowaki-intercepts="[^"]*"><p id="modal-default">no photo open</p></nowaki-slot>'
-! curl -sf http://127.0.0.1:3300/photos/1 | grep -q 'photo-intercepted'
+! curl -sf http://127.0.0.1:3300/photos/1 | grep -q 'photo-intercepted' || exit 1
 test "$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3300/photos/@modal/1')" = 404
 # intercepting route: the router's x-nowaki-intercept request gets the slot fragment, never cached
 curl -sf -H 'x-nowaki-intercept: /photos/@modal' http://127.0.0.1:3300/photos/1 | grep -q '^<template data-nowaki-head>.*</template><aside id="photo-intercepted">intercepted 1</aside>$'
@@ -267,7 +278,7 @@ curl -sf http://127.0.0.1:3300/docs/intro | grep -q '<script type="application/l
 curl -sf http://127.0.0.1:3300/boom | grep -q '<meta name="robots" content="noindex, follow" />'
 curl -s -D - -o /dev/null http://127.0.0.1:3300/sitemap.xml | grep -qi '^content-type: application/xml'
 curl -sf http://127.0.0.1:3300/sitemap.xml | grep -q '<loc>https://hello.nowaki.dev/docs/intro</loc>'
-! curl -sf http://127.0.0.1:3300/sitemap.xml | grep -qE '/boom<|/secret<|/api/|feed.xml'
+! curl -sf http://127.0.0.1:3300/sitemap.xml | grep -qE '/boom<|/secret<|/api/|feed.xml' || exit 1
 curl -sf http://127.0.0.1:3300/robots.txt | grep -q 'User-agent'   # public/robots.txt wins over the generated one
 curl -sf http://127.0.0.1:3300/feed.xml | grep -q '<link>https://hello.nowaki.dev/docs/intro</link>'
 # page scripts: bundled to /_nowaki/stamp.<hash>.js with preloads for its chunks, counted in the
@@ -285,17 +296,17 @@ test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3300/og/intro.jp
 # htmlAttrs / bodyAttrs in the Rust-assembled document
 curl -sf http://127.0.0.1:3300/styled | grep -q '<html lang="ja" data-sheet-rev="3" data-theme="paper" data-nowaki-attrs="data-sheet-rev data-theme">'
 curl -sf http://127.0.0.1:3300/styled | grep -q '<body class="site styled-page" data-site="hello" data-quote="&quot;&lt;x&gt;&quot;" data-nowaki-attrs="class data-site data-quote">'
-! curl -sf http://127.0.0.1:3300/styled | grep -q 'onload'
+! curl -sf http://127.0.0.1:3300/styled | grep -q 'onload' || exit 1
 # public/ (copied to dist/public): as-is, ETag + 304, HEAD, dotfiles hidden except .well-known
 test -f examples/hello/dist/public/robots.txt
-! test -e examples/hello/dist/public/.hidden
+! test -e examples/hello/dist/public/.hidden || exit 1
 curl -s -D - http://127.0.0.1:3300/robots.txt | grep -qi '^content-type: text/plain'
 curl -s -D - -o /dev/null http://127.0.0.1:3300/robots.txt | grep -qi '^cache-control: public, no-cache'
 curl -s -D - -o /dev/null http://127.0.0.1:3300/robots.txt | grep -qi '^x-content-type-options: nosniff'
 curl -sf http://127.0.0.1:3300/raw.css | grep -q '^\.raw { color: red; }'
 curl -sf "http://127.0.0.1:3300/media/hello%20world.txt" | grep -q 'hello from public'
 curl -sf http://127.0.0.1:3300/.well-known/security.txt | grep -q 'Contact:'
-! curl -sf http://127.0.0.1:3300/.hidden | grep -q 'never served'
+! curl -sf http://127.0.0.1:3300/.hidden | grep -q 'never served' || exit 1
 PUB_ETAG=$(curl -s -D - -o /dev/null http://127.0.0.1:3300/robots.txt | tr -d '\r' | awk 'tolower($1)=="etag:" {print $2}')
 test -n "$PUB_ETAG"
 test "$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $PUB_ETAG" http://127.0.0.1:3300/robots.txt)" = 304
@@ -319,7 +330,7 @@ grep -q 'data-testid="early"' /tmp/nowaki-early.html
 grep -q '<title>Early streaming' /tmp/nowaki-early.html
 test "$(curl -s -o /tmp/nowaki-early-fail.html -w '%{http_code}' 'http://127.0.0.1:3300/stream-early?fail=1')" = 200
 grep -q "Couldn't display this page" /tmp/nowaki-early-fail.html
-! grep -q 'the data source is down' /tmp/nowaki-early-fail.html   # no message in production
+! grep -q 'the data source is down' /tmp/nowaki-early-fail.html || exit 1  # no message in production
 curl -s 'http://127.0.0.1:3300/stream-early?go=1' | grep -q 'location.replace("/about")'
 # The build's first-load JS report matches the chunks each page actually references.
 test -f examples/hello/dist/route-js.json
@@ -329,15 +340,20 @@ node scripts/route-js-e2e.mjs http://127.0.0.1:3300 examples/hello
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) sleep 3 ;; esac
 kill $START_PID
 bash scripts/ci/assert-no-orphans.sh $START_PID
+# Observability on: one trace from the Rust front through the sidecar (a local OTLP receiver on
+# 3311), Server-Timing with NOWAKI_SERVER_TIMING=1, NOWAKI_LOG=json lines; then all of it off
+# (servers on 3312 and 3313)
+node scripts/otel-e2e.mjs --port 3311
 # nowaki.config redirects / rewrites / headers / basePath / trailingSlash at the Rust front
 # (a generated app; listens on 3306 and 3307)
 node scripts/rules-e2e.mjs start --port 3306
 # nowaki.config i18n at the Rust front (generated apps; listen on 3308, 3309 for i18n +
 # basePath + trailingSlash "never" + a slot, and 3310 for locale detection)
 node scripts/i18n-e2e.mjs start --port 3308
-# examples/gallery (the v0.18 exit-criteria app) at the Rust front on 3330, and env.ts stopping
-# `nowaki build` / `nowaki start` without a required variable
-node scripts/gallery-e2e.mjs start env --port 3330
+# examples/gallery (the v0.18 + v0.19 exit-criteria app) at the Rust front on 3330 (an edited post
+# is fresh on the next request), env.ts stopping `nowaki build` / `nowaki start` without a
+# required variable, and one post request as one OpenTelemetry trace (a receiver on 3331)
+node scripts/gallery-e2e.mjs start env otel --port 3330
 # Stack traces from the built server modules name the real routes/ files (source maps), on 3318
 node scripts/sourcemap-e2e.mjs start --port 3318
 # Rooms survive a restart: on SIGTERM the sidecar wrote them to .nowaki/live-rooms.json.

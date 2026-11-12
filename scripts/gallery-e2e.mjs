@@ -1,16 +1,22 @@
 // examples/gallery end to end: the v0.18 exit-criteria app (basePath "/gallery", i18n en/ja with
 // detection, a modal gallery through an intercepting route, a session behind a route group's
-// middleware, config redirects / headers, env.ts) over HTTP on each server. Builds the example in
-// place.
+// middleware, config redirects / headers, env.ts) over HTTP on each server, and the v0.19 one: a
+// signed-in caption edit on a cached (ISR, tagged) post calls revalidateTag, and the next GET is
+// fresh on `nowaki start`, on the Cloudflare worker's cache and behind Vercel's CDN, while the
+// other posts stay cached; one request is one OpenTelemetry trace. Builds the example in place.
 //   node scripts/gallery-e2e.mjs <mode>... [--port 5130]
 // Modes: start (`nowaki start`), dev (`nowaki dev`), node (node adapter), cloudflare (the worker's
-// fetch, called in Node), static (prerender output: what a static host can serve; the session
-// pages make the full app refuse it), env (a missing or invalid variable stops `nowaki build` and
-// `nowaki start`, named, its value never printed). NOWAKI_BIN overrides the binary (default
+// fetch, called in Node, then with a stand-in for caches.default and the zone purge API), vercel
+// (the generated function with a fake @vercel/functions, behind a stand-in for Vercel's CDN that
+// caches by s-maxage and deletes by Vercel-Cache-Tag), static (prerender output: what a static
+// host can serve; the session pages make the full app refuse it), env (a missing or invalid
+// variable stops `nowaki build` and `nowaki start`, named, its value never printed), otel
+// (`nowaki start` exporting to a local OTLP receiver on port+1: route, middleware, loader and
+// render of one request in one trace). NOWAKI_BIN overrides the binary (default
 // target/debug/nowaki). The browser half is scripts/gallery-browser-test.mjs.
 
 import { spawn, spawnSync } from "node:child_process";
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -23,7 +29,7 @@ const portArg = args.indexOf("--port");
 const PORT = portArg >= 0 ? Number(args[portArg + 1]) : 5130;
 const modes = args.filter((a, i) => !a.startsWith("--") && (portArg < 0 || i !== portArg + 1));
 const BIN = process.env.NOWAKI_BIN ?? path.join(ROOT, "target/debug/nowaki" + (process.platform === "win32" ? ".exe" : ""));
-const KNOWN = ["start", "dev", "node", "cloudflare", "static", "env"];
+const KNOWN = ["start", "dev", "node", "cloudflare", "vercel", "static", "env", "otel"];
 if (!modes.length || modes.some((m) => !KNOWN.includes(m))) {
   console.error(`usage: node scripts/gallery-e2e.mjs <${KNOWN.join("|")}>... [--port 5130]`);
   process.exit(2);
@@ -101,8 +107,11 @@ const httpClient = (port) => (p, { method = "GET", headers = {}, body } = {}) =>
   });
 
 // The Cloudflare worker's fetch, called in Node, with an ASSETS binding serving dist/worker/assets
-// and the variables as Worker bindings.
-async function workerClient(dir) {
+// and the variables as Worker bindings. With `cache`, also a stand-in for caches.default (honoring
+// the Cache-Tag the worker stores) and for the zone purge API in fetch (which deletes the entries
+// carrying a purged tag, as Cloudflare does), and an execution context whose waitUntil work
+// `flush()` awaits.
+async function workerClient(dir, { cache = false } = {}) {
   const workerDir = path.join(dir, "dist/worker");
   const worker = (await import(pathToFileURL(path.join(workerDir, "index.js")).href)).default;
   const ASSETS = {
@@ -112,12 +121,95 @@ async function workerClient(dir) {
     },
   };
   const bindings = { ASSETS, GALLERY_ADMIN_PASSWORD: PASSWORD, NOWAKI_SESSION_SECRET: SECRET };
-  return async (p, { method = "GET", headers = {}, body } = {}) => {
-    const res = await worker.fetch(new Request(`https://app.example${p}`, { method, headers, body, redirect: "manual" }), bindings);
+  const waits = [];
+  const exec = cache ? { waitUntil: (p) => waits.push(p) } : undefined;
+  const zonePurges = [];
+  if (cache) {
+    const store = new Map();
+    globalThis.caches = {
+      default: {
+        match: async (k) => {
+          const e = store.get(String(k));
+          return e ? new Response(e.body, { headers: e.headers }) : undefined;
+        },
+        put: async (k, res) => {
+          const tags = (res.headers.get("cache-tag") ?? "").split(",").filter(Boolean);
+          store.set(String(k), { body: await res.text(), headers: [...res.headers].filter(([n]) => n !== "cache-tag"), tags });
+        },
+        delete: async (k) => store.delete(String(k)),
+      },
+    };
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      if (!String(url).startsWith("https://api.cloudflare.com/")) return realFetch(url, init);
+      const { tags } = JSON.parse(init.body);
+      zonePurges.push({ url: String(url), tags });
+      for (const [k, e] of store) if (e.tags.some((t) => tags.some((x) => x.toLowerCase() === t.toLowerCase()))) store.delete(k);
+      return new Response('{"success":true}');
+    };
+    bindings.CLOUDFLARE_ZONE_ID = "gallery-zone";
+    bindings.CLOUDFLARE_API_TOKEN = "gallery-token";
+  }
+  const req = async (p, { method = "GET", headers = {}, body } = {}) => {
+    const res = await worker.fetch(new Request(`https://app.example${p}`, { method, headers, body, redirect: "manual" }), bindings, exec);
     const out = Object.fromEntries(res.headers);
     if (res.headers.getSetCookie().length) out["set-cookie"] = res.headers.getSetCookie();
     return { status: res.status, headers: out, body: await res.text() };
   };
+  req.flush = () => Promise.all(waits.splice(0));
+  req.zonePurges = zonePurges;
+  return req;
+}
+
+// The function `nowaki build --adapter vercel` generates, served on `port`, behind a stand-in for
+// Vercel's CDN: a GET whose response has `s-maxage` (and no Set-Cookie) is kept per path with the
+// tags of its Vercel-Cache-Tag, answered from there (`x-vercel-cache: HIT`) until the fake
+// @vercel/functions' dangerouslyDeleteByTag drops the entries carrying one of the tags. The app is
+// a copy with that package in node_modules, which vercel-build.mjs copies into the function.
+async function vercelClient(port) {
+  const dir = path.join(tmp, "vercel");
+  const skip = new Set(["node_modules", "dist", ".nowaki", ".vercel"]);
+  cpSync(APP, dir, { recursive: true, filter: (src) => !skip.has(path.basename(src)) });
+  linkModules(path.join(APP, "node_modules"), path.join(dir, "node_modules"));
+  const fake = path.join(dir, "node_modules/@vercel/functions");
+  mkdirSync(fake, { recursive: true });
+  writeFileSync(path.join(fake, "package.json"), JSON.stringify({ name: "@vercel/functions", version: "3.11.1", main: "index.js" }));
+  writeFileSync(path.join(fake, "index.js"), "exports.dangerouslyDeleteByTag = async (tags) => { globalThis.__galleryCdnDelete(tags); };\n");
+  const log = build(dir, "vercel");
+  check("vercel: the build includes @vercel/functions (purges on)", /@vercel\/functions included/.test(log), log.slice(-800));
+
+  const store = new Map();
+  const deletes = [];
+  globalThis.__galleryCdnDelete = (tags) => {
+    deletes.push(tags);
+    for (const [k, e] of store) if (e.tags.some((t) => tags.includes(t))) store.delete(k);
+  };
+  // The function reads its variables from process.env; VERCEL=1 is what Vercel sets.
+  Object.assign(process.env, { GALLERY_ADMIN_PASSWORD: PASSWORD, NOWAKI_SESSION_SECRET: SECRET, VERCEL: "1" });
+  const func = path.join(dir, ".vercel/output/functions/index.func/index.mjs");
+  const { default: handle } = await import(pathToFileURL(func).href);
+  const server = http.createServer(handle);
+  await new Promise((r) => server.listen(port, "127.0.0.1", r));
+  const origin = httpClient(port);
+  const req = async (p, opts = {}) => {
+    const get = (opts.method ?? "GET") === "GET";
+    const key = p.split("?")[0];
+    if (get && store.has(key)) {
+      const e = store.get(key);
+      return { status: e.status, headers: { ...e.headers, "x-vercel-cache": "HIT" }, body: e.body };
+    }
+    const r = await origin(p, opts);
+    const cc = String(r.headers["cache-control"] ?? "");
+    if (get && r.status === 200 && /\bs-maxage=\d+/.test(cc) && !/\bprivate\b/.test(cc) && !r.headers["set-cookie"]) {
+      const tags = String(r.headers["vercel-cache-tag"] ?? "").split(",").filter(Boolean);
+      store.set(key, { status: r.status, headers: r.headers, body: r.body, tags });
+      return { ...r, headers: { ...r.headers, "x-vercel-cache": "MISS" } };
+    }
+    return r;
+  };
+  req.deletes = deletes;
+  req.close = () => new Promise((r) => server.close(r));
+  return req;
 }
 
 const cookieOf = (r) => [r.headers["set-cookie"] ?? []].flat().find((c) => c.startsWith("gallery_session=")) ?? "";
@@ -232,6 +324,110 @@ async function checks(label, req, origin, { dev = false } = {}) {
   check(t("sign-out clears the cookie"), /^gallery_session=;.*Max-Age=0;.*Path=\/gallery/.test(cleared), cleared);
 }
 
+// v0.19: an action updates a post, and the next request for it is fresh. `req` answers from its
+// cache (x-nowaki-cache on start and the worker, x-vercel-cache from the CDN stand-in) and `flush`
+// waits for the worker's background cache writes.
+const cacheOf = (r) => r.headers["x-nowaki-cache"] ?? r.headers["x-vercel-cache"];
+const captionOf = (r) => r.body.match(/<p id="caption">([^<]*)<\/p>/)?.[1];
+async function postChecks(label, req, origin, { flush = async () => {} } = {}) {
+  const t = (s) => `${label}: ${s}`;
+  const get = async (p, opts) => {
+    const r = await req(p, opts);
+    await flush();
+    return r;
+  };
+  let r = await get("/gallery/posts/1");
+  check(t("/gallery/posts/1 is the post, with its caption"), r.status === 200 && r.body.includes('<main id="post-page"><h1>Dune</h1>') && captionOf(r) === "A dune at noon.", `${r.status} ${r.body.slice(0, 300)}`);
+  check(t("the post is ISR (shared cache-control)"), /public, s-maxage=3600/.test(r.headers["cache-control"] ?? ""), r.headers["cache-control"]);
+  check(t("the photo carries its view-transition-name"), r.body.includes('style="view-transition-name:photo-1;"'), r.body.match(/<img[^>]*>/)?.[0]);
+  check(t("the caption form posts to the post, under the base"), r.body.includes('<form method="post" id="edit" action="/gallery/posts/1">'));
+  check(t("the back link is a View Transition link"), r.body.includes('<a id="all-posts" href="/gallery/posts" data-nowaki-transition>'), r.body.match(/<a id="all-posts"[^>]*>/)?.[0]);
+  check(t("no internal cache headers reach the client"), !Object.keys(r.headers).some((k) => ["x-nowaki-tags", "x-nowaki-revalidate", "x-nowaki-vary", "cache-tag"].includes(k)), Object.keys(r.headers).join());
+  r = await get("/gallery/posts/1");
+  check(t("the next GET of the post is a cache HIT"), cacheOf(r) === "HIT" && captionOf(r) === "A dune at noon.", `${cacheOf(r)} ${captionOf(r)}`);
+  for (const p of ["/gallery/ja/posts/1", "/gallery/posts/2", "/gallery/posts"]) {
+    await get(p);
+    r = await get(p);
+    check(t(`${p} is cached too`), r.status === 200 && cacheOf(r) === "HIT", `${r.status} ${cacheOf(r)}`);
+  }
+  check(t("the list links each post as a View Transition, thumbnails named like the post's photo"), r.body.includes('id="post-1" href="/gallery/posts/1" data-nowaki-transition') && r.body.includes("view-transition-name:photo-2;"), r.body.slice(0, 2000));
+
+  const edit = (caption, headers = {}) => form(origin, `caption=${encodeURIComponent(caption)}`, headers.cookie);
+  // Signed out: the posts' middleware sends the POST to sign in; nothing changes.
+  r = await req("/gallery/posts/1", edit("signed out"));
+  check(t("a signed-out edit → 303 sign in"), r.status === 303 && /\/gallery\/login$/.test(r.headers.location ?? ""), `${r.status} ${r.headers.location}`);
+  r = await req("/gallery/login", form(origin, `password=${PASSWORD}`));
+  const session = cookieOf(r).split(";")[0];
+  check(t("signed in for the edit"), r.status === 302 && session.startsWith("gallery_session="), `${r.status}`);
+  // Cross-site, with the cookie: the session reads as empty there, so it is refused the same way.
+  r = await req("/gallery/posts/1", form("http://evil.test", "caption=cross-site", session));
+  check(t("a cross-site edit is refused"), (r.status === 303 && /\/login$/.test(r.headers.location ?? "")) || r.status === 403, `${r.status} ${r.headers.location}`);
+  r = await req("/gallery/posts/1", edit("", { cookie: session }));
+  check(t("an empty caption is a 400"), r.status === 400, `${r.status}`);
+  r = await get("/gallery/posts/1");
+  check(t("none of that purged the post"), cacheOf(r) === "HIT" && captionOf(r) === "A dune at noon.", `${cacheOf(r)} ${captionOf(r)}`);
+
+  const caption = `Edited on ${label} ${Date.now()}`;
+  r = await req("/gallery/posts/1", edit(caption, { cookie: session }));
+  check(t("the edit → 303 back to the post"), r.status === 303 && /\/gallery\/posts\/1$/.test(r.headers.location ?? ""), `${r.status} ${r.headers.location}`);
+  r = await get("/gallery/posts/1");
+  check(t("the next GET is fresh: a MISS with the new caption"), r.status === 200 && cacheOf(r) === "MISS" && captionOf(r) === caption, `${cacheOf(r)} ${captionOf(r)}`);
+  r = await get("/gallery/ja/posts/1");
+  check(t("the post in the other locale is fresh too (same tag)"), cacheOf(r) === "MISS" && captionOf(r) === caption, `${cacheOf(r)} ${captionOf(r)}`);
+  r = await get("/gallery/posts/2");
+  check(t("another post stays cached (revalidateTag(\"photo:1\") only)"), cacheOf(r) === "HIT", `${cacheOf(r)}`);
+  r = await get("/gallery/posts");
+  check(t("the list stays cached"), cacheOf(r) === "HIT", `${cacheOf(r)}`);
+  r = await get("/gallery/posts/1");
+  check(t("then the new render is cached"), cacheOf(r) === "HIT" && captionOf(r) === caption, `${cacheOf(r)} ${captionOf(r)}`);
+}
+
+// One request, one trace: `nowaki start` exports to a receiver on `port + 1`. The Rust front's
+// SERVER span (child of the client's traceparent), its CLIENT span to the sidecar, the sidecar's
+// SERVER span, and under it the posts middleware, the loader and the render.
+async function otelChecks(port) {
+  const spans = [];
+  const receiver = http.createServer((q, res) => {
+    const chunks = [];
+    q.on("data", (c) => chunks.push(c));
+    q.on("end", () => {
+      if (q.method === "POST" && q.url === "/v1/traces") {
+        for (const rs of JSON.parse(Buffer.concat(chunks).toString("utf8")).resourceSpans ?? []) {
+          const lang = (rs.resource?.attributes ?? []).find((a) => a.key === "telemetry.sdk.language")?.value?.stringValue;
+          for (const ss of rs.scopeSpans ?? []) {
+            for (const sp of ss.spans ?? []) spans.push({ ...sp, lang, attrs: Object.fromEntries((sp.attributes ?? []).map((a) => [a.key, Object.values(a.value)[0]])) });
+          }
+        }
+      }
+      res.writeHead(200, { "content-type": "application/json" }).end("{}");
+    });
+  });
+  await new Promise((r) => receiver.listen(port + 1, "127.0.0.1", r));
+  try {
+    build(APP);
+    const stop = await serve(BIN, ["start", APP, "--port", String(port)], { ...ENV, NOWAKI_ISR_WARM: "0", OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${port + 1}`, OTEL_SERVICE_NAME: "gallery-e2e", OTEL_BSP_SCHEDULE_DELAY: "100" }, port);
+    const hex = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const trace = hex(16);
+    const parent = hex(8);
+    const r = await httpClient(port)("/gallery/posts/2", { headers: { traceparent: `00-${trace}-${parent}-01` } });
+    check("otel: the post rendered (a MISS: NOWAKI_ISR_WARM=0)", r.status === 200 && r.headers["x-nowaki-cache"] === "MISS", `${r.status} ${r.headers["x-nowaki-cache"]}`);
+    const mine = () => spans.filter((sp) => sp.traceId === trace);
+    for (let i = 0; i < 100 && !(mine().some((sp) => sp.name === "render") && mine().some((sp) => sp.lang === "rust" && sp.kind === 2)); i++) await sleep(100);
+    stop();
+    const all = mine();
+    const rustServer = all.find((sp) => sp.kind === 2 && sp.lang === "rust");
+    const rustClient = all.find((sp) => sp.kind === 3 && sp.parentSpanId === rustServer?.spanId);
+    const nodeServer = all.find((sp) => sp.kind === 2 && sp.lang === "nodejs" && sp.parentSpanId === rustClient?.spanId);
+    const under = (name) => all.find((sp) => sp.lang === "nodejs" && sp.name === name && sp.parentSpanId === nodeServer?.spanId);
+    check("otel: the front's SERVER span names the route and continues the client's trace", rustServer?.name === "GET /posts/[id]" && rustServer.attrs["http.route"] === "/posts/[id]" && rustServer.parentSpanId === parent, JSON.stringify({ name: rustServer?.name, attrs: rustServer?.attrs }));
+    check("otel: a CLIENT span to the sidecar, and the sidecar's SERVER span under it", !!rustClient && !!nodeServer, all.map((sp) => `${sp.lang}:${sp.kind}:${sp.name}`).join(", "));
+    check("otel: the posts middleware, the loader and the render, under the sidecar's span", !!under("middleware /posts") && !!under("loader") && !!under("render"), all.map((sp) => `${sp.lang}:${sp.name}`).join(", "));
+    check("otel: all of it one trace from one service", all.length >= 6 && all.every((sp) => sp.traceId === trace), `${all.length} spans`);
+  } finally {
+    receiver.close();
+  }
+}
+
 // What static output can express. The full app can't be exported: its account page reads the
 // session, and a static file is the same for every visitor. A copy without the session pages can.
 function staticChecks() {
@@ -253,6 +449,7 @@ function staticChecks() {
   check("static: i18n.detect warns that a static host can't negotiate", log.includes("i18n.detect"), log.slice(-800));
   check("static: a page per locale", /<html lang="en"/.test(read("index.html")) && read("ja/index.html").includes(`<h1 id="gallery">${JA.gallery}</h1>`));
   check("static: a photo page per photo and locale", ["photo/1", "photo/3", "ja/photo/1", "ja/photo/3"].every((p) => read(`${p}/index.html`).includes('id="photo-page"')));
+  check("static: the posts and their list, per locale", ["posts", "ja/posts"].every((p) => read(`${p}/index.html`).includes('id="posts"')) && ["posts/1", "ja/posts/3"].every((p) => read(`${p}/index.html`).includes('<p id="caption">')));
   const ja = read("ja/photo/1/index.html");
   check("static: hreflang with the base", ja.includes(`hreflang="en" href="${SITE}/gallery/photo/1/"`) && ja.includes(`hreflang="ja" href="${SITE}/gallery/ja/photo/1/"`), ja.slice(0, 1500));
   const img = ja.match(/<img src="([^"]+)"/)?.[1] ?? "";
@@ -305,6 +502,7 @@ try {
       build(APP);
       const stop = await serve(BIN, ["start", APP, "--port", String(PORT)], ENV, PORT);
       await checks("start", httpClient(PORT), local(PORT));
+      await postChecks("start", httpClient(PORT), local(PORT));
       stop();
     } else if (mode === "dev") {
       const stop = await serve(BIN, ["dev", APP, "--port", String(PORT)], ENV, PORT);
@@ -314,10 +512,32 @@ try {
       build(APP, "node");
       const stop = await serve("node", [path.join(APP, "dist/server/index.mjs")], { ...ENV, PORT: String(PORT), NOWAKI_HOST: "127.0.0.1" }, PORT);
       await checks("node", httpClient(PORT), local(PORT));
+      // No ISR store here: the post goes out with its shared Cache-Control (for a CDN in front),
+      // and the headers meant for the `nowaki start` cache stay internal.
+      const post = await httpClient(PORT)("/gallery/posts/1");
+      check(
+        "node: an ISR post sends s-maxage and no internal cache headers",
+        post.status === 200 && /public, s-maxage=3600/.test(post.headers["cache-control"] ?? "") && !Object.keys(post.headers).some((k) => k.startsWith("x-nowaki-")),
+        Object.keys(post.headers).join(),
+      );
       stop();
     } else if (mode === "cloudflare") {
       build(APP, "cloudflare");
       await checks("cloudflare", await workerClient(APP), "https://app.example");
+      const cached = await workerClient(APP, { cache: true });
+      await postChecks("cloudflare", cached, "https://app.example", { flush: cached.flush });
+      check("cloudflare: the edit purged by tag through the zone purge API", cached.zonePurges.length === 1 && cached.zonePurges[0].url.endsWith("/zones/gallery-zone/purge_cache") && cached.zonePurges[0].tags.join() === "t:photo:1", JSON.stringify(cached.zonePurges));
+      delete globalThis.caches;
+    } else if (mode === "vercel") {
+      const req = await vercelClient(PORT);
+      try {
+        await postChecks("vercel", req, local(PORT));
+        check("vercel: the edit deleted the tag through @vercel/functions", req.deletes.length === 1 && req.deletes[0].join() === "t:photo:1", JSON.stringify(req.deletes));
+      } finally {
+        await req.close();
+      }
+    } else if (mode === "otel") {
+      await otelChecks(PORT);
     } else if (mode === "static") {
       staticChecks();
     } else if (mode === "env") {

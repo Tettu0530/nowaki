@@ -7,9 +7,9 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 
-/// The oldest `@nowaki-dev/runtime` this CLI supports. From 0.19.0 the CLI and the runtime share
-/// a version, and this becomes `env!("CARGO_PKG_VERSION")`.
-pub const MIN_RUNTIME: &str = "0.17.1";
+/// The oldest `@nowaki-dev/runtime` this CLI supports. Since 0.19.3 the CLI and the runtime are
+/// released together under one version, so it is the CLI's own.
+pub const MIN_RUNTIME: &str = env!("CARGO_PKG_VERSION");
 
 /// Fails when the app's `@nowaki-dev/runtime` is older than [`MIN_RUNTIME`]. A missing runtime
 /// passes: the command that needs it reports that itself.

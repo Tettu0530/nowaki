@@ -282,18 +282,40 @@ impl LiveHub {
         self.rooms.lock().unwrap().get(room).copied().unwrap_or(0)
     }
 
-    /// Open connections and (room, connections), sorted by room. For the dev MCP.
-    pub fn snapshot(&self) -> (usize, Vec<(String, usize)>) {
-        let mut rooms: Vec<_> = self
+    /// Read-only counters for the dev tools (MCP `live` / `dev_config`, the dev toolbar): open
+    /// connections, the cap, and connections per room, sorted by room.
+    pub fn stats(&self) -> LiveStats {
+        let mut rooms: Vec<RoomStats> = self
             .rooms
             .lock()
             .unwrap()
             .iter()
-            .map(|(r, n)| (r.clone(), *n))
+            .map(|(room, n)| RoomStats {
+                room: room.clone(),
+                connections: *n,
+            })
             .collect();
-        rooms.sort();
-        (self.count(), rooms)
+        rooms.sort_by(|a, b| a.room.cmp(&b.room));
+        LiveStats {
+            connections: self.count(),
+            max: self.max,
+            rooms,
+        }
     }
+}
+
+/// [`LiveHub::stats`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct LiveStats {
+    pub connections: usize,
+    pub max: usize,
+    pub rooms: Vec<RoomStats>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RoomStats {
+    pub room: String,
+    pub connections: usize,
 }
 
 /// Rooms this session is in: its islands' `room:<id>` topics.
@@ -695,11 +717,27 @@ async fn render_once(
         "load": ev.load.as_ref().map(|topic| json!({ "topic": topic })),
     });
     let url = format!("http://127.0.0.1:{}/__nowaki/live-render", ctx.sidecar_port);
+    // One trace per event or publish refresh; the sidecar's span joins it through `traceparent`.
+    let span = crate::obs::get().otel().map(|o| {
+        let kind = if ev.load.is_some() {
+            "refresh"
+        } else {
+            "event"
+        };
+        let mut s = o.root(format!("live {name}"), crate::obs::Kind::Server, None);
+        s.attr("nowaki.live.kind", crate::obs::Attr::Str(kind.to_string()));
+        (o, s)
+    });
+    let traceparent = span.as_ref().map(|(_, s)| s.traceparent());
     let call = async {
-        let r = ctx
+        let mut req = ctx
             .http
             .post(&url)
-            .header("content-type", "application/json")
+            .header("content-type", "application/json");
+        if let Some(tp) = &traceparent {
+            req = req.header("traceparent", tp.as_str());
+        }
+        let r = req
             .body(body.to_string())
             .send()
             .await
@@ -732,10 +770,21 @@ async fn render_once(
             shareable: rv.get("shareable").and_then(|v| v.as_bool()) == Some(true),
         })
     };
-    match tokio::time::timeout(ctx.timeout, call).await {
+    let result = match tokio::time::timeout(ctx.timeout, call).await {
         Ok(r) => r,
         Err(_) => Err(RenderError::Timeout),
+    };
+    if let Some((otel, mut s)) = span {
+        if let Err(e) = &result {
+            s.error = true;
+            s.attr(
+                "nowaki.live.error",
+                crate::obs::Attr::Str(e.reason().to_string()),
+            );
+        }
+        otel.end(s);
     }
+    result
 }
 
 /// Store the new state and push the patch, or tell the client the event failed.
@@ -760,7 +809,15 @@ async fn apply_rendered(
     } = match r.result {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("[nowaki live] {} re-render {}", r.name, e.reason());
+            if crate::obs::get().json {
+                crate::obs::log(
+                    "warn",
+                    &format!("live {} re-render {}", r.name, e.reason()),
+                    &[],
+                );
+            } else {
+                eprintln!("[nowaki live] {} re-render {}", r.name, e.reason());
+            }
             return send_error(socket, page, &r.nid, e.reason()).await;
         }
     };
@@ -1136,5 +1193,36 @@ mod tests {
         assert!(q.pop().is_none());
         receive(&mut islands, &mut page, &mut q, event).unwrap();
         assert_eq!(q.pop().map(|e| e.nid), Some("L0".into()));
+    }
+
+    #[test]
+    fn stats_count_connections_and_rooms() {
+        let hub = LiveHub::new();
+        assert_eq!(hub.stats().connections, 0);
+        assert!(hub.join().is_some());
+        assert!(hub.join().is_some());
+        hub.room_enter("b");
+        hub.room_enter("a");
+        hub.room_enter("a");
+        let s = hub.stats();
+        assert_eq!(s.connections, 2);
+        assert_eq!(
+            s.rooms,
+            vec![
+                RoomStats {
+                    room: "a".into(),
+                    connections: 2
+                },
+                RoomStats {
+                    room: "b".into(),
+                    connections: 1
+                },
+            ]
+        );
+        hub.room_exit("b");
+        hub.leave();
+        let s = hub.stats();
+        assert_eq!(s.connections, 1);
+        assert_eq!(s.rooms.len(), 1);
     }
 }

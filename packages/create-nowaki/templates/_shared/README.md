@@ -51,8 +51,9 @@ actions/     "use server" RPC modules (optional)
 ## Production
 
 Use `npm run build` then `npm run start` (or a deploy adapter). Do not run
-`nowaki dev` on the public internet. Cookie-authenticated API routes should export
-`csrf = true`; live islands need a stable `NOWAKI_LIVE_SECRET`. See `AGENTS.md`
+`nowaki dev` on the public internet. API routes reject cross-site writes by default
+(webhooks opt out with `export const csrf = false`); live islands need a stable
+`NOWAKI_LIVE_SECRET`. See `AGENTS.md`
 § Security and [nowaki.dev/docs](https://nowaki.dev/docs).
 
 Docs: <https://nowaki.dev/docs>

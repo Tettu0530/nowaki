@@ -145,6 +145,12 @@ jobs:
         run: node scripts/handler-test.mjs
       - name: On-demand revalidation (purge encoding vs the shared fixture, tags, purge on the response, endpoint)
         run: node scripts/revalidate-test.mjs
+      - name: CDN purge per adapter (Vercel-Cache-Tag encoding, purge before the response, timeout, generated function)
+        run: node scripts/purge-adapters-test.mjs
+      - name: Cloudflare Worker ISR cache (Cache API HIT / STALE / variants, never per-user pages, local delete, zone purge by tag)
+        run: node scripts/cf-cache-test.mjs
+      - name: Observability (traceparent / sampler / OTLP shape vs the shared fixture, Server-Timing, exporter, OTel API bridge, JSON logs)
+        run: node scripts/otel-test.mjs
       - name: i18n (locale split and localePath against the shared fixture, hreflang, per-locale content)
         run: node scripts/i18n-test.mjs
       - name: Sessions (encryption, tampering, expiry, key rotation, store mode, CSRF read-only)
@@ -218,7 +224,9 @@ jobs:
           # the next / follows it (a generated app on 8251).
           PORT=8251 node scripts/locale-browser-test.mjs
           # examples/gallery, the v0.18 exit criteria: modal on navigation, full page on reload,
-          # under /gallery in ja, the language switcher's cookie, sign-in and sign-out (8252).
+          # under /gallery in ja, the language switcher's cookie, sign-in and sign-out (8252); and
+          # v0.19's: the post list's View Transition and its fallbacks, then in `nowaki dev` (8253)
+          # an island edit that keeps its state and the toolbar's islands and JS budget.
           node scripts/gallery-browser-test.mjs --port 8252
 
   jetstream-load:

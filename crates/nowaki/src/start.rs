@@ -69,6 +69,8 @@ struct ProdState {
     isr: Arc<IsrCache>,
     /// nowaki.config routing; `None` (no routing.json) costs nothing per request.
     front: Option<Arc<crate::front::Front>>,
+    /// The last sidecar ping of `GET /__nowaki/health` and its result.
+    health: Mutex<Option<(Instant, bool)>>,
 }
 
 /// In-memory ISR cache (routes with `export const revalidate = <seconds>`, stale-while-revalidate).
@@ -111,7 +113,8 @@ impl Purge {
 /// browser, on either branch of `proxy`.
 const PURGE_HEADER: &str = "x-nowaki-purge";
 const TAGS_HEADER: &str = "x-nowaki-tags";
-const INTERNAL_RESPONSE_HEADERS: [&str; 3] = [PURGE_HEADER, TAGS_HEADER, "x-nowaki-route"];
+const ROUTE_HEADER: &str = "x-nowaki-route";
+const INTERNAL_RESPONSE_HEADERS: [&str; 3] = [PURGE_HEADER, TAGS_HEADER, ROUTE_HEADER];
 
 /// Page responses drop every `x-nowaki-*` header; passthrough ones keep those the browser runtime
 /// reads (`x-nowaki-slot`) and drop these.
@@ -198,6 +201,8 @@ struct CacheEntry {
     path: Box<str>,
     /// `export const tags` of the render (`x-nowaki-tags`): what `revalidateTag` matches.
     tags: Box<[Box<str>]>,
+    /// The route pattern (`x-nowaki-route`, sent only while tracing), for a hit's span name.
+    route: Option<Box<str>>,
 }
 
 impl IsrCache {
@@ -297,6 +302,12 @@ fn tags_of(h: &reqwest::header::HeaderMap) -> Box<[Box<str>]> {
         .unwrap_or_default()
 }
 
+fn route_of(h: &reqwest::header::HeaderMap) -> Option<Box<str>> {
+    h.get(ROUTE_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(Box::from)
+}
+
 /// Purges what a sidecar response names in `x-nowaki-purge` (a revalidate call during the request).
 fn purge_from(isr: &IsrCache, h: &reqwest::header::HeaderMap) {
     if let Some(v) = h.get(PURGE_HEADER).and_then(|v| v.to_str().ok()) {
@@ -321,6 +332,8 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         );
     }
 
+    // Read the observability settings now (the OTLP exporter task starts on this runtime).
+    let obs = crate::obs::get();
     let live_hub = crate::live::LiveHub::new();
     let mut child = Command::new("node")
         .arg("--enable-source-maps")
@@ -348,7 +361,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         if purge_line(&line).is_some() {
             continue;
         }
-        println!("[sidecar] {line}");
+        crate::obs::sidecar_line(&line);
     }
     let sidecar_port =
         sidecar_port.ok_or_else(|| anyhow!("prod-sidecar exited without reporting READY"))?;
@@ -364,7 +377,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
                 Some(purge) => {
                     isr_for_lines.purge(purge);
                 }
-                None => println!("[sidecar] {l}"),
+                None => crate::obs::sidecar_line(&l),
             }
         }
     });
@@ -396,12 +409,14 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         live_hub,
         isr,
         front: front.clone(),
+        health: Mutex::new(None),
     });
 
     let warm_state = state.clone();
     let base = front.clone().filter(|f| f.has_base());
     let mut app = Router::new()
         .route("/__nowaki/live", get(live_ws))
+        .route(HEALTH_PATH, get(health))
         .fallback(any(handle))
         .with_state(state);
     // Inside the security-headers layer, so a rule's header wins over a default one.
@@ -418,15 +433,27 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
     let actual = listener.local_addr()?.port();
     // Also report the actual port when PORT=0 (a marker grepped by prerender / adapters / bench; keep it).
     println!("NOWAKI_START_READY {actual}");
-    crate::ui::server_banner(
-        "Nowaki (production)",
-        env!("CARGO_PKG_VERSION"),
-        actual,
-        started.elapsed().as_millis(),
-        &["Rust front", "Node renderer"],
-        expose || host == "0.0.0.0",
-        None,
-    );
+    if obs.json {
+        crate::obs::log(
+            "info",
+            "listening",
+            &[
+                ("host", host.as_str().into()),
+                ("port", actual.into()),
+                ("ready_ms", (started.elapsed().as_millis() as u64).into()),
+            ],
+        );
+    } else {
+        crate::ui::server_banner(
+            "Nowaki (production)",
+            env!("CARGO_PKG_VERSION"),
+            actual,
+            started.elapsed().as_millis(),
+            &["Rust front", "Node renderer"],
+            expose || host == "0.0.0.0",
+            None,
+        );
+    }
     if isr_warm_enabled() {
         tokio::spawn(warm_isr(warm_state, format!("127.0.0.1:{actual}")));
     }
@@ -437,6 +464,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
     }
     // SIGTERM first: the sidecar writes Jetstream rooms to disk before it exits.
     crate::shutdown::stop_child(&mut child, std::time::Duration::from_secs(3)).await;
+    crate::obs::flush(Duration::from_secs(2)).await;
     Ok(())
 }
 
@@ -494,6 +522,44 @@ fn prod_ws_origin_ok(headers: &axum::http::HeaderMap) -> bool {
     }
 }
 
+const HEALTH_PATH: &str = "/__nowaki/health";
+
+/// `GET /__nowaki/health`: 200 while the sidecar answers its own health path within a second, 503
+/// otherwise. The result is reused for a second, so a flood of probes costs one ping per second.
+/// No data in it, never cached.
+async fn health(State(state): State<Arc<ProdState>>) -> Response {
+    let cached = *state.health.lock().unwrap();
+    let ok = match cached {
+        Some((at, ok)) if at.elapsed() < Duration::from_secs(1) => ok,
+        _ => {
+            let url = format!("http://127.0.0.1:{}{HEALTH_PATH}", state.sidecar_port);
+            let ok = matches!(
+                state.http.get(&url).timeout(Duration::from_secs(1)).send().await,
+                Ok(r) if r.status().is_success()
+            );
+            *state.health.lock().unwrap() = Some((Instant::now(), ok));
+            ok
+        }
+    };
+    let (status, body) = if ok {
+        (StatusCode::OK, r#"{"status":"ok"}"#)
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            r#"{"status":"unavailable"}"#,
+        )
+    };
+    (
+        status,
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
 /// Sent by the client router for an intercepting route's fragment (handler.mjs `renderIntercept`).
 const INTERCEPT_HEADER: &str = "x-nowaki-intercept";
 
@@ -505,6 +571,99 @@ fn isr_eligible(method: &Method, headers: &axum::http::HeaderMap) -> bool {
 }
 
 async fn handle(State(state): State<Arc<ProdState>>, req: Request) -> Response {
+    let obs = crate::obs::get();
+    if !obs.active() {
+        return route(state, req).await;
+    }
+    observed(obs, state, req).await
+}
+
+const SERVER_TIMING: &str = "server-timing";
+
+/// The route pattern the sidecar matched (`x-nowaki-route`), from `proxy` to `observed`.
+#[derive(Clone)]
+struct RouteName(String);
+
+/// The request's SERVER span, from `observed` to `proxy` (the parent of its CLIENT span).
+#[derive(Clone)]
+struct ServerSpan(crate::obs::Span);
+
+/// A request with Server-Timing, JSON logs or tracing on: a SERVER span around it (an incoming
+/// `traceparent` is its parent), `isr` and `total` appended to Server-Timing, and an access log line.
+async fn observed(
+    obs: &'static crate::obs::Obs,
+    state: Arc<ProdState>,
+    mut req: Request,
+) -> Response {
+    use crate::obs::{Attr, Kind};
+    let started = Instant::now();
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let span = obs.otel().map(|o| {
+        let parent = req
+            .headers()
+            .get("traceparent")
+            .and_then(|v| v.to_str().ok())
+            .and_then(crate::obs::parse_traceparent);
+        o.root(method.as_str().to_string(), Kind::Server, parent)
+    });
+    if let Some(s) = &span {
+        req.extensions_mut().insert(ServerSpan(s.clone()));
+    }
+    let mut resp = route(state, req).await;
+    let isr = match resp.headers().get("x-nowaki-cache").map(|v| v.as_bytes()) {
+        Some(b"HIT") => Some("HIT"),
+        Some(b"STALE") => Some("STALE"),
+        Some(b"MISS") => Some("MISS"),
+        _ => None,
+    };
+    if obs.timing {
+        let value = crate::obs::server_timing(
+            resp.headers()
+                .get(SERVER_TIMING)
+                .and_then(|v| v.to_str().ok()),
+            isr,
+            started.elapsed(),
+        );
+        if let Ok(v) = header::HeaderValue::from_str(&value) {
+            resp.headers_mut().insert(SERVER_TIMING, v);
+        }
+    }
+    let route = resp.extensions_mut().remove::<RouteName>();
+    let status = resp.status().as_u16();
+    let span = span.map(|mut s| {
+        if let Some(r) = &route {
+            s.name = format!("{method} {}", r.0);
+        }
+        s.attr("http.request.method", Attr::Str(method.to_string()));
+        s.attr("url.path", Attr::Str(path.clone()));
+        if let Some(r) = route {
+            s.attr("http.route", Attr::Str(r.0));
+        }
+        s.attr("http.response.status_code", Attr::Int(i64::from(status)));
+        if let Some(i) = isr {
+            s.attr("nowaki.isr", Attr::Str(i.to_string()));
+        }
+        s.error = status >= 500;
+        s
+    });
+    if obs.json {
+        crate::obs::access_log(
+            method.as_str(),
+            &path,
+            status,
+            started.elapsed(),
+            isr,
+            span.as_ref(),
+        );
+    }
+    if let (Some(o), Some(s)) = (obs.otel(), span) {
+        o.end(s);
+    }
+    resp
+}
+
+async fn route(state: Arc<ProdState>, req: Request) -> Response {
     let path = req.uri().path().to_string();
     if crate::forward::is_internal_path(&path) {
         return (StatusCode::NOT_FOUND, "not found").into_response();
@@ -633,12 +792,17 @@ fn cached_response(
     for (n, v) in &entry.headers {
         builder = builder.header(n.as_str(), v.as_str());
     }
-    if entry.with_etag {
-        return entry.body.respond(req, builder, entry.status);
+    let mut resp = if entry.with_etag {
+        entry.body.respond(req, builder, entry.status)
+    } else {
+        builder
+            .body(Body::from(entry.body.plain.clone()))
+            .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
+    };
+    if let Some(r) = &entry.route {
+        resp.extensions_mut().insert(RouteName(r.to_string()));
     }
-    builder
-        .body(Body::from(entry.body.plain.clone()))
-        .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
+    resp
 }
 
 fn isr_warm_enabled() -> bool {
@@ -771,6 +935,7 @@ async fn page_to_entry(
     let secs = isr_secs_of(h)?;
     let kept = kept_headers(h);
     let tags = tags_of(h);
+    let route = route_of(h);
     let status = resp.status().as_u16();
     let bytes = resp.bytes().await.ok()?;
     let meta: PageMeta = serde_json::from_slice(&bytes).ok()?;
@@ -786,6 +951,7 @@ async fn page_to_entry(
         refetch_headers,
         path,
         tags,
+        route,
     })
 }
 
@@ -796,12 +962,14 @@ fn isr_secs_of(h: &reqwest::header::HeaderMap) -> Option<u64> {
         .filter(|n| *n > 0)
 }
 
-/// Set-Cookie is never restored from the shared cache.
+/// Set-Cookie is never restored from the shared cache, and neither is the render's Server-Timing
+/// (a hit gets its own, from `observed`).
 fn kept_headers(h: &reqwest::header::HeaderMap) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for (name, value) in h.iter() {
         let n = name.as_str();
         if n.starts_with("x-nowaki-")
+            || n == SERVER_TIMING
             || name == header::CONTENT_TYPE
             || name == header::CONTENT_LENGTH
             || name == header::TRANSFER_ENCODING
@@ -902,6 +1070,7 @@ fn maybe_store(
             refetch_headers,
             path: pathname.into(),
             tags: tags_of(resp_headers),
+            route: route_of(resp_headers),
         },
         epoch,
     );
@@ -1123,6 +1292,16 @@ async fn proxy(
         return (status, body).into_response();
     }
 
+    // Only set by `observed` (tracing on): the CLIENT span of the sidecar hop goes under it.
+    let client_span = req.extensions().get::<ServerSpan>().and_then(|s| {
+        let otel = crate::obs::get().otel()?;
+        let mut c = otel.child(&s.0, method.as_str().to_string(), crate::obs::Kind::Client);
+        c.attr(
+            "server.port",
+            crate::obs::Attr::Int(i64::from(state.sidecar_port)),
+        );
+        Some((otel, c))
+    });
     let proxy_limit = crate::form_body::proxy_body_limit();
     let body = match axum::body::to_bytes(req.into_body(), proxy_limit).await {
         Ok(b) => b,
@@ -1133,7 +1312,12 @@ async fn proxy(
     };
 
     let mut builder = state.http.request(method, &url).body(body.to_vec());
-    builder = crate::forward::apply(builder, &headers, crate::forward::trust_proxy());
+    builder = crate::forward::apply_traced(
+        builder,
+        &headers,
+        crate::forward::trust_proxy(),
+        client_span.as_ref().map(|(_, c)| c.traceparent()),
+    );
     // Set after forward::apply, which drops a client's own value of this header.
     if let Some(r) = &route_path {
         builder = builder.header(crate::front::ROUTE_PATH_HEADER, r);
@@ -1141,7 +1325,22 @@ async fn proxy(
     // Before the render starts: a purge that lands while it runs keeps its result out of the cache.
     let epoch = if cacheable { state.isr.epoch() } else { 0 };
 
-    let resp = match builder.send().await {
+    let sent = builder.send().await;
+    if let Some((otel, mut c)) = client_span {
+        match &sent {
+            Ok(r) => {
+                let status = r.status().as_u16();
+                c.attr(
+                    "http.response.status_code",
+                    crate::obs::Attr::Int(i64::from(status)),
+                );
+                c.error = status >= 500;
+            }
+            Err(_) => c.error = true,
+        }
+        otel.end(c);
+    }
+    let resp = match sent {
         Ok(r) => r,
         Err(err) => {
             return (
@@ -1158,6 +1357,8 @@ async fn proxy(
     // A revalidate call during this request (an action, API route, server function): purged
     // before the response goes out, so whatever the browser asks for next renders fresh.
     purge_from(&state.isr, &resp_headers);
+    // Sent only while tracing (prod-sidecar.mjs); `observed` names the SERVER span with it.
+    let route_name = route_of(&resp_headers).map(|r| RouteName(r.into()));
 
     if !is_page {
         // Pass through as the sidecar writes it (API, redirect, file stream, streaming SSR,
@@ -1171,11 +1372,13 @@ async fn proxy(
                 builder = builder.header(name, value);
             }
         }
-        return builder
+        let mut out = builder
             .body(Body::from_stream(resp.bytes_stream()))
-            .unwrap_or_else(|e| {
-                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-            });
+            .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response());
+        if let Some(r) = route_name {
+            out.extensions_mut().insert(r);
+        }
+        return out;
     }
     // Pages come back as JSON (body + meta) for Rust to assemble, so they are read whole.
     let bytes = resp.bytes().await.unwrap_or_default();
@@ -1224,9 +1427,13 @@ async fn proxy(
                 );
             }
         }
-        builder
+        let mut out = builder
             .body(Body::from(html))
-            .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
+            .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response());
+        if let Some(r) = route_name {
+            out.extensions_mut().insert(r);
+        }
+        out
     }
 }
 
@@ -1503,6 +1710,7 @@ mod tests {
             refetch_headers: Vec::new(),
             path: path.into(),
             tags: tags.iter().map(|t| Box::<str>::from(*t)).collect(),
+            route: None,
         }
     }
 

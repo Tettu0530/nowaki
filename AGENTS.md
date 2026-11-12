@@ -26,8 +26,9 @@ packages/create-nowaki, create-nowaki-app   scaffolders (npm create nowaki).
 packages/nowaki-cli   the `nowaki` npm wrapper (prebuilt binary shim).
 packages/nowaki-markdoc   `@nowaki-dev/markdoc`, the official Markdoc plugin (`.mdoc`).
 examples/hello/       kitchen-sink app used by CLI tests + e2e.
-examples/gallery/     the v0.18 exit-criteria app (basePath, i18n, modal routes, sessions, env.ts);
-                      scripts/gallery-e2e.mjs + gallery-browser-test.mjs.
+examples/gallery/     the v0.18 + v0.19 exit-criteria app (basePath, i18n, modal routes, sessions,
+                      env.ts; ISR posts with tags + revalidateTag, View Transitions, a Likes island
+                      for HMR, a `budget`); scripts/gallery-e2e.mjs + gallery-browser-test.mjs.
 benchmarks/           bench.mjs, head-to-head.mjs (Next/Astro), check-regression.mjs,
                       ci-perf.mjs + ci-perf-app/ (CI perf gate: head vs base vs last release,
                       all on the fixed ci-perf-app).
@@ -114,8 +115,10 @@ code locations and CI coverage.
   as "Internal Server Error" (dev keeps the message). Keep the body / argument
   limits in `functions.mjs` ahead of parsing and dispatch.
 - **State-changing routes check the origin.** `handler.mjs` rejects cross-site
-  non-GET requests to page actions (and to API routes with `csrf = true`) via
-  `server/origin.mjs`, before the action runs. Don't move the check after the
+  POST / PUT / PATCH / DELETE requests to page actions and to API / file routes via
+  `server/origin.mjs` (`isCrossSite`), after middleware and before the action or
+  handler runs; GET / HEAD / OPTIONS skip the check. API routes and actions share
+  the one `FORBIDDEN` response. Don't move the check after the
   action, and keep `csrf = false` as the only opt-out.
 - **Every server sets the default security headers** (`security_headers.rs` for
   dev/start, `server/security-headers.mjs` for the adapters, `_headers` for
@@ -124,7 +127,9 @@ code locations and CI coverage.
 - **The CSP nonce covers everything Nowaki inserts.** `csp.rs` / `server/csp.mjs`
   stamp `<script>` / `<style>` in HTML responses; client code that inserts a
   `<style>` (CSS shims, router head/body swaps, boundaries) must set
-  `window.__nowakiNonce` on it. Re-run the browser tests with
+  `window.__nowakiNonce` on it. Fetched HTML goes through `router-core.js` `nonceStyles`
+  before `DOMParser` (its document shares this one's CSP, so another response's nonce is a
+  violation as it parses). Re-run the browser tests with
   `NOWAKI_CSP=enforce` when touching those paths.
 - **Live handlers see only allowlisted request headers.** `live::context_headers`
   picks cookie / authorization / accept-language / user-agent and the public
@@ -137,7 +142,8 @@ code locations and CI coverage.
 - **The dev MCP stays loopback-only and dev-only.** `/__nowaki/mcp`
   (`crates/nowaki/src/mcp.rs`) answers only a loopback peer with a loopback
   `Host` and `Origin`, also under `--host`; only `nowaki dev` mounts it. Keep
-  its tools read-only. Dev errors reach its log from the sidecar through a
+  its tools read-only. The dev toolbar's `/__nowaki/devtools` sits behind the
+  same gate and stays read-only too; the toolbar is loaded only by dev `hmr.js`. Dev errors reach its log from the sidecar through a
   stdout line carrying `NOWAKI_PUBLISH_TOKEN`, like `publish()`.
 - **`publish()` has no network endpoint.** The sidecar reaches the Rust hub only
   through its stdout with `NOWAKI_PUBLISH_TOKEN`; keep it that way, and keep the
@@ -159,6 +165,11 @@ code locations and CI coverage.
   and any new internal response header, on **both** branches of `proxy`. The stdout channel needs
   `NOWAKI_PUBLISH_TOKEN`. `POST /__nowaki/revalidate` stays off unless `NOWAKI_REVALIDATE_SECRET`
   is set, and compares it in constant time.
+- **Observability stays opt-in and free when off.** Server-Timing is off in production unless
+  `NOWAKI_SERVER_TIMING=1`; tracing only with an OTLP endpoint (or a registered OTel API tracer).
+  With everything off, `start.rs` pays one `Obs::active` check and the handler one `env.trace` /
+  `ctx.__trace` null check per phase, allocating nothing. `x-nowaki-route` is internal (stripped
+  on both `proxy` branches), and an ISR hit never replays a stored `server-timing`.
 - **ISR keys must include learned `Vary` inputs** (`context.mjs` `__vary()` →
   `x-nowaki-vary`, folded in `isr_key` in `start.rs`) so cached pages cannot
   bleed across users. The query string is part of the key only when the route reads
@@ -174,10 +185,31 @@ code locations and CI coverage.
 
 ## Feature map (where things live)
 
+v0.19 at a glance (each has its entry below): on-demand revalidation and the CDN purge per
+adapter (plus the Cloudflare Worker ISR cache), View Transitions, observability, Dev HMR / Fast
+Refresh, the dev toolbar and the dev MCP. `examples/gallery` (`routes/posts/`) uses all of them,
+and `scripts/gallery-e2e.mjs` / `gallery-browser-test.mjs` check the exit criteria end to end.
+
 - **Dev MCP (`/__nowaki/mcp`)** — `crates/nowaki/src/mcp.rs` (JSON-RPC over
   Streamable HTTP, tools, error ring buffer); route table + island registry from
   the dev sidecar's `/__nowaki/dev-info` (`server/sidecar.mjs`); imports /
   importers from `crates/nowaki-core/src/graph.rs`. E2E: `scripts/mcp-e2e.mjs`.
+  Tools `page` (dev-info `?url=` → `sidecar.mjs` `devPage`: route, layouts, middleware,
+  `revalidate` / `tags`; then `mcp.rs` `page_js`: islands from `chunk::collect_app_modules` of the
+  route + layouts + slots, `live_hint`, and the JS estimate: `module_closure` per group, dev
+  transform → `chunk::minify_chunk` (cached per module output in `MINIFIED`) → one gzip, plus
+  `dist/route-js.json` as the last build figure) and `live` (`LiveHub::stats`).
+- **Dev toolbar** — `packages/nowaki-runtime/client/toolbar.js` (plain DOM in an open Shadow DOM
+  root appended to `<html>`, outside `<body>`; a constructed stylesheet, or a nonced `<style>`),
+  imported on idle by `client/hmr.js` unless `data-toolbar="0"` (`render.mjs` `HMR_SCRIPT`, from
+  `--no-toolbar` / `NOWAKI_TOOLBAR=0`, set in `main.rs`) or `localStorage["nowaki:toolbar"]`
+  is `"off"`. Data: `GET /__nowaki/devtools?url=` (`mcp.rs` `devtools`, the same functions as the
+  MCP tools, the same `request_allowed` gate; listed in `forward::is_internal_path`). Timings come
+  from the browser: the navigation entry's `serverTiming`, else the `timing` field of
+  `nowaki:page-load` (`router.js` `fetchPage`, `hmr.js` `page`). Refreshes on `nowaki:page-load`,
+  `nowaki:hmr` (also `{ type: "error" }`) and on tab changes. Editor links from `NOWAKI_EDITOR`
+  (`mcp.rs` `EDITORS` / `editor_template`). Browser test: `scripts/toolbar-browser-test.mjs`
+  (in e2e-dev).
 - **Dev HMR / Fast Refresh** — `crates/nowaki/src/dev.rs` `apply_changes` →
   `plan_changes` (`css` / `hot` / `page` / `reload`, from the import graph walked up to
   island entries) → `hmr_messages` (bumps hot versions via `NowakiCore::bump_dev_version`;
@@ -186,6 +218,14 @@ code locations and CI coverage.
   that registers components imports `client/refresh.js` (families + an `options.vnode`
   proxy, public Preact API). `client/hmr.js` applies the messages. Live islands re-render
   through `/__nowaki/live-event`; `live::handle_versioned` reads the SSR version per render.
+  `page` (routes, layouts, server-only modules only routes reach; sent after `css` / `hot` of
+  the same batch): `hmr.js` `page` refetches `location.href` with the router's
+  `x-nowaki-nav` (the open slot's fragment with `x-nowaki-intercept`), syncs the head region
+  (a copy of `router.js` `syncHead` that keeps unchanged nodes) and `morphTree`s the body:
+  the top-level `<nowaki-island>` / `<nowaki-live>` at each index is moved over when `src` +
+  `props` (live: `name`) match, other nodes are patched in place or replaced; reloads on a
+  non-200, a redirect or a page without head markers (the dev error page). It fires
+  `nowaki:hmr`, on which `router.js` clears its Router Cache.
   Builds never see any of it. Browser test: `scripts/hmr-browser-test.mjs` (in e2e-dev).
 
 - **On-demand revalidation (`revalidatePath` / `revalidateTag`, `export const tags`)** —
@@ -194,7 +234,8 @@ code locations and CI coverage.
   request (page actions and API routes now run in `runWithContext`, like server functions and live
   events) collect on `ctx.__purge`; `handler.mjs` `finalize` hands them over before the response
   returns: `x-nowaki-purge` on `nowaki start` (`env.isrStore`, set by `prod-sidecar.mjs`), and the
-  adapter seams `env.purge(entries)` / `env.cacheTagHeader(entries)` (unset for now). Outside a
+  adapter seams `env.purge(entries)` / `env.cacheTagHeader(entries)` (set by `createApp({ cdn })`,
+  Vercel only; see below). Outside a
   request, or after its response was built (`ctx.__purgeClosed`, set only on those wrapped
   requests): a `NOWAKI_PURGE <token>` stdout line (`start.rs::run`) or `env.purge`. ISR renders with tags send
   `x-nowaki-tags` (static arrays cached per module). Rust side: `start.rs` `IsrCache::purge` (one
@@ -202,6 +243,70 @@ code locations and CI coverage.
   content). The store is per process. Dev only records calls (dev-info `revalidations`); static
   output warns. Encoding fixture: `crates/nowaki/tests/fixtures/purge-cases.json` (`start.rs`
   units, `scripts/revalidate-test.mjs`); e2e in `scripts/ci/e2e-prod.sh` (`routes/isr-tagged.tsx`).
+- **CDN purge per adapter** — `server/purge-vercel.mjs` `vercelCdn()`, passed as `createApp({ cdn })`
+  by the function `vercel-build.mjs` generates. ISR renders send `Vercel-Cache-Tag` (`t:<tag>` and
+  `p:<browser path>` through `cdnTag`: percent-encoded, `h:<hash>` past 256 bytes, the same on emit
+  and purge); `purge` lazily imports `@vercel/functions` and calls `dangerouslyDeleteByTag` (16 tags
+  per call, raced against a 2 s timeout), warning once when the package is missing.
+  `vercel-build.mjs` `copyWithDeps` copies the package and its dependencies into the function when
+  the app has it. Behavior per server:
+
+  | Server | Tag header | Purge |
+  | --- | --- | --- |
+  | `nowaki start` | `x-nowaki-tags` (internal) | Rust ISR store, before the response |
+  | vercel | `Vercel-Cache-Tag` | `@vercel/functions` `dangerouslyDeleteByTag`, awaited (2 s cap) |
+  | node / bun / deno | none | warn-once no-op (no cache of their own) |
+  | cloudflare | `Cache-Tag` (on the Cache API entry only) | local `cache.delete` of path entries + zone purge by tag with `CLOUDFLARE_ZONE_ID` / `CLOUDFLARE_API_TOKEN`, awaited (2 s cap) |
+  | static | none | warn-once no-op |
+
+  On node / bun / deno / vercel, `app.mjs` drops the `nowaki start` cache headers
+  (`x-nowaki-revalidate` / `-vary` / `-vary-query` / `-tags`, via `purge-cloudflare.mjs`
+  `stripInternal`) from an ISR render before sending it; `Vercel-Cache-Tag` stays for Vercel.
+  Tests: `scripts/purge-adapters-test.mjs` (mocked package, a generated function on port 5540);
+  `scripts/ci/e2e-adapters.sh` checks the header from the built `examples/hello` function.
+- **Cloudflare Worker ISR cache** — `server/purge-cloudflare.mjs` `cloudflareCdn()`, created by
+  `web.mjs` `createFetchHandler` only when some page exports `revalidate` (else the worker runs
+  as before). `fetch` sends eligible GET / HEAD requests (no `x-nowaki-intercept`, path not in
+  the isolate's negative set) through `cached()`: `caches.default.match` of `<origin><path>`,
+  which holds either the page (it varies on nothing) or a stub (`x-nowaki-stub` generation id,
+  `x-nowaki-vary` names, query flag) pointing at the variant key
+  `<origin><path>?__nowaki=<gen>&q=…&h.<name>=…`. The Cache API ignores Vary, hence the key.
+  Stored only when `shareable(result)`: `x-nowaki-revalidate`, 200, string body (no stream),
+  no Set-Cookie, `public, s-maxage`, no per-user Vary input (the handler's own signals; nothing
+  re-derived). Entries are kept a year (`max-age`); `x-nowaki-stored` decides HIT / STALE, and
+  a stale hit re-renders once per key per isolate in `ctx.waitUntil`. The render is stored
+  before CSP (re-nonced per response); internal headers (`x-nowaki-revalidate` / `-vary` /
+  `-vary-query`, `cache-tag`) never reach the browser. `purge(entries, ctx)` bumps an epoch (an
+  in-flight render doesn't store), deletes `p:` entries at `<origin><path>` locally (dropping
+  every variant via the stub), and calls `POST /zones/<id>/purge_cache` `{ tags }` (100 per call,
+  `cfTag`: `server/cdn-tag.mjs` `cdnTag` capped at 240 characters so 65 tags fit Cloudflare's
+  16 KB header; the worker must never import `purge-vercel.mjs`, whose lazy `@vercel/functions`
+  import breaks wrangler's bundle, which `cf-cache-test.mjs` checks); a
+  timed-out purge continues in `ctx.waitUntil` (`takePending`). `revalidatePath` / `-Tag`
+  pass the request context to `env.purge` so the local delete knows the origin. Tests:
+  `scripts/cf-cache-test.mjs` (mocked `caches.default` and fetch), the built worker in
+  `scripts/edge-handler-test.mjs`.
+- **Observability (Server-Timing, JSON logs, OpenTelemetry, health)** — env vars:
+  `NOWAKI_SERVER_TIMING=1` (always on in dev), `NOWAKI_LOG=json`, and the standard
+  `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (tracing is on iff one is set
+  and `OTEL_SDK_DISABLED` isn't true), `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_SERVICE_NAME`,
+  `OTEL_TRACES_SAMPLER` / `_ARG`, `OTEL_BSP_SCHEDULE_DELAY` / `_MAX_EXPORT_BATCH_SIZE` /
+  `_MAX_QUEUE_SIZE`. Rust: `crates/nowaki/src/obs.rs` (one `OnceLock`: config, traceparent,
+  sampler, spans, the bounded batch exporter over reqwest, plain HTTP only; log lines; the
+  Server-Timing tail); `start.rs` `handle` → `observed` (only when `Obs::active`: the SERVER span,
+  `isr` + `total`, the access log), `proxy` (CLIENT span, `forward::apply_traced` replaces the
+  client's `traceparent`, reads the internal `x-nowaki-route`), `health` (`/__nowaki/health`, a
+  cached 1 s sidecar ping); `live.rs` `render_once` (a span per WS event / refresh, `traceparent`
+  on `/__nowaki/live-render`). JS: `server/trace.mjs` (`env.trace`, null when off: the handler does
+  `ctx.__trace?.begin/end` around middleware, loader, render, action, API, server functions and
+  POST live events, and `finish` in `finalizeResult` writes `server-timing` and, for
+  prod-sidecar.mjs, `x-nowaki-route`), `server/otel.mjs` (config, OTLP JSON, fetch exporter; the
+  worker flushes in `waitUntil`), the `@opentelemetry/api` bridge (used when the app registered a
+  tracer), `server/log.mjs` (every runtime error log; text mode reads as before),
+  `server/health.mjs`. `env.trace` is set by `app.mjs`, `web.mjs` and dev `sidecar.mjs`. `kept_headers`
+  never stores `server-timing`. Shared fixture: `crates/nowaki/tests/fixtures/otel-cases.json`
+  (`obs.rs` units, `scripts/otel-test.mjs`); e2e: `scripts/otel-e2e.mjs` (a local OTLP receiver,
+  in e2e-prod), `scripts/ci/e2e-{dev,prod,adapters}.sh`, `scripts/edge-handler-test.mjs`.
 - **Server functions (`"use server"`)** — `crates/nowaki-core/src/server_fn.rs`
   (detect, id, client proxy, discover) + `packages/nowaki-runtime/server/functions.mjs`
   (dispatch + `getContext`). Allowlist: `dist/server/functions.json`.
@@ -399,14 +504,13 @@ code locations and CI coverage.
 
 ## Releasing (maintainers)
 
-The packages are versioned independently today: the CLI and crates are 0.18.x
-(`Cargo.toml` `[workspace.package]`, the `nowaki` crate's `nowaki-core` path-dep
-version, `packages/nowaki-cli`), `@nowaki-dev/runtime` is 0.17.x,
-`create-nowaki` / `create-nowaki-app` are 0.19.x, and `@nowaki-dev/markdoc`
-(`packages/nowaki-markdoc`) is 0.1.x. The scaffold template
-(`packages/create-nowaki/templates/_shared/package.json`) pins the current CLI
-and runtime. From 0.19.0 the CLI, runtime, and create-* versions move together
-(markdoc keeps its own semver). After bumping, run `pnpm install` so
+Since 0.19.3 the CLI and crates (`Cargo.toml` `[workspace.package]`, the `nowaki`
+crate's `nowaki-core` path-dep version, `packages/nowaki-cli`), `@nowaki-dev/runtime`
+and `create-nowaki` / `create-nowaki-app` share one version and are bumped together;
+`@nowaki-dev/markdoc` (`packages/nowaki-markdoc`) keeps its own semver (0.1.x). The
+CLI refuses a runtime older than its own version (`runtime::MIN_RUNTIME`). The
+scaffold template (`packages/create-nowaki/templates/_shared/package.json`) pins
+that version for both. After bumping, run `pnpm install` so
 `pnpm-lock.yaml` matches (CI uses a frozen lockfile). Then: `cargo publish -p
 nowaki-core` → `-p nowaki`; push a `vX.Y.Z` tag (triggers `release.yml` for the
 CLI binaries); `gh workflow run publish-npm.yml -f package=all` for runtime,

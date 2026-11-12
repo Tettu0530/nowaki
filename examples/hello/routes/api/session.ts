@@ -2,7 +2,8 @@
 //   op=login&user=…  regenerate (new cookie on sign-in) and remember the user
 //   op=inc           count requests in the session
 //   op=logout        destroy it (the cookie is deleted)
-// A cross-site POST sees an empty, read-only session: the write throws and `wrote` says why.
+// A cross-site POST is rejected (403) before the handler runs. (Middleware that reads the session on
+// such a request sees it empty and read-only.)
 import type { LoaderContext } from "@nowaki-dev/runtime";
 
 async function state(ctx: LoaderContext) {

@@ -1,6 +1,7 @@
 // E2E for the `nowaki dev` MCP endpoint (/__nowaki/mcp) against examples/hello.
 // Usage: node scripts/mcp-e2e.mjs http://127.0.0.1:<port>
-// Runs initialize → tools/list → each tool, and checks the loopback / Host / Origin gate.
+// Runs initialize → tools/list → each tool, and checks the loopback / Host / Origin gate, also on
+// the dev toolbar's GET /__nowaki/devtools.
 
 import http from "node:http";
 
@@ -19,14 +20,14 @@ function check(name, cond, detail) {
 }
 
 // node:http so the test can set Host (fetch treats it as a forbidden header).
-function post(body, headers = {}, method = "POST") {
-  const url = new URL(MCP);
+function post(body, headers = {}, method = "POST", target = MCP) {
+  const url = new URL(target);
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
         host: url.hostname,
         port: url.port,
-        path: url.pathname,
+        path: url.pathname + url.search,
         method,
         headers: {
           "content-type": "application/json",
@@ -84,7 +85,7 @@ check("notification gets 202 Accepted", notified.status === 202, notified.status
 
 const list = await rpc("tools/list", {});
 const names = list.result.tools.map((t) => t.name);
-for (const n of ["routes", "module_graph", "recent_errors", "dev_config"]) {
+for (const n of ["routes", "module_graph", "recent_errors", "dev_config", "page", "live"]) {
   check(`tools/list has ${n}`, names.includes(n), names);
 }
 
@@ -132,6 +133,36 @@ check("the SSR error points at the route file", ssr?.file?.startsWith("routes/bo
 const config = (await call("dev_config")).structuredContent;
 check("dev_config reports the port", String(config.port) === new URL(BASE).port, config);
 check("dev_config reports live state", typeof config.live?.connections === "number", config.live);
+check("dev_config lists the recent revalidations", Array.isArray(config.revalidations), config.revalidations);
+
+// page: what serves one URL (the dev toolbar reads the same data).
+const livePage = (await call("page", { url: "/live" })).structuredContent;
+check("page matches /live to routes/live.tsx", livePage.route?.pattern === "/live" && livePage.route.file === "routes/live.tsx", livePage.route);
+check("page lists the root layout and middleware", livePage.layouts?.includes("routes/_layout.tsx") && livePage.middleware?.includes("routes/_middleware.ts"), livePage);
+const pIsl = (n) => livePage.islands?.find((i) => i.name === n);
+check("page: LiveCounter is a live island with no client JS", pIsl("LiveCounter")?.kind === "live" && pIsl("LiveCounter").gzipBytes === 0, livePage.islands);
+check("page: Counter is a client island with a size and a could-be-live hint", pIsl("Counter")?.kind === "client" && pIsl("Counter").gzipBytes > 0 && pIsl("Counter").hint?.kind === "could-be-live", pIsl("Counter"));
+const est = livePage.js?.estimate;
+check(
+  "page: first-load JS estimate = runtime + islands + live runtime",
+  est?.label === "estimate" && est.runtime > 0 && est.liveRuntime > 0 && est.gzipBytes === est.runtime + est.islands + est.liveRuntime,
+  livePage.js,
+);
+check("page: lastBuild is null or a build figure", livePage.js.lastBuild === null || typeof livePage.js.lastBuild.gzipBytes === "number", livePage.js.lastBuild);
+check("page lists the recent revalidations", Array.isArray(livePage.revalidations), livePage);
+const isrPage = (await call("page", { url: "/isr-tagged?x=1" })).structuredContent;
+check("page reports revalidate and tags", isrPage.route?.revalidate === 300 && JSON.stringify(isrPage.route.tags) === '["isr-demo"]', isrPage.route);
+const blog = (await call("page", { url: "/blog/hello" })).structuredContent;
+check("page reports the dynamic route's params", blog.route?.pattern === "/blog/[slug]" && blog.route.params?.slug === "hello", blog.route);
+const missing = (await call("page", { url: "/no/such/page" })).structuredContent;
+check("page: no route for an unknown URL, the 404 page named", missing.route === null && missing.notFound === "routes/_404.tsx", missing);
+const badUrl = await call("page", { url: "https://evil.test/" });
+check("page refuses a URL that isn't a path", badUrl.isError === true, badUrl);
+const noUrl = await call("page", {});
+check("page needs a url", noUrl.isError === true, noUrl);
+
+const liveStats = (await call("live")).structuredContent;
+check("live reports connections, the cap and rooms", typeof liveStats.connections === "number" && liveStats.max > 0 && Array.isArray(liveStats.rooms), liveStats);
 
 const unknown = await rpc("tools/call", { name: "nope", arguments: {} });
 check("unknown tool is a JSON-RPC error", unknown.error?.code === -32602, unknown);
@@ -151,6 +182,23 @@ const badVersion = await post(ping, { "mcp-protocol-version": "1999-01-01" });
 check("unsupported MCP-Protocol-Version is 400", badVersion.status === 400, badVersion.status);
 const parse = await post("{not json");
 check("malformed JSON is a parse error", parse.status === 400 && parse.json?.error?.code === -32700, parse.text);
+
+// The dev toolbar's endpoint: the same data behind the same gate.
+const DEVTOOLS = `${BASE}/__nowaki/devtools?url=${encodeURIComponent("/live")}`;
+const tools = await post(undefined, {}, "GET", DEVTOOLS);
+check("devtools answers loopback with JSON", tools.status === 200 && tools.json?.page?.route?.file === "routes/live.tsx", tools.text);
+check(
+  "devtools carries live stats, errors and the editor template",
+  typeof tools.json?.live?.connections === "number" && Array.isArray(tools.json?.errors?.errors) && (tools.json?.editor ?? "").includes("{file}"),
+  tools.json,
+);
+check("devtools is not cacheable", tools.headers["cache-control"] === "no-store", tools.headers);
+const toolsRebound = await post(undefined, { host: `attacker.test:${port}` }, "GET", DEVTOOLS);
+check("devtools refuses a non-loopback Host (403)", toolsRebound.status === 403, toolsRebound.status);
+const toolsCross = await post(undefined, { origin: "http://evil.test" }, "GET", DEVTOOLS);
+check("devtools refuses a non-loopback Origin (403)", toolsCross.status === 403, toolsCross.status);
+const toolsSame = await post(undefined, { origin: `http://localhost:${port}` }, "GET", DEVTOOLS);
+check("devtools allows a loopback Origin", toolsSame.status === 200, toolsSame.status);
 
 const devInfo = await fetch(`${BASE}/__nowaki/dev-info`);
 check("sidecar /__nowaki/dev-info is not proxied", devInfo.status === 404, devInfo.status);

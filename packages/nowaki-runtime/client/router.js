@@ -1,7 +1,7 @@
 // Client router. Intercepts internal <a> clicks, fetches the target HTML,
 // swaps the body, and re-hydrates only the new islands (zero-JS pages do full navigations).
 
-import { matchBoundary, matchPattern, createPageCache, shouldTransition } from "./router-core.js";
+import { matchBoundary, matchPattern, createPageCache, shouldTransition, nonceStyles } from "./router-core.js";
 
 // The eager runtime (islands.js) exposes hydrate on window.
 // Not importing islands.js here keeps the router a separate lazy chunk.
@@ -90,12 +90,18 @@ async function fetchPage(url, slot) {
   if (!page || (res.url && new URL(res.url).origin !== location.origin)) return null;
   const html = await res.text();
   return {
-    doc: new DOMParser().parseFromString(html, "text/html"),
+    doc: parse(html),
     finalUrl: res.redirected ? res.url : url.href.split("#")[0],
     status: res.status,
     slot: slot && res.headers.has("x-nowaki-slot"),
+    // Server-Timing (on in dev), for nowaki:page-load listeners such as the dev toolbar.
+    timing: h("server-timing"),
   };
 }
+
+// DOMParser's document shares this one's CSP: a <style> with another response's nonce (or none)
+// is a violation as it parses, so each gets this document's nonce first.
+const parse = (html) => new DOMParser().parseFromString(nonceStyles(html, window.__nowakiNonce), "text/html");
 
 // Fetch the SSR HTML for loading/error boundaries once and reuse it.
 function loadBoundaries() {
@@ -176,7 +182,7 @@ async function navigate(url, { push = true, intercept = push, vt, type = "forwar
 // URL to scroll for, or to nothing after a slot swap (the page stays where it is) and after a swap
 // a newer navigation superseded.
 function apply(entry, slot, push, token, hash) {
-  const { doc, finalUrl } = entry;
+  const { doc, finalUrl, timing } = entry;
   // Opted in by the link, else by the page on screen or the one coming (`export const
   // viewTransition`, whose <meta> document.mjs puts in the head). A fragment has no head of its own.
   const opted = navVt ?? (vtPage(document) || vtPage(doc));
@@ -194,7 +200,7 @@ function apply(entry, slot, push, token, hash) {
       syncLive();
       removeProgressBar();
       // Page scripts run once (they are modules); this is their cue to set up the new page's DOM.
-      document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl } }));
+      document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl, timing } }));
       return finalUrl;
     });
   }
@@ -220,7 +226,7 @@ function apply(entry, slot, push, token, hash) {
   }, () => {
     if (tpl) loadPageScripts(tpl.content);
     slotShown(slot);
-    document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl, slot: slot.getAttribute("name") } }));
+    document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl, slot: slot.getAttribute("name"), timing } }));
   });
 }
 
@@ -333,7 +339,7 @@ function stampNonce(root) {
 function showLoading(boundary) {
   if (boundary) {
     curDoc = null;
-    const tmp = new DOMParser().parseFromString(`<body>${boundary.html}</body>`, "text/html");
+    const tmp = parse(`<body>${boundary.html}</body>`);
     document.body.replaceWith(stampNonce(tmp.body));
   } else {
     showProgressBar();
@@ -346,7 +352,7 @@ async function showError(url, message) {
   const { error } = await loadBoundaries();
   const boundary = matchBoundary(error, import.meta.env.BASE_URL === "/" ? url.pathname : routePath(url.pathname));
   if (boundary) {
-    const tmp = new DOMParser().parseFromString(`<body>${boundary.html}</body>`, "text/html");
+    const tmp = parse(`<body>${boundary.html}</body>`);
     for (const slot of tmp.body.querySelectorAll("[data-nowaki-error]")) slot.textContent = message;
     document.body.replaceWith(stampNonce(tmp.body));
   } else {
@@ -473,6 +479,12 @@ export function installRouter() {
   curKey = historyKey();
   curDoc = location.pathname + location.search;
   loadBoundaries();
+  // `nowaki dev` (client/hmr.js) fires this after an edit: the pages and boundaries fetched before
+  // it are stale.
+  addEventListener("nowaki:hmr", () => {
+    pageCache.clear();
+    boundariesPromise = null;
+  });
 
   document.addEventListener("click", (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {

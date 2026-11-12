@@ -1,5 +1,6 @@
 // Unit checks for server/handler.mjs with an in-memory env: layout wrapping (plain and
-// `streaming = "early"`), the routePath seam, the finalize commit seam, and parallel-route slots. No server needed.
+// `streaming = "early"`), the routePath seam, the finalize commit seam, parallel-route slots,
+// and the cross-site (CSRF) rule for actions and API / file routes. No server needed.
 import { createRequire } from "node:module";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
 
@@ -186,6 +187,64 @@ const text = async (res) => res.body ?? (await new Response(res.stream).text());
   const noSlots = { ...slotTable, slots: [] };
   const res = await handleRequest({ ...slotEnv, routeTable: async () => noSlots }, { method: "GET", url: new URL("http://x.test/g/5"), headers: {}, version: 1 });
   check("without slots a layout gets an empty slots object", (await text(res)).endsWith("|<div><p>page 5</p></div>"));
+}
+
+// CSRF (0.19): unsafe-method cross-site requests to API and file routes get the same 403 as page
+// actions (after middleware), unless the route exports `csrf = false`. GET / HEAD / OPTIONS pass.
+{
+  let mwRuns = 0;
+  const csrfModules = {
+    "routes/_middleware.ts": { default: () => void mwRuns++ },
+    "routes/api/plain.ts": { GET: () => ({ ok: "get" }), POST: () => ({ ok: "post" }), PUT: () => ({}), PATCH: () => ({}), DELETE: () => ({}), OPTIONS: () => ({ ok: "options" }) },
+    "routes/api/strict.ts": { csrf: true, POST: () => ({ ok: "post" }) },
+    "routes/api/hook.ts": { csrf: false, POST: () => ({ ok: "hook" }) },
+    "routes/feed.xml.ts": { default: () => ({ headers: { "content-type": "application/xml" }, body: "<rss/>" }) },
+    "routes/todos.tsx": { action: () => ({ ok: true }), default: () => h("p", null, "todos") },
+  };
+  const api = (file, lit, fileExt) => ({ file, segments: lit.split("/").filter(Boolean).map((l) => ({ lit: l })), dir: "/", isApi: true, fileExt });
+  const csrfTable = {
+    routes: [
+      api("routes/api/plain.ts", "/api/plain"),
+      api("routes/api/strict.ts", "/api/strict"),
+      api("routes/api/hook.ts", "/api/hook"),
+      api("routes/feed.xml.ts", "/feed.xml", "xml"),
+      { file: "routes/todos.tsx", segments: [{ lit: "todos" }], dir: "/", isApi: false },
+    ],
+    layouts: [],
+    middleware: [{ prefix: "", file: "routes/_middleware.ts" }],
+  };
+  const csrfEnv = { ...env, routeTable: async () => csrfTable, importModule: async (file) => csrfModules[file] };
+  const send = (method, path, headers = {}) =>
+    handleRequest(csrfEnv, {
+      method,
+      url: new URL(`http://app.test${path}`),
+      headers: { host: "app.test", ...headers },
+      readBody: async () => new Uint8Array(),
+      version: 1,
+    });
+  const evil = { origin: "https://evil.test" };
+  const action = await send("POST", "/todos", evil);
+  const rejected = await send("POST", "/api/plain", evil);
+  check("csrf: cross-site API POST is rejected (403)", rejected.status === 403);
+  check(
+    "csrf: the API rejection is the page action's response (status, headers, body)",
+    action.status === 403 && JSON.stringify([rejected.status, rejected.headers, rejected.body]) === JSON.stringify([action.status, action.headers, action.body]),
+  );
+  for (const m of ["PUT", "PATCH", "DELETE"]) check(`csrf: cross-site API ${m} is rejected (403)`, (await send(m, "/api/plain", evil)).status === 403);
+  check("csrf: Origin null is rejected (403)", (await send("POST", "/api/plain", { origin: "null" })).status === 403);
+  check("csrf: Sec-Fetch-Site cross-site without Origin is rejected (403)", (await send("POST", "/api/plain", { "sec-fetch-site": "cross-site" })).status === 403);
+  check("csrf: same-origin API POST is allowed", (await send("POST", "/api/plain", { origin: "http://app.test" })).status === 200);
+  check("csrf: Sec-Fetch-Site same-origin without Origin is allowed", (await send("POST", "/api/plain", { "sec-fetch-site": "same-origin" })).status === 200);
+  check("csrf: POST without Origin or Sec-Fetch-Site (curl, server) is allowed", (await send("POST", "/api/plain")).status === 200);
+  check("csrf: cross-site GET is unaffected", (await send("GET", "/api/plain", evil)).status === 200);
+  check("csrf: cross-site OPTIONS is unaffected", (await send("OPTIONS", "/api/plain", evil)).status === 200);
+  check("csrf: `csrf = true` still rejects (403)", (await send("POST", "/api/strict", evil)).status === 403);
+  check("csrf: `csrf = false` accepts a cross-site POST", (await send("POST", "/api/hook", evil)).status === 200);
+  check("csrf: a file route rejects a cross-site POST (403)", (await send("POST", "/feed.xml", evil)).status === 403);
+  check("csrf: a file route still answers a cross-site GET", (await send("GET", "/feed.xml", evil)).status === 200);
+  mwRuns = 0;
+  await send("POST", "/api/plain", evil);
+  check("csrf: middleware runs before the check, as for actions", mwRuns === 1);
 }
 
 if (failures) {

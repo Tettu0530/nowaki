@@ -108,6 +108,13 @@ check("assets come from the ASSETS binding with security headers", (await asset.
 const form = (h) => req("/todos", { method: "POST", redirect: "manual", headers: { "content-type": "application/x-www-form-urlencoded", ...h }, body: "text=edge" });
 check("action: cross-site POST rejected (403)", (await form({ origin: "https://evil.test" })).status === 403);
 check("action: same-origin POST allowed", (await form({ origin: ORIGIN })).status === 302);
+const apiPost = (path, h) => req(path, { method: "POST", headers: { "content-type": "application/json", ...h }, body: "{}" });
+const apiEvil = await apiPost("/api/echo", { origin: "https://evil.test" });
+check("API: cross-site POST rejected (403)", apiEvil.status === 403 && (await apiEvil.text()) === "Forbidden");
+check("API: Sec-Fetch-Site cross-site rejected (403)", (await apiPost("/api/echo", { "sec-fetch-site": "cross-site" })).status === 403);
+check("API: same-origin POST allowed", (await apiPost("/api/echo", { origin: ORIGIN })).status === 200);
+check("API: cross-site GET unaffected", (await req("/api/echo", { headers: { origin: "https://evil.test" } })).status === 200);
+check("API with `csrf = false`: cross-site POST allowed", (await apiPost("/api/webhook", { origin: "https://evil.test" })).status === 200);
 
 const rpc = (body, h = {}) =>
   req("/__nowaki/fn", { method: "POST", headers: { "content-type": "application/json", "x-nowaki-rpc": "1", ...h }, body: JSON.stringify(body) });
@@ -137,8 +144,8 @@ check("unexpected server function error is generic (500)", broken.status === 500
     /^hello_session=v1\./.test(cookie) && /; Secure/.test(login.headers.get("set-cookie") ?? ""));
   const me = await (await sess({ headers: { cookie } }, withSecret)).json();
   check("session: the cookie round-trips (secret from the bindings)", me.user === "edge");
-  const evil = await (await sess({ method: "POST", headers: { origin: "https://evil.test", cookie, "content-type": "application/x-www-form-urlencoded" }, body: "op=inc" }, withSecret)).json();
-  check("session: cross-site POST sees an empty, read-only session", evil.user === null && evil.readOnly === true && evil.wrote !== true);
+  const evil = await sess({ method: "POST", headers: { origin: "https://evil.test", cookie, "content-type": "application/x-www-form-urlencoded" }, body: "op=inc" }, withSecret);
+  check("session: cross-site POST to the API is rejected (403, no cookie)", evil.status === 403 && !evil.headers.get("set-cookie"));
   if (saved !== undefined) process.env.NOWAKI_SESSION_SECRET = saved;
 }
 
@@ -159,6 +166,75 @@ check("config redirect capture can't leave the site on the edge", evil.headers.g
 check("config rewrite renders the destination on the edge", (await (await req("/p/hello")).text()).includes("Post: hello"));
 const forged = await (await req("/about", { headers: { "x-nowaki-route-path": "/env" } })).text();
 check("client x-nowaki-route-path is ignored on the edge", forged.includes("<h1>About</h1>") && !forged.includes("token length"));
+
+// /__nowaki/health on the worker: answered before routing and env.ts, never cached, no data.
+const health = await req("/__nowaki/health");
+check("health on the edge: 200 {status:ok}, no-store, security headers",
+  health.status === 200 && (await health.text()) === '{"status":"ok"}' && health.headers.get("cache-control") === "no-store" && secure(health));
+check("no Server-Timing on the edge unless NOWAKI_SERVER_TIMING is set", !(await req("/")).headers.has("server-timing"));
+
+check("no Cache API: an ISR page is rendered, with no internal header",
+  !(await req("/isr")).headers.has("x-nowaki-revalidate") && !(await req("/isr")).headers.has("x-nowaki-cache"));
+
+// The ISR cache on the Cache API (scripts/cf-cache-test.mjs covers it in depth): a stand-in for
+// caches.default, and a stand-in for the zone purge API in globalThis.fetch.
+{
+  const store = new Map();
+  globalThis.caches = {
+    default: {
+      match: async (k) => {
+        const e = store.get(String(k));
+        return e ? new Response(e.body, { headers: e.headers }) : undefined;
+      },
+      put: async (k, res) => {
+        const tags = res.headers.get("cache-tag") ?? "";
+        store.set(String(k), { body: await res.text(), headers: [...res.headers].filter(([n]) => n !== "cache-tag"), tags });
+      },
+      delete: async (k) => store.delete(String(k)),
+    },
+  };
+  const purged = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (!String(url).startsWith("https://api.cloudflare.com/")) return realFetch(url, init);
+    purged.push({ url: String(url), auth: init.headers.authorization, tags: JSON.parse(init.body).tags });
+    for (const [k, e] of store) if (e.tags.split(",").some((t) => JSON.parse(init.body).tags.includes(t))) store.delete(k);
+    return new Response('{"success":true}');
+  };
+  const waits = [];
+  const exec = { waitUntil: (p) => waits.push(p) };
+  const bindings = { ...env, CLOUDFLARE_ZONE_ID: "zone-e2e", CLOUDFLARE_API_TOKEN: "token-e2e" };
+  const get = (p, h = {}) => worker.fetch(new Request(ORIGIN + p, { headers: h }), bindings, exec);
+  const flush = () => Promise.all(waits.splice(0));
+  const miss = await get("/isr-tagged");
+  const missHtml = await miss.text();
+  await flush();
+  const hit = await get("/isr-tagged");
+  const hitHtml = await hit.text();
+  check("worker ISR cache: MISS, then HIT with the same render", miss.headers.get("x-nowaki-cache") === "MISS" && hit.headers.get("x-nowaki-cache") === "HIT" && hitHtml === missHtml);
+  check("worker ISR cache: the entry carries Cache-Tag, the response doesn't", store.get(`${ORIGIN}/isr-tagged`)?.tags === "t:isr-demo,p:/isr-tagged" && !hit.headers.has("cache-tag") && !hit.headers.has("x-nowaki-revalidate"));
+  check("worker ISR cache: a HIT keeps the security headers", secure(hit));
+  const ck1 = await get("/isr-cookie", { cookie: "user=alice" });
+  await flush();
+  const ck2 = await (await get("/isr-cookie", { cookie: "user=bob" })).text();
+  check("worker ISR cache: a cookie-reading page is never stored", !ck1.headers.has("x-nowaki-cache") && ck2.includes("USER=bob") && !store.has(`${ORIGIN}/isr-cookie`));
+  const de = await (await get("/vary", { "accept-language": "de" })).text();
+  await flush();
+  const en = await (await get("/vary", { "accept-language": "en" })).text();
+  check("worker ISR cache: Vary variants stay apart", de.includes("LANG=de") && en.includes("LANG=en"));
+  const action = await worker.fetch(
+    new Request(ORIGIN + "/isr-tagged", { method: "POST", redirect: "manual", headers: { origin: ORIGIN, "content-type": "application/x-www-form-urlencoded" }, body: "kind=tag" }),
+    bindings,
+    exec,
+  );
+  check("worker revalidateTag: zone purge by tag before the action's response",
+    action.status === 303 && purged.length === 1 && purged[0].url === "https://api.cloudflare.com/client/v4/zones/zone-e2e/purge_cache" && purged[0].auth === "Bearer token-e2e" && purged[0].tags.join() === "t:isr-demo");
+  const after = await get("/isr-tagged");
+  check("worker revalidateTag: the next request renders fresh (MISS)", after.headers.get("x-nowaki-cache") === "MISS" && (await after.text()) !== missHtml);
+  await flush();
+  globalThis.fetch = realFetch;
+  delete globalThis.caches;
+}
 
 console.log(failures ? `\nEDGE HANDLER TEST FAILED (${failures})` : "\nEDGE HANDLER TEST PASSED");
 process.exit(failures ? 1 : 0);

@@ -40,7 +40,11 @@ Nowaki (野分, an archaic Japanese word for a typhoon) is a full-stack framewor
 - Routing config in `nowaki.config.mjs`: `redirects`, `rewrites`, `headers`, `basePath`, `trailingSlash`, and i18n routing.
 - Sessions (`ctx.session`, an encrypted cookie) and a typed env schema (`env.ts`).
 - Secure defaults: origin checks, security headers, and an optional CSP nonce.
-- Six deploy targets: node, static, bun, deno, cloudflare, vercel. ISR is served from Rust on `nowaki start`.
+- Six deploy targets: node, static, bun, deno, cloudflare, vercel. ISR is served from Rust on `nowaki start`, and from the Cache API on the Cloudflare worker.
+- On-demand revalidation: `revalidatePath()` / `revalidateTag()` with route-level `tags` purge the `nowaki start` cache, Vercel's CDN, and the Cloudflare cache before the action's response.
+- View Transitions in the client router, opt-in per link (`<Link viewTransition>`) or route, with `transitionName()` and a fallback without the API or under reduced motion.
+- Observability: `Server-Timing`, JSON logs (`NOWAKI_LOG=json`), OpenTelemetry traces over OTLP that join the Rust front and the renderer, and `/__nowaki/health`.
+- Dev experience: HMR that keeps island state (Preact Fast Refresh), CSS without a reload, route and layout edits re-rendered in place, a dev toolbar (route, islands, JS budget, ISR, live connections, errors), and a dev MCP endpoint for coding agents.
 - Use the npm ecosystem as is. SSR is delegated to a Rust-managed Node sidecar (Preact).
 
 See <https://nowaki.dev/docs> for the full guide.
