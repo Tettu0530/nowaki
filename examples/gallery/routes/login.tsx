@@ -9,7 +9,7 @@ export const title = "Sign in";
 
 export async function action(ctx: LoaderContext) {
   const form = await ctx.formData();
-  if (form.get("password") !== env.GALLERY_ADMIN_PASSWORD) {
+  if (String(form.get("password") ?? "") !== env.GALLERY_ADMIN_PASSWORD) {
     ctx.status(401);
     return { error: true };
   }

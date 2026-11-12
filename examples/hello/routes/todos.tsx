@@ -2,7 +2,7 @@
 // GET: the loader reads the list from the cookie / POST: the action appends and redirects to /todos.
 type Ctx = {
   cookies: Record<string, string>;
-  formData: () => Promise<URLSearchParams>;
+  formData: () => Promise<FormData>;
   setCookie: (k: string, v: string, opts?: Record<string, unknown>) => unknown;
   redirect: (to: string) => unknown;
 };

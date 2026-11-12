@@ -189,11 +189,11 @@ check(
     url: new URL("http://127.0.0.1/upload"),
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
-    readBody: async () => new TextEncoder().encode("user=alice&n=1"),
+    readBody: async () => new TextEncoder().encode("user=alice&n=1&q=a+b"),
   });
   const form = await ctx.formData();
-  check("urlencoded still returns URLSearchParams", form instanceof URLSearchParams);
-  check("urlencoded get", form.get("user") === "alice");
+  check("urlencoded returns FormData", form instanceof FormData && !(form instanceof URLSearchParams));
+  check("urlencoded get", form.get("user") === "alice" && form.get("n") === "1" && form.get("q") === "a b");
 }
 
 {

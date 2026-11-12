@@ -21,9 +21,11 @@ milestone's worth of work; the codename is noted per entry.
   Treat `File.name` as untrusted either way.
 
 ### Upgrade notes
-- **`ctx.formData()` return type:** multipart bodies return **`FormData`**; urlencoded still returns
-  **`URLSearchParams`**. In TypeScript, `form.get()` becomes `string | File | null`—narrow with
-  `instanceof` in handlers that accept uploads.
+- **Breaking: `ctx.formData()` always returns `FormData`.** Urlencoded bodies used to return
+  `URLSearchParams`. Both media types now return `FormData`, as the platform `Request.formData()`
+  does. `form.get()` is `string | File | null`. Read text with `String(form.get("x") ?? "")`.
+  Methods that exist only on `URLSearchParams` (`toString()`, `sort()`) need rewriting. This is
+  not a patch-level change.
 - **`NOWAKI_FORM_BODY_LIMIT` (default 10 MiB)** now applies to **`bodyText()` and `bodyJson()`** on
   every runtime (not only multipart). JSON API routes and larger `NOWAKI_FN_BODY_LIMIT` / live-event
   payloads must stay under the form limit when handlers read the body through these helpers, or read

@@ -65,7 +65,7 @@ session.ts   ctx.session options (optional)
    import type { LoaderContext, PageProps } from "@nowaki-dev/runtime";
    export const loader = async ({ params }: LoaderContext) => ({ post: await db.post(params.slug) }); // server-only
    export async function action(ctx: LoaderContext) {  // runs on non-GET requests
-     const form = await ctx.formData();
+     const form = await ctx.formData();            // FormData; String(form.get("x") ?? "") for text
      return ctx.redirect("/blog");                 // Post/Redirect/Get
    }
    export default function Post({ data }: PageProps<typeof loader>) { return <article><h1>{data.post.title}</h1></article>; }

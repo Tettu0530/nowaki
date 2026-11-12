@@ -248,9 +248,15 @@ function decodeBody(buf) {
   return new TextDecoder().decode(buf);
 }
 
+function formDataFromUrlencoded(buf) {
+  const form = new FormData();
+  for (const [key, value] of new URLSearchParams(decodeBody(buf))) form.append(key, value);
+  return form;
+}
+
 async function parseFormBody(buf, contentType) {
   if (isMultipartFormData(contentType)) {
     return parseMultipartBody(buf, contentType);
   }
-  return new URLSearchParams(decodeBody(buf));
+  return formDataFromUrlencoded(buf);
 }
