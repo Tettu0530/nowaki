@@ -14,6 +14,7 @@ import { localeState, runWithLocale } from "./i18n-context.mjs";
 import { sitemapUrls } from "./isr-urls.mjs";
 import { makeContext } from "./context.mjs";
 import { dispatchServerFn, runWithContext, SERVER_FN_PATH } from "./functions.mjs";
+import { corsPreflight, withCorsOnResult } from "./cors.mjs";
 import { isCrossSite } from "./origin.mjs";
 import { dispatchLiveEvent, LIVE_EVENT_PATH } from "./live-event.mjs";
 import { encodeEntries, encodeTags, flushPurge, REVALIDATE_PATH, revalidateEndpoint, revalidateEndpointEnabled, TAGS_HEADER } from "./revalidate.mjs";
@@ -53,6 +54,14 @@ const JSON_CT = { "content-type": "application/json; charset=utf-8" };
 // Not async itself: the request's promise is routeRequest's, so an app without i18n pays this one
 // check and no extra async frame.
 export function handleRequest(env, info) {
+  const pre = corsPreflight(env.cors, {
+    method: info.method,
+    origin: rawHeader(info)("origin"),
+    pathname: info.url.pathname,
+    requestMethod: rawHeader(info)("access-control-request-method"),
+    requestHeaders: rawHeader(info)("access-control-request-headers"),
+  });
+  if (pre) return Promise.resolve(pre);
   return env.i18n ? localizedRequest(env, info) : routeRequest(env, info);
 }
 
@@ -309,7 +318,7 @@ function rawHeader(info) {
 function finalize(ctx, result, env, table, version) {
   if (!ctx.__commit && !ctx.__purge) {
     if (ctx.__purgeClosed === false) ctx.__purgeClosed = true;
-    return finalizeResult(ctx, result);
+    return withCorsOnResult(env, ctx, finalizeResult(ctx, result));
   }
   return commitAndFinalize(ctx, result, env, table, version);
 }
@@ -330,7 +339,7 @@ async function commitAndFinalize(ctx, result, env, table, version) {
   }
   if (ctx.__purge) await flushPurge(ctx, out.headers);
   else if (ctx.__purgeClosed === false) ctx.__purgeClosed = true;
-  return out;
+  return withCorsOnResult(env, ctx, out);
 }
 
 // Runs request code (an action, API route, live event) as getContext(). `__purgeClosed` is false

@@ -8,7 +8,15 @@ breaking changes (documented per entry), patch versions do not.
 The npm version and the milestone codename are offset — each release bundles a
 milestone's worth of work; the codename is noted per entry.
 
+
 ## [Unreleased]
+
+### Added
+- **General CORS middleware** — opt-in `cors` in `nowaki.config` (`origins`, `methods`,
+  `headers`, `credentials`, `maxAge`). Browsers get `Access-Control-*` on app routes and API
+  handlers; `OPTIONS` preflight is answered when `Origin` and `Access-Control-Request-Method` are
+  present. Framework paths (`/__nowaki/*`, `/_nowaki/*`) never get CORS headers. Cross-origin
+  writes still pass the existing same-origin / CSRF checks.
 
 ## [0.19.3] — 2026-11-12 · "Bora": production and dev experience
 

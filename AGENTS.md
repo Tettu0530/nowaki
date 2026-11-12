@@ -371,6 +371,10 @@ and `scripts/gallery-e2e.mjs` / `gallery-browser-test.mjs` check the exit criter
   The site comes from `crates/nowaki/src/site.rs`
   (`dist/server/site.json`, normalized by `server/site-config.mjs`), `NOWAKI_SITE` winning. Unit checks:
   `scripts/seo-unit-test.mjs`.
+- **CORS (`cors` in nowaki.config)** — `server/site-config.mjs` `normalizeCors`, written to
+  `dist/server/cors.json` (dev: `.nowaki/cors.json`; `site.rs`). Runtime:
+  `server/cors.mjs` (`corsPreflight`, `withCorsOnResult`) from `server/handler.mjs`. Separate
+  from `server/origin.mjs` CSRF checks. Tests: `scripts/cors-test.mjs`.
 - **Routing config (`basePath`, `trailingSlash`, `redirects`, `rewrites`, `headers`)** —
   normalized and validated by `server/site-config.mjs`, read before the build (in the plugin
   host's Node process, `plugins.rs` `spawn`, or by `site.rs` `config` on its own) and

@@ -116,6 +116,10 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
     if (e.code === "ENOENT") return null;
     throw e;
   });
+  const cors = await readFile(path.join(serverDir, "cors.json"), "utf8").then(JSON.parse, (e) => {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  });
   const base = routing?.basePath ?? "";
   setBasePath(base);
   const assetBase = `${base}/_nowaki/`;
@@ -224,6 +228,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
     .catch(() => null);
   const env = {
     dev: false,
+    cors,
     // Prerendering for static output: pages are files (`x/index.html`), so their URLs end in `/`.
     staticOutput: process.env.NOWAKI_PRERENDER === "1",
     site: resolveSite(builtSite),

@@ -141,8 +141,32 @@ eq(
   { site: "https://example.com", fonts: [{ family: "X" }] },
   "site and fonts as before",
 );
+eq(
+  (
+    await normalizeConfig({
+      cors: {
+        origins: ["https://example.com"],
+        methods: ["GET", "POST"],
+        headers: ["Content-Type"],
+        credentials: true,
+        maxAge: 3600,
+      },
+    })
+  ).cors,
+  {
+    origins: ["https://example.com"],
+    methods: ["GET", "POST", "OPTIONS"],
+    headers: ["Content-Type"],
+    credentials: true,
+    maxAge: 3600,
+  },
+  "cors defaults and OPTIONS",
+);
 
 await rejects({ site: "example.com" }, /site must be an absolute URL/, "invalid site keeps its message");
+await rejects({ cors: { origins: ["*"], credentials: true } }, /credentials/, "cors: credentials + wildcard");
+await rejects({ cors: { origins: ["*", "https://a.test"] } }, /combine/, "cors: wildcard mixed with explicit");
+await rejects({ cors: { origins: ["https://a.test"], methods: ["*"] } }, /method/, "cors: method wildcard");
 await rejects({ basePath: "app" }, /basePath/, "basePath without a leading slash");
 await rejects({ basePath: "/a/[b]" }, /basePath/, "basePath with a param");
 await rejects({ basePath: "/__nowaki" }, /reserved/, "basePath under /__nowaki/");

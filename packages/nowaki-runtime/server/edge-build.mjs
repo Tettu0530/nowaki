@@ -33,6 +33,7 @@ const envPublicJson = hasEnv ? await readFile(path.join(serverDir, "env-public.j
 // nowaki.config routing, inlined; without it the worker imports and checks nothing for it.
 const routingJson = await readFile(path.join(serverDir, "routing.json"), "utf8").catch(() => null);
 const routingConfig = routingJson ? JSON.parse(routingJson) : null;
+const corsJson = await readFile(path.join(serverDir, "cors.json"), "utf8").catch(() => null);
 const trailingSlash = routingConfig?.trailingSlash;
 // basePath: client files and public/ go under it in the assets directory, so the platform serves
 // them at the URL the pages use.
@@ -171,7 +172,7 @@ const handler = createFetchHandler({
   islandComponents,
   liveIslands,
   routeTable,
-  serverFunctions,${site ? `\n  site: ${JSON.stringify(site)},` : ""}${trailingSlash ? `\n  trailingSlash: ${JSON.stringify(trailingSlash)},` : ""}${fontsJson ? `\n  fonts: ${fontsJson.trim()},` : ""}${contentRaw ? "\n  content," : ""}${hasEnv ? "\n  envModule," : ""}${hasSession ? "\n  sessionModule," : ""}${envPublicJson ? `\n  envPublic: ${envPublicJson.trim()},` : ""}${basePath ? `\n  basePath: ${JSON.stringify(basePath)},` : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}${i18nRouting ? `\n  routing: ${i18nRouting},` : ""}
+  serverFunctions,${site ? `\n  site: ${JSON.stringify(site)},` : ""}${trailingSlash ? `\n  trailingSlash: ${JSON.stringify(trailingSlash)},` : ""}${fontsJson ? `\n  fonts: ${fontsJson.trim()},` : ""}${contentRaw ? "\n  content," : ""}${hasEnv ? "\n  envModule," : ""}${hasSession ? "\n  sessionModule," : ""}${envPublicJson ? `\n  envPublic: ${envPublicJson.trim()},` : ""}${basePath ? `\n  basePath: ${JSON.stringify(basePath)},` : ""}${hasLive ? "\n  live: { render: liveRender, props: liveProps, initial: liveInitialState, view: liveView }," : ""}${i18nRouting ? `\n  routing: ${i18nRouting},` : ""}${corsJson ? `\n  cors: ${corsJson.trim()},` : ""}
 });
 
 // public/ files by decoded URL path; they win over routes at the same path.

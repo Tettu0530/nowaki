@@ -115,6 +115,7 @@ export function createFetchHandler({
   trailingSlash,
   basePath,
   routing,
+  cors,
   cdn: cdnOptions,
 }) {
   setBasePath(basePath);
@@ -151,6 +152,7 @@ export function createFetchHandler({
 
   const env = {
     dev: false,
+    cors: cors ?? null,
     // NOWAKI_SITE (a Worker var) or nowaki.config `site`, embedded by edge-build.mjs.
     site: resolveSite(site),
     trailingSlash,

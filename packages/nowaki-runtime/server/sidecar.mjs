@@ -315,6 +315,15 @@ function readDevI18n() {
   }
 }
 
+let devCors;
+function readDevCors() {
+  try {
+    return JSON.parse(readFileSync(path.join(appRoot, ".nowaki/cors.json"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 const env = {
   dev: true,
   site: resolveSite(devConfig.site),
@@ -325,6 +334,10 @@ const env = {
   get i18n() {
     if (devI18n === undefined) devI18n = readDevI18n();
     return devI18n;
+  },
+  get cors() {
+    if (devCors === undefined) devCors = readDevCors();
+    return devCors;
   },
   // dev rescans on every request (picks up file changes)
   routeTable: () => scanRoutes(appRoot),
