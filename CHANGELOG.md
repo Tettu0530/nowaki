@@ -10,7 +10,39 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.19.3] — 2026-11-12 · "Bora": production and dev experience
+
+Packages: `nowaki` / `nowaki-core`, `@nowaki-dev/runtime`, `create-nowaki` /
+`create-nowaki-app`, all 0.19.3 (crates.io, npm). `@nowaki-dev/markdoc` is unchanged
+(0.1.0). From this release the CLI, runtime and create-* packages share one version and
+are released together; it starts at 0.19.3 because create-* had already published
+0.19.2, so the CLI and runtime skip 0.19.0–0.19.2.
+
+Control over what is cached, smooth navigation, visibility into a running app, and edits
+that keep their state: `revalidatePath()` / `revalidateTag()` with route `tags`, purging
+the `nowaki start` ISR cache and the Vercel and Cloudflare CDNs; opt-in View Transitions;
+Server-Timing, JSON logs, OpenTelemetry traces and a health endpoint; HMR that keeps
+island state and updates routes and layouts in place; and a dev toolbar backed by the same
+data as the dev MCP endpoint. `examples/gallery` meets the v0.19 exit criteria. Everything
+is off unless used: the CI perf gate (uncached and ISR req/s, TTFB, build, dev) moved
+within noise on every v0.19 PR.
+
 ### Upgrade notes
+- **Update the CLI and `@nowaki-dev/runtime` together.** The CLI now refuses a runtime
+  older than its own version (0.19.3), naming both and the `npm i` fix.
+- **Breaking: API routes reject cross-site writes by default (CSRF).** A POST, PUT, PATCH or
+  DELETE to an API route (`routes/api/**`) or a file route (`feed.xml.ts`) whose `Origin` is
+  another site or `null`, or that has `Sec-Fetch-Site: cross-site` without `Origin`, now gets
+  the same 403 `Forbidden` as a page action, before the handler runs (after middleware). Until
+  0.18 it was allowed with a one-time warning. GET, HEAD and OPTIONS are unaffected, and so are
+  requests with neither header (curl, server-to-server calls, most native apps). Who is
+  affected: APIs called from a browser page on another origin (another app of yours, a
+  separate frontend, a preview domain), webhooks and payment or OAuth callbacks that a
+  provider posts from its own page, and native apps that send an `Origin`. Opt such a route
+  out with `export const csrf = false`, and authenticate it with a signature or shared secret
+  rather than cookies. `export const csrf = true` is now the default and still accepted. Behind
+  a proxy that rewrites `Host`, forward the public host as `x-forwarded-host` (with
+  `NOWAKI_TRUST_PROXY=1` where needed), as for actions, or same-origin calls are rejected too.
 - **Building Nowaki from source needs Rust 1.97 or newer** (was 1.95), because oxc 0.158
   does. `rust-version` and the MSRV CI job are 1.97. The npm packages are unaffected.
 
@@ -137,8 +169,20 @@ milestone's worth of work; the codename is noted per entry.
   and **`live`** (Jetstream connections, the cap, rooms with member counts). `dev_config` now
   also lists the recent revalidations. `nowaki:page-load` carries the response's `timing`
   (its `Server-Timing` header) after a client navigation or an HMR page update.
+- `examples/gallery` covers the v0.19 exit criteria: ISR posts (`/gallery/posts`) tagged
+  `photos` / `photo:<id>`, a signed-in caption edit that calls `revalidateTag`, a list-to-post
+  View Transition with `transitionName()` on the photo, a Likes island for HMR, and a `budget`.
+  `scripts/gallery-e2e.mjs` gains `vercel` (the generated function, a fake `@vercel/functions`
+  and a stand-in CDN) and `otel` (one trace from a local OTLP receiver) modes and checks the
+  fresh-after-edit flow on `nowaki start` and the Cloudflare worker's cache;
+  `scripts/gallery-browser-test.mjs` checks the transition and its fallbacks, and in `nowaki dev`
+  an island edit that keeps its state and the toolbar's islands and budget.
 
 ### Changed
+- API routes and file routes reject cross-site POST / PUT / PATCH / DELETE requests with 403
+  (the check page actions use, `server/origin.mjs`) on dev, `nowaki start` and every adapter;
+  `export const csrf = false` opts out. The 0.14 warning for allowed cross-site API writes is
+  gone. `examples/hello` gains `routes/api/webhook.ts`, a `csrf = false` example.
 - Dependencies: `oxc` 0.146 → 0.158 (`oxc_resolver` stays at 11.24.3, the latest). oxc
   string literals are now `JSStr`, which can hold a lone surrogate; `nowaki-core` leaves an
   import specifier with one as written (the client build reports it as unresolvable) and
@@ -148,6 +192,16 @@ milestone's worth of work; the codename is noted per entry.
   size benchmark is unchanged). Source maps map a few more names.
 
 ### Fixed
+- The node, bun, deno and vercel adapters no longer send an ISR page's internal cache headers
+  (`x-nowaki-revalidate`, `x-nowaki-vary`, `x-nowaki-vary-query`) to the client; only
+  `nowaki start`'s Rust front reads them. The Cloudflare worker already dropped them.
+- `scripts/router-browser-test.mjs` failed now and then in CI ("SPA navigation swapped to
+  /about", "Chrome exposed no page target"). The first click on a page comes before the lazy
+  router is loaded, so it waits for the router chunk and then the page fetch; the test gave it a
+  fixed 500 ms (and 800 ms for the page load) and now waits for the swap itself. Chrome now runs
+  over `--remote-debugging-pipe` with a fresh profile directory: CI runs the test twice in a row,
+  and the second Chrome could find the fixed debugging port and profile still held by the first
+  one while it shut down.
 - `nowaki dev` no longer serves files under `public/` at `/public/<path>` as well as at
   `/<path>`; production never did.
 - The e2e scripts' `! command` assertions could never fail (`set -e` ignores a command starting

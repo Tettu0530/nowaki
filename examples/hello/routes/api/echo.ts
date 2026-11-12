@@ -1,6 +1,5 @@
 // Per-method API exports (GET / POST). Dispatch by method name instead of default.
-// Reject cross-site POSTs now (API routes only warn by default for the time being).
-export const csrf = true;
+// A cross-site POST is rejected (403) like a page action; same-origin and Origin-less calls pass.
 type Ctx = {
   url: URL;
   json: (data: unknown) => unknown;

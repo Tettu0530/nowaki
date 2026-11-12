@@ -47,3 +47,7 @@ body {
 .error {
   color: #b00;
 }
+.hint {
+  color: #666;
+  font-size: 0.875rem;
+}

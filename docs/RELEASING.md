@@ -11,10 +11,11 @@ Nowaki follows [SemVer](https://semver.org/). During **0.x alpha**, however:
 - Once the public API (CLI commands, authoring conventions, the public exports
   of `@nowaki-dev/runtime`) is mostly settled, we go to **1.0.0**; from then on
   breaking changes happen only in a major.
-- Packages are versioned independently today: `nowaki` / `nowaki-core` (crates
-  and the npm CLI) are 0.18.x, `@nowaki-dev/runtime` is 0.17.x, `create-nowaki` /
-  `create-nowaki-app` are 0.19.x, and `@nowaki-dev/markdoc` is 0.1.x. From 0.19.0
-  the CLI, runtime, and create-* packages share one version; markdoc keeps its own.
+- Since 0.19.3, `nowaki` / `nowaki-core` (crates and the npm CLI),
+  `@nowaki-dev/runtime` and `create-nowaki` / `create-nowaki-app` share one version
+  and are released together (create-* had already published 0.19.2, so the shared
+  version starts at 0.19.3). `@nowaki-dev/markdoc` keeps its own (0.1.x). The CLI
+  refuses a runtime older than its own version.
 - Every release has a matching `vX.Y.Z` tag and CHANGELOG entry.
 
 ## Distribution channels
@@ -78,10 +79,9 @@ create-nowaki, and create-nowaki-app. A package whose version is already on npm
 is skipped with a notice (`scripts/ci/npm-publish-if-new.sh`), so `all` works
 when only some packages were bumped. It uses the same `NPM_TOKEN` as release.yml.
 
-Note: until 0.19.0 the runtime does not share the CLI's version. Keep the
-scaffold template's `@nowaki-dev/runtime` and `nowaki` dependencies on the
-versions just published. From 0.19.0 the CLI, runtime, and create-* packages
-are bumped together.
+Bump the CLI, runtime and create-* packages together, and point the scaffold
+template's `@nowaki-dev/runtime` and `nowaki` dependencies at that version. The
+CLI requires a runtime at least as new as itself, so publish both.
 
 To publish by hand from your machine (while logged in to npm):
 

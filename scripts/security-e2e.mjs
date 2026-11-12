@@ -2,7 +2,7 @@
 //   node scripts/security-e2e.mjs dev  <devBase>  <appRoot>
 //   node scripts/security-e2e.mjs prod <prodBase>
 // Covers (dev + prod unless noted): RPC CSRF, CSWSH, forged live state, the live-event POST gate, server functions,
-//         cross-site writes, sessions (cross-site read-only, forged cookies), default headers, config redirects (open redirects, CRLF, the internal
+//         cross-site writes, sessions (cross-site writes rejected, forged cookies), default headers, config redirects (open redirects, CRLF, the internal
 //         x-nowaki-route-path header). Dev only: arbitrary file read (@fs/ssr-module/.env/
 //         virtual ..), the HMR socket. Prod only: generic 500s, ISR isolation and query-flood
 //         collapsing, /_nowaki/* basename static serving (path traversal).
@@ -99,7 +99,7 @@ async function serverFnHardening(b, m) {
     (await rpc(JSON.stringify({ id: "6c90d7dc921a9a3f", args: ["x".repeat(1100 * 1024)] }))).status === 413);
 }
 
-// Page actions reject cross-site non-GET requests by default; API routes warn unless they opt in.
+// Page actions and API / file routes reject cross-site non-GET requests by default.
 async function crossSiteWritesRejected(b) {
   const send = (path, h) =>
     fetch(`${b}${path}`, {
@@ -114,10 +114,43 @@ async function crossSiteWritesRejected(b) {
     (await send("/todos", { "sec-fetch-site": "cross-site" })) === 403);
   check("action: same-origin POST allowed", (await send("/todos", { origin: b })) === 302);
   check("action: POST without Origin (non-browser) allowed", (await send("/todos", {})) === 302);
-  check("API with `csrf = true`: cross-site Origin rejected (403)",
-    (await send("/api/echo", { origin: "http://evil.test" })) === 403);
-  check("API without `csrf`: cross-site Origin still allowed (warn phase)",
-    (await send("/api/hello", { origin: "http://evil.test" })) === 200);
+  // API routes (0.19): the same rule and the same 403 as actions; `csrf = false` opts out.
+  const api = (path, h, method = "POST") =>
+    fetch(`${b}${path}`, {
+      method,
+      redirect: "manual",
+      headers: method === "GET" ? h : { "content-type": "application/json", ...h },
+      body: method === "GET" ? undefined : "{}",
+    });
+  const action = await fetch(`${b}/todos`, {
+    method: "POST",
+    redirect: "manual",
+    headers: { "content-type": "application/x-www-form-urlencoded", origin: "http://evil.test" },
+    body: "text=csrf-check",
+  });
+  const rejected = await api("/api/echo", { origin: "http://evil.test" });
+  const actionBody = await action.text();
+  const rejectedBody = await rejected.text();
+  check("API: cross-site Origin rejected (403)", rejected.status === 403);
+  check("API: the rejection matches the action's (status, content-type, body)",
+    rejected.status === action.status && rejectedBody === actionBody &&
+      rejected.headers.get("content-type") === action.headers.get("content-type"));
+  check("API: Origin null rejected (403)", (await api("/api/echo", { origin: "null" })).status === 403);
+  check("API: Sec-Fetch-Site cross-site without Origin rejected (403)",
+    (await api("/api/echo", { "sec-fetch-site": "cross-site" })).status === 403);
+  check("API: DELETE cross-site rejected (403, before the 405)",
+    (await api("/api/echo", { origin: "http://evil.test" }, "DELETE")).status === 403);
+  check("API: default handler (any method) rejects cross-site POST (403)",
+    (await api("/api/hello", { origin: "http://evil.test" })).status === 403);
+  check("API: same-origin POST allowed", (await api("/api/echo", { origin: b })).status === 200);
+  check("API: Sec-Fetch-Site same-origin without Origin allowed",
+    (await api("/api/echo", { "sec-fetch-site": "same-origin" })).status === 200);
+  check("API: POST without Origin (non-browser) allowed", (await api("/api/echo", {})).status === 200);
+  check("API: cross-site GET unaffected", (await api("/api/echo", { origin: "http://evil.test" }, "GET")).status === 200);
+  check("API with `csrf = false`: cross-site POST allowed",
+    (await api("/api/webhook", { origin: "http://evil.test" })).status === 200);
+  check("file route: cross-site POST rejected (403)",
+    (await api("/feed.xml", { origin: "http://evil.test" })).status === 403);
 }
 
 // Sessions (routes/api/session.ts): a cross-site POST carrying a valid session cookie sees an empty,
@@ -137,10 +170,8 @@ async function sessionGuards(b) {
   const me = await (await fetch(`${b}/api/session`, { headers: { cookie } })).json();
   check("session: the cookie reads back", me.user === "alice");
   const evil = await post("op=login&user=mallory", { cookie, origin: "http://evil.test" });
-  const ej = await evil.json();
-  check("session: cross-site POST sees an empty session", ej.user === null && ej.readOnly === true);
-  check("session: cross-site POST can't write (read-only, no cookie)",
-    /read-only on a cross-site request/.test(String(ej.wrote)) && !evil.headers.get("set-cookie"));
+  check("session: cross-site POST to the API is rejected (403, no cookie)",
+    evil.status === 403 && !evil.headers.get("set-cookie"));
   const still = await (await fetch(`${b}/api/session`, { headers: { cookie } })).json();
   check("session: the victim's session is unchanged", still.user === "alice");
   const value = cookie.slice(cookie.indexOf("=") + 1);

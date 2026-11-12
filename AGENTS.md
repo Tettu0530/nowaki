@@ -26,8 +26,9 @@ packages/create-nowaki, create-nowaki-app   scaffolders (npm create nowaki).
 packages/nowaki-cli   the `nowaki` npm wrapper (prebuilt binary shim).
 packages/nowaki-markdoc   `@nowaki-dev/markdoc`, the official Markdoc plugin (`.mdoc`).
 examples/hello/       kitchen-sink app used by CLI tests + e2e.
-examples/gallery/     the v0.18 exit-criteria app (basePath, i18n, modal routes, sessions, env.ts);
-                      scripts/gallery-e2e.mjs + gallery-browser-test.mjs.
+examples/gallery/     the v0.18 + v0.19 exit-criteria app (basePath, i18n, modal routes, sessions,
+                      env.ts; ISR posts with tags + revalidateTag, View Transitions, a Likes island
+                      for HMR, a `budget`); scripts/gallery-e2e.mjs + gallery-browser-test.mjs.
 benchmarks/           bench.mjs, head-to-head.mjs (Next/Astro), check-regression.mjs,
                       ci-perf.mjs + ci-perf-app/ (CI perf gate: head vs base vs last release,
                       all on the fixed ci-perf-app).
@@ -114,8 +115,10 @@ code locations and CI coverage.
   as "Internal Server Error" (dev keeps the message). Keep the body / argument
   limits in `functions.mjs` ahead of parsing and dispatch.
 - **State-changing routes check the origin.** `handler.mjs` rejects cross-site
-  non-GET requests to page actions (and to API routes with `csrf = true`) via
-  `server/origin.mjs`, before the action runs. Don't move the check after the
+  POST / PUT / PATCH / DELETE requests to page actions and to API / file routes via
+  `server/origin.mjs` (`isCrossSite`), after middleware and before the action or
+  handler runs; GET / HEAD / OPTIONS skip the check. API routes and actions share
+  the one `FORBIDDEN` response. Don't move the check after the
   action, and keep `csrf = false` as the only opt-out.
 - **Every server sets the default security headers** (`security_headers.rs` for
   dev/start, `server/security-headers.mjs` for the adapters, `_headers` for
@@ -181,6 +184,11 @@ code locations and CI coverage.
   cover the behavior, and update the defenses table in SECURITY.md.
 
 ## Feature map (where things live)
+
+v0.19 at a glance (each has its entry below): on-demand revalidation and the CDN purge per
+adapter (plus the Cloudflare Worker ISR cache), View Transitions, observability, Dev HMR / Fast
+Refresh, the dev toolbar and the dev MCP. `examples/gallery` (`routes/posts/`) uses all of them,
+and `scripts/gallery-e2e.mjs` / `gallery-browser-test.mjs` check the exit criteria end to end.
 
 - **Dev MCP (`/__nowaki/mcp`)** — `crates/nowaki/src/mcp.rs` (JSON-RPC over
   Streamable HTTP, tools, error ring buffer); route table + island registry from
@@ -251,6 +259,9 @@ code locations and CI coverage.
   | cloudflare | `Cache-Tag` (on the Cache API entry only) | local `cache.delete` of path entries + zone purge by tag with `CLOUDFLARE_ZONE_ID` / `CLOUDFLARE_API_TOKEN`, awaited (2 s cap) |
   | static | none | warn-once no-op |
 
+  On node / bun / deno / vercel, `app.mjs` drops the `nowaki start` cache headers
+  (`x-nowaki-revalidate` / `-vary` / `-vary-query` / `-tags`, via `purge-cloudflare.mjs`
+  `stripInternal`) from an ISR render before sending it; `Vercel-Cache-Tag` stays for Vercel.
   Tests: `scripts/purge-adapters-test.mjs` (mocked package, a generated function on port 5540);
   `scripts/ci/e2e-adapters.sh` checks the header from the built `examples/hello` function.
 - **Cloudflare Worker ISR cache** — `server/purge-cloudflare.mjs` `cloudflareCdn()`, created by
@@ -493,14 +504,13 @@ code locations and CI coverage.
 
 ## Releasing (maintainers)
 
-The packages are versioned independently today: the CLI and crates are 0.18.x
-(`Cargo.toml` `[workspace.package]`, the `nowaki` crate's `nowaki-core` path-dep
-version, `packages/nowaki-cli`), `@nowaki-dev/runtime` is 0.17.x,
-`create-nowaki` / `create-nowaki-app` are 0.19.x, and `@nowaki-dev/markdoc`
-(`packages/nowaki-markdoc`) is 0.1.x. The scaffold template
-(`packages/create-nowaki/templates/_shared/package.json`) pins the current CLI
-and runtime. From 0.19.0 the CLI, runtime, and create-* versions move together
-(markdoc keeps its own semver). After bumping, run `pnpm install` so
+Since 0.19.3 the CLI and crates (`Cargo.toml` `[workspace.package]`, the `nowaki`
+crate's `nowaki-core` path-dep version, `packages/nowaki-cli`), `@nowaki-dev/runtime`
+and `create-nowaki` / `create-nowaki-app` share one version and are bumped together;
+`@nowaki-dev/markdoc` (`packages/nowaki-markdoc`) keeps its own semver (0.1.x). The
+CLI refuses a runtime older than its own version (`runtime::MIN_RUNTIME`). The
+scaffold template (`packages/create-nowaki/templates/_shared/package.json`) pins
+that version for both. After bumping, run `pnpm install` so
 `pnpm-lock.yaml` matches (CI uses a frozen lockfile). Then: `cargo publish -p
 nowaki-core` → `-p nowaki`; push a `vX.Y.Z` tag (triggers `release.yml` for the
 CLI binaries); `gh workflow run publish-npm.yml -f package=all` for runtime,

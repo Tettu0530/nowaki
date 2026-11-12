@@ -15,7 +15,7 @@ A "structural answer to the slowness of Next.js", built on three pillars:
 
 ## Where we are
 
-**alpha (CLI / crates 0.18.x, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands: WebSocket on `nowaki dev` / `nowaki start`, per-event HTTP POST on every deploy adapter), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Content sites (content collections, Markdown / MDX / Markdoc, `<Image>`, SEO metadata and sitemaps, fonts) arrived in 0.17. 0.18 added routing for larger apps: route groups, parallel and intercepting routes, `redirects` / `rewrites` / `headers`, `basePath`, `trailingSlash`, i18n routing, sessions, and a typed `env.ts`. Production use is not yet recommended (the API is still stabilizing).
+**alpha (every package 0.19.x except `@nowaki-dev/markdoc`, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands: WebSocket on `nowaki dev` / `nowaki start`, per-event HTTP POST on every deploy adapter), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Content sites (content collections, Markdown / MDX / Markdoc, `<Image>`, SEO metadata and sitemaps, fonts) arrived in 0.17. 0.18 added routing for larger apps: route groups, parallel and intercepting routes, `redirects` / `rewrites` / `headers`, `basePath`, `trailingSlash`, i18n routing, sessions, and a typed `env.ts`. 0.19 added production and dev experience: on-demand revalidation with CDN purge (Vercel, Cloudflare), View Transitions, observability (Server-Timing, JSON logs, OpenTelemetry), HMR that keeps island state and updates pages in place, a dev toolbar, and API routes that reject cross-site writes by default. Production use is not yet recommended (the API is still stabilizing).
 
 ## Milestones
 
@@ -138,19 +138,21 @@ Routing features that larger apps and existing Next.js / Remix users expect.
 - [x] Typed env schema: declare server and `PUBLIC_` variables with a Standard Schema; validated at build and at startup (a missing or malformed value fails fast), with generated types for `import.meta.env` and a server-only `env` that the client build refuses to import
 - [x] Sessions: `ctx.session` (and `getContext().session`) backed by a signed and encrypted cookie by default, or a pluggable store; rotation on sign-in, expiry, and the same CSRF rules as actions
 
-### v0.19 "Bora": Production and dev experience
+### v0.19 "Bora": Production and dev experience ✅
 Control over what is cached, smooth navigation, visibility into a running app, and edits that keep their state.
 
 **Exit criteria**: an action updates a post and the next request for it is fresh on `nowaki start` and on a CDN adapter. A list-to-detail navigation animates with View Transitions and falls back cleanly where they are unsupported. A request shows up as one OpenTelemetry trace (route, middleware, loader, render). Editing an island in `nowaki dev` keeps its state, and the dev toolbar shows the page's islands and JS budget.
 
-- [ ] Upgrade oxc to the latest release (raises the minimum Rust version), before the transform work below lands on top of it
-- [ ] API routes reject cross-site requests by default (CSRF); `export const csrf = false` stays as the opt-out
-- [ ] CLI, runtime and create-* versions move together from 0.19.0
-- [ ] Cache invalidation: `revalidatePath()` / `revalidateTag()` from actions and API routes (route-level `tags`), purging the `nowaki start` ISR cache and calling the adapter's CDN purge where there is one
-- [ ] View Transitions in the client router (`document.startViewTransition`, opt-in per link or route, `view-transition-name` helpers), with a reduced-motion fallback
-- [ ] Observability: `Server-Timing` (middleware, loader, render, ISR status), structured JSON logs (`NOWAKI_LOG=json`), OpenTelemetry traces over OTLP (Rust front and renderer joined by `traceparent`, live events included), and a health endpoint
-- [ ] HMR: island edits keep component state (Preact Fast Refresh), CSS and CSS modules update without a reload, and route / layout edits re-render the page in place
-- [ ] Dev toolbar in `nowaki dev`, from the same data as the dev MCP endpoint:
+**Status**: 0.19.3 ships every item below (the first release with one shared version; 0.19.0–0.19.2 were skipped for the CLI and runtime). The exit criteria are met by [examples/gallery](examples/gallery) (its `/gallery/posts`): CI checks the fresh post after an edit on `nowaki start`, the Cloudflare worker and the Vercel function (`scripts/gallery-e2e.mjs`), the trace from a local OTLP receiver, and in Chrome the View Transition with its fallbacks, the island edit that keeps its state and the toolbar (`scripts/gallery-browser-test.mjs`).
+
+- [x] Upgrade oxc to the latest release (raises the minimum Rust version), before the transform work below lands on top of it
+- [x] API routes reject cross-site requests by default (CSRF); `export const csrf = false` stays as the opt-out
+- [x] CLI, runtime and create-* versions move together (from 0.19.3, since create-* had already published 0.19.2)
+- [x] Cache invalidation: `revalidatePath()` / `revalidateTag()` from actions and API routes (route-level `tags`), purging the `nowaki start` ISR cache and calling the adapter's CDN purge where there is one
+- [x] View Transitions in the client router (`document.startViewTransition`, opt-in per link or route, `view-transition-name` helpers), with a reduced-motion fallback
+- [x] Observability: `Server-Timing` (middleware, loader, render, ISR status), structured JSON logs (`NOWAKI_LOG=json`), OpenTelemetry traces over OTLP (Rust front and renderer joined by `traceparent`, live events included), and a health endpoint
+- [x] HMR: island edits keep component state (Preact Fast Refresh), CSS and CSS modules update without a reload, and route / layout edits re-render the page in place
+- [x] Dev toolbar in `nowaki dev`, from the same data as the dev MCP endpoint:
   - the current route, its layouts, and their loaders' timing
   - each island on the page: client or live, hydration state, size, and the "could be live" hint
   - the route's first-load JS against its `budget`
