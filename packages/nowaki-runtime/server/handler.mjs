@@ -17,7 +17,7 @@ import { dispatchServerFn, runWithContext, SERVER_FN_PATH } from "./functions.mj
 import { isCrossSite } from "./origin.mjs";
 import { dispatchLiveEvent, LIVE_EVENT_PATH } from "./live-event.mjs";
 import { encodeEntries, encodeTags, flushPurge, REVALIDATE_PATH, revalidateEndpoint, revalidateEndpointEnabled, TAGS_HEADER } from "./revalidate.mjs";
-import { logError, logWarn } from "./log.mjs";
+import { logError } from "./log.mjs";
 
 // Internal path the client router fetches loading/error boundary HTML from, once.
 export const BOUNDARIES_PATH = "/__nowaki/boundaries";
@@ -137,15 +137,13 @@ async function routeRequest(env, info, localized) {
 
     const mod = await env.importModule(match.file, version);
 
+    // Cross-site writes to page actions and API / file routes are rejected (403) after middleware,
+    // unless the route opts out with `export const csrf = false`.
     const crossSite = crossOrigin && mod.csrf !== false;
     if (crossOrigin && !crossSite) ctx.__sessionMode = undefined;
 
     if (match.isApi) {
-      if (crossSite) {
-        // Phase 1 for API routes: warn; `export const csrf = true` enforces now.
-        if (mod.csrf === true) return finalize(ctx, FORBIDDEN, env, table, version);
-        warnCrossSiteApi(match.file, url.pathname);
-      }
+      if (crossSite) return finalize(ctx, FORBIDDEN, env, table, version);
       // Inside the request's context, so getContext() and revalidate*() work there.
       const tok = ctx.__trace?.begin(null, "api");
       let res;
@@ -300,15 +298,6 @@ const FORBIDDEN = { status: 403, headers: { "content-type": "text/plain; charset
 function rawHeader(info) {
   const h = info.headers ?? info.req?.headers ?? {};
   return typeof h.get === "function" ? (n) => h.get(n) ?? undefined : (n) => h[n];
-}
-
-const warnedApi = new Set();
-function warnCrossSiteApi(file, pathname) {
-  if (warnedApi.has(file)) return;
-  warnedApi.add(file);
-  logWarn(
-    `cross-site non-GET request to API route ${pathname} was allowed. A later release rejects these by default; add \`export const csrf = true\` to reject now, or \`export const csrf = false\` to keep allowing them.`,
-  );
 }
 
 // `ctx.__commit(result)` (sessions) runs before the response headers are built, so a cookie it sets

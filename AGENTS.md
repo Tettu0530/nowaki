@@ -114,8 +114,10 @@ code locations and CI coverage.
   as "Internal Server Error" (dev keeps the message). Keep the body / argument
   limits in `functions.mjs` ahead of parsing and dispatch.
 - **State-changing routes check the origin.** `handler.mjs` rejects cross-site
-  non-GET requests to page actions (and to API routes with `csrf = true`) via
-  `server/origin.mjs`, before the action runs. Don't move the check after the
+  POST / PUT / PATCH / DELETE requests to page actions and to API / file routes via
+  `server/origin.mjs` (`isCrossSite`), after middleware and before the action or
+  handler runs; GET / HEAD / OPTIONS skip the check. API routes and actions share
+  the one `FORBIDDEN` response. Don't move the check after the
   action, and keep `csrf = false` as the only opt-out.
 - **Every server sets the default security headers** (`security_headers.rs` for
   dev/start, `server/security-headers.mjs` for the adapters, `_headers` for

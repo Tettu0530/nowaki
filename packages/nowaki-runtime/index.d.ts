@@ -161,6 +161,21 @@ export type RouteBudget = { js: number };
  */
 export type Streaming = boolean | "early";
 
+/**
+ * `export const csrf` on a page with an `action`, an API route (`routes/api/**`), or a file route
+ * (`feed.xml.ts`). By default (`true`, so exporting `true` changes nothing) a POST / PUT / PATCH /
+ * DELETE from another site is rejected with 403 `Forbidden` before the action or handler runs: an
+ * `Origin` of another host or `null`, or `Sec-Fetch-Site: cross-site` without `Origin`. Requests
+ * without either header (curl, server-to-server, most native apps) and GET / HEAD / OPTIONS are
+ * never checked. `_middleware` runs before the check.
+ *
+ * `false` accepts cross-site writes, for webhooks and third-party callbacks. Authenticate such a
+ * route another way (a signature header, a shared secret): its cookies are the visitor's.
+ * API routes reject by default since 0.19.0.
+ * @example export const csrf = false; // routes/api/webhook.ts
+ */
+export type Csrf = boolean;
+
 /** API route handler (per-method export or default). */
 export type ApiHandler = (
   ctx: LoaderContext,

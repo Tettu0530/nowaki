@@ -226,11 +226,12 @@ session.ts   ctx.session options (optional)
   argument; authorize with `getContext()` (cookies/headers) before mutating data.
   Use `serverFn(schema, impl)` for `"use server"` exports that take arguments (see
   `actions/echo.ts` in the **basics** template).
-- **Cross-site writes.** Page `action`s reject cross-site non-GET requests by default.
-  **`routes/_middleware.ts` runs before that check** — do not perform sensitive
-  mutations in middleware unless you validate the caller yourself. API routes log a
-  warning and still accept cross-site POSTs unless you `export const csrf = true` on
-  the route (recommended for cookie-authenticated APIs).
+- **Cross-site writes.** Page `action`s and API routes reject cross-site POST / PUT /
+  PATCH / DELETE requests (403) by default. **`routes/_middleware.ts` runs before that
+  check** — do not perform sensitive mutations in middleware unless you validate the
+  caller yourself. A route that must accept calls from other sites (a webhook, a
+  payment callback) exports `csrf = false` and checks a signature or shared secret
+  instead of cookies.
 - **Production checklist** (when you deploy): set `NOWAKI_SESSION_SECRET` (at
   least 32 characters) if the app uses `ctx.session`; set `NOWAKI_LIVE_SECRET` if
   the app uses Jetstream live islands; try `NOWAKI_CSP=report-only` before `enforce`; behind

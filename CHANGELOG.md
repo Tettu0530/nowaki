@@ -11,6 +11,19 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Upgrade notes
+- **Breaking: API routes reject cross-site writes by default (CSRF).** A POST, PUT, PATCH or
+  DELETE to an API route (`routes/api/**`) or a file route (`feed.xml.ts`) whose `Origin` is
+  another site or `null`, or that has `Sec-Fetch-Site: cross-site` without `Origin`, now gets
+  the same 403 `Forbidden` as a page action, before the handler runs (after middleware). Until
+  0.18 it was allowed with a one-time warning. GET, HEAD and OPTIONS are unaffected, and so are
+  requests with neither header (curl, server-to-server calls, most native apps). Who is
+  affected: APIs called from a browser page on another origin (another app of yours, a
+  separate frontend, a preview domain), webhooks and payment or OAuth callbacks that a
+  provider posts from its own page, and native apps that send an `Origin`. Opt such a route
+  out with `export const csrf = false`, and authenticate it with a signature or shared secret
+  rather than cookies. `export const csrf = true` is now the default and still accepted. Behind
+  a proxy that rewrites `Host`, forward the public host as `x-forwarded-host` (with
+  `NOWAKI_TRUST_PROXY=1` where needed), as for actions, or same-origin calls are rejected too.
 - **Building Nowaki from source needs Rust 1.97 or newer** (was 1.95), because oxc 0.158
   does. `rust-version` and the MSRV CI job are 1.97. The npm packages are unaffected.
 
@@ -139,6 +152,10 @@ milestone's worth of work; the codename is noted per entry.
   (its `Server-Timing` header) after a client navigation or an HMR page update.
 
 ### Changed
+- API routes and file routes reject cross-site POST / PUT / PATCH / DELETE requests with 403
+  (the check page actions use, `server/origin.mjs`) on dev, `nowaki start` and every adapter;
+  `export const csrf = false` opts out. The 0.14 warning for allowed cross-site API writes is
+  gone. `examples/hello` gains `routes/api/webhook.ts`, a `csrf = false` example.
 - Dependencies: `oxc` 0.146 → 0.158 (`oxc_resolver` stays at 11.24.3, the latest). oxc
   string literals are now `JSStr`, which can hold a lone surrogate; `nowaki-core` leaves an
   import specifier with one as written (the client build reports it as unresolvable) and

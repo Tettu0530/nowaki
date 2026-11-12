@@ -108,6 +108,13 @@ check("assets come from the ASSETS binding with security headers", (await asset.
 const form = (h) => req("/todos", { method: "POST", redirect: "manual", headers: { "content-type": "application/x-www-form-urlencoded", ...h }, body: "text=edge" });
 check("action: cross-site POST rejected (403)", (await form({ origin: "https://evil.test" })).status === 403);
 check("action: same-origin POST allowed", (await form({ origin: ORIGIN })).status === 302);
+const apiPost = (path, h) => req(path, { method: "POST", headers: { "content-type": "application/json", ...h }, body: "{}" });
+const apiEvil = await apiPost("/api/echo", { origin: "https://evil.test" });
+check("API: cross-site POST rejected (403)", apiEvil.status === 403 && (await apiEvil.text()) === "Forbidden");
+check("API: Sec-Fetch-Site cross-site rejected (403)", (await apiPost("/api/echo", { "sec-fetch-site": "cross-site" })).status === 403);
+check("API: same-origin POST allowed", (await apiPost("/api/echo", { origin: ORIGIN })).status === 200);
+check("API: cross-site GET unaffected", (await req("/api/echo", { headers: { origin: "https://evil.test" } })).status === 200);
+check("API with `csrf = false`: cross-site POST allowed", (await apiPost("/api/webhook", { origin: "https://evil.test" })).status === 200);
 
 const rpc = (body, h = {}) =>
   req("/__nowaki/fn", { method: "POST", headers: { "content-type": "application/json", "x-nowaki-rpc": "1", ...h }, body: JSON.stringify(body) });
@@ -137,8 +144,8 @@ check("unexpected server function error is generic (500)", broken.status === 500
     /^hello_session=v1\./.test(cookie) && /; Secure/.test(login.headers.get("set-cookie") ?? ""));
   const me = await (await sess({ headers: { cookie } }, withSecret)).json();
   check("session: the cookie round-trips (secret from the bindings)", me.user === "edge");
-  const evil = await (await sess({ method: "POST", headers: { origin: "https://evil.test", cookie, "content-type": "application/x-www-form-urlencoded" }, body: "op=inc" }, withSecret)).json();
-  check("session: cross-site POST sees an empty, read-only session", evil.user === null && evil.readOnly === true && evil.wrote !== true);
+  const evil = await sess({ method: "POST", headers: { origin: "https://evil.test", cookie, "content-type": "application/x-www-form-urlencoded" }, body: "op=inc" }, withSecret);
+  check("session: cross-site POST to the API is rejected (403, no cookie)", evil.status === 403 && !evil.headers.get("set-cookie"));
   if (saved !== undefined) process.env.NOWAKI_SESSION_SECRET = saved;
 }
 

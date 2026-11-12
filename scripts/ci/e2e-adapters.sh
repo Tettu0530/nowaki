@@ -62,7 +62,12 @@ test -f examples/hello/dist/server/session.js
 SESSION_COOKIE=$(curl -s -D - -o /dev/null -XPOST -H 'origin: http://127.0.0.1:3310' -d 'op=login&user=node' http://127.0.0.1:3310/api/session | tr -d '\r' | awk 'tolower($1)=="set-cookie:" {print $2}' | cut -d';' -f1)
 echo "$SESSION_COOKIE" | grep -q '^hello_session=v1\.'
 curl -sf -H "cookie: $SESSION_COOKIE" http://127.0.0.1:3310/api/session | grep -q '"user":"node"'
-curl -sf -XPOST -H 'origin: http://evil.test' -H "cookie: $SESSION_COOKIE" -d 'op=inc' http://127.0.0.1:3310/api/session | grep -q '"user":null,"n":0,"readOnly":true'
+# API routes reject cross-site writes by default (0.19): the session is untouched, `csrf = false` opts out
+test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://evil.test' -H "cookie: $SESSION_COOKIE" -d 'op=inc' http://127.0.0.1:3310/api/session)" = 403
+curl -sf -H "cookie: $SESSION_COOKIE" http://127.0.0.1:3310/api/session | grep -q '"user":"node","n":0'
+test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://127.0.0.1:3310' -H 'content-type: application/json' -d '{}' http://127.0.0.1:3310/api/echo)" = 200
+test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'sec-fetch-site: cross-site' -H 'content-type: application/json' -d '{}' http://127.0.0.1:3310/api/echo)" = 403
+test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://evil.test' -H 'content-type: application/json' -d '{}' http://127.0.0.1:3310/api/webhook)" = 200
 # typed env on the node adapter: env.ts validated at startup, read by the loader
 curl -sf http://127.0.0.1:3310/env | grep -q 'token length 15'
 curl -sf http://127.0.0.1:3310/env | grep -q 'id="env-badge">Hello from env.ts x4<'
@@ -258,6 +263,10 @@ VERCEL_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3320/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3320/ | grep -q "nowaki-island"
 curl -sf http://127.0.0.1:3320/api/hello | grep -q '"hello":"nowaki"'
+# API CSRF default on the vercel function: cross-site POST 403, same-origin 200, `csrf = false` 200
+test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://evil.test' -H 'content-type: application/json' -d '{}' http://127.0.0.1:3320/api/echo)" = 403
+test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://127.0.0.1:3320' -H 'content-type: application/json' -d '{}' http://127.0.0.1:3320/api/echo)" = 200
+test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://evil.test' -H 'content-type: application/json' -d '{}' http://127.0.0.1:3320/api/webhook)" = 200
 curl -sf http://127.0.0.1:3320/docs/intro | grep -q '<h2 id="why-content-collections"'   # content on vercel
 curl -sf http://127.0.0.1:3320/nav | grep -q 'href="/blog/hello"'
 # CDN purge: ISR pages carry Vercel-Cache-Tag (their tags + their path), other pages none

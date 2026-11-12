@@ -115,11 +115,14 @@ not run on the production request path unless you embed their output in the app.
   the node adapter log a warning at startup. On the adapters every live event
   is a POST that any instance may serve, so without a shared secret events fail
   as soon as more than one instance (or Worker isolate) is running.
-- **Cross-site writes.** Page actions reject cross-site non-GET requests. API
-  routes still accept them (with a one-time warning) unless they
-  `export const csrf = true`; a later release makes that the default. Requests
-  without `Origin` or `Sec-Fetch-Site` (curl, server-to-server) are allowed, so
-  authenticate those another way. `_middleware` runs before the check. Behind a
+- **Cross-site writes.** Page actions and API routes (`routes/api/**` and file
+  routes such as `feed.xml.ts`) reject cross-site POST / PUT / PATCH / DELETE
+  requests with 403 (since 0.19.0 for API routes). A route that must accept
+  them (a webhook, a third-party callback) exports `csrf = false` and
+  authenticates its caller another way (a signature, a shared secret), never
+  with cookies. Requests without `Origin` or `Sec-Fetch-Site` (curl,
+  server-to-server, most native apps) are allowed, so authenticate those another
+  way too. `_middleware` runs before the check. Behind a
   proxy that rewrites `Host`, forward the public host as `x-forwarded-host` (and
   set `NOWAKI_TRUST_PROXY=1` for `nowaki start` and adapter runtimes), or
   same-origin posts are rejected too.
@@ -139,8 +142,9 @@ Framework defaults do not replace app-level checks:
 - **Jetstream `on` handlers** — State is server-held per WebSocket connection,
   or sent back by the client (signed) with each POST event; validate event
   payloads like any server handler.
-- **Actions / API routes** — Same as in any web app: CSRF and auth are your
-  concern unless a framework defense applies (see table below).
+- **Actions / API routes** — Cross-site writes are rejected by default (see table
+  below); authentication, authorization and input validation are your
+  concern, as are routes that opt out with `csrf = false`.
 
 ## Defenses enabled by default
 
@@ -158,7 +162,7 @@ tests when you change a default defense.
 | Server function allowlist | Calling arbitrary server exports | `nowaki-core` + `dist/server/functions.json` + `functions.mjs` | e2e scripts (`/__nowaki/fn` unknown id → 404) |
 | RPC CSRF gate (JSON + `x-nowaki-rpc` + Origin/Host) | Cross-site POST with victim cookies | `packages/nowaki-runtime/server/functions.mjs` (`browserHost`); Rust sets `x-forwarded-host` from browser `Host` on the sidecar hop | `scripts/security-e2e.mjs` (dev + prod), `scripts/edge-handler-test.mjs` (Edge) |
 | Server function input and error limits | Oversized or malformed RPC payloads; internal error messages reaching the client | `server/functions.mjs`: bodies over `NOWAKI_FN_BODY_LIMIT` (default 1 MiB) → 413, more than 16 arguments → 400, errors other than `ServerFnError` → generic 500 in production. `serverFn(schema, impl)` (`server/server-fn.mjs`) validates the first argument with a Standard Schema; `nowaki build` warns about exports that take arguments without it | `scripts/security-e2e.mjs` (dev + prod), `scripts/ci/e2e-prod.sh` (build warning) |
-| Same-origin check on page actions and API routes (`server/origin.mjs`) | Cross-site form posts and `fetch` writes with the victim's cookies | `server/handler.mjs`: a non-GET to a route with `action` is rejected (403) when `Origin` is another site or `null`, or `Sec-Fetch-Site` is `cross-site`. API routes only warn for now unless they `export const csrf = true`; `export const csrf = false` opts a route out | `scripts/security-e2e.mjs` (dev + prod) |
+| Same-origin check on page actions and API routes (`server/origin.mjs`) | Cross-site form posts and `fetch` writes with the victim's cookies | `server/handler.mjs`: a POST / PUT / PATCH / DELETE to a route with `action`, or to an API or file route, is rejected (403, after middleware) when `Origin` is another site or `null`, or `Sec-Fetch-Site` is `cross-site`; GET / HEAD / OPTIONS are never checked. The same code runs on dev, `nowaki start` and every adapter. `export const csrf = false` opts a route out (`csrf = true` is the default and still accepted) | `scripts/handler-test.mjs`, `scripts/security-e2e.mjs` (dev + prod), `scripts/edge-handler-test.mjs` (Edge), `scripts/ci/e2e-adapters.sh` (node, vercel), `scripts/ci/e2e-runtimes.sh` |
 | Default security headers (`x-content-type-options: nosniff`, `x-frame-options: SAMEORIGIN`, `referrer-policy: strict-origin-when-cross-origin`, `cross-origin-opener-policy: same-origin`, and `content-security-policy: frame-ancestors 'self'` when the app sends no CSP) | MIME sniffing, clickjacking, cross-origin referrer and `window.opener` leaks | `crates/nowaki/src/security_headers.rs` (dev/start, ISR hits, static assets); `server/security-headers.mjs` (node/bun/deno/vercel/cloudflare adapters); `_headers` from `nowaki prerender` | `scripts/security-e2e.mjs` (dev + prod), `scripts/ci/e2e-adapters.sh`, `scripts/ci/e2e-runtimes.sh` |
 | Opt-in CSP with a per-response nonce (`NOWAKI_CSP=report-only` or `enforce`) | Injected inline scripts and styles | `crates/nowaki/src/csp.rs` (dev/start, streamed and ISR responses), `server/csp.mjs` (adapters); every `<script>` / `<style>` gets the response's nonce; the client runtime stamps it on styles it inserts (island CSS, client navigation, boundaries) | `scripts/csp-e2e.mjs` (start + node adapter), `scripts/csp-test.mjs`, browser tests under `enforce` |
 | Live request context and `live.authorize` | Unauthorized live events; leaking internal headers to handlers | `crates/nowaki/src/live.rs` `context_headers` (only cookie, authorization, accept-language, user-agent, and the public host from the upgrade); `server/live.mjs` (`authorize` after the signature check, before the handler; refusal → `forbidden`) | `scripts/livetest.mjs` (dev + prod) |
@@ -191,10 +195,6 @@ tests when you change a default defense.
 - **Full CSP enforcement** — default responses add `frame-ancestors` only unless the
   app sets CSP. Set `NOWAKI_CSP=report-only` or `enforce` for nonce-based
   `script-src` / `style-src-elem` (see [Application author responsibilities](#application-author-responsibilities)).
-- **API route CSRF by default** — page `action`s reject cross-site non-GET requests
-  today. API routes still allow them with a one-time log warning unless the route
-  exports `csrf = true`; a later release will reject by default. Cookie-authenticated
-  API handlers should set `csrf = true` now.
 
 ## Dependency auditing
 

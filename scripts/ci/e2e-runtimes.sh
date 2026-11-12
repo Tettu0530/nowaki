@@ -46,6 +46,9 @@ curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-live: 1' \
   $B/__nowaki/live-event | grep -qE 'live: (<!-- -->)?1'
 test "$(curl -s -o /dev/null -w '%{http_code}' $B/nope)" = "404"
 curl -sf -XPOST -H 'content-type: application/json' -d '{"a":1}' $B/api/echo | grep -q '"received":{"a":1}'
+# API routes reject cross-site writes by default; `csrf = false` opts out
+test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://evil.test' -H 'content-type: application/json' -d '{}' $B/api/echo)" = "403"
+test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://evil.test' -H 'content-type: application/json' -d '{}' $B/api/webhook)" = "200"
 # sessions (WebCrypto on every runtime): sign in, then the cookie reads back
 SESSION_COOKIE=$(curl -s -D - -o /dev/null -XPOST -H "origin: $B" -d 'op=login&user=rt' $B/api/session | tr -d '\r' | awk 'tolower($1)=="set-cookie:" {print $2}' | cut -d';' -f1)
 curl -sf -H "cookie: $SESSION_COOKIE" $B/api/session | grep -q '"user":"rt"'
