@@ -137,6 +137,14 @@ milestone's worth of work; the codename is noted per entry.
   and **`live`** (Jetstream connections, the cap, rooms with member counts). `dev_config` now
   also lists the recent revalidations. `nowaki:page-load` carries the response's `timing`
   (its `Server-Timing` header) after a client navigation or an HMR page update.
+- `examples/gallery` covers the v0.19 exit criteria: ISR posts (`/gallery/posts`) tagged
+  `photos` / `photo:<id>`, a signed-in caption edit that calls `revalidateTag`, a list-to-post
+  View Transition with `transitionName()` on the photo, a Likes island for HMR, and a `budget`.
+  `scripts/gallery-e2e.mjs` gains `vercel` (the generated function, a fake `@vercel/functions`
+  and a stand-in CDN) and `otel` (one trace from a local OTLP receiver) modes and checks the
+  fresh-after-edit flow on `nowaki start` and the Cloudflare worker's cache;
+  `scripts/gallery-browser-test.mjs` checks the transition and its fallbacks, and in `nowaki dev`
+  an island edit that keeps its state and the toolbar's islands and budget.
 
 ### Changed
 - Dependencies: `oxc` 0.146 → 0.158 (`oxc_resolver` stays at 11.24.3, the latest). oxc
@@ -148,6 +156,16 @@ milestone's worth of work; the codename is noted per entry.
   size benchmark is unchanged). Source maps map a few more names.
 
 ### Fixed
+- The node, bun, deno and vercel adapters no longer send an ISR page's internal cache headers
+  (`x-nowaki-revalidate`, `x-nowaki-vary`, `x-nowaki-vary-query`) to the client; only
+  `nowaki start`'s Rust front reads them. The Cloudflare worker already dropped them.
+- `scripts/router-browser-test.mjs` failed now and then in CI ("SPA navigation swapped to
+  /about", "Chrome exposed no page target"). The first click on a page comes before the lazy
+  router is loaded, so it waits for the router chunk and then the page fetch; the test gave it a
+  fixed 500 ms (and 800 ms for the page load) and now waits for the swap itself. Chrome now runs
+  over `--remote-debugging-pipe` with a fresh profile directory: CI runs the test twice in a row,
+  and the second Chrome could find the fixed debugging port and profile still held by the first
+  one while it shut down.
 - `nowaki dev` no longer serves files under `public/` at `/public/<path>` as well as at
   `/<path>`; production never did.
 - The e2e scripts' `! command` assertions could never fail (`set -e` ignores a command starting

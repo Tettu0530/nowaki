@@ -210,6 +210,30 @@ session.ts   ctx.session options (optional)
     Options go in `session.ts` (`export default defineSession({ maxAge })` from
     `@nowaki-dev/runtime/session`).
     Reading it makes the page vary by cookie, so ISR no longer shares one cached copy.
+16. **On-demand revalidation** — tag an ISR page with `export const tags = ["posts"]`
+    (or a function: ``({ params }) => ["posts", `post:${params.id}`]``) and call
+    `revalidateTag("post:1")` or `revalidatePath("/blog/1")` (from `@nowaki-dev/runtime`)
+    in an action, API route or server function after a write. The cached copies are
+    purged before the response goes out, so the redirect after the POST shows fresh data:
+    the `nowaki start` cache, Vercel's CDN (add `@vercel/functions` to the dependencies),
+    and the Cloudflare cache (set `CLOUDFLARE_ZONE_ID` / `CLOUDFLARE_API_TOKEN` for a
+    purge beyond one data center). The `nowaki start` cache is per process.
+17. **View Transitions** — `<Link viewTransition href="/post/1">` runs that client
+    navigation as a View Transition; `export const viewTransition = true` on a route opts
+    every navigation to and from it in. Give the same element on both pages
+    `style={transitionName("post-1")}` (from `@nowaki-dev/runtime/navigation`) to morph it.
+    Browsers without the API and visitors who prefer reduced motion get a plain navigation.
+18. **Observability** (production, off by default) — `NOWAKI_SERVER_TIMING=1` adds
+    `Server-Timing` (middleware, loader, render, ISR); `NOWAKI_LOG=json` prints JSON logs
+    with an access log; `OTEL_EXPORTER_OTLP_ENDPOINT` (plus `OTEL_SERVICE_NAME`, the
+    standard `OTEL_*` variables) exports OpenTelemetry traces over OTLP/HTTP.
+    `/__nowaki/health` answers `{"status":"ok"}` for load balancers.
+19. **Dev toolbar and HMR** — `nowaki dev` keeps island state across edits (Fast
+    Refresh; adding or removing a hook remounts), updates CSS without a reload, and
+    re-renders the page in place on route / layout edits. Its toolbar (bottom right)
+    shows the route, layouts and timings, the page's islands, first-load JS against
+    `budget`, ISR settings, live connections and errors. Turn it off with
+    `nowaki dev --no-toolbar` or `NOWAKI_TOOLBAR=0`.
 
 ## Security
 

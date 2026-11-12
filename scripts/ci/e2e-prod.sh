@@ -350,9 +350,10 @@ node scripts/rules-e2e.mjs start --port 3306
 # nowaki.config i18n at the Rust front (generated apps; listen on 3308, 3309 for i18n +
 # basePath + trailingSlash "never" + a slot, and 3310 for locale detection)
 node scripts/i18n-e2e.mjs start --port 3308
-# examples/gallery (the v0.18 exit-criteria app) at the Rust front on 3330, and env.ts stopping
-# `nowaki build` / `nowaki start` without a required variable
-node scripts/gallery-e2e.mjs start env --port 3330
+# examples/gallery (the v0.18 + v0.19 exit-criteria app) at the Rust front on 3330 (an edited post
+# is fresh on the next request), env.ts stopping `nowaki build` / `nowaki start` without a
+# required variable, and one post request as one OpenTelemetry trace (a receiver on 3331)
+node scripts/gallery-e2e.mjs start env otel --port 3330
 # Stack traces from the built server modules name the real routes/ files (source maps), on 3318
 node scripts/sourcemap-e2e.mjs start --port 3318
 # Rooms survive a restart: on SIGTERM the sidecar wrote them to .nowaki/live-rooms.json.

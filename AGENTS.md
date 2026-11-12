@@ -26,8 +26,9 @@ packages/create-nowaki, create-nowaki-app   scaffolders (npm create nowaki).
 packages/nowaki-cli   the `nowaki` npm wrapper (prebuilt binary shim).
 packages/nowaki-markdoc   `@nowaki-dev/markdoc`, the official Markdoc plugin (`.mdoc`).
 examples/hello/       kitchen-sink app used by CLI tests + e2e.
-examples/gallery/     the v0.18 exit-criteria app (basePath, i18n, modal routes, sessions, env.ts);
-                      scripts/gallery-e2e.mjs + gallery-browser-test.mjs.
+examples/gallery/     the v0.18 + v0.19 exit-criteria app (basePath, i18n, modal routes, sessions,
+                      env.ts; ISR posts with tags + revalidateTag, View Transitions, a Likes island
+                      for HMR, a `budget`); scripts/gallery-e2e.mjs + gallery-browser-test.mjs.
 benchmarks/           bench.mjs, head-to-head.mjs (Next/Astro), check-regression.mjs,
                       ci-perf.mjs + ci-perf-app/ (CI perf gate: head vs base vs last release,
                       all on the fixed ci-perf-app).
@@ -182,6 +183,11 @@ code locations and CI coverage.
 
 ## Feature map (where things live)
 
+v0.19 at a glance (each has its entry below): on-demand revalidation and the CDN purge per
+adapter (plus the Cloudflare Worker ISR cache), View Transitions, observability, Dev HMR / Fast
+Refresh, the dev toolbar and the dev MCP. `examples/gallery` (`routes/posts/`) uses all of them,
+and `scripts/gallery-e2e.mjs` / `gallery-browser-test.mjs` check the exit criteria end to end.
+
 - **Dev MCP (`/__nowaki/mcp`)** — `crates/nowaki/src/mcp.rs` (JSON-RPC over
   Streamable HTTP, tools, error ring buffer); route table + island registry from
   the dev sidecar's `/__nowaki/dev-info` (`server/sidecar.mjs`); imports /
@@ -251,6 +257,9 @@ code locations and CI coverage.
   | cloudflare | `Cache-Tag` (on the Cache API entry only) | local `cache.delete` of path entries + zone purge by tag with `CLOUDFLARE_ZONE_ID` / `CLOUDFLARE_API_TOKEN`, awaited (2 s cap) |
   | static | none | warn-once no-op |
 
+  On node / bun / deno / vercel, `app.mjs` drops the `nowaki start` cache headers
+  (`x-nowaki-revalidate` / `-vary` / `-vary-query` / `-tags`, via `purge-cloudflare.mjs`
+  `stripInternal`) from an ISR render before sending it; `Vercel-Cache-Tag` stays for Vercel.
   Tests: `scripts/purge-adapters-test.mjs` (mocked package, a generated function on port 5540);
   `scripts/ci/e2e-adapters.sh` checks the header from the built `examples/hello` function.
 - **Cloudflare Worker ISR cache** — `server/purge-cloudflare.mjs` `cloudflareCdn()`, created by
