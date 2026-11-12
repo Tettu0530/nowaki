@@ -166,5 +166,68 @@ check("health on the edge: 200 {status:ok}, no-store, security headers",
   health.status === 200 && (await health.text()) === '{"status":"ok"}' && health.headers.get("cache-control") === "no-store" && secure(health));
 check("no Server-Timing on the edge unless NOWAKI_SERVER_TIMING is set", !(await req("/")).headers.has("server-timing"));
 
+check("no Cache API: an ISR page is rendered, with no internal header",
+  !(await req("/isr")).headers.has("x-nowaki-revalidate") && !(await req("/isr")).headers.has("x-nowaki-cache"));
+
+// The ISR cache on the Cache API (scripts/cf-cache-test.mjs covers it in depth): a stand-in for
+// caches.default, and a stand-in for the zone purge API in globalThis.fetch.
+{
+  const store = new Map();
+  globalThis.caches = {
+    default: {
+      match: async (k) => {
+        const e = store.get(String(k));
+        return e ? new Response(e.body, { headers: e.headers }) : undefined;
+      },
+      put: async (k, res) => {
+        const tags = res.headers.get("cache-tag") ?? "";
+        store.set(String(k), { body: await res.text(), headers: [...res.headers].filter(([n]) => n !== "cache-tag"), tags });
+      },
+      delete: async (k) => store.delete(String(k)),
+    },
+  };
+  const purged = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (!String(url).startsWith("https://api.cloudflare.com/")) return realFetch(url, init);
+    purged.push({ url: String(url), auth: init.headers.authorization, tags: JSON.parse(init.body).tags });
+    for (const [k, e] of store) if (e.tags.split(",").some((t) => JSON.parse(init.body).tags.includes(t))) store.delete(k);
+    return new Response('{"success":true}');
+  };
+  const waits = [];
+  const exec = { waitUntil: (p) => waits.push(p) };
+  const bindings = { ...env, CLOUDFLARE_ZONE_ID: "zone-e2e", CLOUDFLARE_API_TOKEN: "token-e2e" };
+  const get = (p, h = {}) => worker.fetch(new Request(ORIGIN + p, { headers: h }), bindings, exec);
+  const flush = () => Promise.all(waits.splice(0));
+  const miss = await get("/isr-tagged");
+  const missHtml = await miss.text();
+  await flush();
+  const hit = await get("/isr-tagged");
+  const hitHtml = await hit.text();
+  check("worker ISR cache: MISS, then HIT with the same render", miss.headers.get("x-nowaki-cache") === "MISS" && hit.headers.get("x-nowaki-cache") === "HIT" && hitHtml === missHtml);
+  check("worker ISR cache: the entry carries Cache-Tag, the response doesn't", store.get(`${ORIGIN}/isr-tagged`)?.tags === "t:isr-demo,p:/isr-tagged" && !hit.headers.has("cache-tag") && !hit.headers.has("x-nowaki-revalidate"));
+  check("worker ISR cache: a HIT keeps the security headers", secure(hit));
+  const ck1 = await get("/isr-cookie", { cookie: "user=alice" });
+  await flush();
+  const ck2 = await (await get("/isr-cookie", { cookie: "user=bob" })).text();
+  check("worker ISR cache: a cookie-reading page is never stored", !ck1.headers.has("x-nowaki-cache") && ck2.includes("USER=bob") && !store.has(`${ORIGIN}/isr-cookie`));
+  const de = await (await get("/vary", { "accept-language": "de" })).text();
+  await flush();
+  const en = await (await get("/vary", { "accept-language": "en" })).text();
+  check("worker ISR cache: Vary variants stay apart", de.includes("LANG=de") && en.includes("LANG=en"));
+  const action = await worker.fetch(
+    new Request(ORIGIN + "/isr-tagged", { method: "POST", redirect: "manual", headers: { origin: ORIGIN, "content-type": "application/x-www-form-urlencoded" }, body: "kind=tag" }),
+    bindings,
+    exec,
+  );
+  check("worker revalidateTag: zone purge by tag before the action's response",
+    action.status === 303 && purged.length === 1 && purged[0].url === "https://api.cloudflare.com/client/v4/zones/zone-e2e/purge_cache" && purged[0].auth === "Bearer token-e2e" && purged[0].tags.join() === "t:isr-demo");
+  const after = await get("/isr-tagged");
+  check("worker revalidateTag: the next request renders fresh (MISS)", after.headers.get("x-nowaki-cache") === "MISS" && (await after.text()) !== missHtml);
+  await flush();
+  globalThis.fetch = realFetch;
+  delete globalThis.caches;
+}
+
 console.log(failures ? `\nEDGE HANDLER TEST FAILED (${failures})` : "\nEDGE HANDLER TEST PASSED");
 process.exit(failures ? 1 : 0);

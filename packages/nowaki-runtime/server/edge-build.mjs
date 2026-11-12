@@ -253,7 +253,11 @@ async function serve(request, env, url, step, headers, ctx) {
 
 // populate_process_env: Worker vars/secrets (NOWAKI_LIVE_SECRET, NOWAKI_CSP, ...) reach process.env,
 // where the runtime reads them; without it every isolate signs live state with its own random key.
+// The comment documents the zone purge of the ISR cache (server/purge-cloudflare.mjs).
 const wrangler = `{
+  // revalidatePath / revalidateTag purge every data center when the Worker has the zone's id and an
+  // API token with the Cache Purge permission (a workers.dev Worker has no zone to purge):
+  //   "vars": { "CLOUDFLARE_ZONE_ID": "<zone id>" }, and \`wrangler secret put CLOUDFLARE_API_TOKEN\`
   "name": ${JSON.stringify(appName)},
   "main": "index.js",
   "compatibility_date": "2024-11-01",

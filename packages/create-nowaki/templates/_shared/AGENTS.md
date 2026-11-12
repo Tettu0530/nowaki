@@ -17,7 +17,9 @@ npx nowaki upgrade # update nowaki (CLI) + @nowaki-dev/runtime to latest
 
 While `npm run dev` runs, the dev server also serves a read-only MCP endpoint
 (loopback only) at `http://127.0.0.1:3000/__nowaki/mcp`, with the tools `routes`,
-`module_graph`, `recent_errors`, and `dev_config`. Add it to Claude Code with
+`module_graph`, `recent_errors`, `dev_config`, `page` (what serves a URL: route, layouts,
+islands, first-load JS, ISR) and `live`. The dev toolbar in the browser shows the same data.
+Add it to Claude Code with
 `claude mcp add --transport http nowaki http://127.0.0.1:3000/__nowaki/mcp`.
 After an edit or a failing request, check `recent_errors` first.
 

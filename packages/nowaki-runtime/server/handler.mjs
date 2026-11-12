@@ -44,7 +44,8 @@ const JSON_CT = { "content-type": "application/json; charset=utf-8" };
 ///   live (optional) -> { lookup(name, version), render } for POST /__nowaki/live-event
 ///   isrStore (optional) -> true on `nowaki start`: ISR responses carry `x-nowaki-tags`, and
 ///     revalidate*() calls ride on the response as `x-nowaki-purge` (server/revalidate.mjs)
-///   purge(entries) (optional) -> an adapter's CDN purge, awaited before the response returns
+///   purge(entries, ctx) (optional) -> an adapter's CDN purge, awaited before the response returns
+///     (`ctx`: the request's context, absent for a call made outside a request)
 ///   cacheTagHeader(entries) (optional) -> { [header]: value } an adapter's CDN keys a page by;
 ///     `entries` are the page's `t:<tag>` plus `p:<browser path>` (the form `purge` receives)
 ///   trace (optional) -> server/trace.mjs `createTrace`: Server-Timing phases and spans. Null when

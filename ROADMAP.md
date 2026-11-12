@@ -168,6 +168,7 @@ Control over what is cached, smooth navigation, visibility into a running app, a
 - A lossy WebP encoder, after comparing the candidates (v0.17)
 - `.mdoc` files as page routes (v0.18; `.mdoc` works in content collections today)
 - Caching the evaluated nowaki.config, so a build whose config has not changed (and has no plugins) skips the Node start
+- Cloudflare [Workers Caching](https://developers.cloudflare.com/workers/cache/) as an alternative to the Worker's Cache API ISR cache (v0.19): it honors Vary and stale-while-revalidate, collapses concurrent requests, uses tiered cache and purges globally, but serves hits without running middleware or nowaki.config rules and bills static asset requests; measure before switching
 
 ### v1.0 "Nowaki": Stable release
 **Exit criteria**: Stability guarantees for the public API, complete documentation, established governance.

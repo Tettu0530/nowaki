@@ -54,6 +54,9 @@ enum Command {
         /// Open the default browser after startup
         #[arg(long)]
         open: bool,
+        /// Don't load the dev toolbar in the browser (same as NOWAKI_TOOLBAR=0)
+        #[arg(long)]
+        no_toolbar: bool,
     },
     /// Build for production and emit output for the deploy adapter
     Build {
@@ -112,9 +115,15 @@ fn main() -> anyhow::Result<()> {
             port,
             host,
             open,
+            no_toolbar,
         } => {
             let root = dunce::canonicalize(&dir)?;
             runtime::check(&root)?;
+            // Read by the dev renderer (server/render.mjs), which the sidecar runs with this
+            // environment. Set here, before the runtime starts any other thread.
+            if no_toolbar {
+                std::env::set_var("NOWAKI_TOOLBAR", "0");
+            }
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?

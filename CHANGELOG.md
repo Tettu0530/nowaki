@@ -34,8 +34,23 @@ milestone's worth of work; the codename is noted per entry.
   response goes out, waiting at most 2 s. Add `@vercel/functions` to the app's dependencies:
   the build copies it into the function. Without it the tags are still sent (purge them from the
   dashboard or the REST API) and the first revalidate call warns once. Tags longer than Vercel's
-  256 bytes are sent as a hash. The node, bun, deno and cloudflare adapters and static output
-  have no cache to purge, so the calls stay a no-op there (warned once).
+  256 bytes are sent as a hash. The node, bun, deno adapters and static output have no cache to
+  purge, so the calls stay a no-op there (warned once).
+- **ISR cache and purge on Cloudflare.** The Worker built by the cloudflare adapter now caches
+  ISR pages in the Cache API of each data center (until now it cached nothing, as Cloudflare
+  doesn't cache what a Worker returns). It stores the same pages `nowaki start` does: an
+  `export const revalidate` render with status 200 and a shared `Cache-Control`. A page that
+  reads cookies, the session or `authorization`, sets a cookie, or streams is never stored.
+  Variants follow what the render read (headers and the query), stale pages are served while one
+  background render (`ctx.waitUntil`) replaces them, and `NOWAKI_CSP` re-nonces each cached
+  response. Responses show `x-nowaki-cache: HIT` / `STALE` / `MISS`. `revalidatePath` deletes
+  the page from the local data center's cache. With `CLOUDFLARE_ZONE_ID` and
+  `CLOUDFLARE_API_TOKEN` (Cache Purge permission) set on the Worker, `revalidatePath` /
+  `revalidateTag` also purge every data center by `Cache-Tag` through the zone purge API, waiting
+  at most 2 s before the action's response. Without them (and on workers.dev, which has no zone)
+  the purge is local only and `revalidateTag` clears nothing (warned once). Apps without ISR
+  pages run as before. The Cache API works on custom domains, not in the dashboard editor or
+  previews.
 
 - HMR keeps island state (Fast Refresh). In `nowaki dev`, editing an island, or a module
   that only islands import, swaps the components in place: hook state survives, and a
@@ -103,6 +118,25 @@ milestone's worth of work; the codename is noted per entry.
     data in it. `nowaki start` answers it in Rust with 200 while the sidecar answers a ping (1 s
     timeout, cached for 1 s) and 503 otherwise; the node, bun, deno, Vercel and Cloudflare
     adapters answer it before routing.
+- **Dev toolbar.** `nowaki dev` pages get a small collapsible toolbar (bottom left) with what the
+  dev MCP endpoint knows about the page on screen: the matched route file, layouts and
+  middleware, the Server-Timing of the last load (also after a client navigation or an HMR page
+  update), the islands with their kind (client or live), hydration state, strategy, size and the
+  "could be live" hint, the first-load JS against `export const budget` (a dev estimate, shown
+  next to the last `nowaki build` figure when `dist/` has one), the ISR settings and recent
+  revalidations, Jetstream connections and rooms, and recent errors with links into the editor
+  (`NOWAKI_EDITOR`: `vscode` by default, `cursor`, `zed`, `windsurf`, `idea`, or a URL template
+  with `{file}`, `{line}`, `{column}`; the server never starts an editor). It lives in a Shadow DOM
+  root, works under `NOWAKI_CSP=enforce`, follows light / dark and reduced motion, and is keyboard
+  accessible. Turn it off with `nowaki dev --no-toolbar` or `NOWAKI_TOOLBAR=0`, or per browser
+  with its close button. It is never part of a build. Its data comes from
+  `GET /__nowaki/devtools?url=…`, behind the MCP endpoint's loopback gate (a LAN client under
+  `--host` gets 403, and the toolbar hides itself).
+- Dev MCP tools **`page`** (`{ url }`: the route, layouts, middleware, `revalidate` / `tags`, the
+  islands with sizes and hints, the JS estimate and the last build figure, recent revalidations)
+  and **`live`** (Jetstream connections, the cap, rooms with member counts). `dev_config` now
+  also lists the recent revalidations. `nowaki:page-load` carries the response's `timing`
+  (its `Server-Timing` header) after a client navigation or an HMR page update.
 
 ### Changed
 - Dependencies: `oxc` 0.146 → 0.158 (`oxc_resolver` stays at 11.24.3, the latest). oxc
@@ -114,6 +148,12 @@ milestone's worth of work; the codename is noted per entry.
   size benchmark is unchanged). Source maps map a few more names.
 
 ### Fixed
+- `nowaki dev` no longer serves files under `public/` at `/public/<path>` as well as at
+  `/<path>`; production never did.
+- The e2e scripts' `! command` assertions could never fail (`set -e` ignores a command starting
+  with `!`). All 68 now end in `|| exit 1`; the three that had been failing silently were too broad
+  (an app header, `@import` inside a CSS comment) and are narrowed. The e2e scripts also stop the
+  servers they started when a step fails, instead of leaving them on the ports.
 - **Client navigation under `NOWAKI_CSP=enforce` no longer logs `style-src-elem` violations**
   for the fetched page's `<style>` (seen going to a page with `export const head` styles).
   The document `DOMParser` creates shares the page's CSP, and the fetched `<style>` carried

@@ -4,6 +4,8 @@
 # Run from the repo root after `cargo build -p nowaki`.
 set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
+# A failed step exits here: stop the servers this script started, or they keep the ports.
+trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
 cd "$(dirname "$0")/../.."
 ROOT=$(pwd)
 NOWAKI="$ROOT/target/debug/nowaki"
@@ -98,7 +100,7 @@ for t in basics minimal; do
     curl -sf "http://127.0.0.1:$port/api/health" | grep -q '"ok"'
     curl -sf "http://127.0.0.1:$port/" | grep -q 'nowaki-island name="Counter"'
   else
-    ! curl -sf "http://127.0.0.1:$port/" | grep -q 'nowaki-island'
+    ! curl -sf "http://127.0.0.1:$port/" | grep -q 'nowaki-island' || exit 1
   fi
   kill $PID
   port=$((port + 1))
