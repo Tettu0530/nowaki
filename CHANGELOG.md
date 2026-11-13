@@ -3,12 +3,22 @@
 All notable changes to Nowaki are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/). Nowaki is **0.x alpha**: minor versions may carry
-breaking changes (documented per entry), patch versions do not.
+breaking changes (documented per entry), patch versions do not. From 1.0.0 the
+policy in [docs/STABILITY.md](./docs/STABILITY.md) applies.
 
 The npm version and the milestone codename are offset — each release bundles a
 milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
+
+### Docs
+
+- Stability, support and governance policies for 1.0: `docs/STABILITY.md` (the frozen
+  surface, what counts as breaking, deprecation, versioning, Node / Rust / browser support),
+  `SUPPORT.md`, SECURITY.md "Supported versions", `GOVERNANCE.md`, `MAINTAINERS.md`, the RFC
+  process (`rfcs/`), CONTRIBUTING.md sections on RFCs, breaking changes and releases, and
+  refreshed issue and PR templates. The API-route CSRF default is documented as "since 0.19.3"
+  (it said 0.19.0, a version the runtime skipped).
 
 ## [0.19.3] — 2026-11-12 · "Bora": production and dev experience
 

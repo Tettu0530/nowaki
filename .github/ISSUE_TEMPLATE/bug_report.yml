@@ -5,7 +5,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for filing a bug. Nowaki is alpha, so a small reproduction helps a lot.
+        Thanks for filing a bug. A small reproduction helps a lot.
+        Which versions get fixes is in [SUPPORT.md](https://github.com/Tettu0530/nowaki/blob/main/SUPPORT.md); questions fit better in [Discussions](https://github.com/Tettu0530/nowaki/discussions).
         **Security issues:** don't file them here. Use [private vulnerability reporting](https://github.com/Tettu0530/nowaki/security/advisories/new).
   - type: dropdown
     id: area
@@ -79,11 +80,25 @@ body:
   - type: input
     id: nowaki-version
     attributes:
-      label: Nowaki version
-      description: Output of `npx nowaki --version`, plus `@nowaki-dev/runtime` from package.json if it differs.
-      placeholder: nowaki 0.17.0, @nowaki-dev/runtime 0.16.0
+      label: Nowaki CLI version
+      description: Output of `npx nowaki --version`.
+      placeholder: nowaki 0.19.3
     validations:
       required: true
+  - type: input
+    id: runtime-version
+    attributes:
+      label: "@nowaki-dev/runtime version"
+      description: From `npm ls @nowaki-dev/runtime` (or your lockfile).
+      placeholder: "0.19.3"
+    validations:
+      required: true
+  - type: checkboxes
+    id: regression
+    attributes:
+      label: Regression
+      options:
+        - label: This worked in an earlier release (name the last version that worked under "What happened").
   - type: dropdown
     id: os
     attributes:
