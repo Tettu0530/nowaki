@@ -10,6 +10,21 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Changed
+- **Releases are published by one workflow.** Pushing a `vX.Y.Z` or `vX.Y.Z-rc.N` tag runs
+  `release.yml`: a version gate (`scripts/release-check.mjs`: every shared-version file,
+  the scaffold template pins, the CHANGELOG section, the `nowaki-core` pin, the lockfiles),
+  the five CLI builds, then every npm package, both crates and the GitHub Release. Release
+  candidates go to the npm `next` dist-tag and are GitHub prereleases; a release of an older
+  major goes to `v<major>-lts`. Versions already on npm or crates.io are skipped, so a failed
+  run can be re-run (`gh workflow run release.yml -f tag=vX.Y.Z -f dry_run=false`).
+  `publish-npm.yml` is gone; the weekly release dry run is now `release.yml`'s schedule and
+  also runs `npm publish --dry-run` and `cargo publish --dry-run`.
+- **Supply chain.** npm packages are published with provenance and support npm trusted
+  publishing (OIDC); crates support crates.io trusted publishing; the GitHub Release carries
+  the binaries with `SHA256SUMS` and GitHub artifact attestations. Tokens keep working until
+  the trusted publishers are configured (docs/RELEASING.md, "One-time setup").
+
 ## [0.19.3] — 2026-11-12 · "Bora": production and dev experience
 
 Packages: `nowaki` / `nowaki-core`, `@nowaki-dev/runtime`, `create-nowaki` /

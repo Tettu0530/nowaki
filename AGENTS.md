@@ -510,9 +510,11 @@ and `create-nowaki` / `create-nowaki-app` share one version and are bumped toget
 `@nowaki-dev/markdoc` (`packages/nowaki-markdoc`) keeps its own semver (0.1.x). The
 CLI refuses a runtime older than its own version (`runtime::MIN_RUNTIME`). The
 scaffold template (`packages/create-nowaki/templates/_shared/package.json`) pins
-that version for both. After bumping, run `pnpm install` so
-`pnpm-lock.yaml` matches (CI uses a frozen lockfile). Then: `cargo publish -p
-nowaki-core` → `-p nowaki`; push a `vX.Y.Z` tag (triggers `release.yml` for the
-CLI binaries); `gh workflow run publish-npm.yml -f package=all` for runtime,
-markdoc, and scaffolders (a version already on npm is skipped, via
-`scripts/ci/npm-publish-if-new.sh`). See [docs/RELEASING.md](docs/RELEASING.md).
+that version for both. `nowaki-core` may be on its own version, pinned with `=` by the
+`nowaki` crate. After bumping, run `pnpm install` and `cargo build` so the lockfiles
+match, and `node scripts/release-check.mjs vX.Y.Z --new-tag` (the gate `release.yml`
+runs; tests in `scripts/release-check-test.mjs`). Pushing the `vX.Y.Z` (or
+`vX.Y.Z-rc.N`) tag publishes everything from `release.yml`: npm packages (rc → `next`
+dist-tag), crates, and the GitHub Release; versions already published are skipped, so
+a failed run can be re-run. Never push a tag or publish unless the maintainer asks. See
+[docs/RELEASING.md](docs/RELEASING.md).
