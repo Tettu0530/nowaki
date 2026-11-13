@@ -36,6 +36,29 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+  # Public API surface snapshots (api/*.txt, CONTRIBUTING.md > API snapshots). Fails when a
+  # snapshot is out of date or a new env var / endpoint / route export is unclassified. On a pull
+  # request it also lists the stable entries removed or changed since the base commit; from the
+  # API freeze (0.20.0) on, those need the `breaking` label. The label is read through the API with
+  # this job's read-only token, so it works for fork PRs: add the label, then re-run the job.
+  # api/cli.txt is compared by `cargo test` (the test job).
+  api-surface:
+    name: API surface snapshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: node scripts/api-surface-test.mjs
+      - run: node scripts/api-surface.mjs --check
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   test:
     name: Rust test (${{ matrix.os }})
     strategy:
@@ -379,7 +402,8 @@ jobs:
           # under crates/*/tests/ (e.g. cli.rs) do not affect the release `nowaki` binary.
           if git diff --name-only "$BASE_SHA" HEAD -- crates Cargo.lock | grep -vE '/tests/' | grep -q .; then
             if cmp -s target/release/nowaki .perf-base/target/release/nowaki; then
-              echo "::error::head and base binaries are identical although crates/ changed"; exit 1
+              # A change to #[cfg(test)] code under src/ leaves the binary identical too.
+              echo "::warning::head and base binaries are identical although crates/ changed (test-only change?)"
             fi
           fi
       - if: steps.scope.outputs.run == 'true'
@@ -487,7 +511,7 @@ jobs:
   ci-ok:
     name: CI OK
     if: always()
-    needs: [lint, test, msrv, semver, security, e2e, browser, jetstream-load, scaffold, runtimes, bench-regression, perf, perf-release-cache, npm-cli, docs, workflows, pr-size]
+    needs: [lint, api-surface, test, msrv, semver, security, e2e, browser, jetstream-load, scaffold, runtimes, bench-regression, perf, perf-release-cache, npm-cli, docs, workflows, pr-size]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

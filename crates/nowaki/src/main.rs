@@ -328,3 +328,119 @@ fn print_island_hints(core: &nowaki_core::NowakiCore, client_dir: &std::path::Pa
     }
     println!();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    fn entry(text: &str, help: &str) -> String {
+        let help = help.split_whitespace().collect::<Vec<_>>().join(" ");
+        if help.is_empty() {
+            format!("{text}\n")
+        } else {
+            format!("{text}  # {help}\n")
+        }
+    }
+
+    /// One argument as api/cli.txt lists it: flags (or `<NAME>` for a positional), value name,
+    /// default and possible values.
+    fn arg_line(a: &clap::Arg) -> String {
+        let value_name = || {
+            a.get_value_names()
+                .and_then(|v| v.first().map(|n| n.to_string()))
+                .unwrap_or_else(|| a.get_id().to_string().to_uppercase())
+        };
+        let mut line = if a.is_positional() {
+            format!("<{}>", value_name())
+        } else {
+            let mut flags = Vec::new();
+            if let Some(l) = a.get_long() {
+                flags.push(format!("--{l}"));
+            }
+            if let Some(s) = a.get_short() {
+                flags.push(format!("-{s}"));
+            }
+            let mut l = flags.join(" ");
+            if a.get_action().takes_values() {
+                l.push_str(&format!(" <{}>", value_name()));
+            }
+            l
+        };
+        let defaults: Vec<_> = a
+            .get_default_values()
+            .iter()
+            .map(|v| v.to_string_lossy().into_owned())
+            .collect();
+        if !defaults.is_empty() {
+            line.push_str(&format!(" default={}", defaults.join(",")));
+        }
+        let values: Vec<_> = a
+            .get_possible_values()
+            .iter()
+            .filter(|v| !v.is_hide_set())
+            .map(|v| v.get_name().to_string())
+            .collect();
+        if !values.is_empty() && a.get_action().takes_values() {
+            line.push_str(&format!(" values={}", values.join("|")));
+        }
+        line
+    }
+
+    fn add_command(out: &mut String, path: &str, cmd: &clap::Command) {
+        out.push_str(&format!("\n[stable {path}]\n"));
+        let subs: Vec<_> = cmd.get_subcommands().collect();
+        for s in &subs {
+            let about = s.get_about().map(|a| a.to_string()).unwrap_or_default();
+            out.push_str(&entry(&format!("command {}", s.get_name()), &about));
+        }
+        for a in cmd.get_arguments().filter(|a| !a.is_hide_set()) {
+            let help = a.get_help().map(|h| h.to_string()).unwrap_or_default();
+            out.push_str(&entry(&arg_line(a), &help));
+        }
+        // clap's own `help` subcommand mirrors the tree; listing it once is enough.
+        for s in subs.into_iter().filter(|s| s.get_name() != "help") {
+            add_command(out, &format!("{path} {}", s.get_name()), s);
+        }
+    }
+
+    /// The CLI surface for api/cli.txt, from clap's own description of the commands (not the
+    /// rendered help, so it doesn't depend on the terminal or the platform). Help text goes in
+    /// comments, so rewording it isn't a surface change.
+    fn cli_surface() -> String {
+        let mut cmd = Cli::command();
+        cmd.build();
+        let mut out = String::from(
+            "# nowaki CLI: commands, flags, value names, defaults and possible values, from clap\n\
+             # (crates/nowaki/src/main.rs). Written by `NOWAKI_UPDATE_SNAPSHOTS=1 cargo test -p nowaki\n\
+             # --bin nowaki cli_surface` (or `node scripts/api-surface.mjs`); `cargo test` fails when\n\
+             # it is out of date. The comment after an entry is its help text. Not covered: the text\n\
+             # of the build report and other output, and the `--version` string.\n",
+        );
+        add_command(&mut out, "nowaki", &cmd);
+        out
+    }
+
+    #[test]
+    fn cli_surface_matches_api_snapshot() {
+        let api = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../api");
+        if !api.is_dir() {
+            return; // a packaged crate, outside the repository
+        }
+        let path = api.join("cli.txt");
+        let got = cli_surface();
+        if std::env::var_os("NOWAKI_UPDATE_SNAPSHOTS").is_some() {
+            std::fs::write(&path, &got).unwrap();
+            return;
+        }
+        let want = std::fs::read_to_string(&path)
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
+        assert!(
+            want == got,
+            "api/cli.txt is out of date. Run `node scripts/api-surface.mjs` (or \
+             NOWAKI_UPDATE_SNAPSHOTS=1 cargo test -p nowaki --bin nowaki cli_surface), review the \
+             diff and commit it.\n--- generated ---\n{got}"
+        );
+    }
+}

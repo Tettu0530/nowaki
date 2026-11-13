@@ -8,13 +8,10 @@ on:
 permissions:
   contents: read
 
-jobs:
-  release-dry-run:
-    name: Release dry run
-    uses: ./.github/workflows/release.yml
-    with:
-      dry_run: true
+# The weekly release dry run is release.yml's own schedule: a reusable-workflow call could not
+# grant the id-token / attestations permissions its publish jobs declare.
 
+jobs:
   bench:
     name: Benchmarks (Nowaki vs Next vs Astro)
     runs-on: ubuntu-latest

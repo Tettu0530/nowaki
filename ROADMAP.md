@@ -175,6 +175,8 @@ Control over what is cached, smooth navigation, visibility into a running app, a
 ### v1.0 "Nowaki": Stable release
 **Exit criteria**: Stability guarantees for the public API, complete documentation, established governance.
 
+**Status**: in progress. The policies are written: [docs/STABILITY.md](docs/STABILITY.md) (everything public is frozen at 1.0, with no experimental tier; what counts as breaking; deprecation; platforms), [SUPPORT.md](SUPPORT.md) (the latest 1.y gets fixes; 1.x gets security fixes for 6 months after 2.0), [GOVERNANCE.md](GOVERNANCE.md), [MAINTAINERS.md](MAINTAINERS.md) and [RFCs](rfcs/README.md). Next: 0.20.0, the last breaking release and the API freeze, then `1.0.0-rc.N` on npm `next` for at least 14 days with no API snapshot change before 1.0.0.
+
 - [ ] Stability guarantees for the public API + a breaking-change policy
 - [ ] Complete documentation and migration guides
 - [ ] Governance (maintainer structure, RFC process, release process)

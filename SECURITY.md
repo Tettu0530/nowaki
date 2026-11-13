@@ -15,7 +15,19 @@ and defenses the framework applies by default.
 
 ## Supported versions
 
-Nowaki is in alpha; only the latest release (and `main`) receives security fixes.
+Security fixes ship in a new release of a supported line; they are not backported to
+older minors. [SUPPORT.md](./SUPPORT.md#supported-versions) has the full policy.
+
+| Release line | Security fixes |
+| --- | --- |
+| Latest 0.x release (0.19.3 today), until 1.0.0 | Yes |
+| Older 0.x releases | No |
+| From 1.0.0: the latest 1.y minor | Yes |
+| Older 1.y minors | No: upgrade to the latest 1.y |
+| 1.x after 2.0.0 is released | Yes, for 6 months after 2.0.0 |
+
+`main` gets every fix first. A fix that tightens a default may land in a minor (or in a patch
+with an advisory); see the security exception in [docs/STABILITY.md](./docs/STABILITY.md#security-exception).
 
 ## Reporting a vulnerability
 
@@ -117,7 +129,7 @@ not run on the production request path unless you embed their output in the app.
   as soon as more than one instance (or Worker isolate) is running.
 - **Cross-site writes.** Page actions and API routes (`routes/api/**` and file
   routes such as `feed.xml.ts`) reject cross-site POST / PUT / PATCH / DELETE
-  requests with 403 (since 0.19.0 for API routes). A route that must accept
+  requests with 403 (since 0.19.3 for API routes). A route that must accept
   them (a webhook, a third-party callback) exports `csrf = false` and
   authenticates its caller another way (a signature, a shared secret), never
   with cookies. Requests without `Origin` or `Sec-Fetch-Site` (curl,

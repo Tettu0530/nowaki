@@ -1,0 +1,21 @@
+# @nowaki-dev/markdoc: every declaration in the types file of each `exports` subpath, printed without
+# comments, one line per declaration (interface and class members on their own lines).
+# Lines without `export` are local types the exported ones use.
+
+[stable .]
+# packages/nowaki-markdoc/index.d.ts
+export type Schema = { render?: string; attributes?: Record<string, unknown>; children?: string[]; selfClosing?: boolean; inline?: boolean; [key: string]: unknown; };
+export type MarkdocOptions = { components?: string; tags?: Record<string, Schema>; nodes?: Record<string, Schema>; variables?: Record<string, unknown>; functions?: Record<string, unknown>; partials?: Record<string, unknown>; parseFrontmatter?: (raw: string, format: "yaml" | "toml") => Record<string, unknown>; root?: string; };
+export type NowakiPlugin = { name: string; transform(code: string, id: string): string | null; };
+export function markdoc(options?: MarkdocOptions): NowakiPlugin;
+export default markdoc;
+export function compileMarkdoc(source: string, id: string, options?: MarkdocOptions): string;
+export const Tag: typeof import("@markdoc/markdoc").Tag;
+export const nodes: typeof import("@markdoc/markdoc").nodes;
+export const tags: typeof import("@markdoc/markdoc").tags;
+export const functions: typeof import("@markdoc/markdoc").functions;
+
+[stable ./render]
+# packages/nowaki-markdoc/render.d.ts
+export type MarkdocNode = string | [string, Record<string, unknown>, MarkdocNode[]];
+export function renderMarkdoc(node: MarkdocNode | null, components?: Record<string, unknown>): import("preact").ComponentChild;

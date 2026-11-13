@@ -7,6 +7,7 @@ body:
       value: |
         Check the [roadmap](https://github.com/Tettu0530/nowaki/blob/main/ROADMAP.md) first; it may already be planned.
         Open-ended ideas and questions fit better in [Discussions](https://github.com/Tettu0530/nowaki/discussions).
+        A change to the public API (exports, route exports, file conventions, config keys, CLI flags, defaults, env vars) needs an [RFC](https://github.com/Tettu0530/nowaki/blob/main/rfcs/README.md) before it is implemented. This issue is a good place to check that the idea fits first.
   - type: dropdown
     id: area
     attributes:
@@ -23,6 +24,7 @@ body:
         - Deploy adapters
         - create-nowaki (scaffolding)
         - Security defaults
+        - Documentation
         - Other
     validations:
       required: true
