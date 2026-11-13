@@ -1,33 +1,133 @@
 name: Release
 
-# Pushing a v* tag builds native binaries for 5 platforms, publishes each
-# @nowaki-dev/cli-<key>, then publishes the wrapper package `nowaki`.
-# Set NPM_TOKEN (an npm Automation token) in repo Secrets beforehand.
-# A manual run (workflow_dispatch) with dry_run=true only builds; nothing is published.
+# One workflow ships a release (docs/RELEASING.md):
+#   plan       scripts/release-check.mjs: every shared-version file agrees with the tag, the
+#              CHANGELOG has its section, nowaki-core and its pin agree; picks the npm dist-tag.
+#   build      the CLI for 5 platforms (cargo --locked) and the @nowaki-dev/cli-* packages.
+#   binaries   SHA256SUMS and GitHub artifact attestations for the binaries.
+#   npm        @nowaki-dev/runtime, @nowaki-dev/markdoc, the 5 platform packages, the `nowaki`
+#              wrapper, create-nowaki, create-nowaki-app (with provenance; versions already on npm
+#              are skipped).
+#   crates     nowaki-core (when its version is not on crates.io yet), then nowaki.
+#   release    the GitHub Release from the CHANGELOG section, with the binaries and SHA256SUMS.
+#
+# Triggers:
+#   - a pushed vX.Y.Z or vX.Y.Z-rc.N tag publishes (rc → npm dist-tag `next`, GitHub prerelease);
+#   - workflow_dispatch with `tag` re-runs a release; every step skips what is already published,
+#     so a run that failed half-way can simply be run again. `dry_run` (the default) runs
+#     `npm publish --dry-run` / `cargo publish --dry-run` and publishes nothing;
+#   - the weekly schedule is a dry run of the default branch (catches cross-build breakage).
+#
+# Auth: npm and crates.io trusted publishing (OIDC) once configured (docs/RELEASING.md,
+# "One-time setup"); until then the NPM_TOKEN / CARGO_REGISTRY_TOKEN secrets. A dry run gets
+# neither secret.
 
 on:
   push:
-    tags: ["v*"]
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
   workflow_dispatch:
     inputs:
+      tag:
+        description: "Release tag to (re-)publish, e.g. v1.0.0. Empty: dry run of the selected branch"
+        type: string
+        default: ""
       dry_run:
-        description: "Build only, skip npm publish"
-        type: boolean
-        default: false
-  # weekly.yml calls this with dry_run=true to catch cross-build breakage before a tag.
-  workflow_call:
-    inputs:
-      dry_run:
+        description: "Dry run: build and run npm/cargo publish --dry-run, publish nothing"
         type: boolean
         default: true
+  schedule:
+    - cron: "41 4 * * 1"
 
-permissions:
-  contents: read
+permissions: {}
+
+concurrency:
+  # One run per release at a time; never cancel a run that may be half-way through publishing.
+  group: release-${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  plan:
+    name: Version check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.plan.outputs.sha }}
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+      core_version: ${{ steps.plan.outputs.core_version }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      dist_tag: ${{ steps.plan.outputs.dist_tag }}
+      dry_run: ${{ steps.plan.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A re-run checks out the tag, not the branch the workflow was started from.
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Check versions
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            push) tag="$REF_NAME"; dry_run=false ;;
+            workflow_dispatch) tag="$INPUT_TAG"; dry_run="$INPUT_DRY_RUN" ;;
+            *) tag=""; dry_run=true ;;
+          esac
+          if [ -z "$tag" ]; then
+            # No tag: a dry run of the checked-out branch at its Cargo.toml version.
+            dry_run=true
+            meta=$(node scripts/release-check.mjs --json)
+          else
+            meta=$(node scripts/release-check.mjs "$tag" --json)
+            # Only a commit on main or a release/* branch is released.
+            sha=$(git rev-parse HEAD)
+            on_branch=false
+            for b in $(git for-each-ref --format='%(refname)' refs/remotes/origin/main 'refs/remotes/origin/release/*'); do
+              if git merge-base --is-ancestor "$sha" "$b"; then on_branch=true; fi
+            done
+            if [ "$on_branch" != true ]; then
+              echo "::error::$tag ($sha) is not on main or a release/* branch"
+              exit 1
+            fi
+          fi
+          version=$(node -p 'JSON.parse(process.argv[1]).version' "$meta")
+          latest=$(npm view nowaki dist-tags.latest 2>/dev/null || true)
+          dist_tag=$(node scripts/release-check.mjs dist-tag "$version" --latest "$latest")
+          {
+            echo "sha=$(git rev-parse HEAD)"
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "core_version=$(node -p 'JSON.parse(process.argv[1]).coreVersion' "$meta")"
+            echo "prerelease=$(node -p 'JSON.parse(process.argv[1]).prerelease' "$meta")"
+            echo "dist_tag=$dist_tag"
+            echo "dry_run=$dry_run"
+          } | tee -a "$GITHUB_OUTPUT"
+          {
+            echo "### Release ${tag:-(no tag)}"
+            echo "version \`$version\`, nowaki-core \`$(node -p 'JSON.parse(process.argv[1]).coreVersion' "$meta")\`, npm dist-tag \`$dist_tag\` (npm latest today: \`${latest:-none}\`), dry run: \`$dry_run\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   build:
     name: Build ${{ matrix.key }}
+    needs: plan
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -36,25 +136,34 @@ jobs:
             runner: macos-latest
             triple: aarch64-apple-darwin
             cross: false
+            exe: ""
           - key: darwin-x64
             runner: macos-latest
             triple: x86_64-apple-darwin
             cross: false
+            exe: ""
           - key: linux-x64-gnu
             runner: ubuntu-latest
             triple: x86_64-unknown-linux-gnu
             cross: false
+            exe: ""
           - key: linux-arm64-gnu
             runner: ubuntu-latest
             triple: aarch64-unknown-linux-gnu
             cross: true
+            exe: ""
           - key: win32-x64
             runner: windows-latest
             triple: x86_64-pc-windows-msvc
             cross: false
+            exe: ".exe"
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
@@ -62,8 +171,7 @@ jobs:
           targets: ${{ matrix.triple }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
+          node-version: 24
           package-manager-cache: false
 
       - name: Install cross
@@ -74,40 +182,218 @@ jobs:
 
       - name: Build (cargo)
         if: ${{ !matrix.cross }}
-        run: cargo build --release -p nowaki --target ${{ matrix.triple }}
+        run: cargo build --release --locked -p nowaki --target ${{ matrix.triple }}
 
       - name: Build (cross)
         if: matrix.cross
-        run: cross build --release -p nowaki --target ${{ matrix.triple }}
+        run: cross build --release --locked -p nowaki --target ${{ matrix.triple }}
 
-      - name: Assemble npm package
-        run: node scripts/build-npm.mjs ${{ matrix.key }} --no-build
-
-      - name: Publish @nowaki-dev/cli-${{ matrix.key }}
-        if: ${{ !inputs.dry_run }}
-        run: npm publish --access public
-        working-directory: packages/nowaki-cli/npm/${{ matrix.key }}
+      - name: Assemble npm package and release binary
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          KEY: ${{ matrix.key }}
+          TRIPLE: ${{ matrix.triple }}
+          EXE: ${{ matrix.exe }}
+        run: |
+          node scripts/build-npm.mjs "$KEY" --no-build
+          mkdir -p out
+          # tar keeps the executable bit, which an Actions artifact would drop.
+          tar -czf "out/npm-$KEY.tgz" -C packages/nowaki-cli/npm "$KEY"
+          cp "target/$TRIPLE/release/nowaki$EXE" "out/nowaki-$KEY$EXE"
 
-  publish-wrapper:
-    name: Publish nowaki (wrapper)
-    needs: build
-    if: ${{ !inputs.dry_run }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cli-${{ matrix.key }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  binaries:
+    name: Checksums and attestations
+    needs: [plan, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: cli-*
+          path: out
+          merge-multiple: true
+      - name: SHA256SUMS
+        working-directory: out
+        run: |
+          sha256sum nowaki-* > SHA256SUMS
+          cat SHA256SUMS
+      - name: Attest build provenance
+        if: needs.plan.outputs.dry_run != 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            out/nowaki-*
+            out/npm-*.tgz
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sha256sums
+          path: out/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  npm:
+    name: Publish npm packages
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # trusted publishing and --provenance
+    env:
+      NPM_DRY_RUN: ${{ needs.plan.outputs.dry_run == 'true' && '1' || '' }}
+      # Used only until trusted publishing is configured (npm tries OIDC first). Never in a dry run.
+      NODE_AUTH_TOKEN: ${{ needs.plan.outputs.dry_run != 'true' && secrets.NPM_TOKEN || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      # Publish the wrapper after the platform packages
-      # (so its optionalDependencies are resolvable).
-      - name: Publish wrapper
-        run: npm publish --access public
+      - name: npm 11.5.1 or newer (trusted publishing)
+        run: |
+          if ! node -e 'const [a,b,c]=process.argv[1].split(".").map(Number);process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)' "$(npm --version)"; then
+            npm install -g npm@11.21.2
+          fi
+          npm --version
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: cli-*
+          path: out
+          merge-multiple: true
+      - name: Unpack platform packages
+        run: |
+          mkdir -p packages/nowaki-cli/npm
+          for t in out/npm-*.tgz; do tar -xzf "$t" -C packages/nowaki-cli/npm; done
+          ls -l packages/nowaki-cli/npm/*/bin
+
+      # The runtime first: the CLI refuses a runtime older than itself, so it must be installable
+      # before the CLI that needs it is.
+      - name: "@nowaki-dev/runtime"
+        working-directory: packages/nowaki-runtime
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/npm-publish-if-new.sh"
+      - name: "@nowaki-dev/markdoc"
+        working-directory: packages/nowaki-markdoc
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/npm-publish-if-new.sh"
+      - name: "@nowaki-dev/cli-* (5 platforms)"
+        run: |
+          for key in darwin-arm64 darwin-x64 linux-x64-gnu linux-arm64-gnu win32-x64; do
+            (cd "packages/nowaki-cli/npm/$key" && bash "$GITHUB_WORKSPACE/scripts/ci/npm-publish-if-new.sh")
+          done
+      # The wrapper after the platform packages, so its optionalDependencies resolve.
+      - name: nowaki (wrapper)
         working-directory: packages/nowaki-cli
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/npm-publish-if-new.sh"
+      # The scaffolders last: a new app installs the runtime and CLI published above.
+      - name: create-nowaki
+        working-directory: packages/create-nowaki
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/npm-publish-if-new.sh"
+      - name: create-nowaki-app
+        working-directory: packages/create-nowaki-app
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/npm-publish-if-new.sh"
+
+  crates:
+    name: Publish crates
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write # crates.io trusted publishing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - name: Dry run
+        if: needs.plan.outputs.dry_run == 'true'
+        # Packages and verifies both crates; nowaki resolves the local nowaki-core.
+        run: cargo publish --dry-run --locked -p nowaki-core -p nowaki
+      # Set the repository variable CRATES_IO_TRUSTED_PUBLISHING=true once crates.io trusts this
+      # workflow for both crates (docs/RELEASING.md); until then the CARGO_REGISTRY_TOKEN secret.
+      - name: crates.io token (trusted publishing)
+        id: auth
+        if: needs.plan.outputs.dry_run != 'true' && vars.CRATES_IO_TRUSTED_PUBLISHING == 'true'
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+      - name: Publish
+        if: needs.plan.outputs.dry_run != 'true'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          CORE_VERSION: ${{ needs.plan.outputs.core_version }}
+        run: |
+          set -euo pipefail
+          # The sparse index lists every published version (https://index.crates.io/no/wa/<name>).
+          published() {
+            curl -sSf "https://index.crates.io/${1:0:2}/${1:2:2}/$1" | grep -q "\"vers\":\"$2\""
+          }
+          for spec in "nowaki-core $CORE_VERSION" "nowaki $VERSION"; do
+            read -r name version <<< "$spec"
+            if published "$name" "$version"; then
+              echo "::notice::$name $version is already on crates.io, skipped"
+            else
+              cargo publish --locked -p "$name"
+            fi
+          done
+
+  release:
+    name: GitHub Release
+    needs: [plan, binaries, npm, crates]
+    if: needs.plan.outputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: cli-*
+          path: out
+          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sha256sums
+          path: out
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+          DIST_TAG: ${{ needs.plan.outputs.dist_tag }}
+        run: |
+          set -euo pipefail
+          node scripts/release-check.mjs notes "$TAG" > notes.md
+          title=$(node scripts/release-check.mjs title "$TAG")
+          assets=(out/nowaki-* out/SHA256SUMS)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::release $TAG exists; replacing its assets"
+            gh release upload "$TAG" "${assets[@]}" --clobber
+            exit 0
+          fi
+          flags=(--verify-tag --title "$title" --notes-file notes.md)
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease --latest=false)
+          elif [ "$DIST_TAG" != latest ]; then flags+=(--latest=false)
+          fi
+          gh release create "$TAG" "${flags[@]}" "${assets[@]}"

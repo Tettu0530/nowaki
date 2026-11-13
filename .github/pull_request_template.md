@@ -8,6 +8,14 @@ Closes #
 
 <!-- Commands you ran and what you checked. -->
 
+## Public API
+
+<!-- The frozen surface is listed in docs/STABILITY.md ("What is frozen"). Check one. -->
+
+- [ ] Doesn't change the public surface
+- [ ] Adds to the public surface (new export, route export, config key, flag, env var, event): `api/` snapshots updated, CHANGELOG entry, RFC: <!-- link -->
+- [ ] **Breaking change**: removes or changes something in the public surface. The PR has the `breaking` label, targets the next major, updates the `api/` snapshots, has an Upgrade note in the CHANGELOG, and links the accepted RFC: <!-- link -->
+
 ## Checklist
 
 - [ ] `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace` pass

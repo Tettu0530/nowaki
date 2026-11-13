@@ -178,7 +178,7 @@ export type Streaming = boolean | "early";
  *
  * `false` accepts cross-site writes, for webhooks and third-party callbacks. Authenticate such a
  * route another way (a signature header, a shared secret): its cookies are the visitor's.
- * API routes reject by default since 0.19.0.
+ * API routes reject by default since 0.19.3.
  * @example export const csrf = false; // routes/api/webhook.ts
  */
 export type Csrf = boolean;

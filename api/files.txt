@@ -1,0 +1,37 @@
+# File conventions: the app files and names Nowaki gives a meaning to. Each line is taken
+# from the code that implements it (the comment says where). .nowaki/ is internal, except
+# the .nowaki/types.d.ts path.
+
+[stable routes]
+routes/ file extensions: .tsx .ts .jsx .js .mdx  # packages/nowaki-runtime/server/router.mjs
+routes/**/index  # packages/nowaki-runtime/server/router.mjs
+routes/api/** (API routes)  # packages/nowaki-runtime/server/router.mjs
+routes/**/<name>.<ext>.ts (file routes, e.g. feed.xml.ts)  # packages/nowaki-runtime/server/router.mjs
+[...rest] (catch-all segment)  # packages/nowaki-runtime/server/segments.mjs
+[param].<ext> (param with a fixed extension)  # packages/nowaki-runtime/server/segments.mjs
+[param]  # packages/nowaki-runtime/server/segments.mjs
+routes/**/_layout  # packages/nowaki-runtime/server/router.mjs
+routes/**/_middleware  # packages/nowaki-runtime/server/router.mjs
+routes/**/loading  # packages/nowaki-runtime/server/router.mjs
+routes/**/error  # packages/nowaki-runtime/server/router.mjs
+routes/**/_404  # packages/nowaki-runtime/server/router.mjs
+routes/**/_500  # packages/nowaki-runtime/server/router.mjs
+routes/**/_error  # packages/nowaki-runtime/server/router.mjs
+routes/**/default (slot fallback, @slot/default only)  # packages/nowaki-runtime/server/router.mjs
+routes/**/_* (other names reserved)  # packages/nowaki-runtime/server/router.mjs
+routes/**/(group)/  # packages/nowaki-runtime/server/router.mjs
+routes/**/@slot/  # packages/nowaki-runtime/server/router.mjs
+(.)x (..)x (...)x intercepting segments inside a slot  # packages/nowaki-runtime/server/router.mjs
+
+[stable app]
+islands/  # crates/nowaki-core/src/build.rs
+content/ with content/config.ts | content/config.js | content/config.mjs | content/config.mts  # crates/nowaki/src/content.rs
+content/<collection>/  # crates/nowaki/src/content.rs
+public/  # crates/nowaki-core/src/public.rs
+env.ts | env.mts | env.js | env.mjs  # crates/nowaki-core/src/env.rs
+session.ts | session.mts | session.js | session.mjs  # crates/nowaki-core/src/build.rs
+nowaki.config.mjs | nowaki.config.js  # packages/nowaki-runtime/server/site-config.mjs
+.env | .env.local (loaded into process.env, never overriding it)  # packages/nowaki-runtime/server/env.mjs
+.nowaki/types.d.ts (typegen output)  # crates/nowaki/src/typegen.rs
+source extensions: .ts .tsx .js .jsx .mjs .tsrx .mdx .mdoc  # crates/nowaki-core/src/lib.rs
+.tsrx (compiled with the app's @tsrx/preact)  # crates/nowaki/src/plugins.rs

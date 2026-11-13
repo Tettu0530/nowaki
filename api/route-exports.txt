@@ -1,0 +1,38 @@
+# Route and island module exports the runtime reads (`mod.<name>` in the server files that
+# load route modules, names nowaki-core reads from the AST) and the client:* island
+# directives. <METHOD> is an API / file route's request-method export (GET, POST, ...).
+# Each entry is `name: type`, the type as index.d.ts names it ("untyped" when it has none).
+# Sections: [stable] is covered by semver; [dev] dev-only; [internal] not covered (may change in
+# any release); [external] standard names Nowaki reads but doesn't own; [ignored] matches that
+# aren't this kind of surface. A name the scan finds that isn't listed lands in [unclassified],
+# and --check fails until it is moved to a section. The comment after each entry lists where
+# the scan found it.
+
+[stable]
+<METHOD>: ApiHandler (API / file routes: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, ...; the lowercase name is also tried)  # packages/nowaki-runtime/server/handler.mjs
+action: Action (page)  # packages/nowaki-runtime/server/handler.mjs
+bodyAttrs: DocumentAttrs (page, layout)  # packages/nowaki-runtime/server/document.mjs
+budget: RouteBudget (page; a literal, read from the AST)  # crates/nowaki-core/src/budget.rs
+client:idle: boolean (island usage)  # packages/nowaki-runtime/server/island-directive.mjs
+client:load: boolean (island usage)  # packages/nowaki-runtime/server/island-directive.mjs
+client:media: string (island usage)  # packages/nowaki-runtime/server/island-directive.mjs
+client:only: boolean (island usage)  # packages/nowaki-runtime/server/island-directive.mjs
+client:visible: boolean (island usage)  # packages/nowaki-runtime/server/island-directive.mjs
+csrf: Csrf (page with an action, API and file routes)  # packages/nowaki-runtime/server/handler.mjs, packages/nowaki-runtime/server/sidecar.mjs
+default: component | ApiHandler | Middleware (page, layout, slot, _404, _500, loading, error, island; API / file route fallback; _middleware)  # packages/nowaki-runtime/server/app.mjs, packages/nowaki-runtime/server/handler.mjs, packages/nowaki-runtime/server/isr-urls.mjs, packages/nowaki-runtime/server/live.mjs, packages/nowaki-runtime/server/render.mjs, packages/nowaki-runtime/server/sidecar.mjs, packages/nowaki-runtime/server/web.mjs
+head: untyped string (page, layout)  # packages/nowaki-runtime/server/document.mjs, packages/nowaki-runtime/server/handler.mjs
+htmlAttrs: DocumentAttrs (page, layout)  # packages/nowaki-runtime/server/document.mjs, packages/nowaki-runtime/server/handler.mjs
+lang: untyped string (page, layout)  # packages/nowaki-runtime/server/document.mjs, packages/nowaki-runtime/server/handler.mjs
+live: Live (island)  # crates/nowaki-core/src/live_hint.rs, packages/nowaki-runtime/server/app.mjs, packages/nowaki-runtime/server/live.mjs, packages/nowaki-runtime/server/render.mjs, packages/nowaki-runtime/server/web.mjs
+loader: Loader (page, layout, slot)  # packages/nowaki-runtime/server/handler.mjs
+meta: Meta | MetaFn (page, layout)  # packages/nowaki-runtime/server/handler.mjs, packages/nowaki-runtime/server/isr-urls.mjs
+middleware: untyped Middleware (_middleware; alias of default)  # packages/nowaki-runtime/server/handler.mjs
+prerender: untyped false (page)  # packages/nowaki-runtime/server/static-paths.mjs
+revalidate: untyped number of seconds (ISR page)  # packages/nowaki-runtime/server/handler.mjs, packages/nowaki-runtime/server/isr-urls.mjs, packages/nowaki-runtime/server/sidecar.mjs
+scripts: untyped (page, layout; read from the AST)  # crates/nowaki-core/src/page_scripts.rs, packages/nowaki-runtime/server/sidecar.mjs
+sitemap: untyped false (page)  # packages/nowaki-runtime/server/isr-urls.mjs
+staticPaths: StaticPaths (dynamic page, file route)  # packages/nowaki-runtime/server/isr-urls.mjs, packages/nowaki-runtime/server/static-paths.mjs
+streaming: Streaming (page)  # crates/nowaki-core/src/budget.rs, packages/nowaki-runtime/server/handler.mjs, packages/nowaki-runtime/server/sidecar.mjs
+tags: RouteTags (ISR page)  # packages/nowaki-runtime/server/handler.mjs, packages/nowaki-runtime/server/sidecar.mjs
+title: untyped string (page, layout)  # packages/nowaki-runtime/server/document.mjs, packages/nowaki-runtime/server/handler.mjs
+viewTransition: ViewTransition (page)  # packages/nowaki-runtime/server/document.mjs

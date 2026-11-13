@@ -1,0 +1,39 @@
+# Client surface: nowaki:* DOM events and data-live* / data-nowaki-* attributes used by
+# packages/nowaki-runtime/client. Generated markup (<nowaki-island> and friends) and
+# window.__nowaki* globals are internal.
+# Sections: [stable] is covered by semver; [dev] dev-only; [internal] not covered (may change in
+# any release); [external] standard names Nowaki reads but doesn't own; [ignored] matches that
+# aren't this kind of surface. A name the scan finds that isn't listed lands in [unclassified],
+# and --check fails until it is moved to a section. The comment after each entry lists where
+# the scan found it.
+
+[stable]
+data-live  # packages/nowaki-runtime/client/live.js
+data-live-change  # packages/nowaki-runtime/client/live.js
+data-live-debounce  # packages/nowaki-runtime/client/live.js
+data-live-input  # packages/nowaki-runtime/client/live.js
+data-live-submit  # packages/nowaki-runtime/client/live.js
+data-nowaki-error  # packages/nowaki-runtime/client/router.js
+data-nowaki-presence  # packages/nowaki-runtime/client/live.js
+data-nowaki-reset  # packages/nowaki-runtime/client/router.js
+data-nowaki-transition  # packages/nowaki-runtime/client/router.js
+nowaki:action  # packages/nowaki-runtime/client/islands.js
+nowaki:live-error  # packages/nowaki-runtime/client/live.js
+nowaki:live-stale  # packages/nowaki-runtime/client/live.js
+nowaki:page-load  # packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js, packages/nowaki-runtime/client/toolbar.js
+nowaki:presence  # packages/nowaki-runtime/client/live.js
+
+[dev]
+nowaki:hmr  # packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js, packages/nowaki-runtime/client/toolbar.js
+nowaki:toolbar  # packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/toolbar.js
+nowaki:toolbar-ui  # packages/nowaki-runtime/client/toolbar.js
+
+[internal]
+data-live-connections  # packages/nowaki-runtime/client/toolbar.js
+data-live-transport  # packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/live.js, packages/nowaki-runtime/client/router.js
+data-nowaki-attrs  # packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js
+data-nowaki-css  # packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js
+data-nowaki-head  # packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js
+data-nowaki-intercepts  # packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js
+data-nowaki-script  # packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js
+data-nowaki-slot  # packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js

@@ -1,0 +1,41 @@
+# nowaki.config keys: top-level keys read by server/site-config.mjs and server/plugin-host.mjs,
+# the allowed keys of nested objects (site-config.mjs `keys()` calls, unknown ones throw),
+# font keys (crates/nowaki/src/fonts.rs, server/fonts-fetch.mjs) and plugin hooks.
+# Unknown top-level keys are ignored today (not rejected).
+
+[stable files]
+nowaki.config.mjs  # packages/nowaki-runtime/server/site-config.mjs, packages/nowaki-runtime/server/plugin-host.mjs
+nowaki.config.js  # packages/nowaki-runtime/server/site-config.mjs, packages/nowaki-runtime/server/plugin-host.mjs
+export default  # the config object
+export config  # the config object
+
+[stable top-level]
+basePath
+fonts
+headers
+i18n
+images
+mjs
+plugins
+redirects
+rewrites
+site
+trailingSlash
+
+[stable nested]
+headers[]: source, headers, locale
+headers[].headers[]: key, value
+i18n: locales, defaultLocale, prefixDefaultLocale, detect
+images: remotePatterns
+images.remotePatterns[]: protocol, hostname, port, pathname
+redirects[]: source, destination, permanent, statusCode, locale
+rewrites[]: source, destination, locale
+trailingSlash: never | always | ignore
+fonts[]: display, fallback, family, preload, provider, src, style, styles, subsets, variable, weight, weights
+fonts[].src[]: path, weight, style
+
+[stable plugins]
+load  # plugins[].load
+resolveId  # plugins[].resolveId
+transform  # plugins[].transform
+name  # plugins[].name (shown in errors)
