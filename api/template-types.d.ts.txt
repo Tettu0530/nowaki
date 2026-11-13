@@ -1,0 +1,38 @@
+# Type files every scaffolded app gets (create-nowaki templates/_shared): ambient module
+# declarations for asset / CSS / MDX / Markdoc / virtual imports, import.meta.env, and the
+# client:* JSX attributes.
+
+[stable nowaki-env.d.ts]
+declare module "*.module.css" { const classes: Record<string, string>; export default classes; }
+declare module "*.css" { const css: string; export default css; }
+declare module "*?image" { const image: import("@nowaki-dev/runtime/image").ImageSource; export default image; }
+declare module "*&image" { const image: import("@nowaki-dev/runtime/image").ImageSource; export default image; }
+declare module "*.svg" { const url: string; export default url; }
+declare module "*.png" { const url: string; export default url; }
+declare module "*.jpg" { const url: string; export default url; }
+declare module "*.jpeg" { const url: string; export default url; }
+declare module "*.gif" { const url: string; export default url; }
+declare module "*.webp" { const url: string; export default url; }
+declare module "*.avif" { const url: string; export default url; }
+declare module "*.ico" { const url: string; export default url; }
+declare module "*.woff" { const url: string; export default url; }
+declare module "*.woff2" { const url: string; export default url; }
+declare module "*.ttf" { const url: string; export default url; }
+declare module "*.otf" { const url: string; export default url; }
+declare module "*.mp4" { const url: string; export default url; }
+declare module "*.webm" { const url: string; export default url; }
+declare module "*.mp3" { const url: string; export default url; }
+declare module "*.wav" { const url: string; export default url; }
+declare module "*.pdf" { const url: string; export default url; }
+declare module "*.mdx" { export const headings: { depth: number; text: string; id: string; }[]; const MDXContent: (props?: Record<string, unknown>) => import("preact").JSX.Element; export default MDXContent; }
+declare module "*.mdoc" { export const frontmatter: Record<string, any>; export const headings: { depth: number; text: string; id: string; }[]; const MarkdocContent: () => import("preact").JSX.Element; export default MarkdocContent; }
+declare module "virtual:*";
+interface ImportMetaEnv {}
+ImportMetaEnv.readonly MODE: string;
+ImportMetaEnv.readonly BASE_URL: string;
+ImportMetaEnv.readonly [key: `PUBLIC_${string}`]: string | undefined;
+interface ImportMeta {}
+ImportMeta.readonly env: ImportMetaEnv;
+
+[stable nowaki-jsx.d.ts]
+declare module "preact" { namespace JSX { interface IntrinsicAttributes { "client:load"?: boolean; "client:idle"?: boolean; "client:visible"?: boolean; "client:media"?: string; "client:only"?: boolean; } } }

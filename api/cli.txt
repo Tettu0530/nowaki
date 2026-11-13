@@ -1,0 +1,50 @@
+# nowaki CLI: commands, flags, value names, defaults and possible values, from clap
+# (crates/nowaki/src/main.rs). Written by `NOWAKI_UPDATE_SNAPSHOTS=1 cargo test -p nowaki
+# --bin nowaki cli_surface` (or `node scripts/api-surface.mjs`); `cargo test` fails when
+# it is out of date. The comment after an entry is its help text. Not covered: the text
+# of the build report and other output, and the `--version` string.
+
+[stable nowaki]
+command dev  # Start the dev server
+command build  # Build for production and emit output for the deploy adapter
+command start  # Serve a built app in production mode
+command prerender  # Prerender as a static site (SSG)
+command upgrade  # Update nowaki (CLI) and @nowaki-dev/runtime to the latest version
+command typegen  # Generate typed routes (.nowaki/types.d.ts)
+command help  # Print this message or the help of the given subcommand(s)
+--help -h  # Print help
+--version -V  # Print version
+
+[stable nowaki dev]
+<DIR> default=.  # App root directory
+--port -p <PORT> default=3000
+--host default=false  # Expose on the LAN (listen on 0.0.0.0, show the Network URL)
+--open default=false  # Open the default browser after startup
+--no-toolbar default=false  # Don't load the dev toolbar in the browser (same as NOWAKI_TOOLBAR=0)
+--help -h  # Print help
+
+[stable nowaki build]
+<DIR> default=.  # App root directory
+--adapter <ADAPTER> default=node values=node|static|bun|deno|cloudflare|vercel  # Deploy target adapter (node|static|bun|deno|cloudflare|vercel)
+--help -h  # Print help (see more with '--help')
+
+[stable nowaki start]
+<DIR> default=.  # App root directory
+--port -p <PORT> default=3000
+--host default=false  # Listen on all interfaces (default: NOWAKI_HOST or 127.0.0.1)
+--help -h  # Print help
+
+[stable nowaki prerender]
+<DIR> default=.  # App root directory
+--out -o <OUT> default=dist/static  # Output directory (relative to dir, or absolute)
+--skip-build default=false  # Render from existing `dist/` (`nowaki build`); skips the transform and content-index steps
+--help -h  # Print help
+
+[stable nowaki upgrade]
+<DIR> default=.  # App root directory
+--to <TO>  # Version to update to (default: latest), e.g. --to 0.11.0
+--help -h  # Print help
+
+[stable nowaki typegen]
+<DIR> default=.  # App root directory
+--help -h  # Print help

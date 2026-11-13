@@ -1,0 +1,22 @@
+# create-nowaki / create-nowaki-app: command-line flags (from index.js) and template names.
+
+[stable flags]
+--install
+--no-git
+--no-install
+--pm <value>
+--template <value>
+--yes
+-t <value>
+-y
+<dir>
+
+[stable templates]
+basics
+minimal
+
+[stable package managers]
+npm
+pnpm
+yarn
+bun
