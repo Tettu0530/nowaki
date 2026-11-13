@@ -1,0 +1,72 @@
+name: Release check
+
+# On PRs that touch version files or the release tooling: the version files agree
+# (scripts/release-check.mjs, the same gate release.yml runs on a tag), a PR that changes the
+# version does not reuse an existing tag, the gate's own tests pass, and the workflows lint.
+# Read-only: no secrets, no publishing.
+
+on:
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - crates/*/Cargo.toml
+      - packages/*/package.json
+      - packages/create-nowaki/templates/_shared/package.json
+      - pnpm-lock.yaml
+      - CHANGELOG.md
+      - scripts/release-check.mjs
+      - scripts/release-check-test.mjs
+      - scripts/ci/npm-publish-if-new.sh
+      - .github/workflows/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  versions:
+    name: Versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Tests
+        run: node scripts/release-check-test.mjs
+      - name: Version files agree
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          version() { sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p'; }
+          head=$(version < Cargo.toml)
+          base=$(git show "$BASE_SHA:Cargo.toml" | version)
+          if [ "$head" != "$base" ]; then
+            echo "Release PR: $base -> $head"
+            node scripts/release-check.mjs "v$head" --new-tag
+          else
+            node scripts/release-check.mjs
+          fi
+
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        with:
+          tool: actionlint
+      - run: actionlint -color
