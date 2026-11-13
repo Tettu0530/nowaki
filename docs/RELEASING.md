@@ -67,7 +67,7 @@ needs no postinstall) resolves and execs the right one at runtime.
 7. **Announce** (maintainer).
 
 Pushing a release tag is what publishes, so only maintainers push `v*` tags (see
-GOVERNANCE.md for who that is); the npm and crates.io owners are the same people.
+[GOVERNANCE.md](../GOVERNANCE.md) for who that is); the npm and crates.io owners are the same people.
 
 ## Bumping the version
 
