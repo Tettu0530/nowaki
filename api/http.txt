@@ -1,0 +1,55 @@
+# HTTP surface: /__nowaki/* endpoints, /@*/ dev paths, the /_nowaki/ asset prefix, x-nowaki-*
+# headers and nowaki_* cookies found in crates/*/src and packages/nowaki-runtime.
+# Request / response formats of internal endpoints (wire protocols) are not covered.
+# Sections: [stable] is covered by semver; [dev] dev-only; [internal] not covered (may change in
+# any release); [external] standard names Nowaki reads but doesn't own; [ignored] matches that
+# aren't this kind of surface. A name the scan finds that isn't listed lands in [unclassified],
+# and --check fails until it is moved to a section. The comment after each entry lists where
+# the scan found it.
+
+[stable]
+/__nowaki/health (GET; {"status":"ok"} or 503)  # crates/nowaki/src/start.rs, packages/nowaki-runtime/server/health.mjs, packages/nowaki-runtime/server/prod-sidecar.mjs
+/__nowaki/revalidate (POST; Authorization: Bearer NOWAKI_REVALIDATE_SECRET; { paths, tags })  # packages/nowaki-runtime/index.d.ts, packages/nowaki-runtime/server/revalidate.mjs
+/_nowaki/ (asset prefix, reserved; file names internal)  # crates/nowaki-core/src/image.rs, crates/nowaki-core/src/lib.rs, crates/nowaki-core/src/public.rs, crates/nowaki/src/encoding.rs, crates/nowaki/src/fonts.rs, crates/nowaki/src/front.rs, crates/nowaki/src/prerender.rs, crates/nowaki/src/site.rs, crates/nowaki/src/start.rs, packages/nowaki-runtime/server/app.mjs, packages/nowaki-runtime/server/document.mjs, packages/nowaki-runtime/server/edge-build.mjs, packages/nowaki-runtime/server/front.mjs, packages/nowaki-runtime/server/public-files.mjs, packages/nowaki-runtime/server/vercel-build.mjs, packages/nowaki-runtime/server/web.mjs
+nowaki_locale (cookie)  # crates/nowaki-core/src/rules.rs, crates/nowaki/src/front.rs, crates/nowaki/src/prerender.rs, packages/nowaki-runtime/index.d.ts, packages/nowaki-runtime/navigation.js, packages/nowaki-runtime/server/app.mjs, packages/nowaki-runtime/server/edge-build.mjs, packages/nowaki-runtime/server/rules.mjs
+nowaki_session (cookie; default session cookie name)  # packages/nowaki-runtime/server/session.mjs, packages/nowaki-runtime/session.d.ts
+x-nowaki-cache (response header: HIT | STALE | MISS)  # crates/nowaki/src/start.rs, packages/nowaki-runtime/server/purge-cloudflare.mjs
+
+[dev]
+/@fs/  # crates/nowaki-core/src/resolve.rs, crates/nowaki/src/dev.rs, packages/nowaki-runtime/server/sidecar.mjs
+/__nowaki/css  # crates/nowaki-core/src/css.rs, crates/nowaki/src/dev.rs, packages/nowaki-runtime/client/hmr.js
+/__nowaki/devtools  # crates/nowaki/src/forward.rs, crates/nowaki/src/mcp.rs, packages/nowaki-runtime/client/toolbar.js
+/__nowaki/hmr  # crates/nowaki/src/dev.rs
+/__nowaki/image  # crates/nowaki-core/src/image.rs, crates/nowaki-core/src/transform.rs, crates/nowaki/src/content.rs, crates/nowaki/src/dev.rs
+/__nowaki/mcp  # crates/nowaki/src/forward.rs, crates/nowaki/src/mcp.rs
+/__nowaki/ssr-module  # crates/nowaki/src/dev.rs, packages/nowaki-runtime/server/loader-hooks.mjs
+
+[internal]
+/__nowaki/boundaries  # crates/nowaki/src/prerender.rs, packages/nowaki-runtime/client/router.js, packages/nowaki-runtime/server/handler.mjs
+/__nowaki/dev-info  # crates/nowaki/src/forward.rs, crates/nowaki/src/mcp.rs, packages/nowaki-runtime/server/sidecar.mjs
+/__nowaki/fn  # crates/nowaki-core/src/lib.rs, crates/nowaki-core/src/server_fn.rs, packages/nowaki-runtime/server/functions.mjs
+/__nowaki/fonts  # crates/nowaki/src/dev.rs, crates/nowaki/src/fonts.rs
+/__nowaki/isr-urls  # crates/nowaki/src/forward.rs, crates/nowaki/src/start.rs, packages/nowaki-runtime/server/prod-sidecar.mjs
+/__nowaki/live  # crates/nowaki/src/dev.rs, crates/nowaki/src/start.rs, packages/nowaki-runtime/client/live.js, packages/nowaki-runtime/server/document.mjs, packages/nowaki-runtime/server/live-hub.mjs, packages/nowaki-runtime/server/live.mjs
+/__nowaki/live-event  # packages/nowaki-runtime/client/live.js, packages/nowaki-runtime/server/document.mjs, packages/nowaki-runtime/server/handler.mjs, packages/nowaki-runtime/server/live-event.mjs, packages/nowaki-runtime/server/live.mjs
+/__nowaki/live-render  # crates/nowaki/src/forward.rs, crates/nowaki/src/live.rs, packages/nowaki-runtime/server/live.mjs, packages/nowaki-runtime/server/prod-sidecar.mjs, packages/nowaki-runtime/server/sidecar.mjs
+/__nowaki/route-css  # crates/nowaki/src/dev.rs, packages/nowaki-runtime/server/sidecar.mjs
+/__nowaki/server-functions  # crates/nowaki/src/dev.rs, packages/nowaki-runtime/server/sidecar.mjs
+x-nowaki-cc  # packages/nowaki-runtime/server/purge-cloudflare.mjs
+x-nowaki-intercept  # crates/nowaki/src/forward.rs, crates/nowaki/src/start.rs, packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js, packages/nowaki-runtime/server/handler.mjs, packages/nowaki-runtime/server/purge-cloudflare.mjs
+x-nowaki-live  # crates/nowaki/src/forward.rs, packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/live.js, packages/nowaki-runtime/server/live-event.mjs
+x-nowaki-nav  # crates/nowaki/src/forward.rs, packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js
+x-nowaki-page  # crates/nowaki/src/start.rs, packages/nowaki-runtime/server/prod-sidecar.mjs
+x-nowaki-purge  # crates/nowaki/src/start.rs, packages/nowaki-runtime/server/handler.mjs, packages/nowaki-runtime/server/prod-sidecar.mjs, packages/nowaki-runtime/server/revalidate.mjs
+x-nowaki-revalidate  # crates/nowaki/src/start.rs, packages/nowaki-runtime/server/app.mjs, packages/nowaki-runtime/server/handler.mjs, packages/nowaki-runtime/server/purge-cloudflare.mjs, packages/nowaki-runtime/server/web.mjs
+x-nowaki-route  # crates/nowaki/src/start.rs, packages/nowaki-runtime/server/prod-sidecar.mjs, packages/nowaki-runtime/server/trace.mjs
+x-nowaki-route-path  # crates/nowaki/src/forward.rs, crates/nowaki/src/front.rs, packages/nowaki-runtime/server/prod-sidecar.mjs, packages/nowaki-runtime/server/sidecar.mjs
+x-nowaki-rpc  # crates/nowaki-core/src/server_fn.rs, crates/nowaki/src/forward.rs, packages/nowaki-runtime/client/islands.js, packages/nowaki-runtime/server/functions.mjs
+x-nowaki-slot  # crates/nowaki/src/start.rs, packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js, packages/nowaki-runtime/server/handler.mjs
+x-nowaki-ssr-version  # crates/nowaki/src/dev.rs, packages/nowaki-runtime/server/sidecar.mjs
+x-nowaki-stored  # packages/nowaki-runtime/server/purge-cloudflare.mjs
+x-nowaki-stub  # packages/nowaki-runtime/server/purge-cloudflare.mjs
+x-nowaki-tags  # crates/nowaki/src/start.rs, packages/nowaki-runtime/server/handler.mjs, packages/nowaki-runtime/server/purge-cloudflare.mjs, packages/nowaki-runtime/server/revalidate.mjs
+x-nowaki-vary  # crates/nowaki/src/start.rs, packages/nowaki-runtime/server/handler.mjs, packages/nowaki-runtime/server/purge-cloudflare.mjs
+x-nowaki-vary-out  # packages/nowaki-runtime/server/purge-cloudflare.mjs
+x-nowaki-vary-query  # crates/nowaki/src/start.rs, packages/nowaki-runtime/server/handler.mjs, packages/nowaki-runtime/server/purge-cloudflare.mjs

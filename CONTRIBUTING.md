@@ -51,6 +51,32 @@ cargo build -p nowaki
   The `PR size` check enforces this; split larger work into a stack of PRs.
 - Every PR needs a maintainer approval and a green `CI OK` check before it can merge.
 
+## API snapshots
+
+[`api/`](./api/README.md) lists the public surface: runtime types, route exports,
+file conventions, config keys, CLI flags, env vars, endpoints, client events. CI (`API
+surface snapshots`) regenerates it and fails when it differs from what is checked in.
+When your change touches the public surface:
+
+1. Run `node scripts/api-surface.mjs`. It rewrites `api/*.txt`, and `api/cli.txt`
+   through `NOWAKI_UPDATE_SNAPSHOTS=1 cargo test -p nowaki --bin nowaki cli_surface`
+   (`--no-cargo` skips that step).
+2. If it reports `[unclassified]` names (a new env var, endpoint, header, event or
+   route export), move each line in `api/env.txt`, `http.txt`, `client.txt` or
+   `route-exports.txt` to `[stable]`, `[dev]`, `[internal]`, `[external]` or
+   `[ignored]`. Anything not `[stable]` is not covered by semver.
+3. Review the diff and commit it with the change. Added stable entries get a
+   CHANGELOG line.
+4. `node scripts/api-surface.mjs --check --base origin/main` shows locally what CI
+   reports on the PR: stable entries added, and stable entries removed or changed.
+
+A removed or changed `[stable]` entry is a breaking change. From the API freeze
+(0.20.0) on, CI fails on one unless the PR has the `breaking` label, which is for
+changes aimed at the next major. A maintainer adds the label; then re-run the job,
+which reads the labels through the API, so this works for PRs from forks too. Before
+0.20.0 the check only lists them. `node scripts/api-surface-test.mjs` tests the
+script itself.
+
 ## Commit messages and sign-off
 
 We use the [Developer Certificate of Origin](https://developercertificate.org/)

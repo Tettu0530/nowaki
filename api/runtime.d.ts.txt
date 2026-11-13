@@ -1,0 +1,232 @@
+# @nowaki-dev/runtime: every declaration in the types file of each `exports` subpath, printed without
+# comments, one line per declaration (interface and class members on their own lines).
+# Lines without `export` are local types the exported ones use.
+# Not covered: the wildcard subpaths ./client/*, ./server/* (files the CLI's generated code imports).
+
+[stable .]
+# packages/nowaki-runtime/index.d.ts
+export type RouteParams = Record<string, string | string[]>;
+export interface CookieOptions {}
+CookieOptions.maxAge?: number;
+CookieOptions.expires?: Date | string;
+CookieOptions.path?: string;
+CookieOptions.domain?: string;
+CookieOptions.httpOnly?: boolean;
+CookieOptions.secure?: boolean;
+CookieOptions.sameSite?: "Lax" | "Strict" | "None" | "lax" | "strict" | "none";
+export interface ResponseInit {}
+ResponseInit.status?: number;
+ResponseInit.headers?: Record<string, string>;
+export interface Session {}
+Session.readonly readOnly: boolean;
+Session.get<T = unknown>(key: string): Promise<T | undefined>;
+Session.has(key: string): Promise<boolean>;
+Session.set(key: string, value: unknown): Promise<void>;
+Session.delete(key: string): Promise<void>;
+Session.regenerate(): Promise<void>;
+Session.destroy(): Promise<void>;
+export interface NowakiResult {}
+NowakiResult.readonly __nowakiResult: true;
+export interface LoaderContext {}
+LoaderContext.readonly url: URL;
+LoaderContext.readonly site: URL | undefined;
+LoaderContext.readonly params: RouteParams;
+LoaderContext.readonly method: string;
+LoaderContext.readonly locale: string | undefined;
+LoaderContext.readonly headers: Record<string, string>;
+LoaderContext.readonly cookies: Record<string, string>;
+LoaderContext.readonly session: Session;
+LoaderContext.readonly req?: unknown;
+LoaderContext.state: Record<string, unknown>;
+LoaderContext.actionData?: unknown;
+LoaderContext.get(name: string): string | undefined;
+LoaderContext.formData(): Promise<URLSearchParams>;
+LoaderContext.bodyText(): Promise<string>;
+LoaderContext.bodyJson<T = unknown>(): Promise<T>;
+LoaderContext.status(code: number): this;
+LoaderContext.setHeader(name: string, value: string): this;
+LoaderContext.setCookie(name: string, value: string, opts?: CookieOptions): this;
+LoaderContext.deleteCookie(name: string, opts?: CookieOptions): this;
+LoaderContext.redirect(to: string, status?: number, opts?: { basePath?: boolean; }): NowakiResult;
+LoaderContext.redirect(to: string, opts: { basePath?: boolean; }): NowakiResult;
+LoaderContext.json<T>(data: T, init?: ResponseInit): NowakiResult;
+LoaderContext.html(markup: string, init?: ResponseInit): NowakiResult;
+LoaderContext.text(s: string, init?: ResponseInit): NowakiResult;
+export type Loader<T = unknown> = (ctx: LoaderContext) => T | Promise<T>;
+export type Action = (ctx: LoaderContext) => unknown | Promise<unknown>;
+export type StaticPaths<P extends RouteParams = RouteParams> = P[] | ((info: { locale?: string; }) => P[] | Promise<P[]>);
+export type RouteBudget = { js: number; };
+export type Streaming = boolean | "early";
+export type Csrf = boolean;
+export type ApiHandler = (ctx: LoaderContext) => Response | NowakiResult | unknown | Promise<Response | NowakiResult | unknown>;
+export type Middleware = (ctx: LoaderContext) => unknown | Promise<unknown>;
+export type DocumentAttrs = Record<string, string | number | boolean | null | undefined>;
+export interface Meta {}
+Meta.title?: string;
+Meta.head?: string;
+Meta.lang?: string;
+Meta.htmlAttrs?: DocumentAttrs;
+Meta.bodyAttrs?: DocumentAttrs;
+Meta.description?: string;
+Meta.canonical?: string | true;
+Meta.robots?: string | { index?: boolean; follow?: boolean; };
+Meta.openGraph?: { title?: string; description?: string; type?: string; url?: string; siteName?: string; locale?: string; image?: OpenGraphImage | OpenGraphImage[]; };
+Meta.twitter?: { card?: "summary" | "summary_large_image" | "app" | "player"; site?: string; creator?: string; title?: string; description?: string; image?: string; imageAlt?: string; };
+Meta.jsonLd?: Record<string, unknown> | Record<string, unknown>[];
+export type OpenGraphImage = string | { url: string; type?: string; width?: number; height?: number; alt?: string; };
+export type MetaFn<D = unknown> = (info: { data: D; params: RouteParams; url: URL; }) => Meta | Promise<Meta>;
+export interface RouteProps<D = unknown> {}
+RouteProps.data: D;
+RouteProps.actionData?: unknown;
+RouteProps.params: RouteParams;
+RouteProps.url: URL;
+export type PageProps<L extends Loader<any> = Loader<unknown>> = RouteProps<Awaited<ReturnType<L>>>;
+export interface LayoutProps<D = unknown> {}
+LayoutProps.data: D;
+LayoutProps.params: RouteParams;
+LayoutProps.url: URL;
+LayoutProps.children: ComponentChildren;
+LayoutProps.slots: Record<string, ComponentChildren>;
+export type LoadingComponent = () => unknown;
+export interface ErrorPageProps {}
+ErrorPageProps.error: { message: string; };
+ErrorPageProps.reset: () => void;
+export interface Live<S = any> {}
+Live.state: (props?: any) => S;
+Live.on: Record<string, (state: S, payload?: any) => S | Promise<S>>;
+Live.authorize?: (event: { name: string; handler: string; state: S; payload?: any; }) => boolean | Promise<boolean>;
+Live.subscribe?: string[] | ((state: S) => string[]);
+Live.load?: (state: S, info: { topic: string; }) => S | Promise<S>;
+Live.room?: (props: any) => string;
+Live.shared?: (props?: any) => S;
+export function publish(topic: string): void;
+export type RouteTags = string[] | ((info: { params: RouteParams; data: any; }) => string[]);
+export function revalidatePath(path: string): void;
+export function revalidateTag(tag: string): void;
+export function getContext(): LoaderContext | null;
+export function getLocale(): string | undefined;
+export function localePath(path: string, locale?: string): string;
+export function href(path: string, options?: { locale?: string | false; basePath?: boolean; }): string;
+export function setLocale(locale: string): void;
+export interface StandardSchemaV1<Input = unknown, Output = Input> {}
+StandardSchemaV1.readonly "~standard": { readonly version: 1; readonly vendor: string; readonly validate: (value: unknown) => StandardSchemaResult<Output> | Promise<StandardSchemaResult<Output>>; readonly types?: { readonly input: Input; readonly output: Output; }; };
+export type StandardSchemaResult<Output> = { readonly value: Output; readonly issues?: undefined; } | { readonly issues: ReadonlyArray<{ readonly message: string; readonly path?: ReadonlyArray<PropertyKey | { readonly key: PropertyKey; }>; }>; };
+type SchemaInput<S> = S extends { readonly "~standard": { readonly types?: { readonly input: infer I; }; }; } ? unknown extends I ? unknown : I : unknown;
+type ValidatedValue<S> = S extends { readonly "~standard": { readonly validate: (v: unknown) => infer R; }; } ? Extract<Awaited<R>, { readonly value: unknown; }> extends { readonly value: infer V; } ? V : unknown : unknown;
+type SchemaOutput<S> = S extends { readonly "~standard": { readonly types?: { readonly output: infer O; }; }; } ? unknown extends O ? ValidatedValue<S> : O : ValidatedValue<S>;
+export declare function serverFn<S extends StandardSchemaV1, R, Rest extends unknown[] = []>(schema: S, impl: (input: SchemaOutput<S>, ...rest: Rest) => R | Promise<R>): (input: SchemaInput<S>, ...rest: Rest) => Promise<Awaited<R>>;
+export declare class ServerFnError extends Error {}
+ServerFnError.constructor(message: string, options?: { status?: number; data?: unknown; });
+ServerFnError.readonly status: number;
+ServerFnError.readonly data?: unknown;
+export type ViewTransition = boolean;
+
+[stable ./content]
+# packages/nowaki-runtime/content.d.ts
+export interface ContentHeading {}
+ContentHeading.depth: number;
+ContentHeading.text: string;
+ContentHeading.id: string;
+export interface CollectionDefinition<S extends StandardSchemaV1 = StandardSchemaV1> {}
+CollectionDefinition.type?: "markdown" | "data";
+CollectionDefinition.schema?: S;
+export interface ContentEntry<D = unknown> {}
+ContentEntry.collection: string;
+ContentEntry.slug: string;
+ContentEntry.locale?: string;
+ContentEntry.file: string;
+ContentEntry.data: D;
+ContentEntry.body?: string;
+ContentEntry.html?: string;
+ContentEntry.headings?: ContentHeading[];
+ContentEntry.render?: () => Promise<{ Content: (props?: Record<string, unknown>) => unknown; headings: ContentHeading[]; }>;
+export interface Collections {}
+type DataOf<K> = K extends keyof Collections ? Collections[K] : unknown;
+export type CollectionData<C> = C extends { schema?: infer S; } ? S extends { readonly "~standard": { readonly types?: infer T; }; } ? T extends { readonly output: infer O; } ? O : unknown : unknown : unknown;
+export declare function defineCollection<S extends StandardSchemaV1>(def: CollectionDefinition<S>): CollectionDefinition<S>;
+export interface CollectionQuery<D> {}
+CollectionQuery.locale?: string;
+CollectionQuery.filter?: (entry: ContentEntry<D>) => boolean;
+export declare function getCollection<K extends string>(name: K, filter?: ((entry: ContentEntry<DataOf<K>>) => boolean) | CollectionQuery<DataOf<K>>): Promise<ContentEntry<DataOf<K>>[]>;
+export declare function getEntry<K extends string>(name: K, slug: string, options?: { locale?: string; }): Promise<ContentEntry<DataOf<K>> | undefined>;
+
+[stable ./env]
+# packages/nowaki-runtime/env.d.ts
+type Shape = Record<string, StandardSchemaV1>;
+export interface EnvDefinition<S extends Shape = Shape, P extends Shape = Shape> {}
+EnvDefinition.readonly server: Readonly<S>;
+EnvDefinition.readonly public: Readonly<P>;
+export type EnvOutput<S> = S extends { readonly "~standard": { readonly types?: infer T; }; } ? T extends { readonly output: infer O; } ? O : unknown : unknown;
+export type EnvValues<S> = { readonly [K in keyof S]: EnvOutput<S[K]>; };
+export type ServerEnvOf<D> = D extends EnvDefinition<infer S, infer P> ? EnvValues<S> & EnvValues<P> : {};
+export type PublicEnvOf<D> = D extends EnvDefinition<Shape, infer P> ? EnvValues<P> : {};
+export declare function defineEnv<S extends Shape = {}, P extends Shape = {}>(def: { server?: S; public?: P; }): EnvDefinition<S, P>;
+
+[stable ./env/server]
+# packages/nowaki-runtime/env-server.d.ts
+export interface ServerEnv {}
+type EnvShape = keyof ServerEnv extends never ? { readonly [name: string]: unknown; } : Readonly<ServerEnv>;
+export declare const env: EnvShape;
+# packages/nowaki-runtime/server/env-server.mjs also exports (undeclared, not covered): setServerEnv
+
+[stable ./image]
+# packages/nowaki-runtime/image.d.ts
+export interface ImageSource {}
+ImageSource.src: string;
+ImageSource.width: number;
+ImageSource.height: number;
+ImageSource.sources: { type: string; srcset: string; }[];
+export type ImageProps = Omit<JSX.IntrinsicElements["img"], "src" | "srcset" | "alt" | "sizes" | "width" | "height" | "loading" | "decoding"> & { src: ImageSource | string; alt: string; sizes?: string; width?: number; height?: number; loading?: "lazy" | "eager"; decoding?: "async" | "sync" | "auto"; };
+export function Image(props: ImageProps): JSX.Element;
+
+[stable ./navigation]
+# packages/nowaki-runtime/navigation.d.ts
+export interface NowakiRoutes {}
+type Keys = keyof NowakiRoutes & string;
+export type RoutePath = [Keys] extends [never] ? string : Keys;
+type ParamsOf<P extends string> = P extends keyof NowakiRoutes ? NowakiRoutes[P] : Record<string, string | string[]>;
+type StaticRoutePath = [Keys] extends [never] ? string : { [P in Keys]: {} extends ParamsOf<P> ? P : never; }[Keys];
+export type Href = string & { readonly __nowaki: "href"; };
+export function route<P extends RoutePath>(pattern: P, ...args: {} extends ParamsOf<P> ? [] : [params: ParamsOf<P>]): Href;
+export interface LinkProps {}
+LinkProps.href: StaticRoutePath | Href;
+LinkProps.class?: string;
+LinkProps.className?: string;
+LinkProps.target?: string;
+LinkProps.rel?: string;
+LinkProps."data-no-router"?: boolean;
+LinkProps.basePath?: boolean;
+LinkProps.locale?: string | false;
+LinkProps.viewTransition?: boolean;
+LinkProps.children?: unknown;
+LinkProps.[key: string]: unknown;
+export function Link(props: LinkProps): VNode;
+export interface HrefOptions {}
+HrefOptions.locale?: string | false;
+HrefOptions.basePath?: boolean;
+export function href(path: StaticRoutePath | Href, options?: HrefOptions): Href;
+export function href(path: string, options?: HrefOptions): string;
+export function getLocale(): string | undefined;
+export function localePath(path: StaticRoutePath | Href, locale?: string): Href;
+export function localePath(path: string, locale?: string): string;
+export function setLocale(locale: string): void;
+export function transitionName(name: string | number): { viewTransitionName: string; };
+
+[stable ./session]
+# packages/nowaki-runtime/session.d.ts
+export interface StoredSession {}
+StoredSession.d: Record<string, unknown>;
+StoredSession.iat: number;
+StoredSession.exp: number;
+export interface SessionStore {}
+SessionStore.get(id: string): StoredSession | undefined | null | Promise<StoredSession | undefined | null>;
+SessionStore.set(id: string, data: StoredSession, ttlSeconds: number): void | Promise<void>;
+SessionStore.delete(id: string): void | Promise<void>;
+export interface SessionOptions {}
+SessionOptions.cookieName?: string;
+SessionOptions.maxAge?: number;
+SessionOptions.rolling?: boolean;
+SessionOptions.store?: SessionStore;
+export interface SessionConfig extends Readonly<Required<Omit<SessionOptions, "store">>> {}
+SessionConfig.readonly store: SessionStore | null;
+export function defineSession(options?: SessionOptions): SessionConfig;
