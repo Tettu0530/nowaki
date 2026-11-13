@@ -287,7 +287,11 @@ export function check(root, version, { newTag = false } = {}) {
   else if (!section.body) errors.push(`CHANGELOG.md "## [${want}]" section is empty`);
 
   // The public-surface snapshots (api/), once scripts/api-surface.mjs exists.
-  if (existsSync(path.join(root, "scripts/api-surface.mjs"))) {
+  // It needs the workspace's `typescript`; without node_modules it is skipped here (CI's
+  // api-surface job checks every PR, and release tags must be on main).
+  if (existsSync(path.join(root, "scripts/api-surface.mjs")) && !existsSync(path.join(root, "node_modules/typescript"))) {
+    warnings.push("api/ snapshots not checked: install dependencies first (pnpm install)");
+  } else if (existsSync(path.join(root, "scripts/api-surface.mjs"))) {
     try {
       execFileSync(process.execPath, ["scripts/api-surface.mjs", "--check"], { cwd: root, stdio: "pipe" });
     } catch (e) {

@@ -402,7 +402,8 @@ jobs:
           # under crates/*/tests/ (e.g. cli.rs) do not affect the release `nowaki` binary.
           if git diff --name-only "$BASE_SHA" HEAD -- crates Cargo.lock | grep -vE '/tests/' | grep -q .; then
             if cmp -s target/release/nowaki .perf-base/target/release/nowaki; then
-              echo "::error::head and base binaries are identical although crates/ changed"; exit 1
+              # A change to #[cfg(test)] code under src/ leaves the binary identical too.
+              echo "::warning::head and base binaries are identical although crates/ changed (test-only change?)"
             fi
           fi
       - if: steps.scope.outputs.run == 'true'
