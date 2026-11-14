@@ -336,7 +336,11 @@ fn manifest_stays_json_for_odd_island_names() {
     assert!(manifest["islands"]["Plain"].is_string(), "{text}");
 
     // A quote can't round-trip through the page's `<nowaki-island name>`: a clear error, not a
-    // broken manifest.
+    // broken manifest. Windows doesn't allow `"` in a file name, so there is nothing to check.
+    if cfg!(windows) {
+        let _ = fs::remove_dir_all(&root);
+        return;
+    }
     fs::write(root.join("islands/Say\"Hi\".ts"), island).unwrap();
     let Err(err) = build_client(&NowakiCore::new(root.clone()), &root.join("dist")) else {
         panic!("a quote in an island name should fail the build");
