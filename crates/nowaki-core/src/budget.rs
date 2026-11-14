@@ -2,7 +2,8 @@
 //!
 //! "First load" is what production HTML references for a page (`document.mjs` / `start.rs`
 //! `assemble`): the islands runtime and the chunks it preloads when the page has a client island,
-//! each island's chunk and its preloads, and the live runtime when the page has a live island. The
+//! each island's chunk and its preloads, and the live runtime when the page has a live island (or
+//! streams, in an app with live islands: the shell can't see them, so it always loads it). The
 //! lazy SPA router chunk is not counted. Sizes are gzip (level 9), in KiB.
 //!
 //! Islands are found through the import graph, from the route and every `_layout` above it,
@@ -147,9 +148,9 @@ pub fn route_first_load(
         // A streaming page sends its shell before it knows which islands render, so the shell
         // always loads the islands runtime (document.mjs prodShell), islands or not. So does a page
         // with an intercepting slot: the client router comes with the runtime.
+        let streaming = is_streaming(&path, &source);
         if client_islands.is_empty()
-            && (is_streaming(&path, &source)
-                || renders_intercepting_slot(&routes_dir, &rel, &slot_files))
+            && (streaming || renders_intercepting_slot(&routes_dir, &rel, &slot_files))
         {
             if let Some(rt) = &client.runtime {
                 add_with_preloads(&mut chunks, rt, client);
@@ -165,7 +166,9 @@ pub fn route_first_load(
                 }
             }
         }
-        if has_live {
+        // The streamed shell can't see its live islands either: it loads live.js whenever the
+        // build has any.
+        if has_live || streaming {
             if let Some(lr) = &client.live_runtime {
                 chunks.insert(lr.clone());
             }

@@ -97,7 +97,9 @@ const contentTypeOf = (name) => {
 /// The returned `handle(req, res)` is a node:http-compatible handler (also works under Bun/Deno node compat).
 /// `cdn` (an adapter's CDN, e.g. purge-vercel.mjs `vercelCdn()`): `{ purge, cacheTagHeader }`, the
 /// revalidate*() seams of handler.mjs. Without it ISR pages only send `s-maxage`.
-export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = true, cdn = null } = {}) {
+/// `liveTransport`: what live.js is told to use, `"post"` (the default; this server has no
+/// /__nowaki/live WebSocket) or `"auto"` (prod-sidecar.mjs: the `nowaki start` front has one).
+export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = true, cdn = null, liveTransport = "post" } = {}) {
   if (!clientDir || !serverDir) {
     throw new Error("createApp requires clientDir and serverDir");
   }
@@ -231,6 +233,9 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
   const fonts = await readFile(path.join(serverDir, "fonts.json"), "utf8")
     .then((t) => JSON.parse(t))
     .catch(() => null);
+  // `nowaki prerender` sets NOWAKI_PRERENDER=1 on its temporary server: the pages become static
+  // files, so live islands get no live.js (it could never reach a server), streamed pages included.
+  const docOpts = { live: process.env.NOWAKI_PRERENDER !== "1", liveTransport, assetBase };
   const env = {
     dev: false,
     // Prerendering for static output: pages are files (`x/index.html`), so their URLs end in `/`.
@@ -254,10 +259,8 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
     live: liveByName.size
       ? { lookup: (name) => liveByName.get(name) ?? null, render: liveRender }
       : null,
-    // `nowaki prerender` sets NOWAKI_PRERENDER=1 on its temporary server: the pages become static
-    // files, so live islands get no live.js (it could never reach a server).
-    renderDocument: (args) => prodDocument(manifest, args, { live: process.env.NOWAKI_PRERENDER !== "1", assetBase }),
-    renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta, { assetBase }),
+    renderDocument: (args) => prodDocument(manifest, args, docOpts),
+    renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta, docOpts),
     // Page scripts from the build (manifest.routeScripts per route / layout module).
     routeScripts: (file) =>
       memo(scriptsByFile, file, () =>

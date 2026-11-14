@@ -99,6 +99,10 @@ curl -sf http://127.0.0.1:3300/vt | grep -q '<a id="vt-island-ssr" href="/about"
 ! curl -s http://127.0.0.1:3300/about | grep -qE 'nowaki-view-transition|@view-transition' || exit 1
 curl -sf http://127.0.0.1:3300/live | grep -q 'nowaki-live name="LiveCounter"'
 curl -sf http://127.0.0.1:3300/live | grep -q 'live\.'  # live.js script
+# live.js over the WebSocket (no data-live-transport), on assembled and streamed pages alike
+# (fixture: crates/nowaki/tests/fixtures/live-script-cases.json).
+curl -sf http://127.0.0.1:3300/live | grep -qE '<script id="nowaki-live" type="module" src="/_nowaki/live\.[0-9a-f]+\.js"></script>'
+curl -sf http://127.0.0.1:3300/stream | grep -qE '<script id="nowaki-live" type="module" src="/_nowaki/live\.[0-9a-f]+\.js"></script>'
 # server functions in production: allowlist written, no impl leaked to
 # the client, and the Rust front proxies /__nowaki/fn to the renderer.
 test -f examples/hello/dist/server/functions.json

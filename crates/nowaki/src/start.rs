@@ -1924,4 +1924,43 @@ mod tests {
         assert!(!is_internal_response_header("x-nowaki-slot"));
         assert!(!is_internal_response_header("cache-control"));
     }
+
+    /// The live.js tag of an assembled page matches what prodDocument writes for `nowaki start`
+    /// (the fixture is shared with scripts/router-test.mjs).
+    #[test]
+    fn assembled_live_script_matches_the_shared_fixture() {
+        let fx: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/live-script-cases.json")).unwrap();
+        let manifest = Manifest {
+            runtime: fx["manifest"]["runtime"].as_str().map(str::to_string),
+            live_runtime: fx["manifest"]["liveRuntime"].as_str().map(str::to_string),
+            asset_base: fx["assetBase"].as_str().unwrap().to_string(),
+            ..Default::default()
+        };
+        let mut n = 0;
+        for c in fx["cases"].as_array().unwrap() {
+            if c["target"] != "start" {
+                continue;
+            }
+            n += 1;
+            let meta = PageMeta {
+                body: c["body"].as_str().unwrap().to_string(),
+                title: "t".into(),
+                head: String::new(),
+                lang: "en".into(),
+                html_attrs: String::new(),
+                body_attrs: String::new(),
+                router: false,
+            };
+            let html = assemble(&manifest, &meta, None);
+            match c["script"].as_str() {
+                Some(tag) => {
+                    assert!(html.contains(tag), "{tag} in {html}");
+                    assert_eq!(html.matches("id=\"nowaki-live\"").count(), 1);
+                }
+                None => assert!(!html.contains("id=\"nowaki-live\""), "{html}"),
+            }
+        }
+        assert!(n >= 2);
+    }
 }

@@ -30,7 +30,7 @@ x-nowaki-cache (response header: HIT | STALE | MISS)  # crates/nowaki/src/start.
 /__nowaki/fn  # crates/nowaki-core/src/lib.rs, crates/nowaki-core/src/server_fn.rs, packages/nowaki-runtime/server/functions.mjs
 /__nowaki/fonts  # crates/nowaki/src/dev.rs, crates/nowaki/src/fonts.rs
 /__nowaki/isr-urls  # crates/nowaki/src/forward.rs, crates/nowaki/src/start.rs, packages/nowaki-runtime/server/prod-sidecar.mjs
-/__nowaki/live  # crates/nowaki/src/dev.rs, crates/nowaki/src/start.rs, packages/nowaki-runtime/client/live.js, packages/nowaki-runtime/server/document.mjs, packages/nowaki-runtime/server/live-hub.mjs, packages/nowaki-runtime/server/live.mjs
+/__nowaki/live  # crates/nowaki/src/dev.rs, crates/nowaki/src/start.rs, packages/nowaki-runtime/client/live.js, packages/nowaki-runtime/server/app.mjs, packages/nowaki-runtime/server/document.mjs, packages/nowaki-runtime/server/live-hub.mjs, packages/nowaki-runtime/server/live.mjs, packages/nowaki-runtime/server/prod-sidecar.mjs
 /__nowaki/live-event  # packages/nowaki-runtime/client/live.js, packages/nowaki-runtime/server/document.mjs, packages/nowaki-runtime/server/handler.mjs, packages/nowaki-runtime/server/live-event.mjs, packages/nowaki-runtime/server/live.mjs
 /__nowaki/live-render  # crates/nowaki/src/forward.rs, crates/nowaki/src/live.rs, packages/nowaki-runtime/server/live.mjs, packages/nowaki-runtime/server/prod-sidecar.mjs, packages/nowaki-runtime/server/sidecar.mjs
 /__nowaki/route-css  # crates/nowaki/src/dev.rs, packages/nowaki-runtime/server/sidecar.mjs

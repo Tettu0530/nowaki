@@ -80,8 +80,10 @@ function attrString(obj, skip) {
 
 // Non-streaming: scan the whole body and put preloads for used islands in <head> (avoids waterfalls).
 // `opts.live === false` (static output from `nowaki prerender`): live islands keep their first
-// HTML but ship no live.js. A static host has no server to answer its events. `opts.assetBase`:
-// where the client files are served (`/_nowaki/`, or `<basePath>/_nowaki/`).
+// HTML but ship no live.js. A static host has no server to answer its events. `opts.liveTransport`:
+// `"post"` (the default: the adapters have no /__nowaki/live WebSocket) or `"auto"` (`nowaki start`,
+// whose Rust front terminates it; start.rs `assemble` writes the same tag). `opts.assetBase`: where
+// the client files are served (`/_nowaki/`, or `<basePath>/_nowaki/`).
 export function prodDocument(manifest, { mod, body, meta }, opts = {}) {
   const m = pageMeta(meta, mod);
   const a = opts.assetBase ?? "/_nowaki/";
@@ -115,12 +117,7 @@ export function prodDocument(manifest, { mod, body, meta }, opts = {}) {
   const runtime = hasIslands
     ? `<script${nonceAttr()} id="nowaki-runtime" type="module" src="${a}${manifest.runtime}"${dataRouter(manifest, a)}></script>`
     : "";
-  // Only `nowaki dev` / `nowaki start` terminate the /__nowaki/live WebSocket, and they assemble
-  // their own documents, so this one tells live.js to go straight to POST /__nowaki/live-event.
-  const live =
-    opts.live !== false && manifest.liveRuntime && body.includes("<nowaki-live")
-      ? `<script${nonceAttr()} id="nowaki-live" type="module" src="${a}${manifest.liveRuntime}" data-live-transport="post"></script>`
-      : "";
+  const live = body.includes("<nowaki-live") ? liveScript(manifest, a, opts) : "";
 
   return `<!DOCTYPE html>
 <html lang="${escapeHtml(m.lang)}"${m.htmlAttrs}>
@@ -165,11 +162,24 @@ ${runtimePreload}${m.head}
 </head>
 <body${m.bodyAttrs}>
 `;
+  // Live islands aren't known yet either: live.js comes whenever the app has any (with none on
+  // the page it opens no connection).
+  const liveTag = liveScript(manifest, a, opts);
   const tail = `
-${runtimeScript}
+${runtimeScript}${liveTag ? `\n${liveTag}` : ""}
 </body>
 </html>`;
   return { head, tail };
+}
+
+// The live.js tag, or "" without live islands in the build or for static output (`opts.live ===
+// false`). Without `opts.liveTransport: "auto"` it tells live.js to go straight to POST
+// /__nowaki/live-event. Shared fixture with start.rs `assemble`:
+// crates/nowaki/tests/fixtures/live-script-cases.json (scripts/router-test.mjs).
+function liveScript(manifest, assetBase, opts) {
+  if (opts.live === false || !manifest.liveRuntime) return "";
+  const transport = opts.liveTransport === "auto" ? "" : ' data-live-transport="post"';
+  return `<script${nonceAttr()} id="nowaki-live" type="module" src="${assetBase}${manifest.liveRuntime}"${transport}></script>`;
 }
 
 // islands.js imports the SPA router from this URL on link intent (hover, focus, touch, or a click).

@@ -214,6 +214,11 @@ milestone's worth of work; the codename is noted per entry.
   queries; `asset::optimize` takes no transform. No app-facing change.
 
 ### Fixed
+- Live islands on streamed pages (`export const streaming`) work in production. The streamed
+  shell had no live.js on `nowaki start` or the adapters (`nowaki dev` had it), so their events
+  did nothing. The shell now carries it whenever the build has live islands (with none on the
+  page it opens no connection): over the WebSocket on `nowaki start`, in POST mode on the
+  adapters, and not at all in `nowaki prerender` output, as for other pages.
 - `revalidatePath` with a long non-ASCII path under `nowaki start`: a valid path of 2000
   characters encodes to ~30 KB, and it was put in the `x-nowaki-purge` response header anyway,
   past its 8 KB cap. An entry that doesn't fit the header now goes through the token-guarded

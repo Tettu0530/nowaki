@@ -115,6 +115,8 @@ curl -s -D - -o /dev/null http://127.0.0.1:3310/ | grep -qi "^content-security-p
 # streaming SSR route (export const streaming = true) renders a complete document
 curl -sf http://127.0.0.1:3310/stream | grep -q "Streaming SSR"
 curl -sf http://127.0.0.1:3310/stream | grep -q "nowaki-island"
+# a streamed shell can't see its live islands: live.js comes with it, in POST mode
+curl -sf http://127.0.0.1:3310/stream | grep -qE '/_nowaki/live\.[0-9a-f]+\.js" data-live-transport="post"'
 # ISR signal is universal: the node adapter emits the same Cache-Control,
 # so the page gets stale-while-revalidate on any CDN/edge without the Rust front.
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr | grep -qi 'cache-control: public, s-maxage=2, stale-while-revalidate'
@@ -180,6 +182,7 @@ ls examples/hello/dist/static/_nowaki/styled.*.css >/dev/null
 grep -q 'nowaki-live name="LiveCounter"' examples/hello/dist/static/live/index.html
 ! grep -q '/_nowaki/live\.' examples/hello/dist/static/live/index.html || exit 1
 ! grep -q '/_nowaki/live\.' examples/hello/dist/static/poll/index.html || exit 1
+! grep -q '/_nowaki/live\.' examples/hello/dist/static/stream/index.html || exit 1
 # the SPA router's boundaries fetch is answered by a static file (no 404 on static hosts)
 node -e 'const b=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!Array.isArray(b.loading)||!Array.isArray(b.error)||!b.loading.length) process.exit(1)' examples/hello/dist/static/__nowaki/boundaries
 grep -q '/__nowaki/boundaries' examples/hello/dist/static/_headers
