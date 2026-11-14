@@ -67,7 +67,8 @@ async function routeRequest(env, info, localized) {
   let match = matchRoute(table.routes, path);
   // With prefixDefaultLocale, an unprefixed page is a 404 (API and file routes still answer).
   if (match && localized && !localized.prefixed && localized.i18n.prefixDefault && !match.isApi) match = null;
-  const ctx = makeContext({ ...info, params: match?.params ?? {} });
+  // `ctx.routePath` is the path routing used: no basePath, no locale prefix.
+  const ctx = makeContext({ ...info, params: match?.params ?? {}, routePath: path });
   if (env.trace) {
     const tr = (ctx.__trace = env.trace.start(method, rawHeader(info), url.pathname));
     if (match) tr.setRoute(routeName(table, match.file));
@@ -393,8 +394,14 @@ async function runMiddleware(env, table, ctx, version, path, match) {
   for (const entry of table.middleware ?? []) {
     if (entry.group ? !(match && groupMiddleware(table, match.file).has(entry)) : !underPrefix(path, entry.prefix)) continue;
     const mod = await env.importModule(entry.file, version);
-    const fn = mod.default ?? mod.middleware;
-    if (typeof fn !== "function") continue;
+    const fn = mod.default;
+    if (typeof fn !== "function") {
+      // The old alias, removed in 0.20.0: an error, not a middleware that silently stops running.
+      if (mod.middleware !== undefined) {
+        throw new Error(`${entry.file}: \`export const middleware\` is no longer read (removed in 0.20.0). Use \`export default\`.`);
+      }
+      continue;
+    }
     const tok = ctx.__trace?.begin("mw", `middleware ${entry.prefix || "/"}`);
     let out;
     try {
@@ -450,8 +457,21 @@ function contentTypeForExt(ext) {
   return EXT_TYPES[ext.slice(1).toLowerCase()] ?? "application/octet-stream";
 }
 
+// The request's method export (`GET`, `POST`, ...), else the default export. Lowercase method
+// exports (`export function get`) were an undocumented alias, removed in 0.20.0: a module with one
+// fails every request with an error naming the export, instead of answering 405 or falling
+// through to `default`. Checked once per module.
+const API_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+const checkedApiModules = new WeakSet();
 function pickMethodHandler(mod, method) {
-  const named = mod[method] ?? mod[method?.toLowerCase?.()];
+  if (!checkedApiModules.has(mod)) {
+    const lower = API_METHODS.find((m) => typeof mod[m.toLowerCase()] === "function");
+    if (lower) {
+      throw new Error(`API route exports \`${lower.toLowerCase()}\`: method exports are uppercase (\`${lower}\`). The lowercase alias was removed in 0.20.0.`);
+    }
+    checkedApiModules.add(mod);
+  }
+  const named = mod[method];
   if (typeof named === "function") return named;
   if (typeof mod.default === "function") return mod.default;
   return null;

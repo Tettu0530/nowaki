@@ -1,10 +1,15 @@
-// multipart/form-data parsing for LoaderContext.formData(). No server needed.
+// multipart/form-data parsing for LoaderContext.formData(), and the body limit over real sockets
+// (a temporary production server on 127.0.0.1, ephemeral port).
 import { EventEmitter } from "node:events";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
+import os from "node:os";
+import path from "node:path";
+import { createApp } from "../packages/nowaki-runtime/server/app.mjs";
 import { readBodyWithLimit } from "../packages/nowaki-runtime/server/body-read.mjs";
 import { makeContext } from "../packages/nowaki-runtime/server/context.mjs";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
-import { requestBodyResult } from "../packages/nowaki-runtime/server/request-body.mjs";
+import { RequestBodyError, requestBodyResult } from "../packages/nowaki-runtime/server/request-body.mjs";
 import {
   FORM_BODY_LIMIT,
   boundaryFromContentType,
@@ -341,6 +346,30 @@ check("requestBodyResult 400 plain", requestBodyResult({ name: "RequestBodyError
     version: 1,
   });
   check("handler maps oversized multipart to 413 on API routes", res.status === 413);
+
+  // Server functions and live events read the body with bodyText(): a body that goes over the
+  // limit while it is read (no Content-Length) is a 413 there too, not a 400 "bad request".
+  const overflow = async () => {
+    throw new RequestBodyError("request body exceeds 10 byte limit", { status: 413 });
+  };
+  const endpointEnv = {
+    ...env,
+    serverFunctions: { lookup: async () => null, importModule: async () => ({}) },
+    live: { lookup: async () => null, render: async () => ({}) },
+  };
+  for (const [p, header] of [
+    ["/__nowaki/fn", "x-nowaki-rpc"],
+    ["/__nowaki/live-event", "x-nowaki-live"],
+  ]) {
+    const r = await handleRequest(endpointEnv, {
+      method: "POST",
+      url: new URL(`http://x.test${p}`),
+      headers: { "content-type": "application/json", [header]: "1", host: "x.test" },
+      readBody: overflow,
+      version: 1,
+    });
+    check(`${p}: a body over the limit while reading is a 413`, r.status === 413 && /Payload Too Large/.test(r.body), JSON.stringify(r));
+  }
 }
 
 {
@@ -363,83 +392,92 @@ check("requestBodyResult 400 plain", requestBodyResult({ name: "RequestBodyError
 }
 
 {
-  const table = {
-    routes: [{ file: "routes/api/upload.ts", segments: [{ lit: "api" }, { lit: "upload" }], isApi: true }],
-    layouts: [],
-    middleware: [],
-  };
-  const modules = {
-    "routes/api/upload.ts": {
-      POST: async (ctx) => {
-        await ctx.formData();
-        return { ok: true };
-      },
-    },
-  };
-  const env = {
-    dev: true,
-    routeTable: async () => table,
-    importModule: async (f) => modules[f],
-    ensureIslands: async () => {},
-    renderDocument: ({ body: b }) => b,
-    renderError: (err) => ({ status: 500, body: String(err) }),
-    onError: () => {},
-  };
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    const result = await handleRequest(env, { method: req.method, url, version: 1, req, headers: req.headers });
-    res.writeHead(result.status ?? 200, result.headers ?? {});
-    res.end(result.body ?? "");
-  });
-  await new Promise((r) => server.listen(0, "127.0.0.1", r));
-  const { port } = server.address();
-  const boundary = "sock";
-  let httpStatus = 0;
-  let reset = false;
-  await new Promise((resolve) => {
-    const piece = Buffer.alloc(64 * 1024, 0x61);
-    const req = http.request(
-      {
-        host: "127.0.0.1",
-        port,
-        path: "/api/upload",
-        method: "POST",
-        headers: {
-          "content-type": `multipart/form-data; boundary=${boundary}`,
-          origin: `http://127.0.0.1:${port}`,
-          "transfer-encoding": "chunked",
-        },
-      },
-      (res) => {
-        httpStatus = res.statusCode ?? 0;
-        res.resume();
-        resolve();
-      },
+  // Real sockets through the production server (server/app.mjs createApp().handle), with a built
+  // API route on disk: a declared Content-Length over the limit gets a 413 before any of the body
+  // is read; a chunked body that goes over it while being read ends the connection (the socket is
+  // destroyed, so the client sees ECONNRESET or EPIPE) or, if the response won the race, a 413.
+  // Anything else (a 200, a 400, another error) fails.
+  const dir = mkdtempSync(path.join(os.tmpdir(), "nowaki-form-data-"));
+  const server = http.createServer();
+  try {
+    writeFileSync(path.join(dir, "package.json"), '{ "type": "module" }');
+    mkdirSync(path.join(dir, "client"));
+    writeFileSync(path.join(dir, "client/manifest.json"), "{}");
+    mkdirSync(path.join(dir, "server/routes/api"), { recursive: true });
+    writeFileSync(
+      path.join(dir, "server/routes/api/upload.js"),
+      "export async function POST(ctx) { await ctx.formData(); return { ok: true }; }\n",
     );
-    req.on("error", () => {
-      reset = true;
-      resolve();
-    });
-    let sent = 0;
-    const target = FORM_BODY_LIMIT + piece.length;
-    const pump = () => {
-      while (sent < target) {
-        if (!req.write(piece)) {
-          req.once("drain", pump);
-          return;
-        }
-        sent += piece.length;
-      }
-      req.end();
-    };
-    pump();
-  });
-  server.close();
-  check(
-    "real-socket chunked upload over limit (413 or reset)",
-    httpStatus === 413 || reset,
-    `status=${httpStatus} reset=${reset}`,
-  );
+    const app = await createApp({ clientDir: path.join(dir, "client"), serverDir: path.join(dir, "server"), loadDotenv: false });
+    server.on("request", app.handle);
+    await new Promise((r) => server.listen(0, "127.0.0.1", r));
+    const { port } = server.address();
+    const boundary = "sock";
+    const piece = Buffer.alloc(64 * 1024, 0x61);
+
+    // Sends `total` bytes (or fewer, when the response or an error arrives first), each upload on
+    // its own connection: a kept-alive socket would carry one upload's unsent body into the next.
+    const upload = (headers, total) =>
+      new Promise((resolve) => {
+        const out = { status: 0, body: "", code: null };
+        const req = http.request(
+          {
+            agent: false,
+            host: "127.0.0.1",
+            port,
+            path: "/api/upload",
+            method: "POST",
+            headers: { "content-type": `multipart/form-data; boundary=${boundary}`, origin: `http://127.0.0.1:${port}`, ...headers },
+          },
+          (res) => {
+            out.status = res.statusCode ?? 0;
+            res.setEncoding("utf8");
+            res.on("data", (c) => (out.body += c));
+            res.on("end", () => {
+              req.destroy();
+              resolve(out);
+            });
+          },
+        );
+        req.on("error", (e) => {
+          out.code = e.code ?? String(e);
+          resolve(out);
+        });
+        let sent = 0;
+        const pump = () => {
+          while (sent < total && !req.destroyed) {
+            sent += piece.length;
+            if (!req.write(piece)) {
+              req.once("drain", pump);
+              return;
+            }
+          }
+          if (!req.destroyed) req.end();
+        };
+        pump();
+      });
+
+    const declared = await upload({ "content-length": String(FORM_BODY_LIMIT + 1) }, piece.length);
+    check(
+      "real socket: Content-Length over the limit is a 413 Payload Too Large",
+      declared.status === 413 && /Payload Too Large/.test(declared.body),
+      JSON.stringify(declared),
+    );
+
+    const chunked = await upload({ "transfer-encoding": "chunked" }, FORM_BODY_LIMIT + piece.length);
+    const reset = chunked.status === 0 && (chunked.code === "ECONNRESET" || chunked.code === "EPIPE");
+    check(
+      "real socket: a chunked body over the limit is a 413 or a reset connection",
+      reset || (chunked.status === 413 && /Payload Too Large/.test(chunked.body)),
+      JSON.stringify(chunked),
+    );
+
+    const after = await fetch(`http://127.0.0.1:${port}/api/upload`);
+    check("real socket: the server still answers afterwards (GET is 405)", after.status === 405, after.status);
+  } finally {
+    await new Promise((r) => server.close(r));
+    if (dir.startsWith(os.tmpdir())) rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 if (failures) process.exit(1);

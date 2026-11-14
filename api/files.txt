@@ -16,7 +16,6 @@ routes/**/loading  # packages/nowaki-runtime/server/router.mjs
 routes/**/error  # packages/nowaki-runtime/server/router.mjs
 routes/**/_404  # packages/nowaki-runtime/server/router.mjs
 routes/**/_500  # packages/nowaki-runtime/server/router.mjs
-routes/**/_error  # packages/nowaki-runtime/server/router.mjs
 routes/**/default (slot fallback, @slot/default only)  # packages/nowaki-runtime/server/router.mjs
 routes/**/_* (other names reserved)  # packages/nowaki-runtime/server/router.mjs
 routes/**/(group)/  # packages/nowaki-runtime/server/router.mjs

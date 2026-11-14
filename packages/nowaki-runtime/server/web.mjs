@@ -11,7 +11,7 @@ import { withSecurityHeaders } from "./security-headers.mjs";
 import { applyCsp } from "./csp.mjs";
 import { setContent, validateContent } from "./content-store.mjs";
 import { initServerEnv } from "./env-schema.mjs";
-import { setServerEnv } from "./env-server.mjs";
+import { setServerEnv } from "./env-store.mjs";
 import { configureSessions, sessionConfigOf } from "./session.mjs";
 import { setBasePath } from "./base-path.mjs";
 import { readBodyWithLimit } from "./body-read.mjs";

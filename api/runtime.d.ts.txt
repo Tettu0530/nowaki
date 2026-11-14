@@ -29,6 +29,7 @@ export interface NowakiResult {}
 NowakiResult.readonly __nowakiResult: true;
 export interface LoaderContext {}
 LoaderContext.readonly url: URL;
+LoaderContext.readonly routePath: string;
 LoaderContext.readonly site: URL | undefined;
 LoaderContext.readonly params: RouteParams;
 LoaderContext.readonly method: string;
@@ -104,10 +105,7 @@ export type RouteTags = string[] | ((info: { params: RouteParams; data: any; }) 
 export function revalidatePath(path: string): void;
 export function revalidateTag(tag: string): void;
 export function getContext(): LoaderContext | null;
-export function getLocale(): string | undefined;
-export function localePath(path: string, locale?: string): string;
-export function href(path: string, options?: { locale?: string | false; basePath?: boolean; }): string;
-export function setLocale(locale: string): void;
+export { getLocale, href, localePath, setLocale } from "./navigation.js";
 export interface StandardSchemaV1<Input = unknown, Output = Input> {}
 StandardSchemaV1.readonly "~standard": { readonly version: 1; readonly vendor: string; readonly validate: (value: unknown) => StandardSchemaResult<Output> | Promise<StandardSchemaResult<Output>>; readonly types?: { readonly input: Input; readonly output: Output; }; };
 export type StandardSchemaResult<Output> = { readonly value: Output; readonly issues?: undefined; } | { readonly issues: ReadonlyArray<{ readonly message: string; readonly path?: ReadonlyArray<PropertyKey | { readonly key: PropertyKey; }>; }>; };
@@ -120,6 +118,114 @@ ServerFnError.constructor(message: string, options?: { status?: number; data?: u
 ServerFnError.readonly status: number;
 ServerFnError.readonly data?: unknown;
 export type ViewTransition = boolean;
+export type Revalidate = number;
+export type PageScripts = readonly string[];
+export interface PageModule<D = any> {}
+PageModule.default: (props: RouteProps<D>) => unknown;
+PageModule.loader?: Loader<D>;
+PageModule.action?: Action;
+PageModule.meta?: Meta | MetaFn<D>;
+PageModule.title?: string;
+PageModule.head?: string;
+PageModule.lang?: string;
+PageModule.htmlAttrs?: DocumentAttrs;
+PageModule.bodyAttrs?: DocumentAttrs;
+PageModule.revalidate?: Revalidate;
+PageModule.tags?: RouteTags;
+PageModule.streaming?: Streaming;
+PageModule.csrf?: Csrf;
+PageModule.budget?: RouteBudget;
+PageModule.viewTransition?: ViewTransition;
+PageModule.staticPaths?: StaticPaths;
+PageModule.prerender?: boolean;
+PageModule.sitemap?: boolean;
+PageModule.scripts?: PageScripts;
+export interface LayoutModule<D = any> {}
+LayoutModule.default: (props: LayoutProps<D>) => unknown;
+LayoutModule.loader?: Loader<D>;
+LayoutModule.meta?: Meta | MetaFn<D>;
+LayoutModule.title?: string;
+LayoutModule.head?: string;
+LayoutModule.lang?: string;
+LayoutModule.htmlAttrs?: DocumentAttrs;
+LayoutModule.bodyAttrs?: DocumentAttrs;
+LayoutModule.scripts?: PageScripts;
+export interface ApiModule {}
+ApiModule.GET?: ApiHandler;
+ApiModule.POST?: ApiHandler;
+ApiModule.PUT?: ApiHandler;
+ApiModule.PATCH?: ApiHandler;
+ApiModule.DELETE?: ApiHandler;
+ApiModule.HEAD?: ApiHandler;
+ApiModule.OPTIONS?: ApiHandler;
+ApiModule.default?: ApiHandler;
+ApiModule.csrf?: Csrf;
+ApiModule.staticPaths?: StaticPaths;
+ApiModule.prerender?: boolean;
+export interface MiddlewareModule {}
+MiddlewareModule.default: Middleware;
+export interface IslandModule<S = any> {}
+IslandModule.default: (props: any) => unknown;
+IslandModule.live?: Live<S>;
+
+[stable ./config]
+# packages/nowaki-runtime/config.d.ts
+export interface NowakiConfig {}
+NowakiConfig.site?: string;
+NowakiConfig.fonts?: FontConfig[];
+NowakiConfig.basePath?: string;
+NowakiConfig.trailingSlash?: "never" | "always" | "ignore";
+NowakiConfig.redirects?: RuleList<RedirectRule>;
+NowakiConfig.rewrites?: RuleList<RewriteRule>;
+NowakiConfig.headers?: RuleList<HeaderRule>;
+NowakiConfig.i18n?: I18nConfig;
+NowakiConfig.images?: ImagesConfig;
+NowakiConfig.plugins?: (NowakiPlugin | false | null | undefined)[];
+export type RuleList<R> = R[] | (() => R[] | Promise<R[]>);
+export interface RedirectRule {}
+RedirectRule.source: string;
+RedirectRule.destination: string;
+RedirectRule.permanent?: boolean;
+RedirectRule.statusCode?: 301 | 302 | 303 | 307 | 308;
+RedirectRule.locale?: boolean;
+export interface RewriteRule {}
+RewriteRule.source: string;
+RewriteRule.destination: string;
+RewriteRule.locale?: boolean;
+export interface HeaderRule {}
+HeaderRule.source: string;
+HeaderRule.headers: Record<string, string | number> | { key: string; value: string; }[];
+HeaderRule.locale?: boolean;
+export interface I18nConfig {}
+I18nConfig.locales: string[];
+I18nConfig.defaultLocale: string;
+I18nConfig.prefixDefaultLocale?: boolean;
+I18nConfig.detect?: boolean;
+export interface ImagesConfig {}
+ImagesConfig.remotePatterns?: { protocol?: "https" | "http"; hostname: string; port?: string | number; pathname?: string; }[];
+export type FontConfig = GoogleFont | LocalFont;
+interface FontCommon {}
+FontCommon.family: string;
+FontCommon.fallback?: "sans-serif" | "serif" | "monospace";
+FontCommon.variable?: string;
+FontCommon.display?: "auto" | "block" | "swap" | "fallback" | "optional";
+FontCommon.preload?: boolean;
+export interface GoogleFont extends FontCommon {}
+GoogleFont.provider: "google";
+GoogleFont.weights?: (number | string)[];
+GoogleFont.styles?: ("normal" | "italic")[];
+GoogleFont.subsets?: string[];
+GoogleFont.src?: never;
+GoogleFont.weight?: never;
+GoogleFont.style?: never;
+export type LocalFont = FontCommon & { provider?: never; weights?: never; styles?: never; subsets?: never; } & ({ src: string; weight?: number | string; style?: "normal" | "italic"; } | { src: { path: string; weight?: number | string; style?: "normal" | "italic"; }[]; weight?: never; style?: never; });
+export type PluginCode = string | { code: string; } | null | undefined;
+export interface NowakiPlugin {}
+NowakiPlugin.name: string;
+NowakiPlugin.transform?(code: string, id: string): PluginCode | Promise<PluginCode>;
+NowakiPlugin.resolveId?(source: string, importer: string): string | { id: string; } | null | undefined | Promise<string | { id: string; } | null | undefined>;
+NowakiPlugin.load?(id: string): PluginCode | Promise<PluginCode>;
+export function defineConfig(config: NowakiConfig): NowakiConfig;
 
 [stable ./content]
 # packages/nowaki-runtime/content.d.ts
@@ -167,7 +273,6 @@ export declare function defineEnv<S extends Shape = {}, P extends Shape = {}>(de
 export interface ServerEnv {}
 type EnvShape = keyof ServerEnv extends never ? { readonly [name: string]: unknown; } : Readonly<ServerEnv>;
 export declare const env: EnvShape;
-# packages/nowaki-runtime/server/env-server.mjs also exports (undeclared, not covered): setServerEnv
 
 [stable ./image]
 # packages/nowaki-runtime/image.d.ts
@@ -210,6 +315,7 @@ export function getLocale(): string | undefined;
 export function localePath(path: StaticRoutePath | Href, locale?: string): Href;
 export function localePath(path: string, locale?: string): string;
 export function setLocale(locale: string): void;
+export function routePath(url: URL | string): Href;
 export function transitionName(name: string | number): { viewTransitionName: string; };
 
 [stable ./session]

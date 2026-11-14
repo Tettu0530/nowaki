@@ -51,12 +51,26 @@ export function makeContext(info) {
   let cookiesCache;
   let session;
 
+  // The body for formData / bodyText / bodyJson, at most FORM_BODY_LIMIT bytes: a Content-Length
+  // over it is refused (413) before anything is read, and a longer body while reading. Touching it
+  // makes the render depend on the body, so no shared ISR cache (prevents per-user mixups).
+  const readBody = async () => {
+    reqAccessed = true;
+    if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
+      discardUnreadBody(req);
+      throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
+    }
+    return assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT);
+  };
+
   const ctx = {
     url: urlProxy,
     params,
     method,
     // The request's locale with i18n configured (handler.mjs `localizedRequest`), else undefined.
     locale: info.locale,
+    // The path routing used (handler.mjs passes it): without basePath and the locale prefix.
+    routePath: info.routePath ?? url.pathname,
     // Header/query access through raw req (Node IncomingMessage) can't be tracked, so
     // touching it counts as "depends on everything" and disables the ISR cache (prevents per-user leaks).
     get req() {
@@ -98,30 +112,13 @@ export function makeContext(info) {
       return reqHeaders[String(name).toLowerCase()];
     },
     async formData() {
-      reqAccessed = true; // depends on body/Content-Type → no shared ISR cache (prevents per-user mixups)
-      const ct = reqHeaders["content-type"] ?? "";
-      if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
-        discardUnreadBody(req);
-        throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
-      }
-      const buf = assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT);
-      return await parseFormBody(buf, ct);
+      return await parseFormBody(await readBody(), reqHeaders["content-type"] ?? "");
     },
     async bodyText() {
-      reqAccessed = true;
-      if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
-        discardUnreadBody(req);
-        throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
-      }
-      return decodeBody(assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT));
+      return decodeBody(await readBody());
     },
     async bodyJson() {
-      reqAccessed = true;
-      if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
-        discardUnreadBody(req);
-        throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
-      }
-      const s = decodeBody(assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT));
+      const s = decodeBody(await readBody());
       return s ? JSON.parse(s) : null;
     },
 

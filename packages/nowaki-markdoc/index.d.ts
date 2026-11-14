@@ -1,3 +1,5 @@
+import type { NowakiPlugin } from "@nowaki-dev/runtime/config";
+
 /** A Markdoc tag or node schema. `render` names an HTML element (lowercase) or an export of the
  * `components` module (capitalized). See https://markdoc.dev/docs/tags. */
 export type Schema = {
@@ -28,10 +30,8 @@ export type MarkdocOptions = {
   root?: string;
 };
 
-export type NowakiPlugin = {
-  name: string;
-  transform(code: string, id: string): string | null;
-};
+/** The plugin type of nowaki.config `plugins`, from `@nowaki-dev/runtime/config`. */
+export type { NowakiPlugin } from "@nowaki-dev/runtime/config";
 
 /** The plugin: `plugins: [markdoc({ components: "./markdoc/components.tsx", tags })]` in
  * nowaki.config.mjs. Compiles `.mdoc` files at build / dev time. */

@@ -7,7 +7,7 @@
 //   _layout.tsx     wraps pages under its directory (nestable)
 //   _middleware.ts  pre-processes requests under its directory (nestable)
 //   _404.tsx        page for unmatched paths
-//   _500.tsx /_error.tsx  page for render failures
+//   _500.tsx        page for render failures (`_error.tsx`, its old alias, is refused)
 //   loading.tsx     loading UI shown during client navigation (nestable)
 //   error.tsx       fallback UI when client navigation fails (nestable)
 // A convention file's prefix is its directory as written ("/org/[org]").
@@ -40,6 +40,12 @@ import { decodeSegment, matchSegments, parseSegment } from "./segments.mjs";
 const ROUTE_EXT = /\.(tsx|ts|jsx|js|mdx)$/;
 // Kept in step with nowaki-core routes::is_route_group.
 const GROUP_DIR = /^\((?!\.)[^)/]+\)$/;
+// File conventions removed before 1.0, refused rather than ignored so the page doesn't silently
+// disappear (nowaki-core routes::removed_convention fails the build the same way).
+const REMOVED_CONVENTIONS = {
+  _error:
+    "`_error` is no longer a file convention (removed in 0.20.0). Rename it to `_500` (the server's error page); `error.tsx` is the client navigation error boundary.",
+};
 // Kept in step with nowaki-core routes::is_intercept_segment.
 const INTERCEPT = /^\(\.{1,3}\)/;
 
@@ -116,9 +122,12 @@ export async function scanRoutes(appRoot) {
       notFound = abs;
       continue;
     }
-    if (base === "_500" || base === "_error") {
+    if (base === "_500") {
       errorRoute = abs;
       continue;
+    }
+    if (Object.hasOwn(REMOVED_CONVENTIONS, base)) {
+      throw new Error(`routes/${rel}: ${REMOVED_CONVENTIONS[base]}`);
     }
     if (base.startsWith("_")) continue; // reserved
 

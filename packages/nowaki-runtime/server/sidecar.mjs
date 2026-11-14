@@ -29,6 +29,7 @@ const { liveRender, liveContext, liveShareable, liveSigStatus, LiveForbiddenErro
 const { runWithContext, contextReads } = await import("./functions.mjs");
 const { recentRevalidations, setRevalidateEnv } = await import("./revalidate.mjs");
 const { pathToFileURL } = await import("node:url");
+const { configOf } = await import("./site-config.mjs");
 
 const appRoot = process.cwd();
 
@@ -61,7 +62,7 @@ async function ensureContent(version) {
 // env.ts in dev: `nowaki dev` validated it before starting; the renderer imports it (through the
 // Rust transform, so on the first request, once that server is up) and fills env/server.
 const { initServerEnv } = await import("./env-schema.mjs");
-const { setServerEnv } = await import("./env-server.mjs");
+const { setServerEnv } = await import("./env-store.mjs");
 const envFile = ["env.ts", "env.mts", "env.js", "env.mjs"].map((f) => path.join(appRoot, f)).find((f) => existsSync(f));
 let envReady = envFile ? null : true;
 if (!envFile) setServerEnv(null);
@@ -275,7 +276,7 @@ const devConfig = await (async () => {
     if (!existsSync(p)) continue;
     try {
       const mod = await import(pathToFileURL(p).href);
-      return mod.default ?? mod.config ?? {};
+      return configOf(mod);
     } catch (err) {
       console.error(`[nowaki] ${name}: ${err?.message ?? err}`);
     }

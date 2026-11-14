@@ -421,8 +421,16 @@ export function genConfig(root) {
   const siteText = read(root, site);
   const hostText = read(root, host);
 
-  const top = new Set();
-  for (const t of [siteText, hostText]) for (const m of t.matchAll(/(?<![\w.])config\.([A-Za-z_]\w*)/g)) top.add(m[1]);
+  // CONFIG_KEYS: the top-level keys normalizeConfig accepts (any other one throws).
+  const topList = siteText.match(/export const CONFIG_KEYS = Object\.freeze\(\[([^\]]*)\]\)/);
+  if (!topList) throw new Error(`${site}: CONFIG_KEYS not found; update scripts/api-surface.mjs`);
+  const top = new Set(strings(topList[1]));
+  // A top-level key the runtime reads must be in CONFIG_KEYS, or no config could set it.
+  for (const t of [siteText, hostText]) {
+    for (const m of t.matchAll(/(?<![\w./-])config\.([A-Za-z_]\w*)\b(?!\.)/g)) {
+      if (!top.has(m[1])) throw new Error(`config.${m[1]} is read but not in CONFIG_KEYS (${site}); update it`);
+    }
+  }
 
   // keys(obj, ["a", "b"], label): the allowed keys of a nested object (unknown ones throw). The
   // label is a string, a template, or `label`, the closest `const label = ...` above the call.
@@ -432,18 +440,29 @@ export function genConfig(root) {
     const outer = [...siteText.slice(0, m.index).matchAll(/const label = `([^`]+)`;/g)].pop()?.[1] ?? "";
     label = label.replace(/^label$/, `\`${outer}\``).replace(/\$\{label\}/, outer);
     label = label.replace(/^[`"]|[`"]$/g, "").replace(/\[\$\{i\}\]/g, "[]");
-    byLabel.set(label, strings(m[1]));
+    // A list built from constants (`[...FONT_KEYS.common, ...mine]`) is listed from FONT_KEYS below.
+    if (strings(m[1]).length) byLabel.set(label, strings(m[1]));
   }
 
   const trailing = siteText.match(/\[("never", "always", "ignore")\]\.includes\(trailing\)/);
   if (!trailing) throw new Error(`${site}: trailingSlash values not found; update scripts/api-surface.mjs`);
 
-  const fontKeys = new Set();
-  const fontsText = sourceText(root, fonts);
-  for (const m of fontsText.matchAll(/(?:spec|e|f)\.get\("(\w+)"\)|str_of\("(\w+)"\)/g)) fontKeys.add(m[1] ?? m[2]);
-  for (const m of read(root, fontsFetch).matchAll(/\bspec\.(\w+)/g)) fontKeys.add(m[1]);
-  fontKeys.delete("path"); // only in src[] entries
-  const srcKeys = ["path", "weight", "style"].filter((k) => fontsText.includes(`get("${k}")`));
+  // FONT_KEYS: the keys of a fonts[] entry per kind (site-config.mjs refuses the rest). A key
+  // fonts.rs or fonts-fetch.mjs reads must be one of them.
+  const fontBlock = siteText.match(/export const FONT_KEYS = Object\.freeze\(\{([\s\S]*?)\n\}\);/);
+  if (!fontBlock) throw new Error(`${site}: FONT_KEYS not found; update scripts/api-surface.mjs`);
+  const fontKinds = {};
+  for (const m of fontBlock[1].matchAll(/(\w+): Object\.freeze\(\[([^\]]*)\]\)/g)) fontKinds[m[1]] = strings(m[2]);
+  for (const k of ["common", "google", "local", "src"]) {
+    if (!fontKinds[k]) throw new Error(`${site}: FONT_KEYS.${k} not found; update scripts/api-surface.mjs`);
+  }
+  const allFontKeys = new Set(Object.values(fontKinds).flat());
+  const readKeys = new Set();
+  for (const m of sourceText(root, fonts).matchAll(/(?:spec|e|f)\.get\("(\w+)"\)|str_of\("(\w+)"\)/g)) readKeys.add(m[1] ?? m[2]);
+  for (const m of read(root, fontsFetch).matchAll(/\bspec\.(\w+)/g)) readKeys.add(m[1]);
+  for (const k of readKeys) {
+    if (!allFontKeys.has(k)) throw new Error(`font key ${k} is read but not in FONT_KEYS (${site}); update it`);
+  }
 
   const hooks = new Set();
   for (const m of hostText.matchAll(/typeof p\.(\w+) === "function"/g)) hooks.add(m[1]);
@@ -452,14 +471,14 @@ export function genConfig(root) {
   for (const m of siteText.matchAll(/for \(const name of \[("nowaki\.config[^\]]*)\]\)/g)) {
     for (const f of m[1].matchAll(/"([^"]+)"/g)) files.push(f[1]);
   }
-  const exportsRead = [...siteText.matchAll(/mod\.(default|config)\b/g)].map((m) => m[1]);
+  if (!/mod\.default\b/.test(siteText)) throw new Error(`${site}: the default export read not found; update scripts/api-surface.mjs`);
+  const exportsRead = ["default"];
 
   const out = [
     header([
-      "nowaki.config keys: top-level keys read by server/site-config.mjs and server/plugin-host.mjs,",
-      "the allowed keys of nested objects (site-config.mjs `keys()` calls, unknown ones throw),",
-      "font keys (crates/nowaki/src/fonts.rs, server/fonts-fetch.mjs) and plugin hooks.",
-      "Unknown top-level keys are ignored today (not rejected).",
+      "nowaki.config keys: the top-level keys (site-config.mjs CONFIG_KEYS), the allowed keys of",
+      "nested objects (site-config.mjs `keys()` calls), the keys of a fonts[] entry per kind",
+      "(site-config.mjs FONT_KEYS) and the plugin hooks. An unknown key throws at every level.",
     ]),
     "[stable files]",
     ...files.map((f) => `${f}  # ${site}, ${host}`),
@@ -471,8 +490,10 @@ export function genConfig(root) {
     "[stable nested]",
     ...[...byLabel.keys()].sort().map((l) => `${l}: ${byLabel.get(l).join(", ")}`),
     `trailingSlash: ${trailing[1].replace(/"/g, "").split(", ").join(" | ")}`,
-    `fonts[]: ${[...fontKeys].sort().join(", ")}`,
-    `fonts[].src[]: ${srcKeys.join(", ")}`,
+    `fonts[]: ${fontKinds.common.join(", ")}`,
+    `fonts[] (provider: "google"): ${fontKinds.google.join(", ")}`,
+    `fonts[] (local, src): ${fontKinds.local.join(", ")}`,
+    `fonts[].src[]: ${fontKinds.src.join(", ")}`,
     "",
     "[stable plugins]",
     ...[...hooks].sort().map((h) => `${h}  # plugins[].${h}`),

@@ -247,6 +247,63 @@ const text = async (res) => res.body ?? (await new Response(res.stream).text());
   check("csrf: middleware runs before the check, as for actions", mwRuns === 1);
 }
 
+// ctx.routePath, and the aliases removed in 0.20.0 (`export const middleware`, lowercase API
+// method exports): each is an error naming the new form, not a silent change.
+{
+  const seen = [];
+  const mods = {
+    "routes/photo/[id].tsx": { default: () => h("p", null, "photo") },
+    "routes/api/r.ts": { GET: (ctx) => ctx.json({ routePath: ctx.routePath }) },
+    "routes/api/lower.ts": { get: () => ({ ok: true }), POST: () => ({ ok: true }) },
+    "routes/old/_middleware.ts": { middleware: () => new Response("old", { status: 401 }) },
+    "routes/_middleware.ts": { default: (ctx) => void seen.push(ctx.routePath) },
+  };
+  const t = {
+    routes: [
+      { file: "routes/photo/[id].tsx", segments: [{ lit: "photo" }, { param: "id" }], dir: "/photo", isApi: false },
+      { file: "routes/api/r.ts", segments: [{ lit: "api" }, { lit: "r" }], dir: "/api", isApi: true },
+      { file: "routes/api/lower.ts", segments: [{ lit: "api" }, { lit: "lower" }], dir: "/api", isApi: true },
+    ],
+    layouts: [],
+    middleware: [
+      { prefix: "", file: "routes/_middleware.ts" },
+      { prefix: "/old", file: "routes/old/_middleware.ts" },
+    ],
+  };
+  const errors = [];
+  const e = {
+    ...env,
+    routeTable: async () => t,
+    importModule: async (file) => mods[file],
+    renderError: (err) => (errors.push(String(err?.message ?? err)), { status: 500, headers: {}, body: "error" }),
+  };
+  const go = (path, extra = {}) => handleRequest(e, { method: "GET", url: new URL(`http://x.test${path}`), headers: {}, version: 1, ...extra });
+
+  const r = await go("/app/api/r", { routePath: "/api/r" });
+  check("ctx.routePath is the routed path, without basePath", JSON.parse(r.body).routePath === "/api/r");
+  seen.length = 0;
+  await go("/photo/1");
+  check("ctx.routePath without a front is url.pathname", seen[0] === "/photo/1");
+
+  const { compileI18n } = await import("../packages/nowaki-runtime/server/i18n.mjs");
+  const i18nEnv = { ...e, i18n: compileI18n({ i18n: { locales: ["en", "ja"], defaultLocale: "en" }, basePath: "/app" }) };
+  seen.length = 0;
+  const ja = await handleRequest(i18nEnv, { method: "GET", url: new URL("http://x.test/app/ja/photo/1"), routePath: "/ja/photo/1", headers: {}, version: 1 });
+  check("ctx.routePath drops the locale prefix too", ja.status === 200 && seen[0] === "/photo/1");
+
+  errors.length = 0;
+  const old = await go("/old/x");
+  check("`export const middleware` is refused with an error", old.status === 500 && /export const middleware.*removed in 0\.20\.0.*export default/.test(errors.join(" ")));
+
+  errors.length = 0;
+  const lowerGet = await go("/api/lower");
+  const lowerPost = await go("/api/lower", { method: "POST" });
+  check(
+    "a lowercase API method export is refused for every method",
+    lowerGet.status === 500 && lowerPost.status === 500 && errors.length === 2 && errors.every((m) => /exports `get`.*uppercase \(`GET`\)/.test(m)),
+  );
+}
+
 if (failures) {
   console.error(`${failures} failure(s)`);
   process.exit(1);

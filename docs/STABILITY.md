@@ -36,12 +36,14 @@ either covered by semver or listed below as not covered. Frozen and covered by s
 
 - **`@nowaki-dev/runtime` exports**: every name and type in the `.d.ts` files of the
   documented subpaths (`.`, `./navigation`, `./content`, `./image`, `./env`, `./env/server`,
-  `./session`, and any subpath added before 1.0). This includes Jetstream (`live`,
+  `./session`, `./config`, and any subpath added before 1.0). This includes Jetstream (`live`,
   `publish()`, rooms, `shared`, presence) and the plugin API.
 - **Route and island module exports**: `default`, `loader`, `action`, the HTTP method exports
   of API routes, `meta`, `title`, `head`, `lang`, `htmlAttrs`, `bodyAttrs`, `revalidate`,
   `tags`, `streaming`, `csrf`, `budget`, `viewTransition`, `staticPaths`, `prerender`,
-  `sitemap`, `scripts`, `live`, the `client:*` island directives, and the layout `slots` prop.
+  `sitemap`, `scripts`, `live`, the `client:*` island directives, and the layout `slots` prop,
+  with the types `PageModule`, `LayoutModule`, `ApiModule`, `MiddlewareModule` and `IslandModule`
+  give them. API method exports are uppercase.
 - **File conventions**: `routes/` file routing (`index`, `[param]`, `[...rest]`, extension
   file routes such as `feed.xml.ts`), `_layout`, `_middleware`, `_404`, `_500`, `loading`,
   `error`, `(group)`, `@slot` with `default`, the `(.)` / `(..)` / `(...)` intercepts,
@@ -49,7 +51,9 @@ either covered by semver or listed below as not covered. Frozen and covered by s
   `nowaki.config.mjs` / `.js`, `.tsrx` files, and the `.nowaki/types.d.ts` path. Other `_*`
   names under `routes/` are reserved.
 - **`nowaki.config` keys**: `site`, `fonts`, `basePath`, `trailingSlash`, `redirects`,
-  `rewrites`, `headers`, `i18n`, `images`, `plugins`, and their documented nested keys.
+  `rewrites`, `headers`, `i18n`, `images`, `plugins`, and their documented nested keys (any
+  other key is an error, at every level), and the plugin hooks `name`, `transform`, `resolveId`
+  and `load`.
 - **CLI**: the commands `dev`, `build`, `start`, `prerender`, `upgrade`, `typegen`, their
   flags and defaults, `--version`, `--help`, and the exit code of a failed build (including a
   route over its `budget`).

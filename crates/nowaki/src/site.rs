@@ -12,27 +12,6 @@ use std::path::Path;
 use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
 
-/// Config keys that need Node to read; a config naming none of them skips it.
-const KEYS: &[&str] = &[
-    "site",
-    "fonts",
-    "basePath",
-    "trailingSlash",
-    "redirects",
-    "rewrites",
-    "headers",
-    "i18n",
-    "images",
-];
-
-/// Whether nowaki.config names one of the build-time keys, so the plugin host is asked for them.
-pub fn mentions(root: &Path) -> bool {
-    ["nowaki.config.mjs", "nowaki.config.js"]
-        .iter()
-        .filter_map(|n| std::fs::read_to_string(root.join(n)).ok())
-        .any(|src| KEYS.iter().any(|k| src.contains(k)))
-}
-
 /// nowaki.config `basePath` from `config` (`""` without one).
 pub fn base_path(config: &Value) -> &str {
     config

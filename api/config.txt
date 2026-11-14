@@ -1,13 +1,11 @@
-# nowaki.config keys: top-level keys read by server/site-config.mjs and server/plugin-host.mjs,
-# the allowed keys of nested objects (site-config.mjs `keys()` calls, unknown ones throw),
-# font keys (crates/nowaki/src/fonts.rs, server/fonts-fetch.mjs) and plugin hooks.
-# Unknown top-level keys are ignored today (not rejected).
+# nowaki.config keys: the top-level keys (site-config.mjs CONFIG_KEYS), the allowed keys of
+# nested objects (site-config.mjs `keys()` calls), the keys of a fonts[] entry per kind
+# (site-config.mjs FONT_KEYS) and the plugin hooks. An unknown key throws at every level.
 
 [stable files]
 nowaki.config.mjs  # packages/nowaki-runtime/server/site-config.mjs, packages/nowaki-runtime/server/plugin-host.mjs
 nowaki.config.js  # packages/nowaki-runtime/server/site-config.mjs, packages/nowaki-runtime/server/plugin-host.mjs
 export default  # the config object
-export config  # the config object
 
 [stable top-level]
 basePath
@@ -15,7 +13,6 @@ fonts
 headers
 i18n
 images
-mjs
 plugins
 redirects
 rewrites
@@ -31,7 +28,9 @@ images.remotePatterns[]: protocol, hostname, port, pathname
 redirects[]: source, destination, permanent, statusCode, locale
 rewrites[]: source, destination, locale
 trailingSlash: never | always | ignore
-fonts[]: display, fallback, family, preload, provider, src, style, styles, subsets, variable, weight, weights
+fonts[]: family, fallback, variable, display, preload
+fonts[] (provider: "google"): provider, weights, styles, subsets
+fonts[] (local, src): src, weight, style
 fonts[].src[]: path, weight, style
 
 [stable plugins]
