@@ -3,7 +3,7 @@ name = "nowaki-core"
 description = "The engine of the nowaki CLI (an oxc-based transform pipeline, resolver, and module cache); not a supported API for other programs"
 # Its own 0.x line, not the shared Nowaki version (docs/STABILITY.md): bumped when its code
 # changes, and pinned with `=` by crates/nowaki/Cargo.toml.
-version = "0.19.3"
+version = "0.20.0"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true

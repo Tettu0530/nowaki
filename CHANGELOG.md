@@ -11,6 +11,20 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-11-14 · API freeze (the last breaking release before 1.0)
+
+Packages: `nowaki` / `nowaki-core`, `@nowaki-dev/runtime`, `create-nowaki` /
+`create-nowaki-app`, all 0.20.0; `@nowaki-dev/markdoc` 0.2.0 (it now peers on
+`@nowaki-dev/runtime` and uses its `NowakiPlugin` type). `nowaki-core` is internal from
+here on, on its own 0.x version line, pinned exactly by `nowaki`.
+
+The public API is frozen from this release: what is covered is listed in `api/` and
+described in docs/STABILITY.md, and CI refuses a removal or change to it without the
+`breaking` label. Next come `1.0.0-rc.N` releases on the npm `next` tag, then 1.0.0. This
+release makes the breaking cleanups that had to land before the freeze, ships the
+pre-1.0 security review, and moves releases to one tag-driven workflow with provenance.
+Run `nowaki upgrade --check` in an app to list what it needs to change.
+
 ### Upgrade notes
 - **Breaking: `nowaki dev` and `nowaki start` read `PORT`.** Without `--port` they listen on
   `PORT` (as the node / bun / deno adapters already did), else 3000. If `PORT` is set in
