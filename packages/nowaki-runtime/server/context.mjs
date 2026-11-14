@@ -14,16 +14,17 @@ export function makeContext(info) {
   const resHeaders = new Map();
   const setCookies = [];
 
-  // ISR Vary tracking: records the request headers / query this render depended on. start.rs folds
-  // them into the cache key, preventing cross-user leaks on header-dependent pages and eviction from query floods.
+  // ISR Vary tracking: records the request headers / query this render depended on. The
+  // `nowaki start` cache (start.rs) folds them into its key, so a header-dependent page is not
+  // served to the wrong user and a flood of query strings cannot evict other pages.
   const accessedHeaders = new Set();
   let queryAccessed = false;
   let reqAccessed = false; // touching raw req has unknown granularity, so treat as uncacheable ("*")
   const noteHeader = (name) => accessedHeaders.add(String(name).toLowerCase());
 
-  // Allowlisting accessors that expose the query misses inherited methods like toLocaleString,
-  // causing cross-user leaks. So anything outside QUERY_FREE counts as query-dependent (fail safe).
-  // Framework internals only use the raw info.url / .pathname, so only user-code accesses are recorded.
+  // An allowlist of the accessors that expose the query would miss inherited methods such as
+  // toLocaleString, so every property outside QUERY_FREE counts as reading the query (fail safe).
+  // Framework internals use the raw info.url, so only user code's reads are recorded.
   const QUERY_FREE = new Set([
     "pathname",
     "hostname",
@@ -107,7 +108,8 @@ export function makeContext(info) {
     actionData: undefined,
     state: {}, // arbitrary data middleware passes to loaders/pages
 
-    // handler.mjs puts this in the ISR response header. "*" means no_cache on the Rust side.
+    // handler.mjs sends this to the Rust front in the ISR vary headers. "*" makes the `nowaki start`
+    // cache skip the page.
     __vary() {
       const headers = reqAccessed ? ["*"] : [...accessedHeaders];
       return { query: queryAccessed, headers };

@@ -30,7 +30,7 @@ export function decodeSegment(seg) {
 export function matchSegments(segs, parts) {
   const rest = segs.length > 0 && segs[segs.length - 1].rest;
   if (rest) {
-    // A trailing catch-all collects the rest (≥1). Fixed part = segs.length - 1.
+    // A trailing catch-all collects the rest (one or more).
     if (parts.length < segs.length) return null;
   } else if (segs.length !== parts.length) {
     return null;

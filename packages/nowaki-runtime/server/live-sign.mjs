@@ -1,7 +1,7 @@
 // HMAC-signs and verifies live island state. State is embedded in the DOM and sent back on join,
 // so without a signature anyone could forge arbitrary state (e.g. { isAdmin: true }).
-// Verification runs in the same process as rendering, so the key is shared. It defaults to random
-// per process; set NOWAKI_LIVE_SECRET to keep it stable across processes and restarts.
+// The key defaults to random per process, which works while the process that signed a state also
+// verifies it; set NOWAKI_LIVE_SECRET to keep it stable across processes, instances and restarts.
 //
 // A signature is `v1.<iat>.<mac>`: the issue time (unix seconds) is signed too, and signatures older
 // than NOWAKI_LIVE_MAX_AGE seconds (default 86400) are rejected, so a captured state can't be

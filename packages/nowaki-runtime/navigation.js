@@ -5,7 +5,7 @@ import { h } from "preact";
 import { basePath, withBase } from "./server/base-path.mjs";
 import { localePathFor, parseClientI18n, splitLocale } from "./server/i18n.mjs";
 
-// route("/blog/[slug]", { slug: "x" }) → "/blog/x"。
+// route("/blog/[slug]", { slug: "x" }) → "/blog/x".
 // A catch-all ([...path]) joins its array with "/". Each segment is encodeURIComponent'd.
 export function route(pattern, params = {}) {
   return pattern.replace(/\[(\.\.\.)?([^[\]]+)\]/g, (_, dots, name) => {
@@ -86,7 +86,7 @@ export function localePath(path, locale) {
   return localePathFor(st.i18n, path, locale ?? st.locale);
 }
 
-/// The app path of a browser URL (a URL, or a path string): basePath and a configured locale
+/// The route path of a browser URL (a URL, or a path string): basePath and a configured locale
 /// prefix taken off ("/gallery/ja/photo/1" → "/photo/1"), the query and fragment left out. The
 /// counterpart of href(), for links back to the current page in another locale and the like.
 export function routePath(url) {

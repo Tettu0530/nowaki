@@ -48,9 +48,9 @@ await cp(path.join(clientDir, "manifest.json"), path.join(funcDir, "client", "ma
 const nodeModules = path.join(funcDir, "node_modules");
 for (const dep of ["@nowaki-dev/runtime", "preact", "preact-render-to-string"]) {
   const src = path.join(appRoot, "node_modules", dep);
-  // Don't copy dependencies' nested node_modules. Doing so duplicates preact
-  // (runtime's devDep), splitting hooks across instances and breaking SSR.
-  // Node walks up node_modules, so it resolves to the single top-level preact.
+  // Dependencies' nested node_modules are not copied: a second preact there (the runtime's
+  // devDependency in a workspace) would split hooks across instances and break SSR. Node walks
+  // up node_modules, so it resolves to the single top-level preact.
   await cp(src, path.join(nodeModules, dep), {
     recursive: true,
     dereference: true,
@@ -86,8 +86,9 @@ await writeFile(
     "\n",
 );
 
-// nowaki.config routing: redirects and headers as platform routes; the function (app.mjs) runs
-// the same rules for everything (rewrites, basePath, trailingSlash, redirects left to it).
+// nowaki.config routing: redirects and headers as platform routes (vercel-routes.mjs); the
+// function (app.mjs) runs the full rules for whatever reaches it (rewrites, basePath,
+// trailingSlash, and the redirects the routes leave to it).
 const rules = routing ? compileRules(routing) : null;
 // A rewrite to a public/ file is answered by the function, which has no public/ of its own: copy
 // those files into it (its default public dir, next to client/).

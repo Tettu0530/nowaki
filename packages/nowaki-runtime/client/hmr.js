@@ -8,6 +8,7 @@
 //          the page in place. Islands whose src + props are unchanged keep their element (and
 //          Preact state); live islands keep their server state. Reloads when that can't be done.
 //   reload anything else (config, env, session, content, removed files).
+//   error  a build failed: show the error overlay until the next update.
 
 import { h, render } from "preact";
 import { carryNonces, hasNonce, matchPattern, responseNonce } from "./router-core.js";
@@ -502,7 +503,7 @@ if (!document.querySelector('script[data-toolbar="0"]')) {
 }
 
 ws.addEventListener("close", () => {
-  // wait for the dev server to restart, then reconnect
+  // The dev server restarted or stopped: reload once it answers again.
   const timer = setInterval(async () => {
     try {
       await fetch(import.meta.env.BASE_URL, { method: "HEAD" });

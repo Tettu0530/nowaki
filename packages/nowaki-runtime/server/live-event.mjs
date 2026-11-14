@@ -16,7 +16,7 @@ const JSON_CT = { "content-type": "application/json; charset=utf-8", "cache-cont
 export async function dispatchLiveEvent(ctx, info, live) {
   if (ctx.method !== "POST") return errBody(405, "Method Not Allowed");
   // Same CSRF gate as server function RPC: JSON only (no simple request), a custom header (needs a
-  // preflight we never grant), and no cross-site Origin / Sec-Fetch-Site.
+  // preflight, which is never granted), and no cross-site Origin / Sec-Fetch-Site.
   const ct = String(ctx.get("content-type") ?? "")
     .split(";")[0]
     .trim()

@@ -1,4 +1,4 @@
-// Renders a serialized Markdoc tree (emitted by the plugin at build time) with Preact. No Markdoc
+// Renders a serialized Markdoc tree (emitted by the plugin's transform) with Preact. No Markdoc
 // runtime ships: the tree is plain data, `[name, attributes, children]` for a tag (an empty name
 // for a fragment) and a string for text. Preact escapes text and attribute values; nothing here sets raw HTML.
 

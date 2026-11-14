@@ -26,7 +26,7 @@ export async function indexPublic(dir) {
       const url = `${prefix}/${e.name}`;
       let st;
       try {
-        st = await stat(file); // follows symlinks, like the copy did
+        st = await stat(file); // follows symlinks, as the build's copy does
       } catch {
         continue;
       }
