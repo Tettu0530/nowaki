@@ -16,7 +16,7 @@
 //       Prints the npm dist-tag for <version>: `next` for a prerelease, `latest` for a release
 //       that is not older than the current `latest`, `v<major>-lts` for an older major.
 //
-// Exit code 0 = ok, 1 = check failed, 2 = usage error.
+// Exit code 0 = ok, 1 = check failed or bad version, 2 = unknown option.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -288,9 +288,9 @@ export function check(root, version, { newTag = false } = {}) {
   if (!section) errors.push(`CHANGELOG.md has no "## [${want}]" section`);
   else if (!section.body) errors.push(`CHANGELOG.md "## [${want}]" section is empty`);
 
-  // The public-surface snapshots (api/), once scripts/api-surface.mjs exists.
-  // It needs the workspace's `typescript`; without node_modules it is skipped here (CI's
-  // api-surface job checks every PR, and release tags must be on main).
+  // The public-surface snapshots (api/). scripts/api-surface.mjs needs the workspace's
+  // `typescript`; without node_modules the check is skipped with a warning (CI's api-surface job
+  // checks every PR, and release tags must be on main).
   if (existsSync(path.join(root, "scripts/api-surface.mjs")) && !existsSync(path.join(root, "node_modules/typescript"))) {
     warnings.push("api/ snapshots not checked: install dependencies first (pnpm install)");
   } else if (existsSync(path.join(root, "scripts/api-surface.mjs"))) {

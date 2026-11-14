@@ -1,4 +1,6 @@
-// Unit tests for server/origin.mjs (browserHost / isCrossSite / NOWAKI_TRUST_PROXY).
+// Unit test for server/origin.mjs: browserHost, requestOrigin, requestUrl and isCrossSite on the
+// adapters, behind the Rust sidecar hop, on Vercel, and with NOWAKI_TRUST_PROXY.
+// Usage: node scripts/origin-test.mjs
 import { browserHost, isCrossSite, requestOrigin, requestUrl, trustProxy, trustSidecarHop } from "../packages/nowaki-runtime/server/origin.mjs";
 
 let failures = 0;

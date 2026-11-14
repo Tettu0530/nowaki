@@ -2,7 +2,7 @@
 // <Link locale> inside an island sets the nowaki_locale cookie before the router navigates, and the
 // next request for `/` follows it instead of Accept-Language. Builds a small app into a temp
 // directory (linked to examples/hello's node_modules) and serves it with `nowaki start`.
-//   PORT=5070 CDP_PORT=5090 node scripts/locale-browser-test.mjs
+// Usage: [PORT=8251] [CDP_PORT=9225] node scripts/locale-browser-test.mjs
 // NOWAKI_BIN overrides the binary (default target/debug/nowaki), CHROME the browser.
 
 import { spawn, spawnSync } from "node:child_process";
@@ -51,7 +51,7 @@ export default function Switcher() {
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "nowaki-locale-browser-"));
 // Chrome's profile gets its own directory: Chrome keeps writing to it for a moment after SIGKILL,
-// which made removing `tmp` race (ENOTEMPTY).
+// so removing it inside `tmp` could fail with ENOTEMPTY.
 const profile = mkdtempSync(path.join(os.tmpdir(), "nowaki-locale-chrome-"));
 const children = new Set();
 // Best-effort: a leftover temp dir never changes the exit code.
@@ -76,7 +76,7 @@ process.on("exit", () => {
 });
 process.on("SIGINT", () => process.exit(130));
 
-// Each package linked to its real directory (see rules-e2e.mjs: Windows junction caveat).
+// Each package is linked to its real directory (see rules-e2e.mjs: Windows junction caveat).
 function linkModules(from, to) {
   mkdirSync(to, { recursive: true });
   for (const name of readdirSync(from)) {

@@ -2,6 +2,7 @@
 // tampering, expiry, key rotation, regenerate, the 4 KB limit, store mode, the cross-site and live
 // read-only rules, the missing-secret and prerender errors, and a failing commit rendering the 500
 // page. No server needed.
+// Usage: node scripts/session-test.mjs
 import { createRequire } from "node:module";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
 import { makeContext } from "../packages/nowaki-runtime/server/context.mjs";

@@ -1,9 +1,12 @@
-// Jetstream in a real browser (Chrome over CDP, no puppeteer): clicking data-live buttons on /live
-// updates the island, over the transport the page is expected to pick; /live-form covers submit,
-// debounced input, change, and keyed rows.
-// Usage: BASE=http://127.0.0.1:8243 EXPECT=post [PAGE=/live] node scripts/live-browser-test.mjs   (EXPECT=ws|post)
-// HMR_TOUCH=examples/hello/routes/live.tsx (nowaki dev only): after the SPA visits, edit that file
-// and expect HMR to reload the page.
+// Jetstream in a real browser (Chrome over CDP, no puppeteer), on a running examples/hello server:
+// clicking data-live buttons on /live updates the island over the transport the page is expected
+// to pick (EXPECT=ws or post); the page also works after client navigations, which neither run the
+// fetched page's other scripts nor give them this document's nonce; /live-form covers submit,
+// debounced input, change, and keyed rows. With EXPECT=ws: queued events don't reach the next
+// page, two tabs on /poll share a room, and leaving a live page drops the presence count.
+// Usage: BASE=http://127.0.0.1:8243 EXPECT=post [PAGE=/live] [CDP_PORT=9224] node scripts/live-browser-test.mjs
+// HMR_TOUCH=examples/hello/routes/live.tsx (nowaki dev only): after the client navigations, edit
+// that file and expect HMR to reload the page.
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";

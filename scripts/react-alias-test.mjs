@@ -1,7 +1,7 @@
 // SSR React alias: with the runtime's resolve hook registered, `react*` imports from anywhere
 // (including node_modules) load preact/compat. The repo root has no `react` installed, so
 // without the hook these imports fail.
-// Keep ALIAS_SPECS in sync with resolve.rs `alias_specifier` and react-alias-hooks.mjs.
+// ALIAS_SPECS must match resolve.rs `alias_specifier` and react-alias-hooks.mjs (checked below).
 // Usage: node scripts/react-alias-test.mjs
 import { readFileSync } from "node:fs";
 import { register } from "node:module";

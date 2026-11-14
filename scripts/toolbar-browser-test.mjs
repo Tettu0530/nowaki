@@ -1,11 +1,12 @@
 // The dev toolbar in a real browser (Chrome over CDP) on `nowaki dev` under NOWAKI_CSP=enforce:
 // it shows the route, the islands (client vs live, the could-be-live hint), the first-load JS
 // against the budget, ISR settings, Jetstream connections, and an error after a broken edit with
-// an editor link (NOWAKI_EDITOR); it updates after a client navigation and after an HMR page
-// update; the close button keeps it hidden in this browser; a 403 from the devtools endpoint (a
-// LAN client under --host) removes it; no CSP violation anywhere. Then `nowaki dev --no-toolbar`
-// renders data-toolbar="0" and the toolbar never loads.
-// Builds a small app under target/ (linked to examples/hello's node_modules).
+// an editor link (NOWAKI_EDITOR); arrow keys and Escape work; it updates after a client
+// navigation and after an HMR page update; a 403 from the devtools endpoint (a LAN client under
+// --host) removes it; the close button keeps it hidden in this browser; no CSP violation anywhere.
+// Then `nowaki dev --no-toolbar` renders data-toolbar="0" and the toolbar never loads.
+// Builds a small app under target/ (linked to examples/hello's node_modules). Chrome is driven
+// over CDP_PORT. Run by scripts/ci/e2e-dev.sh.
 //   PORT=5520 CDP_PORT=5521 node scripts/toolbar-browser-test.mjs
 // NOWAKI_BIN overrides the binary (default target/debug/nowaki), CHROME the browser.
 

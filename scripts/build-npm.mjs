@@ -4,7 +4,9 @@
 //   node scripts/build-npm.mjs <key> [--binary <path>] [--no-build]
 //
 // <key> is darwin-arm64 / darwin-x64 / linux-x64-gnu / linux-arm64-gnu / win32-x64.
-// By default runs cargo build, then places it in packages/nowaki-cli/npm/<key>/ (for each CI matrix job).
+// Runs `cargo build --release` for the key's target (unless --binary or --no-build), then writes
+// the package to packages/nowaki-cli/npm/<key>/. release.yml runs it with --no-build in each
+// matrix job.
 
 import { execFileSync } from "node:child_process";
 import {
@@ -21,7 +23,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // key -> Rust target triple + npm os/cpu/libc metadata.
-// Must match PACKAGES in lib/resolve.js.
+// Must match PACKAGES in packages/nowaki-cli/lib/resolve.js.
 const TARGETS = {
   "darwin-arm64": { triple: "aarch64-apple-darwin", os: "darwin", cpu: "arm64" },
   "darwin-x64": { triple: "x86_64-apple-darwin", os: "darwin", cpu: "x64" },

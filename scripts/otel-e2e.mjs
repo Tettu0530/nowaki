@@ -1,9 +1,10 @@
-// Observability end to end on `nowaki start` (examples/hello, built first if needed): a tiny local
-// OTLP/HTTP receiver collects the spans of the Rust front and the Node sidecar, and checks that one
-// request is one trace (client traceparent → Rust SERVER → CLIENT → Node SERVER → middleware /
-// loader / render), that a Jetstream WS event is traced across both, that Server-Timing is there
-// with NOWAKI_SERVER_TIMING=1 (and an ISR hit doesn't replay a render's timings), that
-// NOWAKI_LOG=json lines parse, and /__nowaki/health. Then the same app with all of it off.
+// Observability end to end on `nowaki start` (examples/hello, built first if needed). A local
+// OTLP/HTTP receiver collects the spans of the Rust front and the Node sidecar, and the script
+// checks that one request is one trace (client traceparent → Rust SERVER → CLIENT → Node SERVER →
+// middleware / loader / render), that a Jetstream WS event is traced across both, that
+// Server-Timing is there with NOWAKI_SERVER_TIMING=1 (and an ISR hit doesn't replay a render's
+// timings), that NOWAKI_LOG=json lines parse (a failing loader's line carries the trace and the
+// stack), and /__nowaki/health. Then the same app with all of it off. e2e-prod.sh runs it.
 // Usage: node scripts/otel-e2e.mjs [--port 5560]   (uses port, port+1, port+2)
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";

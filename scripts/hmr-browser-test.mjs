@@ -6,8 +6,9 @@
 // recovers once fixed. Runs without a CSP, under NOWAKI_CSP=enforce, and (page edits only) under
 // a basePath with the CSP. Prints the update latency (file written -> DOM updated) for each kind
 // of edit.
-// Builds a small app under target/ (linked to examples/hello's node_modules).
-//   PORT=5500 CDP_PORT=5501 node scripts/hmr-browser-test.mjs
+// Builds a small app under target/ (linked to examples/hello's node_modules). e2e-dev.sh runs it
+// when it finds Chrome (not on Windows).
+// Usage: [PORT=5500] [CDP_PORT=5501] node scripts/hmr-browser-test.mjs
 // NOWAKI_BIN overrides the binary (default target/debug/nowaki), CHROME the browser.
 
 import { spawn } from "node:child_process";
@@ -110,7 +111,7 @@ process.on("exit", () => {
 });
 process.on("SIGINT", () => process.exit(130));
 
-// Each package linked to its real directory (see rules-e2e.mjs: Windows junction caveat).
+// Each package is linked to its real directory (see rules-e2e.mjs: Windows junction caveat).
 function linkModules(from, to) {
   mkdirSync(to, { recursive: true });
   for (const name of readdirSync(from)) {

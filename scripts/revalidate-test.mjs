@@ -2,6 +2,7 @@
 // and path expansion (shared fixture with start.rs), tags on ISR responses, purges riding on the
 // response of an action / API route / server function, env.purge / env.cacheTagHeader seams, the
 // stdout channel outside a request, dev recording, and POST /__nowaki/revalidate. No server needed.
+// Usage: node scripts/revalidate-test.mjs
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
