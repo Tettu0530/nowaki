@@ -8,11 +8,13 @@ mod fonts;
 mod form_body;
 mod forward;
 mod front;
+mod listen;
 mod live;
 mod mcp;
 mod obs;
 mod plugins;
 mod prerender;
+mod readiness;
 mod remote_images;
 mod runtime;
 mod security_headers;
@@ -47,11 +49,12 @@ enum Command {
         /// App root directory
         #[arg(default_value = ".")]
         dir: PathBuf,
-        #[arg(short, long, default_value_t = 3000)]
-        port: u16,
-        /// Expose on the LAN (listen on 0.0.0.0, show the Network URL)
-        #[arg(long)]
-        host: bool,
+        /// Port to listen on (default: PORT, else 3000)
+        #[arg(short, long)]
+        port: Option<u16>,
+        /// Address to listen on; `--host` alone listens on all interfaces (0.0.0.0) [default: NOWAKI_HOST, else 127.0.0.1]
+        #[arg(long, value_name = "ADDR", num_args = 0..=1, default_missing_value = listen::ALL_INTERFACES)]
+        host: Option<String>,
         /// Open the default browser after startup
         #[arg(long)]
         open: bool,
@@ -73,11 +76,12 @@ enum Command {
         /// App root directory
         #[arg(default_value = ".")]
         dir: PathBuf,
-        #[arg(short, long, default_value_t = 3000)]
-        port: u16,
-        /// Listen on all interfaces (default: NOWAKI_HOST or 127.0.0.1)
-        #[arg(long)]
-        host: bool,
+        /// Port to listen on (default: PORT, else 3000)
+        #[arg(short, long)]
+        port: Option<u16>,
+        /// Address to listen on; `--host` alone listens on all interfaces (0.0.0.0) [default: NOWAKI_HOST, else 127.0.0.1]
+        #[arg(long, value_name = "ADDR", num_args = 0..=1, default_missing_value = listen::ALL_INTERFACES)]
+        host: Option<String>,
     },
     /// Prerender as a static site (SSG)
     Prerender {
@@ -96,9 +100,12 @@ enum Command {
         /// App root directory
         #[arg(default_value = ".")]
         dir: PathBuf,
-        /// Version to update to (default: latest), e.g. --to 0.11.0
+        /// Version or npm dist-tag to update to (default: latest), e.g. --to 1.0.0 or --to next. A version on a newer major first prints a readiness report and installs nothing while it lists something to change
         #[arg(long)]
         to: Option<String>,
+        /// Only print the readiness report for --to (read-only; exits 1 when something must change)
+        #[arg(long)]
+        check: bool,
     },
     /// Generate typed routes (.nowaki/types.d.ts)
     Typegen {
@@ -120,6 +127,7 @@ fn main() -> anyhow::Result<()> {
         } => {
             let root = dunce::canonicalize(&dir)?;
             runtime::check(&root)?;
+            let bind = listen::resolve(port, host)?;
             // Read by the dev renderer (server/render.mjs), which the sidecar runs with this
             // environment. Set here, before the runtime starts any other thread.
             if no_toolbar {
@@ -128,7 +136,7 @@ fn main() -> anyhow::Result<()> {
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
-                .block_on(dev::run(root, port, host, open))
+                .block_on(dev::run(root, bind, open))
         }
         Command::Build { dir, adapter } => {
             let root = dunce::canonicalize(&dir)?;
@@ -199,11 +207,12 @@ fn main() -> anyhow::Result<()> {
         Command::Start { dir, port, host } => {
             let root = dunce::canonicalize(&dir)?;
             runtime::check(&root)?;
+            let bind = listen::resolve(port, host)?;
             // Rust (axum) serves static files + assembles HTML; the Node prod-sidecar renders components.
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
-                .block_on(start::run(root, port, host))
+                .block_on(start::run(root, bind))
         }
         Command::Prerender {
             dir,
@@ -222,9 +231,9 @@ fn main() -> anyhow::Result<()> {
                 .build()?
                 .block_on(prerender::run(root, out, skip_build))
         }
-        Command::Upgrade { dir, to } => {
+        Command::Upgrade { dir, to, check } => {
             let root = dunce::canonicalize(&dir)?;
-            upgrade::run(root, to)
+            upgrade::run(root, to, check)
         }
         Command::Typegen { dir } => {
             let root = dunce::canonicalize(&dir)?;

@@ -133,8 +133,9 @@ const editJson = (dir, rel, fn) => edit(dir, rel, (s) => JSON.stringify(fn(JSON.
 function bump(dir, v, { core = v, pin = `=${core}`, changelog = true } = {}) {
   const cur = JSON.parse(readFileSync(path.join(dir, "packages/nowaki-cli/package.json"), "utf8")).version;
   edit(dir, "Cargo.toml", (s) => s.replace(/(\[workspace\.package\]\s*\nversion = )"[^"]+"/, `$1"${v}"`));
+  // nowaki-core has its own line: a literal version (the workspace one before 0.20.0).
   edit(dir, "crates/nowaki-core/Cargo.toml", (s) =>
-    core === v ? s : s.replace(/^version\.workspace = true$/m, `version = "${core}"`),
+    s.replace(/^version(?:\.workspace = true| = "[^"]+")$/m, `version = "${core}"`),
   );
   edit(dir, "crates/nowaki/Cargo.toml", (s) =>
     s.replace(/(nowaki-core = \{ path = "\.\.\/nowaki-core", version = )"[^"]+"/, `$1"${pin}"`),
@@ -196,8 +197,14 @@ const has = (list, re) => list.some((e) => re.test(e));
   const d = fixture();
   bump(d, "1.0.0", { core: "0.20.0", pin: "0.20.0" });
   const r = check(d, "1.0.0");
-  eq(r.errors, [], "caret pin of the right core version passes");
-  eq(has(r.warnings, /use "=0\.20\.0"/), true, "  … with a warning to pin exactly");
+  eq(has(r.errors, /pins nowaki-core "0\.20\.0"; use "=0\.20\.0"/), true, "caret pin of the right core version fails: the pin must be exact");
+}
+{
+  const d = fixture();
+  bump(d, "0.20.0", { core: "0.19.3" });
+  const r = check(d, "0.20.0");
+  eq(r.errors, [], "0.20.0 with nowaki-core left at 0.19.3 (its own line) passes");
+  eq(r.meta?.coreVersion, "0.19.3", "  … meta names nowaki-core's own version");
 }
 {
   const d = fixture();

@@ -1,3 +1,12 @@
+//! The engine of the [`nowaki`](https://crates.io/crates/nowaki) CLI: the oxc-based transform
+//! pipeline, resolver, bundler and module cache that `nowaki dev`, `nowaki build` and
+//! `nowaki prerender` run.
+//!
+//! **This crate is internal.** It is published so that `cargo install nowaki` works, and it is
+//! not a supported API for other programs. It has its own 0.x version line, independent of
+//! Nowaki's (a minor may break it, as 0.x allows), and `nowaki` depends on it with an exact `=`
+//! requirement. Use the `nowaki` CLI instead. See [docs/STABILITY.md](https://github.com/Tettu0530/nowaki/blob/main/docs/STABILITY.md).
+
 pub mod asset;
 pub mod budget;
 pub mod build;

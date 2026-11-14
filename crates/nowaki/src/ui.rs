@@ -1,7 +1,7 @@
 //! Terminal output styling (colors, banners). Respects NO_COLOR and non-TTY; stays readable without color.
 
 use std::io::IsTerminal;
-use std::net::{IpAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, UdpSocket};
 
 fn color() -> bool {
     std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
@@ -180,27 +180,41 @@ pub fn build_summary(
     println!();
 }
 
-/// Prints the LAN URL only when `show_network` is set. `mcp` is `nowaki dev`'s MCP endpoint, shown
-/// with the command that registers it with Claude Code.
+/// The URL to open this machine's browser at for a server listening on `bind`.
+pub fn browser_url(bind: IpAddr, port: u16) -> String {
+    let bind = bind.to_canonical();
+    if bind.is_unspecified() || bind == Ipv4Addr::LOCALHOST || bind == Ipv6Addr::LOCALHOST {
+        format!("http://localhost:{port}/")
+    } else {
+        format!("http://{}:{port}/", crate::listen::url_host(bind))
+    }
+}
+
+/// `bind` is the address the server listens on: all interfaces (`0.0.0.0` / `::`) show the Local
+/// and the LAN URL, a loopback address the Local URL, any other address its own Network URL. `mcp`
+/// is `nowaki dev`'s MCP endpoint, shown with the command that registers it with Claude Code.
 pub fn server_banner(
     label: &str,
     version: &str,
     port: u16,
     ready_ms: u128,
     features: &[&str],
-    show_network: bool,
+    bind: IpAddr,
     mcp: Option<&str>,
 ) {
+    let bind = bind.to_canonical();
     println!();
     println!("  {} {}", bold(&cyan(label)), dim(&format!("v{version}")));
     println!();
-    println!(
-        "  {}  {}    {}",
-        green("➜"),
-        bold("Local:"),
-        cyan(&format!("http://localhost:{port}/")),
-    );
-    if show_network {
+    if bind.is_unspecified() || bind.is_loopback() {
+        println!(
+            "  {}  {}    {}",
+            green("➜"),
+            bold("Local:"),
+            cyan(&browser_url(bind, port)),
+        );
+    }
+    if bind.is_unspecified() {
         if let Some(ip) = lan_ip() {
             println!(
                 "  {}  {}  {}",
@@ -209,6 +223,13 @@ pub fn server_banner(
                 cyan(&format!("http://{ip}:{port}/")),
             );
         }
+    } else if !bind.is_loopback() {
+        println!(
+            "  {}  {}  {}",
+            green("➜"),
+            bold("Network:"),
+            cyan(&browser_url(bind, port)),
+        );
     } else {
         println!(
             "  {}  {}  {}",

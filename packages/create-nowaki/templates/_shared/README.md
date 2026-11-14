@@ -13,8 +13,9 @@ npm run dev      # http://localhost:3000
 ```
 
 Other scripts: `npm run build`, `npm run start`, `npm run prerender`.
-Pass `--host` to expose dev on your LAN, `--open` to open the browser:
-`npm run dev -- --host --open`.
+Pass `--host` to expose dev on your LAN (or `--host <addr>` for one address),
+`--open` to open the browser: `npm run dev -- --host --open`. The port is
+`--port`, else `PORT`, else 3000.
 
 ## Update
 
@@ -25,8 +26,11 @@ npx nowaki upgrade        # bumps nowaki (CLI) and @nowaki-dev/runtime to latest
 `nowaki upgrade` detects your package manager and updates both packages,
 rewriting the `package.json` ranges. (A plain `npm update` won't cross a
 `0.x` minor, so prefer `nowaki upgrade` — or install `@latest` by hand.)
-Pin a version with `--to`, e.g. `npx nowaki upgrade --to 0.11.0`. Pre-1.0,
-check the release notes before upgrading; minors can include breaking changes.
+Pin a version with `--to`, e.g. `npx nowaki upgrade --to 1.0.0`. For a newer
+major it first prints a readiness report (what to change, with `file:line`)
+and installs nothing until that list is empty; `--check` only prints it.
+Pre-1.0, check the release notes before upgrading; minors can include
+breaking changes.
 
 ## Structure
 

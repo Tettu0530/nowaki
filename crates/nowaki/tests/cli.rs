@@ -798,3 +798,181 @@ fn every_server_command_refuses_a_runtime_older_than_the_cli_supports() {
     }
     assert!(!app.join("dist").exists(), "nothing is built");
 }
+
+#[test]
+fn every_server_command_refuses_a_runtime_of_a_newer_major() {
+    let bin = env!("CARGO_BIN_EXE_nowaki");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let runtime = dir.path().join("node_modules/@nowaki-dev/runtime");
+    std::fs::create_dir_all(&runtime).unwrap();
+    std::fs::write(
+        runtime.join("package.json"),
+        r#"{"name":"@nowaki-dev/runtime","version":"99.0.0"}"#,
+    )
+    .unwrap();
+    for cmd in ["dev", "build", "start", "prerender"] {
+        let out = Command::new(bin).arg(cmd).arg(dir.path()).output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{cmd} must fail:\n{stderr}");
+        assert!(
+            stderr.contains("@nowaki-dev/runtime 99.0.0 is a newer major than nowaki")
+                && stderr.contains(env!("CARGO_PKG_VERSION"))
+                && stderr.contains("npm i -D nowaki@99.0.0"),
+            "{cmd}:\n{stderr}"
+        );
+    }
+}
+
+/// An app that `nowaki start` gets far enough in to bind its port (it would then fail on the
+/// fake sidecar; the bind comes first).
+fn startable_app() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let app = dir.path();
+    std::fs::create_dir_all(app.join("dist/client")).unwrap();
+    std::fs::write(app.join("dist/client/manifest.json"), "{}").unwrap();
+    let server = app.join("node_modules/@nowaki-dev/runtime/server");
+    std::fs::create_dir_all(&server).unwrap();
+    std::fs::write(server.join("prod-sidecar.mjs"), "process.exit(1);\n").unwrap();
+    dir
+}
+
+/// Runs `nowaki <args>` with `env`, without PORT / NOWAKI_HOST from the outer environment.
+fn run_with_env(args: &[&str], env: &[(&str, &str)]) -> (bool, String) {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_nowaki"));
+    cmd.args(args).env_remove("PORT").env_remove("NOWAKI_HOST");
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let out = cmd.output().unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    (out.status.success(), text)
+}
+
+#[test]
+fn dev_and_start_read_port_and_host_with_the_flags_winning() {
+    let app = startable_app();
+    let dir = app.path().to_str().unwrap();
+    // Each case holds the port, so the server's bind fails and names what it tried.
+    let taken = |host: &str, port: u16| std::net::TcpListener::bind((host, port)).unwrap();
+    for cmd in ["dev", "start"] {
+        let held = taken("127.0.0.1", 5860);
+        let (ok, out) = run_with_env(&[cmd, dir], &[("PORT", "5860")]);
+        assert!(
+            !ok && out.contains("port 5860 is already in use on 127.0.0.1"),
+            "{cmd} PORT:\n{out}"
+        );
+        let (ok, out) = run_with_env(&[cmd, dir, "--port", "5860"], &[("PORT", "1")]);
+        assert!(
+            !ok && out.contains("port 5860 is already in use"),
+            "{cmd} --port wins:\n{out}"
+        );
+        let (ok, out) = run_with_env(
+            &[cmd, dir, "--port", "5860", "--host", "127.0.0.1"],
+            &[("NOWAKI_HOST", "0.0.0.0")],
+        );
+        assert!(
+            !ok && out.contains("in use on 127.0.0.1"),
+            "{cmd} --host <addr> wins:\n{out}"
+        );
+        drop(held);
+
+        let held = taken("0.0.0.0", 5861);
+        let (ok, out) = run_with_env(&[cmd, dir, "--port", "5861", "--host"], &[]);
+        assert!(
+            !ok && out.contains("port 5861 is already in use on 0.0.0.0"),
+            "{cmd} bare --host:\n{out}"
+        );
+        let (ok, out) = run_with_env(&[cmd, dir, "--port", "5861"], &[("NOWAKI_HOST", "0.0.0.0")]);
+        assert!(
+            !ok && out.contains("in use on 0.0.0.0"),
+            "{cmd} NOWAKI_HOST:\n{out}"
+        );
+        drop(held);
+
+        let (ok, out) = run_with_env(&[cmd, dir], &[("PORT", "web")]);
+        assert!(
+            !ok && out.contains("PORT=\"web\" is not a port number"),
+            "{cmd} bad PORT:\n{out}"
+        );
+        // `--host <dir>`: the directory would be read as the address.
+        let (ok, out) = run_with_env(&[cmd, "--host", dir], &[]);
+        assert!(
+            !ok && out.contains("is not an address"),
+            "{cmd} --host <dir>:\n{out}"
+        );
+    }
+}
+
+#[test]
+fn upgrade_to_a_new_major_reports_what_to_change_and_installs_nothing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let app = dir.path();
+    let pkg = r#"{"dependencies":{"@nowaki-dev/runtime":"^0.19.3"},"devDependencies":{"nowaki":"^0.19.3"}}"#;
+    std::fs::write(app.join("package.json"), pkg).unwrap();
+    std::fs::create_dir_all(app.join("routes/api")).unwrap();
+    std::fs::write(
+        app.join("routes/_error.tsx"),
+        "export default () => null;\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("routes/api/hello.ts"),
+        "export function get() {\n  return { ok: true };\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("nowaki.config.mjs"),
+        "export default {\n  basepath: \"/x\",\n};\n",
+    )
+    .unwrap();
+    let dir_s = app.to_str().unwrap();
+    for args in [
+        &["upgrade", dir_s, "--to", "1.0.0"][..],
+        &["upgrade", dir_s, "--to", "1.0.0", "--check"],
+    ] {
+        let (ok, out) = run_with_env(args, &[]);
+        assert!(!ok, "{args:?}:\n{out}");
+        for want in [
+            "Readiness for 1.0.0",
+            "routes/_error.tsx:1",
+            "routes/api/hello.ts:1",
+            "nowaki.config.mjs:2",
+            "Did you mean `basePath`?",
+            "nothing was installed",
+        ] {
+            assert!(out.contains(want), "{args:?}: {want}\n{out}");
+        }
+    }
+    assert_eq!(
+        std::fs::read_to_string(app.join("package.json")).unwrap(),
+        pkg,
+        "read-only"
+    );
+    assert!(!app.join("node_modules").exists() && !app.join("package-lock.json").exists());
+
+    // Fixed: --check passes (exit 0) and still installs nothing.
+    std::fs::rename(app.join("routes/_error.tsx"), app.join("routes/_500.tsx")).unwrap();
+    std::fs::write(
+        app.join("routes/api/hello.ts"),
+        "export function GET() {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("nowaki.config.mjs"),
+        "export default { basePath: \"/x\" };\n",
+    )
+    .unwrap();
+    let (ok, out) = run_with_env(&["upgrade", dir_s, "--to", "1.0.0", "--check"], &[]);
+    assert!(ok && out.contains("nothing must change"), "{out}");
+    assert_eq!(
+        std::fs::read_to_string(app.join("package.json")).unwrap(),
+        pkg
+    );
+
+    let (ok, out) = run_with_env(&["upgrade", dir_s, "--to", "^1"], &[]);
+    assert!(!ok && out.contains("neither a version"), "{out}");
+}

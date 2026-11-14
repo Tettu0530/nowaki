@@ -27,7 +27,18 @@ nowaki dev [dir]          # Dev server (HMR + Islands hydration)
 nowaki build [dir]        # Production build (client + server)
 nowaki start [dir]        # Serve the built app
 nowaki prerender [dir]    # Static site generation (SSG)
+nowaki upgrade [dir]      # Update nowaki + @nowaki-dev/runtime (--to <version>, --check)
 ```
+
+`nowaki dev` and `nowaki start` listen on `--port`, else `PORT`, else 3000, and on
+`--host <addr>`, else `NOWAKI_HOST`, else `127.0.0.1`. `--host` alone listens on all
+interfaces (`0.0.0.0`). Put the directory before a bare `--host`
+(`nowaki dev my-app --host`): a word right after it is read as the address.
+
+`nowaki upgrade --to <version>` for a newer major (from 0.20.0 on) first prints a
+read-only readiness report: what in the app must change (with `file:line` and the fix)
+and heuristics to review. It installs nothing while something must change;
+`--check` only prints the report (exit code 1 when something must change).
 
 Scaffold a new app with `npm create nowaki@latest my-app`.
 

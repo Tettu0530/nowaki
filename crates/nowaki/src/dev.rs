@@ -28,10 +28,13 @@ pub struct DevState {
     /// Recent build / SSR / live / HMR errors for the MCP `recent_errors` tool.
     pub(crate) errors: Arc<crate::mcp::ErrorLog>,
     pub(crate) port: u16,
+    /// The address the dev server listens on (`--host` / `NOWAKI_HOST`), for `dev_config`.
+    pub(crate) bind_ip: std::net::IpAddr,
     pub(crate) plugins: bool,
     /// Roots /@fs/ may serve from (canonical paths). Anything else is rejected.
     fs_allow: Vec<PathBuf>,
-    /// Whether --host exposes all interfaces. Used for WS Origin/Host checks.
+    /// Whether the bind is reachable from other machines (`--host`, `--host <addr>` or a
+    /// non-loopback `NOWAKI_HOST`). Used for the Host and WS Origin checks.
     pub(crate) expose: bool,
     /// nowaki.config routing from `.nowaki/routing.json` (read at startup; a change needs a restart,
     /// which `apply_changes` says).
@@ -51,8 +54,36 @@ impl DevState {
     }
 }
 
-pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<()> {
+pub async fn run(root: PathBuf, bind: crate::listen::Bind, open: bool) -> Result<()> {
     let started = Instant::now();
+    // Bound first: a taken port fails before any child process starts. What the bind exposes is
+    // read from the socket, so a name that resolves to loopback keeps the loopback-only checks.
+    let listener = crate::listen::bind(&bind).await?;
+    let local = listener.local_addr()?;
+    let port = local.port();
+    let expose = crate::listen::is_exposed(local.ip());
+    // The renderer (server/sidecar.mjs) calls back on 127.0.0.1:<port>, and the MCP endpoint is
+    // loopback-only: a bind that doesn't cover 127.0.0.1 (`--host 10.0.0.5`, `--host ::1`) also
+    // listens there.
+    let loopback = if crate::listen::covers_loopback_v4(local.ip()) {
+        None
+    } else {
+        let lo = crate::listen::Bind {
+            host: crate::listen::DEFAULT_HOST.to_string(),
+            port,
+        };
+        match crate::listen::bind(&lo).await {
+            Ok(l) => Some(l),
+            // `::` on a dual-stack system already answers on 127.0.0.1.
+            Err(_) if local.ip().is_unspecified() => None,
+            Err(e) => {
+                return Err(e.context(format!(
+                    "the dev renderer also needs 127.0.0.1:{port} next to {}:{port}",
+                    bind.host
+                )))
+            }
+        }
+    };
 
     // The plugin host imports nowaki.config (plugins, and the build-time config site-config.mjs
     // normalizes) while typegen runs and the sidecar starts; it's waited for before serving:
@@ -116,6 +147,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         live_hub,
         errors,
         port,
+        bind_ip: local.ip(),
         plugins: plugin_host.is_some(),
         fs_allow: compute_fs_allow(&root),
         expose,
@@ -152,9 +184,6 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         .layer(axum::middleware::from_fn(crate::csp::layer))
         .layer(axum::middleware::map_response(crate::security_headers::add));
 
-    let bind_host = if expose { "0.0.0.0" } else { "127.0.0.1" };
-    let listener = tokio::net::TcpListener::bind((bind_host, port)).await?;
-
     let mut features: Vec<&str> = Vec::new();
     if plugin_host.is_some() {
         features.push("plugins");
@@ -165,17 +194,27 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         port,
         started.elapsed().as_millis(),
         &features,
-        expose,
+        local.ip(),
         Some(&crate::mcp::url(port)),
     );
 
     if open {
-        crate::ui::open_browser(&format!("http://localhost:{port}/"));
+        crate::ui::open_browser(&crate::ui::browser_url(local.ip(), port));
     }
 
     // Don't wait for open HMR/live sockets on shutdown; just stop serving and drop the children.
+    let also_loopback = {
+        let (app, base) = (app.clone(), base.clone());
+        async move {
+            match loopback {
+                Some(l) => serve(l, app, base).await,
+                None => std::future::pending().await,
+            }
+        }
+    };
     tokio::select! {
         r = serve(listener, app, base) => r?,
+        r = also_loopback => r?,
         _ = crate::shutdown::signal() => {}
     }
     drop(plugin_host);
@@ -1130,16 +1169,15 @@ async fn proxy_to_sidecar(
     let log_path = req.uri().path().to_string();
     let headers = req.headers().clone();
 
-    if crate::form_body::multipart_content_length_over_limit(&headers) {
-        let (status, body) = crate::form_body::multipart_payload_too_large();
-        return (status, body).into_response();
+    if let Some(rejected) = crate::form_body::reject_before_read(&headers) {
+        return rejected.into_response();
     }
 
     let proxy_limit = crate::form_body::proxy_body_limit();
     let body = match axum::body::to_bytes(req.into_body(), proxy_limit).await {
         Ok(b) => b,
         Err(err) => {
-            let (status, body) = crate::form_body::proxy_body_to_bytes_error(&headers, &err);
+            let (status, body) = crate::form_body::proxy_body_to_bytes_error(&err);
             return (status, body).into_response();
         }
     };
@@ -1244,11 +1282,12 @@ pub(crate) fn is_loopback_host(host: &str) -> bool {
     matches!(h, "localhost" | "127.0.0.1" | "::1")
 }
 
-/// DNS-rebinding guard for every dev route. On the default bind (127.0.0.1) a page on another
-/// domain can rebind its name to 127.0.0.1 and read dev responses same-origin: server-only source
-/// with its source map, `/@fs/` files, `.npmrc`. The browser still sends the attacker's name as
-/// `Host`, so only `localhost` / `127.0.0.1` / `[::1]` are accepted. `--host` exposes the server on
-/// purpose and accepts any Host. A request without Host (no browser sends one) is let through.
+/// DNS-rebinding guard for every dev route. On a loopback bind (the default 127.0.0.1) a page on
+/// another domain can rebind its name to 127.0.0.1 and read dev responses same-origin: server-only
+/// source with its source map, `/@fs/` files, `.npmrc`. The browser still sends the attacker's
+/// name as `Host`, so only `localhost` / `127.0.0.1` / `[::1]` are accepted. A non-loopback bind
+/// (`--host`, `--host <addr>`, `NOWAKI_HOST`; `expose`, read from the socket) exposes the server
+/// on purpose and accepts any Host. A request without Host (no browser sends one) is let through.
 pub(crate) fn dev_host_allowed(headers: &axum::http::HeaderMap, expose: bool) -> bool {
     if expose {
         return true;

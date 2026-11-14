@@ -11,11 +11,12 @@ Nowaki follows [SemVer](https://semver.org/). During **0.x alpha**, however:
 - Once the public API (CLI commands, authoring conventions, the public exports
   of `@nowaki-dev/runtime`) is mostly settled, we go to **1.0.0**; from then on
   breaking changes happen only in a major.
-- Since 0.19.3, `nowaki` / `nowaki-core` (crates and the npm CLI),
-  `@nowaki-dev/runtime` and `create-nowaki` / `create-nowaki-app` share one version
-  and are released together (create-* had already published 0.19.2, so the shared
-  version starts at 0.19.3). `@nowaki-dev/markdoc` keeps its own (0.1.x). The CLI
-  refuses a runtime older than its own version.
+- Since 0.19.3, `nowaki` (the crate and the npm CLI), `@nowaki-dev/runtime` and
+  `create-nowaki` / `create-nowaki-app` share one version and are released together
+  (create-* had already published 0.19.2, so the shared version starts at 0.19.3).
+  `@nowaki-dev/markdoc` keeps its own (0.1.x), and so does the internal `nowaki-core`
+  crate (its own 0.x line, see below). The CLI refuses a runtime older than its own
+  version or of another major (on 0.x, another minor).
 - Every release has a matching `vX.Y.Z` tag and CHANGELOG entry.
 
 ## Distribution channels
@@ -89,11 +90,15 @@ all of these against the tag:
 
 Two packages have their own version:
 
-- **`nowaki-core`** may be on its own line (`version` in `crates/nowaki-core/Cargo.toml`).
-  The check requires the `nowaki-core` requirement in `crates/nowaki/Cargo.toml` to name
-  that version, and warns unless it is an exact `=X.Y.Z` pin (a caret would let
-  `cargo install nowaki` pick a newer nowaki-core). Bump it whenever its code changed;
-  the workflow publishes it only if that version is not on crates.io yet.
+- **`nowaki-core`** is on its own 0.x line: a literal `version` in
+  `crates/nowaki-core/Cargo.toml` (not `version.workspace`). The check requires the
+  `nowaki-core` requirement in `crates/nowaki/Cargo.toml` to be exactly `=` that version
+  (a caret fails: it would let `cargo install nowaki` pick a newer nowaki-core). Bump it
+  whenever its code changed since its last release (a patch, or a minor when its API
+  breaks; `cargo-semver-checks` in CI compares it with the version on crates.io) and the
+  pin with it; the workflow publishes it only if that version is not on crates.io yet. The
+  line so far: 0.19.3 (with Nowaki 0.19.3), 0.20.0 (with Nowaki 0.20.0, whose release PR
+  bumps it: the crate docs changed), then independent of Nowaki's 1.x.
 - **`@nowaki-dev/markdoc`** follows its own SemVer. Bump `packages/nowaki-markdoc/package.json`
   when it changed; it ships with the next release tag and is skipped when its version is
   already on npm.
