@@ -331,7 +331,10 @@ and `scripts/gallery-e2e.mjs` / `gallery-browser-test.mjs` check the exit criter
   `server/live.mjs`, `client/live.js`. State on the server, HTML patches over WS;
   `server/live-event.mjs` is the per-event POST transport (all servers, the only
   one on the adapters). `server/live-hub.mjs` is a runtime-neutral JS port of the
-  WS session, not wired into a server yet.
+  WS session, not wired into a server yet. The live.js tag (WS on `nowaki start`, POST on the
+  adapters, none in prerender output; streamed shells carry it whenever the build has live
+  islands) is written by `start.rs` `assemble` and `document.mjs` `liveScript`, checked against
+  `crates/nowaki/tests/fixtures/live-script-cases.json` (`start.rs` tests, `scripts/router-test.mjs`).
 - **Plugins / virtual modules** — `PluginBridge` (`transform`, `compile_tsrx`,
   `resolve_id`, `load`); `NowakiCore::resolve_spec` + the `VirtualResolve` trait.
   The host (`server/plugin-host.mjs`, started by `plugins::spawn` before typegen) also
@@ -376,7 +379,11 @@ and `scripts/gallery-e2e.mjs` / `gallery-browser-test.mjs` check the exit criter
   build compiles env.ts to `dist/server/env.js` and writes `env-public.json`. Startup validation:
   `app.mjs` `createApp`, `web.mjs` (first request), dev `sidecar.mjs` (first request). Client import
   guard: `build.rs` `emit` and the dev browser transform (`env::is_server_env_module`). Types:
-  `typegen.rs` `render_env`. Tests: `scripts/env-schema-test.mjs`.
+  `typegen.rs` `render_env`. Tests: `scripts/env-schema-test.mjs`. `.env` precedence (`.env`, then
+  `.env.local`, then the real environment) is implemented twice, `server/env.mjs` `loadEnv` and
+  `nowaki_core::env::dotenv_values` (client defines; `main.rs` `load_dotenv_knobs` for `NOWAKI_*`),
+  driven by `crates/nowaki-core/tests/fixtures/dotenv-cases.json` (`tests/dotenv.rs`,
+  `scripts/env-schema-test.mjs`).
 - **Sessions (`ctx.session`)** — `server/session.mjs` (`defineSession`, `configureSessions`,
   `createSession`: WebCrypto only, keys from `NOWAKI_SESSION_SECRET` via HKDF). `context.mjs`
   creates the session on first access (`__sessionMode`: `"crossSite"` / `"live"` make it
