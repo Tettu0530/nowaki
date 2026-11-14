@@ -39,7 +39,8 @@ export default function Layout({ children }: { children: unknown }) {
   "routes/index.tsx": `import Counter from "../islands/Counter.tsx";
 import Styled from "../islands/Styled.tsx";
 import { greeting } from "../lib/greeting.ts";
-export const head = "<style>#page-style { color: rgb(30, 30, 30); }</style>";
+import { nonce } from "@nowaki-dev/runtime";
+export const meta = () => ({ head: \`<style nonce="\${nonce()}">#page-style { color: rgb(30, 30, 30); }</style>\` });
 export default function Home() {
   return <main><h1 id="title">HMR</h1><Counter /><Styled /><p id="greeting">{greeting}</p><p id="page-style">styled</p><div style="height:4000px"></div><p id="bottom">bottom</p></main>;
 }\n`,
@@ -357,7 +358,7 @@ async function run(mode) {
   ok = await edit(cdp, dir, "lib/greeting.ts", `"hello from lib"`, `"hi from lib"`, `document.getElementById("greeting")?.textContent === "hi from lib"`, "server-only lib");
   check(`${tag} server-only lib edit: the page re-rendered with it`, ok, await text("greeting"));
   await samePage("server-only lib edit");
-  // The route's own head (a <style> in the head region, nonced under CSP) follows.
+  // The route's own head (a <style> in the head region, with nonce() for the CSP) follows.
   check(`${tag} the route's head <style> applies`, (await color("page-style")) === "rgb(30, 30, 30)", await color("page-style"));
   ok = await edit(cdp, dir, "routes/index.tsx", "rgb(30, 30, 30)", "rgb(31, 32, 33)", `getComputedStyle(document.getElementById("page-style")).color === "rgb(31, 32, 33)"`, "route head");
   check(`${tag} route head edit: the new <style> applies`, ok, await color("page-style"));

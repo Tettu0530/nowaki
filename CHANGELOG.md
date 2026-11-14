@@ -94,8 +94,33 @@ milestone's worth of work; the codename is noted per entry.
   `id_rsa`, `*.p12`, …), and its workspace root is never the home directory or `/`: an app whose
   nearest `.git` was a dotfiles repository in `$HOME` now gets only its own directory (add a
   `pnpm-workspace.yaml` to share a monorepo's `node_modules`).
+- **Breaking: under `NOWAKI_CSP`, the nonce goes only on the scripts and styles Nowaki emits.**
+  It used to go on every `<script>` / `<style>` in the HTML, so a script that reached the page
+  as raw HTML ran under `enforce`. Now an inline `<script>` / `<style>` the app writes as raw
+  HTML (an `export const head` string, `dangerouslySetInnerHTML`, Markdown / MDX / Markdoc
+  output, `ctx.html()` markup, a `public/` HTML file) gets no nonce: under `enforce` it is
+  blocked, under `report-only` it is reported. Nowaki's own tags (the islands runtime, live.js,
+  page scripts, the View Transition style, dev's hmr.js) are unaffected, and so are external
+  same-origin files, inline `style="…"` attributes and class names. Who: apps with
+  `NOWAKI_CSP=enforce` and inline scripts or styles in their own markup. How: put
+  `nonce={nonce()}` on the tag (`import { nonce } from "@nowaki-dev/runtime"`), or move the code
+  to a file (`export const scripts`, a CSS import, `public/`). A static `export const head`
+  string is evaluated once: return the tag from `meta()` instead,
+  `` export const meta = () => ({ head: `<style nonce="${nonce()}">…</style>` }) ``. Content
+  (Markdown, MDX, Markdoc) that relied on an inline `<style>` should use classes, `style`
+  attributes, or a `<style nonce={nonce()}>` in an MDX component. Run with
+  `NOWAKI_CSP=report-only` first to see what would be blocked.
+- **`nowaki prerender` (and the static adapter) writes pages without a nonce**, also when
+  `NOWAKI_CSP` is set: a static file has no per-response nonce, so the one it baked in was the
+  same for every visitor. Set a static site's CSP in `_headers` yourself.
 
 ### Added
+- **`nonce()` from `@nowaki-dev/runtime`**: the CSP nonce for an inline `<script>` / `<style>`
+  the app renders on the server (`<style nonce={nonce()}>`), in pages, layouts, `meta()`,
+  loaders, actions, middleware and API routes. It returns the render's marker, which the
+  response's nonce replaces as the page is sent (also on ISR hits); `""` with `NOWAKI_CSP` off.
+  Loading and error boundaries may use it too: the client router gives their tags the page's
+  nonce.
 - **`nowaki upgrade --to <version>` readiness report.** For a version on a newer major (or
   0.x minor) from 0.20.0 on, `nowaki upgrade` first prints what in the app must change,
   with `file:line` and the fix: `_error.*` route files, `export const middleware` in
@@ -197,6 +222,20 @@ milestone's worth of work; the codename is noted per entry.
   and **`/@fs/` denies more credential files** and never widens to the home directory.
 - **Page actions don't run for `OPTIONS`** (a CORS preflight any site can send, which skips the
   same-origin check).
+- **The CSP nonce no longer covers HTML injection** (see Upgrade notes). Under `NOWAKI_CSP` each
+  render writes a random marker on the tags Nowaki emits, and the CSP layer (`nowaki dev` /
+  `nowaki start`, the node / bun / deno / Vercel / Cloudflare adapters) turns only those into the
+  response's nonce; raw HTML in the page can't know the marker, so an injected `<script>` /
+  `<style>` gets no nonce and `enforce` blocks it. The marker never reaches the browser, and an
+  ISR entry (`nowaki start`, the Cloudflare Worker cache) keeps its own while every hit gets a
+  fresh nonce. The client router gives a fetched page's tags this document's nonce only when they
+  carried that response's nonce (from its CSP header), so a client navigation doesn't nonce
+  injected tags either. `islands.js` imports island modules and the router only from where it is
+  served (`/_nowaki/`; in dev also `/islands/`), and reads its own `#nowaki-runtime` tag (the last
+  one loading it), so an injected `<nowaki-island src>` or `#nowaki-runtime` can't make it load
+  another script.
+- `nowaki start` sends `public/` HTML files with their ETag under `NOWAKI_CSP` again (their body no
+  longer changes per response).
 - Hardening: the server function allowlist ignores inherited names (`__proto__`, `toString`);
   `ctx.cookies` has no prototype; a blank or whitespace-padded `NOWAKI_REVALIDATE_SECRET` is
   trimmed (blank leaves the endpoint off).

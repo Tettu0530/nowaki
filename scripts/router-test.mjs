@@ -10,7 +10,7 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { scanRoutes, matchRoute, underPrefix, routeUnderPrefix, isRouteGroup, stripRouteGroups, interceptTarget } from "../packages/nowaki-runtime/server/router.mjs";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
-import { matchBoundary, nonceStyles, shouldTransition } from "../packages/nowaki-runtime/client/router-core.js";
+import { carryNonces, hasNonce, matchBoundary, responseNonce, shouldTransition } from "../packages/nowaki-runtime/client/router-core.js";
 import { pageMeta, prodDocument, prodShell } from "../packages/nowaki-runtime/server/document.mjs";
 import { Link, transitionName } from "../packages/nowaki-runtime/navigation.js";
 
@@ -575,16 +575,38 @@ eq(stripRouteGroups("/(.)/x"), "/(.)/x", "(.) stays literal");
   await rm(dir, { recursive: true, force: true });
 }
 
-// nonceStyles: a fetched page's <style> tags get this document's nonce before DOMParser parses
-// them (the nonce the server injected, or none); scripts and text are left alone.
+// carryNonces: before DOMParser parses a fetched page, the tags its server nonced (they carry the
+// response's nonce, `from`) get this document's; any other nonce on a <script> / <style> (raw HTML
+// that guessed one, another response's) is dropped, and tags without one stay without.
 {
-  const html = '<style nonce="aa">a{}</style><STYLE nonce="aa" media="x">b{}</STYLE><style>c{}</style><script nonce="aa">1</script><stylex></stylex><p>&lt;style</p>';
+  const html = '<style nonce="aa">a{}</style><STYLE media="x" nonce="aa">b{}</STYLE><style>c{}</style><script nonce="aa" src="/r.js"></script><script nonce="zz">1</script><stylex nonce="aa"></stylex><p nonce="aa">&lt;style nonce="aa"</p>';
   eq(
-    nonceStyles(html, "me"),
-    '<style nonce="me">a{}</style><style nonce="me" media="x">b{}</STYLE><style nonce="me">c{}</style><script nonce="aa">1</script><stylex></stylex><p>&lt;style</p>',
-    "nonceStyles: every <style> gets this document's nonce",
+    carryNonces(html, "me", "aa"),
+    '<style nonce="me">a{}</style><STYLE media="x" nonce="me">b{}</STYLE><style>c{}</style><script nonce="me" src="/r.js"></script><script>1</script><stylex nonce="aa"></stylex><p nonce="aa">&lt;style nonce="aa"</p>',
+    "carryNonces: the server's tags get this document's nonce, a guessed one is dropped",
   );
-  eq(nonceStyles(html, undefined), html, "nonceStyles: no nonce (no CSP), the HTML as it came");
+  eq(
+    carryNonces(html, "me", undefined),
+    '<style>a{}</style><STYLE media="x">b{}</STYLE><style>c{}</style><script src="/r.js"></script><script>1</script><stylex nonce="aa"></stylex><p nonce="aa">&lt;style nonce="aa"</p>',
+    "carryNonces: a response without a nonce (boundaries, no CSP there) keeps none",
+  );
+  eq(carryNonces(html, undefined, "aa"), html, "carryNonces: no nonce here (no CSP), the HTML as it came");
+  const res = (h) => ({ headers: new Headers(h) });
+  eq(
+    [
+      responseNonce(res({ "content-security-policy": "script-src 'self' 'nonce-abc123'; style-src-elem 'self' 'nonce-abc123'" })),
+      responseNonce(res({ "content-security-policy-report-only": "script-src 'nonce-def'" })),
+      responseNonce(res({})),
+    ],
+    ["abc123", "def", undefined],
+    "responseNonce: from the enforced or report-only header",
+  );
+  const el = (nonce, attr) => ({ nonce, getAttribute: () => attr });
+  eq(
+    [hasNonce(el("me", null), "me"), hasNonce(el("", "me"), "me"), hasNonce(el("aa", null), "me"), hasNonce(el("", null), undefined)],
+    [true, true, false, false],
+    "hasNonce: only this document's nonce counts",
+  );
 }
 
 // View Transitions: when the client router transitions, the route export's document output, and

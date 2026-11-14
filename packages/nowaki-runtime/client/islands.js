@@ -9,10 +9,24 @@ if (import.meta.env.BASE_URL !== "/" && typeof window !== "undefined") {
   window.__nowakiBase = import.meta.env.BASE_URL.slice(0, -1);
 }
 
-// The CSP nonce of the initial response (NOWAKI_CSP). The router and CSS shims stamp it on <style>
-// they insert; read once because client navigation may replace the nonced <script>.
-if (typeof document !== "undefined" && !window.__nowakiNonce) {
-  window.__nowakiNonce = document.querySelector("script[nonce]")?.nonce || undefined;
+// Nowaki's own runtime tag: the last <script id="nowaki-runtime"> that loads this module. It comes
+// after the page's HTML, so markup injected there can't stand in for it.
+const own = [...document.querySelectorAll("script#nowaki-runtime")].filter((s) => s.src === import.meta.url).pop();
+
+// The CSP nonce of the initial response (NOWAKI_CSP), from that tag. The router and CSS shims
+// stamp it on what they insert; read once because client navigation may replace the tag.
+if (own?.nonce) window.__nowakiNonce = own.nonce;
+
+// Modules are imported only from where this runtime is served (the build's client files; in dev
+// also the dev server's /islands/), so an injected <nowaki-island src> can't load another script.
+const DIR = new URL(".", import.meta.url).href;
+function ours(src) {
+  try {
+    const url = new URL(src, location.href).href;
+    return url.startsWith(DIR) || (DIR.includes("/node_modules/") && url.startsWith(location.origin + "/islands/"));
+  } catch {
+    return false;
+  }
 }
 
 export function hydrateIslands(root = document) {
@@ -38,6 +52,7 @@ function schedule(el, strategy) {
 
 function mount(el, clientOnly) {
   const src = el.getAttribute("src");
+  if (!ours(src)) return console.error(`[nowaki] not an island module: ${src}`);
   const props = JSON.parse(el.getAttribute("props") || "{}");
   import(src).then(
     (mod) => (clientOnly ? render : hydrate)(h(mod.default, props), el),
@@ -120,9 +135,8 @@ hydrateIslands();
 // (keyboard, script) waits for the router and is replayed as a client navigation. Visitors who
 // never follow a link never download it.
 if (typeof document !== "undefined") {
-  const runtimeEl = document.getElementById("nowaki-runtime");
-  const routerSrc = runtimeEl && runtimeEl.getAttribute("data-router");
-  if (routerSrc) {
+  const routerSrc = own?.getAttribute("data-router");
+  if (routerSrc && ours(routerSrc)) {
     let loading = null;
     const load = () => (loading ??= import(routerSrc).catch(() => {}));
     // A reload of an entry the router made (or keyed): back / forward to the router's other

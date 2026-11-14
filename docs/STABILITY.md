@@ -137,7 +137,8 @@ code. In particular:
 - **Headers.** Removing or changing a response header Nowaki documents, or the headers the
   adapters' `_headers` / `.vercel/output` / worker set.
 - **CSP.** Changing the directives sent under `NOWAKI_CSP=report-only` / `enforce`, or which
-  elements get the nonce, in a way that blocks content the previous release allowed.
+  elements get the nonce (the scripts and styles Nowaki emits, and tags written with `nonce()`;
+  never raw HTML), in a way that blocks content the previous release allowed.
 - **Deploy contract.** Changing an adapter's output path, its start command, or the
   environment variables it reads.
 - **Platforms.** Dropping a Preact major from the peer range, or raising the minimum

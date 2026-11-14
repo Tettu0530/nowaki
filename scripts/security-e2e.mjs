@@ -447,7 +447,7 @@ async function internalHeaderSweep(req, label, origin) {
     ["/"], ["/"], ["/about"], ["/isr"], ["/isr"], ["/isr?cb=1"], ["/isr-tagged"], ["/isr-tagged"],
     ["/vary", { headers: { "accept-language": "de" } }], ["/vary", { headers: { "accept-language": "de" } }],
     ["/isr-cookie", { headers: { cookie: "user=alice" } }], ["/isr-sets-cookie"], ["/isr-sets-cookie"],
-    ["/stream"], ["/stream-early"], ["/live"], ["/env"], ["/feed.xml"], ["/og/intro.png"], ["/robots.txt"],
+    ["/stream"], ["/stream-early"], ["/live"], ["/raw-html"], ["/env"], ["/feed.xml"], ["/og/intro.png"], ["/robots.txt"],
     ["/nope"], ["/boom?boom=1"], ["/old-docs/intro"], ["/p/hello"], ["/photos/1"],
     ["/photos/1", { headers: { "x-nowaki-intercept": "/photos/@modal" } }],
     ["/api/hello"], ["/api/echo", { method: "POST", headers: json, body: "{}" }],
@@ -479,6 +479,27 @@ async function internalHeaderSweep(req, label, origin) {
   shared = [...new Set(shared)];
   check(`${label}: no internal x-nowaki-* response header (${cases.length} requests x2)${leaks.length ? ` leaked: ${leaks.join(", ")}` : ""}`, leaks.length === 0);
   check(`${label}: no Set-Cookie on a shared-cacheable response${shared.length ? ` (${shared.join(", ")})` : ""}`, shared.length === 0);
+  await rawHtmlNonce(req, label);
+}
+
+// Under NOWAKI_CSP (when the server sends a nonce policy): raw HTML in a page (routes/raw-html.tsx,
+// as if from a CMS) gets no nonce on its inline <script> / <style>, a guessed nonce stays wrong,
+// and only Nowaki's runtime tag and the nonce() style carry the response's nonce.
+async function rawHtmlNonce(req, label) {
+  const r = await req("/raw-html");
+  // Both headers: under report-only, the enforced one is the default `frame-ancestors` policy.
+  const policy = `${r.headers.get("content-security-policy") ?? ""} ${r.headers.get("content-security-policy-report-only") ?? ""}`;
+  const nonce = /'nonce-([0-9a-f]{32})'/.exec(policy)?.[1];
+  const html = await r.text();
+  if (!nonce) return;
+  const tags = html.match(/<(script|style)\b[^>]*>/gi) ?? [];
+  const injected = tags.filter((t) => /id="raw-|evil\.invalid/.test(t));
+  check(`${label}: injected <script> / <style> in raw HTML get no nonce (${injected.length} tags)`,
+    injected.length === 4 && !injected.some((t) => t.includes(`nonce="${nonce}"`)));
+  check(`${label}: Nowaki's tags and nonce() still get it`,
+    tags.filter((t) => !injected.includes(t)).every((t) => t.includes(`nonce="${nonce}"`)) && tags.some((t) => t.includes('id="helper-style"') && t.includes(nonce)));
+  const markers = [...html.matchAll(/nonce="([0-9a-f]{32})"/g)].filter((m) => m[1] !== nonce && m[1] !== "0123456789abcdef0123456789abcdef");
+  check(`${label}: no render marker reaches the page`, markers.length === 0);
 }
 
 // `headers <base> [label]`: only the sweep, against any HTTP server (nowaki start, node / vercel
@@ -506,6 +527,10 @@ if (mode === "headers" || mode === "headers-worker") {
     };
     const ctx = { waitUntil: () => {}, passThroughOnException: () => {} };
     await internalHeaderSweep((p, init) => worker.fetch(new Request(ORIGIN + p, init), env, ctx), "cloudflare worker", ORIGIN);
+    // Again under NOWAKI_CSP=enforce: the render's marker header stays internal, ISR hits included.
+    process.env.NOWAKI_CSP = "enforce";
+    await internalHeaderSweep((p, init) => worker.fetch(new Request(ORIGIN + p, init), env, ctx), "cloudflare worker, NOWAKI_CSP", ORIGIN);
+    delete process.env.NOWAKI_CSP;
     // The session and revalidate checks of the server modes, against the Worker: fetch() to
     // ORIGIN goes to its fetch handler.
     const realFetch = globalThis.fetch;

@@ -1,13 +1,14 @@
 // ISR demo. Opt in with `export const revalidate = <seconds>` and `nowaki start` caches HTML
 // per path; when stale, it serves the old copy immediately and regenerates in the background.
 // CDN/edge deployments get the same behavior via Cache-Control (s-maxage + stale-while-revalidate).
-import type { PageProps } from "@nowaki-dev/runtime";
+import { nonce, type PageProps } from "@nowaki-dev/runtime";
 
 export const revalidate = 2;
 
 export const title = "ISR — Nowaki";
-// Inline style: scripts/csp-e2e.mjs checks cached (HIT) responses still get a fresh CSP nonce.
-export const head = `<style>.isr-renders{font-variant-numeric:tabular-nums}</style>`;
+// Inline style with nonce(): scripts/csp-e2e.mjs checks cached (HIT) responses still get a fresh
+// CSP nonce on it.
+export const meta = () => ({ head: `<style nonce="${nonce()}">.isr-renders{font-variant-numeric:tabular-nums}</style>` });
 
 // Module-scoped counter. Increments on each regeneration (loader run).
 let renders = 0;

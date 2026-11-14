@@ -127,12 +127,13 @@ echo "$LIVE_OUT" | grep -qE '"sig":"v1\.[^"]+"'
 test "$(echo "$LIVE_OUT" | grep -cF "$LIVE_SIG")" = 0
 test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'content-type: application/json' -H 'x-nowaki-live: 1' -H 'origin: http://evil.test' -d "$LIVE_EV" http://127.0.0.1:3310/__nowaki/live-event)" = "403"
 kill $NODE_PID
-# CSP on the node adapter (report-only): nonce on every script/style
+# CSP on the node adapter (report-only): the nonce on Nowaki's scripts/styles and nonce() tags only
 # (with NOWAKI_SERVER_TIMING=1 on the same run: the handler's phases on the node adapter)
 NOWAKI_CSP=report-only NOWAKI_SERVER_TIMING=1 PORT=3312 node examples/hello/dist/server/index.mjs &
 CSPN_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3312/ >/dev/null && break; sleep 1; done
 node scripts/csp-e2e.mjs http://127.0.0.1:3312 --report-only
+node scripts/security-e2e.mjs headers http://127.0.0.1:3312 "node adapter, NOWAKI_CSP"
 curl -s -D - -o /dev/null http://127.0.0.1:3312/ | tr -d '\r' | grep -qiE '^server-timing: mw;dur=[0-9.]+, loader;dur=[0-9.]+, render;dur=[0-9.]+$'
 kill $CSPN_PID
 

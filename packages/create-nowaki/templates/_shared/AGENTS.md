@@ -266,6 +266,13 @@ session.ts   ctx.session options (optional)
   the app uses Jetstream live islands; try `NOWAKI_CSP=report-only` before `enforce`; behind
   a reverse proxy on `nowaki start`, set `NOWAKI_TRUST_PROXY=1` and forward the public
   host as `x-forwarded-host`. See the upstream [SECURITY.md](https://github.com/Tettu0530/nowaki/blob/main/SECURITY.md).
+- **Inline scripts and styles under `NOWAKI_CSP`.** The nonce goes only on Nowaki's own
+  tags and on tags written with `nonce()` from `@nowaki-dev/runtime`
+  (`<style nonce={nonce()}>`); an inline `<script>` / `<style>` in raw HTML (a `head`
+  string, `dangerouslySetInnerHTML`, Markdown) is blocked under `enforce`. For a tag in
+  `head`, return it from `meta()`: `` meta = () => ({ head: `<style nonce="${nonce()}">…</style>` }) ``.
+  Prefer CSS imports, classes and files in `public/`. `nonce()` is server-only: never import
+  it in an island.
 - **Do not embed secrets** in client islands, loaders returned to the page, or static
   prerender output. ISR pages must not include per-user secrets.
 

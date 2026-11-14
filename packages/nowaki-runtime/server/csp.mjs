@@ -1,9 +1,14 @@
 // Opt-in Content Security Policy with a per-response nonce for the adapters
-// (NOWAKI_CSP=report-only|enforce). Mirrors crates/nowaki/src/csp.rs: every <script> / <style>
-// in an HTML response gets nonce="…", streams stay streams, and a response that already sets a
-// CSP is left alone. No node: imports, so the Edge worker uses it too.
+// (NOWAKI_CSP=report-only|enforce). Mirrors crates/nowaki/src/csp.rs: the nonce goes only on the
+// tags Nowaki rendered, which carry `nonce="<marker>"` with the render's marker (server/nonce.mjs),
+// never on a <script> / <style> that came in as raw HTML. Streams stay streams, and a response
+// that already sets a CSP is left alone (its marker attributes are removed). No node: imports, so
+// the Edge worker uses it too.
 
 const env = globalThis.process?.env ?? {};
+
+/// The response header a render names its marker in. Internal: applyCsp and csp.rs remove it.
+export const CSP_MARKER_HEADER = "x-nowaki-csp-marker";
 
 export function cspMode() {
   const v = String(env.NOWAKI_CSP ?? "").trim().toLowerCase();
@@ -28,25 +33,23 @@ export function cspPolicy(nonce, reportUri = env.NOWAKI_CSP_REPORT_URI) {
   return p;
 }
 
-const TAG = /<(script|style)(?=[\s>/])/gi;
-// A tail that could still become `<script` / `<style` once the next chunk arrives.
-const PARTIAL = /<(s(c(r(i(pt?)?)?)?)?|st(y(le?)?)?)?$/i;
-
-export function injectNonce(html, nonce) {
-  return html.replace(TAG, `$& nonce="${nonce}"`);
+/// `html` with every `nonce="<marker>"` replaced by `to` (the response's `nonce="…"`, or "").
+export function stampMarker(html, marker, to) {
+  return html.replaceAll(`nonce="${marker}"`, to);
 }
 
-/// A TransformStream of strings that injects the nonce across chunk boundaries.
-export function nonceTransform(nonce) {
+/// A TransformStream of strings that replaces the marker attribute across chunk boundaries.
+export function markerTransform(marker, to) {
+  const needle = `nonce="${marker}"`;
   let carry = "";
   return new TransformStream({
     transform(chunk, controller) {
-      let s = carry + chunk;
-      const m = PARTIAL.exec(s);
-      carry = m ? m[0] : "";
-      if (m) s = s.slice(0, m.index);
-      // A carried `<script` / `<style` followed by a delimiter is complete; inject it now.
-      controller.enqueue(injectNonce(s, nonce));
+      const s = stampMarker(carry + chunk, marker, to);
+      // A tail that could still become the marker with the next chunk waits for it.
+      let keep = Math.min(needle.length - 1, s.length);
+      while (keep > 0 && !needle.startsWith(s.slice(s.length - keep))) keep--;
+      carry = s.slice(s.length - keep);
+      controller.enqueue(s.slice(0, s.length - keep));
     },
     flush(controller) {
       if (carry) controller.enqueue(carry);
@@ -59,27 +62,41 @@ function headerOf(headers, name) {
   return undefined;
 }
 
-/// Applies the CSP to a handler result ({ status, headers, body | stream }); non-HTML results and
-/// results with their own CSP pass through unchanged.
+/// Applies the CSP to a handler result ({ status, headers, body | stream }); non-HTML results pass
+/// through unchanged. The marker the render named (CSP_MARKER_HEADER) becomes this response's
+/// nonce. A result without one keeps its body as it is: nothing in it gets the nonce.
 export function applyCsp(result) {
   const mode = cspMode();
   if (mode === "off" || !result) return result;
   const ct = String(headerOf(result.headers, "content-type") ?? "");
   if (!ct.startsWith("text/html")) return result;
-  if (headerOf(result.headers, "content-security-policy") || headerOf(result.headers, "content-security-policy-report-only")) {
-    return result;
-  }
-  const nonce = newNonce();
   const headers = { ...(result.headers ?? {}) };
+  let marker;
+  for (const k of Object.keys(headers)) {
+    if (k.toLowerCase() !== CSP_MARKER_HEADER) continue;
+    marker ??= String(headers[k]);
+    delete headers[k];
+  }
+  // Only a marker as nonce.mjs makes them: an empty or short value must never match app attributes.
+  if (marker !== undefined && !/^[0-9a-f]{32}$/.test(marker)) marker = undefined;
+  // With the app's own CSP there is no nonce of ours: the marked tags just lose the marker.
+  const own = headerOf(headers, "content-security-policy") || headerOf(headers, "content-security-policy-report-only");
+  if (own && !marker) return result;
+  let to = "";
+  if (!own) {
+    const nonce = newNonce();
+    headers[mode === "enforce" ? "content-security-policy" : "content-security-policy-report-only"] = cspPolicy(nonce);
+    to = `nonce="${nonce}"`;
+  }
+  if (!marker) return { ...result, headers };
   for (const k of Object.keys(headers)) if (k.toLowerCase() === "content-length") delete headers[k];
-  headers[mode === "enforce" ? "content-security-policy" : "content-security-policy-report-only"] = cspPolicy(nonce);
   if (result.stream) {
     const stream = result.stream
       .pipeThrough(new TextDecoderStream())
-      .pipeThrough(nonceTransform(nonce))
+      .pipeThrough(markerTransform(marker, to))
       .pipeThrough(new TextEncoderStream());
     return { ...result, headers, stream };
   }
-  const body = typeof result.body === "string" ? injectNonce(result.body, nonce) : result.body;
+  const body = typeof result.body === "string" ? stampMarker(result.body, marker, to) : result.body;
   return { ...result, headers, body };
 }

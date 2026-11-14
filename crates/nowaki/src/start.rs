@@ -203,6 +203,9 @@ struct CacheEntry {
     tags: Box<[Box<str>]>,
     /// The route pattern (`x-nowaki-route`, sent only while tracing), for a hit's span name.
     route: Option<Box<str>>,
+    /// The render's CSP marker, on the tags Nowaki emitted. Stays on the server: every response
+    /// names it to the CSP layer, which turns it into that response's nonce.
+    csp_marker: Option<Box<str>>,
 }
 
 impl IsrCache {
@@ -789,6 +792,9 @@ fn cached_response(
     for (n, v) in &entry.headers {
         builder = builder.header(n.as_str(), v.as_str());
     }
+    if let Some(m) = &entry.csp_marker {
+        builder = builder.header(crate::csp::MARKER_HEADER, m.as_ref());
+    }
     let mut resp = if entry.with_etag {
         entry.body.respond(req, builder, entry.status)
     } else {
@@ -933,10 +939,11 @@ async fn page_to_entry(
     let kept = kept_headers(h);
     let tags = tags_of(h);
     let route = route_of(h);
+    let csp_marker = csp_marker_of(h);
     let status = resp.status().as_u16();
     let bytes = resp.bytes().await.ok()?;
     let meta: PageMeta = serde_json::from_slice(&bytes).ok()?;
-    let html = assemble(&state.manifest, &meta);
+    let html = assemble(&state.manifest, &meta, csp_marker.as_deref());
     Some(CacheEntry {
         status,
         body: crate::encoding::Variants::new(html.into(), None, None),
@@ -949,7 +956,16 @@ async fn page_to_entry(
         path,
         tags,
         route,
+        csp_marker,
     })
+}
+
+/// The render's CSP marker (`server/nonce.mjs`), when it named a valid one.
+fn csp_marker_of(h: &reqwest::header::HeaderMap) -> Option<Box<str>> {
+    h.get(crate::csp::MARKER_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .filter(|m| crate::csp::valid_marker(m))
+        .map(Into::into)
 }
 
 fn isr_secs_of(h: &reqwest::header::HeaderMap) -> Option<u64> {
@@ -1068,6 +1084,7 @@ fn maybe_store(
             path: pathname.into(),
             tags: tags_of(resp_headers),
             route: route_of(resp_headers),
+            csp_marker: csp_marker_of(resp_headers),
         },
         epoch,
     );
@@ -1204,31 +1221,21 @@ fn url_encode_path(p: &str) -> String {
     out
 }
 
-/// Whether a public file may carry its `W/"size-mtime"` ETag. Not an HTML file under CSP: the CSP
-/// layer stamps each response with a new nonce, so the body changes while the file doesn't, and a
-/// 304 would pair the cached body (old nonce) with a new policy.
-fn public_etag(content_type: &str, csp: crate::csp::Mode) -> bool {
-    csp == crate::csp::Mode::Off || !content_type.starts_with("text/html")
-}
-
 /// `no-cache` with an ETag: public/ names aren't hashed, so a browser revalidates each use and
-/// gets a 304 while the file is unchanged.
+/// gets a 304 while the file is unchanged. HTML files too under `NOWAKI_CSP`: the nonce goes only
+/// on what Nowaki renders, never into a file's own tags, so the body is the same every time.
 async fn serve_public(file: &PublicFile, req: &axum::http::HeaderMap) -> Response {
-    let etag = public_etag(file.content_type, crate::csp::mode());
-    let not_modified = etag
-        && req
-            .get(header::IF_NONE_MATCH)
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|v| {
-                v.split(',')
-                    .any(|t| t.trim() == file.etag || t.trim() == "*")
-            });
-    let mut builder = Response::builder()
+    let not_modified = req
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| {
+            v.split(',')
+                .any(|t| t.trim() == file.etag || t.trim() == "*")
+        });
+    let builder = Response::builder()
         .header(header::CONTENT_TYPE, file.content_type)
-        .header(header::CACHE_CONTROL, "public, no-cache");
-    if etag {
-        builder = builder.header(header::ETAG, &file.etag);
-    }
+        .header(header::CACHE_CONTROL, "public, no-cache")
+        .header(header::ETAG, &file.etag);
     if not_modified {
         return builder
             .status(StatusCode::NOT_MODIFIED)
@@ -1380,8 +1387,9 @@ async fn proxy(
     let bytes = resp.bytes().await.unwrap_or_default();
 
     {
+        let marker = csp_marker_of(&resp_headers);
         let html = match serde_json::from_slice::<PageMeta>(&bytes) {
-            Ok(meta) => assemble(&state.manifest, &meta),
+            Ok(meta) => assemble(&state.manifest, &meta, marker.as_deref()),
             Err(_) => String::from_utf8_lossy(&bytes).to_string(),
         };
         let isr_secs = if cacheable && status == StatusCode::OK {
@@ -1405,6 +1413,10 @@ async fn proxy(
                 continue;
             }
             builder = builder.header(name, value);
+        }
+        // For the CSP layer, which removes it.
+        if let Some(m) = &marker {
+            builder = builder.header(crate::csp::MARKER_HEADER, m.as_ref());
         }
         // Per-user responses (with Set-Cookie) never go into the shared cache.
         if let Some(secs) = isr_secs {
@@ -1434,8 +1446,13 @@ async fn proxy(
 }
 
 /// Rust port of prodDocument (JS). Islands are picked from <nowaki-island name="..."> in the body.
-fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
+/// `marker`: the render's CSP marker (`x-nowaki-csp-marker`), written on the scripts added here so
+/// the CSP layer gives them the response's nonce, as the renderer did for its own tags.
+fn assemble(manifest: &Manifest, meta: &PageMeta, marker: Option<&str>) -> String {
     let base = &manifest.asset_base;
+    let nonce = marker
+        .map(|m| format!(" nonce=\"{m}\""))
+        .unwrap_or_default();
     let island_names = scan_island_names(&meta.body);
     let has_islands = (!island_names.is_empty() || meta.router) && manifest.runtime.is_some();
 
@@ -1474,7 +1491,7 @@ fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
             None => String::new(),
         };
         format!(
-            "<script id=\"nowaki-runtime\" type=\"module\" src=\"{base}{}\"{data_router}></script>",
+            "<script{nonce} id=\"nowaki-runtime\" type=\"module\" src=\"{base}{}\"{data_router}></script>",
             manifest.runtime.as_ref().unwrap()
         )
     } else {
@@ -1483,7 +1500,9 @@ fn assemble(manifest: &Manifest, meta: &PageMeta) -> String {
     let live_script = if meta.body.contains("<nowaki-live") {
         match &manifest.live_runtime {
             Some(f) => {
-                format!("<script id=\"nowaki-live\" type=\"module\" src=\"{base}{f}\"></script>")
+                format!(
+                    "<script{nonce} id=\"nowaki-live\" type=\"module\" src=\"{base}{f}\"></script>"
+                )
             }
             None => String::new(),
         }
@@ -1676,12 +1695,34 @@ mod tests {
     }
 
     #[test]
-    fn public_html_has_no_etag_under_csp() {
-        use crate::csp::Mode;
-        assert!(public_etag("text/html; charset=utf-8", Mode::Off));
-        assert!(!public_etag("text/html; charset=utf-8", Mode::Enforce));
-        assert!(!public_etag("text/html; charset=utf-8", Mode::ReportOnly));
-        assert!(public_etag("text/css; charset=utf-8", Mode::Enforce));
+    fn assembled_scripts_carry_the_render_marker_only() {
+        let manifest = Manifest {
+            runtime: Some("islands-1.js".into()),
+            live_runtime: Some("live-1.js".into()),
+            asset_base: "/_nowaki/".into(),
+            ..Default::default()
+        };
+        let meta = PageMeta {
+            body: r#"<nowaki-island name="C"></nowaki-island><nowaki-live></nowaki-live><script>raw()</script>"#.into(),
+            title: "t".into(),
+            head: r#"<style>raw{}</style>"#.into(),
+            lang: "en".into(),
+            html_attrs: String::new(),
+            body_attrs: String::new(),
+            router: false,
+        };
+        let m = "0123456789abcdef0123456789abcdef";
+        let html = assemble(&manifest, &meta, Some(m));
+        assert!(html.contains(&format!(
+            r#"<script nonce="{m}" id="nowaki-runtime" type="module" src="/_nowaki/islands-1.js">"#
+        )));
+        assert!(html.contains(&format!(
+            r#"<script nonce="{m}" id="nowaki-live" type="module" src="/_nowaki/live-1.js">"#
+        )));
+        assert!(html.contains("<script>raw()</script>") && html.contains("<style>raw{}</style>"));
+        assert_eq!(html.matches("nonce=").count(), 2);
+        let plain = assemble(&manifest, &meta, None);
+        assert!(!plain.contains("nonce="));
     }
 
     #[test]
@@ -1707,6 +1748,7 @@ mod tests {
             path: path.into(),
             tags: tags.iter().map(|t| Box::<str>::from(*t)).collect(),
             route: None,
+            csp_marker: None,
         }
     }
 

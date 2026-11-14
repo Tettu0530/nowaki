@@ -464,6 +464,36 @@ try {
   const vtViolations = await cdp.evalAsync(`return window.__cspViolations;`);
   check(`no CSP violations through the View Transition navigations (${vtViolations.join(", ")})`, vtViolations.length === 0);
 
+  // Raw HTML (routes/raw-html.tsx): its inline <script> / <style> get no nonce, so under
+  // NOWAKI_CSP they stay blocked, on a full load and after a client navigation, while nonce() and
+  // Nowaki's own tags keep working. The injected <nowaki-island src> and #nowaki-runtime tag never
+  // make islands.js import anything from evil.invalid (with or without a CSP).
+  const rawState = () => cdp.evalAsync(`
+    const color = (id) => getComputedStyle(document.getElementById(id)).color;
+    return { csp: !!window.__nowakiNonce, ran: window.__rawRan ?? null, raw: color('raw-probe'), helper: color('helper-probe'),
+      fake: document.getElementById('raw-fake')?.nonce === window.__nowakiNonce, same: window.__sameDoc === 1,
+      hydrated: !!document.querySelector('nowaki-island[name="Counter"]')?.__nowakiHydrated };`);
+  const evilRequests = () => cdp.events.filter((e) => e.method === "Network.requestWillBeSent" && /evil\.invalid/.test(e.params?.request?.url ?? "")).length;
+  await cdp.load(BASE + "/raw-html");
+  await cdp.waitFor(`document.querySelector('nowaki-island[name="Counter"]')?.__nowakiHydrated`);
+  let raw = await rawState();
+  check(`raw HTML, full load: the page hydrates and nonce() styles apply (${JSON.stringify(raw)})`, raw.hydrated && raw.helper === "rgb(0, 128, 0)");
+  if (raw.csp) {
+    check(`raw HTML, full load: its inline script and style are blocked (${JSON.stringify(raw)})`, raw.ran === null && raw.raw !== "rgb(255, 0, 0)" && !raw.fake);
+  }
+  await cdp.load(BASE + "/");
+  await cdp.evalAsync(`
+    window.__nav = (href) => { const a=document.createElement('a'); a.href=href; a.textContent=href; document.body.appendChild(a); a.click(); };
+    window.__sameDoc = 1; window.__nav('/raw-html'); return true;`);
+  await cdp.waitFor(`document.getElementById('raw-title') && document.querySelector('nowaki-island[name="Counter"]')?.__nowakiHydrated`);
+  raw = await rawState();
+  check(`raw HTML, client navigation: swapped in, hydrated, nonce() styles apply (${JSON.stringify(raw)})`, raw.same && raw.hydrated && raw.helper === "rgb(0, 128, 0)");
+  if (raw.csp) {
+    check(`raw HTML, client navigation: its style is blocked and no tag gains the nonce (${JSON.stringify(raw)})`, raw.ran === null && raw.raw !== "rgb(255, 0, 0)" && !raw.fake);
+  }
+  await sleep(300);
+  check(`no injected island or router is fetched (${evilRequests()} requests to evil.invalid)`, evilRequests() === 0);
+
   // Under a basePath, a same-origin link outside it belongs to another app: a full load.
   if (P) {
     await cdp.load(BASE + "/");

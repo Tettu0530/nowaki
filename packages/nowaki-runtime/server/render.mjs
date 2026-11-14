@@ -10,6 +10,7 @@ import { wrapIsland } from "./island-directive.mjs";
 import { liveInitialState, liveTopics, liveView } from "./live.mjs";
 import { liveProps } from "./live-sign.mjs";
 import { pageMeta } from "./document.mjs";
+import { nonceAttr } from "./nonce.mjs";
 
 const ISLAND_EXT = /\.(tsx|jsx|ts|js|tsrx)$/;
 
@@ -107,20 +108,23 @@ export function renderDocument({ mod, body, meta }) {
   return `${head}${body}${tail}`;
 }
 
+// Under NOWAKI_CSP each tag carries the render's marker (the response's nonce once sent).
 function devScripts({ islands, live: hasLive }) {
+  const n = nonceAttr();
   // As in prod, islands.js lazily imports the SPA router from data-router after hydration.
   const router = islands
-    ? '<script id="nowaki-runtime" type="module" src="/node_modules/@nowaki-dev/runtime/client/islands.js" data-router="/node_modules/@nowaki-dev/runtime/client/router.js"></script>\n'
+    ? `<script${n} id="nowaki-runtime" type="module" src="/node_modules/@nowaki-dev/runtime/client/islands.js" data-router="/node_modules/@nowaki-dev/runtime/client/router.js"></script>\n`
     : "";
   const live = hasLive
-    ? '<script id="nowaki-live" type="module" src="/node_modules/@nowaki-dev/runtime/client/live.js"></script>\n'
+    ? `<script${n} id="nowaki-live" type="module" src="/node_modules/@nowaki-dev/runtime/client/live.js"></script>\n`
     : "";
-  return `${router}${live}${HMR_SCRIPT}`;
+  return `${router}${live}${hmrScript()}`;
 }
 
 // `nowaki dev --no-toolbar` / NOWAKI_TOOLBAR=0: hmr.js then never loads the dev toolbar.
 const TOOLBAR_OFF = /^(0|off|false)$/i.test(process.env.NOWAKI_TOOLBAR ?? "");
-const HMR_SCRIPT = `<script type="module" src="/node_modules/@nowaki-dev/runtime/client/hmr.js"${TOOLBAR_OFF ? ' data-toolbar="0"' : ""}></script>`;
+const hmrScript = () =>
+  `<script${nonceAttr()} type="module" src="/node_modules/@nowaki-dev/runtime/client/hmr.js"${TOOLBAR_OFF ? ' data-toolbar="0"' : ""}></script>`;
 
 function escapeHtml(s) {
   return String(s)
@@ -141,7 +145,7 @@ export function errorPage(message) {
 <pre style="white-space:pre-wrap;margin:0">${escapeHtml(message)}</pre>
 <div style="margin-top:1.5rem;color:#8a8f98">Fix the error and save; the page reloads automatically.</div>
 </div>
-${HMR_SCRIPT}
+${hmrScript()}
 </body>
 </html>`;
 }

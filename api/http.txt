@@ -36,6 +36,7 @@ x-nowaki-cache (response header: HIT | STALE | MISS)  # crates/nowaki/src/start.
 /__nowaki/route-css  # crates/nowaki/src/dev.rs, packages/nowaki-runtime/server/sidecar.mjs
 /__nowaki/server-functions  # crates/nowaki/src/dev.rs, packages/nowaki-runtime/server/sidecar.mjs
 x-nowaki-cc  # packages/nowaki-runtime/server/purge-cloudflare.mjs
+x-nowaki-csp-marker  # crates/nowaki/src/csp.rs, crates/nowaki/src/start.rs, packages/nowaki-runtime/server/csp.mjs
 x-nowaki-intercept  # crates/nowaki/src/forward.rs, crates/nowaki/src/start.rs, packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js, packages/nowaki-runtime/server/handler.mjs, packages/nowaki-runtime/server/purge-cloudflare.mjs
 x-nowaki-live  # crates/nowaki/src/forward.rs, packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/live.js, packages/nowaki-runtime/server/live-event.mjs
 x-nowaki-nav  # crates/nowaki/src/forward.rs, packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js

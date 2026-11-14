@@ -123,19 +123,34 @@ not run on the production request path unless you embed their output in the app.
 
 - **Content Security Policy (opt-in).** `NOWAKI_CSP=report-only` sends
   `Content-Security-Policy-Report-Only` and `NOWAKI_CSP=enforce` sends
-  `Content-Security-Policy`, with `script-src` / `style-src-elem` limited to
-  `'self'` plus a nonce that Nowaki adds to every `<script>` and `<style>` in the
-  HTML (including `export const head`). `NOWAKI_CSP_REPORT_URI` adds a
-  `report-uri`. Start with `report-only`: inline event handlers (`onclick="…"`),
-  `javascript:` URLs, and third-party scripts are blocked under `enforce`. A
-  response that sets its own CSP is left alone. **The nonce goes on every `<script>` / `<style>`
-  in the HTML, including ones that reach the page as raw HTML** (`dangerouslySetInnerHTML`,
-  Markdown or CMS content rendered unescaped): the policy does not contain HTML injection on the
-  server-rendered page, so sanitize raw HTML yourself. It does block inline handlers,
-  `javascript:` URLs, and scripts that client code inserts without the nonce. **A CDN that caches HTML**
-  (`s-maxage` on Vercel) caches the nonce too, so every visitor of a cached copy
-  gets the same one; `nowaki start`'s own ISR cache and the Cloudflare Worker's
-  ISR cache re-nonce each response.
+  `Content-Security-Policy`, with `script-src` / `style-src-elem` limited to `'self'` plus a
+  nonce that is new for every response. `NOWAKI_CSP_REPORT_URI` adds a `report-uri`. A response
+  that sets its own CSP is left alone. Start with `report-only`: under `enforce`, inline event
+  handlers (`onclick="…"`), `javascript:` URLs, third-party scripts and inline scripts or styles
+  without the nonce are blocked.
+
+  **The nonce goes only on the scripts and styles Nowaki emits** (the islands runtime, live.js,
+  page scripts, the View Transition style, dev's hmr.js) **and on tags the app writes with
+  `nonce()`** (`<style nonce={nonce()}>`, from `@nowaki-dev/runtime`; in a `head` string, return
+  it from `meta()`). Each render writes a random marker on those tags; the CSP layer of every
+  server (`nowaki dev` / `start`, and the node, bun, deno, Vercel and Cloudflare adapters) turns
+  exactly those attributes into the response's nonce, and the marker never reaches the browser.
+  An inline `<script>` / `<style>` that reaches the page as raw HTML (`dangerouslySetInnerHTML`,
+  Markdown / MDX / Markdoc or CMS content, an `export const head` string, a `public/` HTML file)
+  can't know the marker and gets no nonce, and a `nonce="…"` it guesses stays wrong, so `enforce`
+  contains HTML injection on the server-rendered page and after client navigation (the router
+  gives a fetched page's tags this document's nonce only when they carried that response's own).
+  The islands runtime imports island modules and the SPA router only from the build's client
+  files (`/_nowaki/`; `/islands/` in dev), so an injected `<nowaki-island src>` or
+  `#nowaki-runtime` tag can't load another script. Raw HTML is still HTML: injected markup can
+  deface the page, add links and forms, and use same-origin scripts (`'self'`), so sanitize it.
+
+  **A CDN that caches HTML** (`s-maxage` on Vercel) caches the nonce too, so every visitor of a
+  cached copy gets the same one; `nowaki start`'s own ISR cache and the Cloudflare Worker's ISR
+  cache keep the render's marker on the server and give every response its own nonce. **Static
+  output** (`nowaki prerender`, the static adapter) has no per-response nonce: pages are written
+  without one, and a CSP for a static host goes in `_headers` (with hashes, or `'self'` and no
+  inline code).
 
 - **Set `NOWAKI_LIVE_SECRET`** in production when the app has live islands.
   Without it, each process signs live state with its own random key: state
@@ -193,7 +208,7 @@ tests when you change a default defense.
 | Multipart form bodies (`ctx.formData()`) | Oversized uploads and malformed boundaries exhausting memory | `server/multipart.mjs` (platform `Response.formData()` on a capped buffer) / `server/context.mjs` / `server/body-read.mjs` / `server/request-body.mjs`: default cap 10 MiB (`NOWAKI_FORM_BODY_LIMIT`) on `formData()`, `bodyText()`, and `bodyJson()`; `Content-Length` over the cap → **413** before read; Node streamed reads over the cap abort the socket (clients may see a reset rather than 413); bad bodies → **400**; `handler.mjs` maps `RequestBodyError` to 413/400 (JSON on API routes). Treat `File.name` as untrusted. Rust dev/start reject oversized multipart `Content-Length` and use `max(16 MiB, NOWAKI_FORM_BODY_LIMIT)` on the proxy buffer (`crates/nowaki/src/form_body.rs`). Server functions, live events and the revalidate endpoint read the body under their own cap (1 MiB / 64 KiB / 64 KiB) while streaming, so a chunked body with no `Content-Length` stops at that cap, not at the form limit; a body is read once (a second read reuses it) | `scripts/form-data-test.mjs`, `scripts/security-e2e.mjs`, `scripts/handler-test.mjs` (streamed bodies) |
 | Same-origin check on page actions and API routes (`server/origin.mjs`) | Cross-site form posts and `fetch` writes with the victim's cookies | `server/handler.mjs`: a POST / PUT / PATCH / DELETE to a route with `action`, or to an API or file route, is rejected (403, after middleware) when `Origin` is another site or `null`, or `Sec-Fetch-Site` is `cross-site`; GET / HEAD / OPTIONS are never checked. The same code runs on dev, `nowaki start` and every adapter. `export const csrf = false` opts a route out (`csrf = true` is the default and still accepted) | `scripts/handler-test.mjs`, `scripts/security-e2e.mjs` (dev + prod), `scripts/edge-handler-test.mjs` (Edge), `scripts/ci/e2e-adapters.sh` (node, vercel), `scripts/ci/e2e-runtimes.sh` |
 | Default security headers (`x-content-type-options: nosniff`, `x-frame-options: SAMEORIGIN`, `referrer-policy: strict-origin-when-cross-origin`, `cross-origin-opener-policy: same-origin`, and `content-security-policy: frame-ancestors 'self'` when the app sends no CSP) | MIME sniffing, clickjacking, cross-origin referrer and `window.opener` leaks | `crates/nowaki/src/security_headers.rs` (dev/start, ISR hits, static assets); `server/security-headers.mjs` (node/bun/deno/vercel/cloudflare adapters); `_headers` from `nowaki prerender` | `scripts/security-e2e.mjs` (dev + prod), `scripts/ci/e2e-adapters.sh`, `scripts/ci/e2e-runtimes.sh` |
-| Opt-in CSP with a per-response nonce (`NOWAKI_CSP=report-only` or `enforce`) | Injected inline scripts and styles | `crates/nowaki/src/csp.rs` (dev/start, streamed and ISR responses), `server/csp.mjs` (adapters); every `<script>` / `<style>` gets the response's nonce; the client runtime stamps it on styles it inserts (island CSS, client navigation, boundaries) | `scripts/csp-e2e.mjs` (start + node adapter), `scripts/csp-test.mjs`, browser tests under `enforce` |
+| Opt-in CSP with a per-response nonce (`NOWAKI_CSP=report-only` or `enforce`), only on the tags Nowaki emits and `nonce()` | Injected inline scripts and styles, including ones in raw HTML the page renders; injected island / runtime tags loading foreign scripts | `server/nonce.mjs` (a random marker per render on Nowaki's tags, named in the internal `x-nowaki-csp-marker` header), `crates/nowaki/src/csp.rs` (dev/start, streamed and ISR responses) and `server/csp.mjs` (adapters, Cloudflare ISR cache) replace only that marker; `start.rs` `assemble` and the ISR entries carry it. Client: `client/router-core.js` `carryNonces` (a fetched page's tags get this document's nonce only if they carried that response's), `client/islands.js` (island and router URLs must be under its own directory; its own `#nowaki-runtime` tag is the last one loading it); the runtime stamps the nonce on what it inserts (island CSS, the toolbar, HMR) | `scripts/csp-test.mjs`, `crates/nowaki/src/csp.rs` and `start.rs` unit tests, `scripts/csp-e2e.mjs` (start, dev, node adapter; `/raw-html`), `scripts/edge-handler-test.mjs` and `scripts/cf-cache-test.mjs` (Worker, ISR hits), `scripts/router-test.mjs`, `scripts/router-browser-test.mjs` under `enforce` (`/raw-html` full load and client navigation, no request for the injected island), slot / gallery / HMR / toolbar browser tests under `enforce` |
 | Live request context and `live.authorize` | Unauthorized live events; leaking internal headers to handlers | `crates/nowaki/src/live.rs` `context_headers` (only cookie, authorization, accept-language, user-agent, and the public host from the upgrade); `server/live.mjs` (`authorize` after the signature check, before the handler; refusal → `forbidden`) | `scripts/livetest.mjs` (dev + prod) |
 | Internal sidecar endpoints not proxied (`/__nowaki/live-render`, `/__nowaki/dev-info`) | Calling the trusted re-render endpoint with a forged request context or replayed state; listing app files through the public port | `crates/nowaki/src/forward.rs` `is_internal_path` (404 in dev/start; `/__nowaki/mcp` is listed too, so `start` never forwards it) | `scripts/security-e2e.mjs` (dev + prod), `scripts/mcp-e2e.mjs` |
 | Dev MCP endpoint is loopback-only (`/__nowaki/mcp`, `nowaki dev` only) | Reading routes, source paths, and error text (which can quote source) from another machine under `--host`, or from a web page via DNS rebinding | `crates/nowaki/src/mcp.rs` `request_allowed`: the TCP peer must be loopback, `Host` must be `localhost` / `127.0.0.1` / `[::1]`, and `Origin`, when sent, must be loopback (403 otherwise). Read-only tools; `module_graph` only reads app modules under the root and skips `.env` / `.git` / keys | `crates/nowaki/src/mcp.rs` unit tests, `scripts/mcp-e2e.mjs` |
