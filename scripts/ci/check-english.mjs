@@ -1,5 +1,6 @@
 // CI: the repo is English-only (AGENTS.md > Conventions). Fails on Japanese text in
-// tracked files, except the brand name.
+// tracked files, except the brand name. Run from the repo root:
+// node scripts/ci/check-english.mjs
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 

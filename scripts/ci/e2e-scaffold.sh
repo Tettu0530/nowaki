@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# CI: scaffold each create-nowaki template, install it against the workspace
-# runtime, then build and serve it with the local CLI.
-# Run from the repo root after `cargo build -p nowaki`.
+# CI: runs scripts/create-nowaki-test.mjs, then scaffolds each create-nowaki template (basics,
+# minimal), installs it against a packed workspace runtime, builds and serves it with the local
+# CLI on ports 3400-3401, and type-checks it.
+# Needs `cargo build -p nowaki`; run as `bash scripts/ci/e2e-scaffold.sh`.
 set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 # A failed step exits here: stop the servers this script started, or they keep the ports.
@@ -19,7 +20,8 @@ TARBALL=$(ls "$WORK"/nowaki-dev-runtime-*.tgz)
 
 # Type-check the scaffolded app with skipLibCheck off, using the shipped tsconfig.json and
 # type files plus a probe that imports a `?image` asset, a plain asset, a CSS module, reads
-# import.meta.env, and passes attributes to <Image>. tsc comes from $TSC, else from `tsc` on
+# import.meta.env, passes attributes to <Image>, and uses island `client:*` props; an unknown
+# <Image> attribute must be a type error. tsc comes from $TSC, else from `tsc` on
 # PATH; in CI (CI=true) a pinned typescript is installed into the app. Skipped otherwise.
 typecheck() {
   local app=$1 tsc=${TSC:-}
@@ -80,7 +82,8 @@ for t in basics minimal; do
     done
   fi
 
-  # The CLI under test is the local build, so drop the published `nowaki` devDependency.
+  # Point the runtime at the packed tarball, and drop devDependencies (the published `nowaki`
+  # CLI): the CLI under test is the local build.
   node -e '
     const fs = require("fs");
     const [file, tarball] = process.argv.slice(1);

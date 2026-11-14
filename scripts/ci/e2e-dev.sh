@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# CI: Start dev server and verify SSR, islands, API, and v0.3 routing
-# Run from the repo root after `cargo build -p nowaki` and `pnpm install`.
+# CI: `nowaki dev examples/hello` on $PORT (default 3000) checked over HTTP: SSR, islands, routing,
+# API routes, content, images, fonts, SEO, public/, server functions, plugins, Jetstream, and
+# security-e2e.mjs / mcp-e2e.mjs. Then, one after another on PORT+7..PORT+18: rules-e2e, i18n-e2e,
+# gallery-e2e, sourcemap-e2e, csp-e2e under NOWAKI_CSP=enforce, the HMR and toolbar browser tests
+# (when Chrome is found), and the SIGTERM / SIGKILL orphan checks.
+# Needs `cargo build -p nowaki` and `pnpm install`; run as `bash scripts/ci/e2e-dev.sh`.
 set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 # A failed step exits here: stop the servers this script started, or they keep the ports.
@@ -80,7 +84,7 @@ test "$(status $B/nope)" = "404"
 curl -s $B/nope | grep -q "Page not found"
 test "$(status "$B/boom?boom=1")" = "500"
 
-# API: legacy default, method dispatch, 405, streaming
+# API route with a default-export handler (method dispatch, 405 and streaming are further down)
 curl -sf $B/api/hello | grep -q '"hello":"nowaki"'
 # content collections in dev: a new Markdown file shows up without a restart, and a broken
 # frontmatter is reported instead of stopping the server
@@ -107,7 +111,6 @@ mcp_errors | grep -q 'content/docs/e2e-added.md:3: frontmatter'
 rm examples/hello/content/docs/e2e-added.md
 for i in $(seq 1 20); do curl -sf $B/docs >/dev/null && break; sleep 0.5; done
 curl -sf $B/docs | grep -q 'href="/docs/intro"'
-# route / layout CSS in dev: linked from the dev server, which serves only .css under the app
 # ?image + <Image>: AVIF then JPEG, sizes from the file, lazy by default; Markdown images too
 curl -sf $B/gallery | grep -q '<picture><source type="image/avif" srcset="/__nowaki/image?f=/hero.jpg&amp;w=640&amp;fmt=avif'
 curl -sf $B/gallery | grep -q 'width="1200" height="750" alt="A gradient" loading="eager"'
@@ -125,13 +128,13 @@ curl -sf "$B$FCSS" | grep -q 'size-adjust: '
 curl -sf "$B$FCSS" | grep -q -- '--font-body: "Atkinson Hyperlegible", "Atkinson Hyperlegible Fallback", sans-serif;'
 FT=$(echo "$FH" | grep -oE '/__nowaki/fonts/atkinson-hyperlegible-400-normal\.[0-9a-f]+\.ttf' | head -1)
 curl -s -D - -o /dev/null "$B$FT" | grep -qi '^content-type: font/ttf'
-# from porting an Astro site: a layout's head, CSS @import inlined, modules outside the
-# conventional folders, and no SPA router on a page without islands (dev and prod alike)
+# a layout's head, CSS @import inlined, modules outside the conventional folders (data/), and no
+# SPA router on a page without islands (dev and prod alike)
 curl -sf $B/about | grep -q '<meta name="x-layout-head" content="root" />'
 curl -sf $B/about | grep -q '<p id="greeting">Hello from data/</p>'
 ! curl -sf $B/about | grep -q 'id="nowaki-runtime"' || exit 1
 curl -sf "$B/__nowaki/css?f=styles/site.css" | grep -q -- '--site-token: rgb(9, 8, 7)'
-# An @import rule left in place (tokens.css itself mentions "@import" in a comment).
+# No @import rule is left in place (only line starts count: tokens.css mentions "@import" in a comment).
 ! curl -sf "$B/__nowaki/css?f=styles/site.css" | grep -qE '^[[:space:]]*@import[[:space:]]' || exit 1
 # route groups: routes/(marketing)/pricing.tsx at /pricing, with the group's layout and middleware
 curl -sf $B/pricing | grep -q '<div data-group="marketing"><main'
@@ -208,6 +211,7 @@ curl -sf $B/.well-known/security.txt | grep -q 'Contact:'
 ! curl -sf $B/.hidden | grep -q 'never served' || exit 1
 ! curl -sf $B/.private/secret.txt | grep -q 'never served' || exit 1
 ! curl -sf $B/public/robots.txt | grep -q 'User-agent' || exit 1
+# route / layout CSS in dev: linked from the dev server, which serves only .css under the app
 curl -sf $B/styled | grep -q '<link rel="stylesheet" href="/__nowaki/css?f=routes/styled.css"'
 curl -sf $B/styled | grep -q '<style nonce="">#styled-probe{color:rgb(1, 2, 3)}</style>'
 curl -s -D - "$B/__nowaki/css?f=routes/styled.css" | grep -qi '^content-type: text/css'
@@ -229,28 +233,28 @@ CJ=$(mktemp)
 test "$(status -c $CJ -X POST -d 'text=ci-todo' $B/todos)" = "302"
 curl -s -b $CJ $B/todos | grep -q "ci-todo"
 
-# v0.4 bundler features (rendered on the home page)
+# bundler features rendered on the home page
 curl -sf $B/ | grep -q 'class="badge_'          # CSS Modules scoped class
 curl -sf $B/ | grep -q 'src="/logo.svg"'        # asset import URL
 curl -sf $B/ | grep -q '<code>a→b</code>'       # cyclic dependency resolves
 curl -sf "$B/islands/Counter.tsx" | grep -q 'sourceMappingURL=data'  # dev source map
 
-# v0.5 plugin transform hook (nowaki.config.mjs rewrites a token before oxc)
+# plugin transform hook (nowaki.config.mjs rewrites a token before oxc)
 curl -sf $B/plugin | grep -q 'transformed-by-plugin'
 ! curl -sf $B/plugin | grep -q '__PLUGIN_MARK__' || exit 1
 
-# v0.5 TSRX: a .tsrx island compiled to Preact via @tsrx/preact, SSR + island wrap
+# TSRX: a .tsrx island compiled to Preact via @tsrx/preact, SSR + island wrap
 curl -sf $B/tsrx | grep -q 'nowaki-island name="TsrxCounter"'
 curl -sf $B/tsrx | grep -q 'tsrx: 5'
 
-# v0.6 Jetstream: server-reactive island SSRs as <nowaki-live> with initial state,
+# Jetstream: server-reactive island SSRs as <nowaki-live> with initial state,
 # loads live.js, and coexists with a client island on the same page
 curl -sf $B/live | grep -q 'nowaki-live name="LiveCounter"'
 curl -sf $B/live | grep -q 'live: 0'
 curl -sf $B/live | grep -q 'client/live.js'
 curl -sf $B/live | grep -q 'nowaki-island name="Counter"'
 
-# v0.8 server functions: "use server" RPC. The browser gets a fetch proxy
+# server functions: "use server" RPC. The browser gets a fetch proxy
 # (no impl/secret); POST /__nowaki/fn runs the real function server-side,
 # and getContext() reads the request cookie. Unknown id is rejected.
 curl -sf "$B/actions/todos.ts" | grep -q '__nowakiCall'
@@ -263,21 +267,17 @@ test "$(status -XPOST -H 'content-type: application/json' -H 'x-nowaki-rpc: 1' -
 curl -sf $B/server-fn | grep -q 'nowaki-island name="ServerTodos"'
 
 # server fn as a <form action>: the islands runtime intercepts the submit and
-# posts the form to the fn. Here we exercise the server side (addTodoForm) and
-# confirm the runtime ships the form interceptor.
+# posts the form to the fn. Only the server side (addTodoForm) and the form in the
+# page are checked here.
 curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-rpc: 1' -d '{"id":"5591e6fc8d31a200","args":[{"text":"ci-form-action"}]}' $B/__nowaki/fn >/dev/null
 curl -sf -XPOST -H 'content-type: application/json' -H 'x-nowaki-rpc: 1' -d '{"id":"6c90d7dc921a9a3f","args":[]}' $B/__nowaki/fn | grep -q 'ci-form-action'
 curl -sf "$B/server-fn" | grep -q 'fa-form'
 
-# v0.9 virtual modules: a plugin resolveId/load provides virtual:build-info,
-# imported by an island. SSR renders it (inlined as a data: module) and the
-# island's browser JS loads the generated source from a /__nowaki_virtual__/ URL.
+# virtual modules: a plugin resolveId/load provides virtual:build-info,
+# imported by an island; SSR renders its value inside the island.
 curl -sf $B/virtual | grep -q 'VIRTUAL_OK · nowaki-plugin'
 curl -sf $B/virtual | grep -q 'nowaki-island name="VirtualBadge"'
 
-# lazy hydration (Astro-style client:* directives): the island wrapper sets a
-# `client` attribute and the directive is NOT serialized into the island props.
-# client:only renders no SSR content (hydrates client-side only).
 # typed navigation: <Link href> renders an <a href>, route() builds dynamic
 # hrefs (encoded params, catch-all joined with /).
 curl -sf $B/nav | grep -q '<a href="/about" data-testid="link-about">'
@@ -287,6 +287,9 @@ curl -sf $B/vt | grep -q '<meta name="nowaki-view-transition" content="1" />'
 ! curl -sf $B/about | grep -qE 'nowaki-view-transition|@view-transition' || exit 1
 curl -sf $B/nav | grep -q 'href="/blog/hello" data-testid="link-blog"'
 curl -sf $B/nav | grep -q 'href="/files/docs/intro" data-testid="link-files"'
+# lazy hydration (Astro-style client:* directives): the island wrapper sets a
+# `client` attribute and the directive is not serialized into the island props.
+# client:only renders no SSR content (hydrates client-side only).
 
 curl -sf $B/lazy | grep -q 'name="Counter"[^>]*client="idle"'
 # the directive is stripped from the serialized props (props has only start)
@@ -305,10 +308,10 @@ test "$(status $B/loading)" = "404"
 test "$(status $B/error)" = "404"
 curl -sf "$B/slow?ms=0" | grep -q 'data-testid="slow"'
 
-# --- application-security regressions (guards for the multi-round audit fixes):
-# arbitrary file read (@fs / ssr-module / .env / virtual ..), RPC CSRF,
-# CSWSH (WS Origin), and live state forgery. A sentinel .env proves file-read
-# denial without leaking; it is removed right after.
+# application-security regressions (security-e2e.mjs dev): arbitrary file read (@fs /
+# ssr-module / .env / virtual ..), RPC CSRF, cross-site writes, sessions, security headers,
+# CSWSH (WS Origin), and live state forgery. A sentinel .env proves file-read denial without
+# leaking; it is removed right after.
 printf 'DATABASE_URL=postgres://u:supersecretpw@db/prod\nSESSION_SECRET=ci-do-not-leak\n' > examples/hello/.env
 node scripts/security-e2e.mjs dev "$B" "$(pwd)/examples/hello"
 # without NOWAKI_SESSION_SECRET, dev generated one on the first ctx.session (security-e2e signed in)
