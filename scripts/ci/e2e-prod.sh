@@ -38,7 +38,7 @@ CY=$(ls examples/hello/dist/client/Cycle.*.js | head -1)
 ! grep -q './cycle-' "$CY" || exit 1
 # Jetstream build: the live island ships no client component JS (only live.js),
 # is listed in the manifest, and is still built as a server module for rendering.
-grep -qE '"liveIslands": \[[^]]*"LiveCounter"' examples/hello/dist/client/manifest.json
+node -e 'const m = require("./examples/hello/dist/client/manifest.json"); process.exit(m.liveIslands.includes("LiveCounter") ? 0 : 1)'
 ! ls examples/hello/dist/client/LiveCounter.*.js >/dev/null 2>&1 || exit 1
 ls examples/hello/dist/client/live.*.js >/dev/null 2>&1
 test -f examples/hello/dist/server/islands/LiveCounter.js
@@ -99,6 +99,10 @@ curl -sf http://127.0.0.1:3300/vt | grep -q '<a id="vt-island-ssr" href="/about"
 ! curl -s http://127.0.0.1:3300/about | grep -qE 'nowaki-view-transition|@view-transition' || exit 1
 curl -sf http://127.0.0.1:3300/live | grep -q 'nowaki-live name="LiveCounter"'
 curl -sf http://127.0.0.1:3300/live | grep -q 'live\.'  # live.js script
+# live.js over the WebSocket (no data-live-transport), on assembled and streamed pages alike
+# (fixture: crates/nowaki/tests/fixtures/live-script-cases.json).
+curl -sf http://127.0.0.1:3300/live | grep -qE '<script id="nowaki-live" type="module" src="/_nowaki/live\.[0-9a-f]+\.js"></script>'
+curl -sf http://127.0.0.1:3300/stream | grep -qE '<script id="nowaki-live" type="module" src="/_nowaki/live\.[0-9a-f]+\.js"></script>'
 # server functions in production: allowlist written, no impl leaked to
 # the client, and the Rust front proxies /__nowaki/fn to the renderer.
 test -f examples/hello/dist/server/functions.json
@@ -172,6 +176,24 @@ tpost late
 for i in $(seq 1 20); do T6B=$(tnum); test "$(tcache)" = MISS && break; sleep 0.25; done
 test "$(tcache)" = MISS; test "$T6B" -gt "$T6"
 T6=$(tnum); test "$(tcache)" = HIT
+# revalidatePath on long non-ASCII paths (routes/isr-long/[slug].tsx). A 700-character path's
+# entry encodes to ~10 KB, past the 8 KB x-nowaki-purge header, so it goes through the stdout
+# channel; the page is cached, purged, and rendered again.
+LONG=http://127.0.0.1:3300/isr-long/$(node -e 'process.stdout.write(encodeURIComponent("\u65e5".repeat(700)))')
+lnum() { curl -s -D /tmp/long.h -o /tmp/long.html "$LONG"; grep -o 'isr-long-renders">[0-9]*' /tmp/long.html | grep -o '[0-9]*'; }
+lcache() { tr -d '\r' < /tmp/long.h | sed -n 's/^[Xx]-[Nn]owaki-[Cc]ache: //p'; }
+L1=$(lnum); test "$(lcache)" = MISS
+grep -q 'slug of 700 characters' /tmp/long.html
+L2=$(lnum); test "$(lcache)" = HIT; test "$L2" = "$L1"
+test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://127.0.0.1:3300' -d x=1 "$LONG")" = 303
+for i in $(seq 1 20); do L3=$(lnum); test "$(lcache)" = MISS && break; sleep 0.25; done
+test "$(lcache)" = MISS; test "$L3" -gt "$L2"
+# The longest valid path (2000 characters, ~30 KB encoded) purges without breaking the response
+# (its URL is over Node's 16 KB request header limit, so it is named in the form, not requested).
+SHORT=http://127.0.0.1:3300/isr-long/short
+curl -s -o /dev/null "$SHORT"
+test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://127.0.0.1:3300' --data-urlencode "slug=$(node -e 'process.stdout.write("\u65e5".repeat(1990))')" "$SHORT")" = 303
+test "$(curl -s -o /dev/null -w '%{http_code}' "$SHORT")" = 200
 # POST /__nowaki/revalidate: the secret is required; with it, the purge lands before the reply.
 REV=http://127.0.0.1:3300/__nowaki/revalidate
 test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'content-type: application/json' -d '{"tags":["isr-demo"]}' $REV)" = 401

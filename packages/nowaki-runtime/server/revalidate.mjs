@@ -219,9 +219,15 @@ export function flushPurge(ctx, headers) {
   ctx.__purgeClosed = true;
   const env = S.env;
   if (env?.isrStore) {
-    const [first, ...rest] = chunks(entries, HEADER_MAX);
+    // An entry that doesn't fit the header on its own (a long path of non-ASCII characters
+    // encodes to ~30 KB) goes through stdout, which has no line limit (start.rs).
+    const fits = [];
+    const long = [];
+    for (const e of entries) (encodeOne(e).length <= HEADER_MAX ? fits : long).push(e);
+    const [first, ...rest] = chunks(fits, HEADER_MAX);
     if (first) headers[PURGE_HEADER] = first;
-    if (rest.length) writeLines(rest);
+    const lines = [...rest, ...chunks(long, HEADER_MAX)];
+    if (lines.length) writeLines(lines);
   }
   if (typeof env?.purge === "function") {
     // The context goes along: the Cloudflare cache deletes the paths under the request's origin.

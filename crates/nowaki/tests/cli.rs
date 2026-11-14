@@ -39,14 +39,13 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
     assert!(manifest.contains("\"preload\""), "preload chains expected");
 
     // Jetstream island: registered, but no client chunk is emitted (zero added JS).
-    let live_list = manifest
-        .split("\"liveIslands\": [")
-        .nth(1)
-        .and_then(|rest| rest.split(']').next())
-        .unwrap_or("");
+    let parsed: serde_json::Value = serde_json::from_str(&manifest).expect("manifest is JSON");
+    let live_list = &parsed["liveIslands"];
     assert!(
-        live_list.contains("\"LiveCounter\""),
-        "LiveCounter should be a live island: [{live_list}]"
+        live_list
+            .as_array()
+            .is_some_and(|l| l.iter().any(|n| n == "LiveCounter")),
+        "LiveCounter should be a live island: {live_list}"
     );
     assert!(
         manifest.contains("\"liveRuntime\""),

@@ -1,0 +1,37 @@
+{
+  "comment": "The live.js tag each server writes for a page, shared by start.rs `assemble` (target \"start\") and server/document.mjs prodDocument / prodShell (scripts/router-test.mjs; start: liveTransport \"auto\", adapter: the default, prerender: live false). `script` null: no live.js. `streamed`: the prodShell tail, which can't see the body.",
+  "manifest": { "runtime": "islands-1.js", "liveRuntime": "live-1.js", "liveIslands": ["L"] },
+  "assetBase": "/_nowaki/",
+  "cases": [
+    {
+      "target": "start",
+      "body": "<nowaki-live name=\"L\" nid=\"n1\"></nowaki-live>",
+      "script": "<script id=\"nowaki-live\" type=\"module\" src=\"/_nowaki/live-1.js\"></script>",
+      "streamed": "<script id=\"nowaki-live\" type=\"module\" src=\"/_nowaki/live-1.js\"></script>"
+    },
+    {
+      "target": "start",
+      "body": "<p>no live island</p>",
+      "script": null,
+      "streamed": "<script id=\"nowaki-live\" type=\"module\" src=\"/_nowaki/live-1.js\"></script>"
+    },
+    {
+      "target": "adapter",
+      "body": "<nowaki-live name=\"L\" nid=\"n1\"></nowaki-live>",
+      "script": "<script id=\"nowaki-live\" type=\"module\" src=\"/_nowaki/live-1.js\" data-live-transport=\"post\"></script>",
+      "streamed": "<script id=\"nowaki-live\" type=\"module\" src=\"/_nowaki/live-1.js\" data-live-transport=\"post\"></script>"
+    },
+    {
+      "target": "adapter",
+      "body": "<p>no live island</p>",
+      "script": null,
+      "streamed": "<script id=\"nowaki-live\" type=\"module\" src=\"/_nowaki/live-1.js\" data-live-transport=\"post\"></script>"
+    },
+    {
+      "target": "prerender",
+      "body": "<nowaki-live name=\"L\" nid=\"n1\"></nowaki-live>",
+      "script": null,
+      "streamed": null
+    }
+  ]
+}

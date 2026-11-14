@@ -318,3 +318,35 @@ fn build_output_names_are_servable_for_any_source_name() {
         );
     }
 }
+
+#[test]
+fn manifest_stays_json_for_odd_island_names() {
+    let island = "export default function X() { return null; }\n";
+    let root = temp_app(
+        "manifest-json",
+        &[
+            ("islands/It's \u{fc}.ts", island),
+            ("islands/Plain.ts", island),
+        ],
+    );
+    build_client(&NowakiCore::new(root.clone()), &root.join("dist")).expect("build ok");
+    let text = fs::read_to_string(root.join("dist/client/manifest.json")).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+    assert!(manifest["islands"]["It's \u{fc}"].is_string(), "{text}");
+    assert!(manifest["islands"]["Plain"].is_string(), "{text}");
+
+    // A quote can't round-trip through the page's `<nowaki-island name>`: a clear error, not a
+    // broken manifest. Windows doesn't allow `"` in a file name, so there is nothing to check.
+    if cfg!(windows) {
+        let _ = fs::remove_dir_all(&root);
+        return;
+    }
+    fs::write(root.join("islands/Say\"Hi\".ts"), island).unwrap();
+    let Err(err) = build_client(&NowakiCore::new(root.clone()), &root.join("dist")) else {
+        panic!("a quote in an island name should fail the build");
+    };
+    let err = err.to_string();
+    let _ = fs::remove_dir_all(&root);
+    assert!(err.contains("Say\"Hi\".ts"), "{err}");
+    assert!(err.contains("which an island name can't"), "{err}");
+}

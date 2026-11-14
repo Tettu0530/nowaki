@@ -104,9 +104,9 @@ pub fn server_fn_id(module_key: &str, export: &str) -> String {
     )
 }
 
-/// Collects the names a module exports (named declarations, `export {a}`, default), sorted.
-/// Re-exports like `export * from` and `export {a} from` are excluded (they can't be proxied), and
-/// so are destructured declarations (`export const { a } = o`).
+/// Collects the names a module exports (named declarations, destructured ones like
+/// `export const { a, b } = o`, `export {a}`, default), sorted. Re-exports like `export * from`
+/// and `export {a} from` are excluded (they can't be proxied).
 pub fn collect_exports(abs: &Path, source: &str) -> Result<Vec<String>> {
     let allocator = Allocator::default();
     let program = crate::transform::parse_program(
@@ -118,7 +118,9 @@ pub fn collect_exports(abs: &Path, source: &str) -> Result<Vec<String>> {
     let mut out: Vec<String> = Vec::new();
     for stmt in &program.body {
         match stmt {
-            Statement::ExportDeclaration(d) => out.extend(decl_bound_names(&d.declaration)),
+            Statement::ExportDeclaration(d) => {
+                out.extend(crate::chunk::decl_bound_names(&d.declaration))
+            }
             Statement::ExportNamedDeclaration(d) => {
                 for sp in &d.specifiers {
                     out.push(export_name_str(&sp.exported));
@@ -135,7 +137,8 @@ pub fn collect_exports(abs: &Path, source: &str) -> Result<Vec<String>> {
 
 /// Exports that take arguments without validating them: a function (declaration, arrow, or
 /// expression, default export included) with at least one parameter, or a `const` initialized
-/// with anything but `serverFn(schema, impl)`. `export { a }` lists are not inspected.
+/// with anything but `serverFn(schema, impl)`, and every name a destructuring `export const`
+/// binds (its values can't be checked). `export { a }` lists are not inspected.
 pub fn unvalidated_exports(abs: &Path, source: &str) -> Result<Vec<String>> {
     let allocator = Allocator::default();
     let program = crate::transform::parse_program(
@@ -164,8 +167,16 @@ pub fn unvalidated_exports(abs: &Path, source: &str) -> Result<Vec<String>> {
                             Some(Expression::FunctionExpression(f)) => !f.params.is_empty(),
                             _ => false,
                         };
-                        if let (true, Some(b)) = (takes_input, decl.id.get_binding_identifier()) {
-                            out.push(b.name.to_string());
+                        match decl.id.get_binding_identifier() {
+                            Some(b) if takes_input => out.push(b.name.to_string()),
+                            Some(_) => {}
+                            // `export const { a, b } = o`: what `o` holds can't be checked.
+                            None => out.extend(
+                                decl.id
+                                    .get_binding_identifiers()
+                                    .into_iter()
+                                    .map(|b| b.name.to_string()),
+                            ),
                         }
                     }
                 }
@@ -342,27 +353,6 @@ fn export_name_str(n: &ModuleExportName) -> String {
     }
 }
 
-fn decl_bound_names(decl: &Declaration) -> Vec<String> {
-    match decl {
-        Declaration::VariableDeclaration(v) => v
-            .declarations
-            .iter()
-            .filter_map(|d| d.id.get_binding_identifier().map(|b| b.name.to_string()))
-            .collect(),
-        Declaration::FunctionDeclaration(f) => {
-            f.id.as_ref()
-                .map(|i| vec![i.name.to_string()])
-                .unwrap_or_default()
-        }
-        Declaration::ClassDeclaration(c) => {
-            c.id.as_ref()
-                .map(|i| vec![i.name.to_string()])
-                .unwrap_or_default()
-        }
-        _ => Vec::new(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,10 +367,11 @@ mod tests {
             export async function d(x) {}\n\
             export async function e() {}\n\
             export const f = wrap(async (x) => x);\n\
+            export const { g, h: i } = makeFns();\n\
             export default async function (x) {}\n";
         let mut v = unvalidated_exports(&PathBuf::from("actions/x.ts"), src).unwrap();
         v.sort();
-        assert_eq!(v, vec!["b", "d", "default", "f"]);
+        assert_eq!(v, vec!["b", "d", "default", "f", "g", "i"]);
     }
 
     #[test]
@@ -431,8 +422,14 @@ export const listTodos = async () => [];\n\
 function helper(){}\n\
 export { helper };\n\
 export { shared } from \"./shared.ts\";\n\
+export const { fromPair, other: renamed } = makeFns();\n\
+export const [first, ...rest] = list;\n\
 export default async function(){}\n";
         let names = collect_exports(Path::new("/app/actions/todos.ts"), src).unwrap();
+        for n in ["fromPair", "renamed", "first", "rest"] {
+            assert!(names.contains(&n.to_string()), "{n} in {names:?}");
+        }
+        assert!(!names.contains(&"other".to_string()));
         assert!(!names.contains(&"shared".to_string()));
         assert!(names.contains(&"addTodo".to_string()));
         assert!(names.contains(&"listTodos".to_string()));

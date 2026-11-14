@@ -19,6 +19,8 @@ import {
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = path.join(ROOT, "scripts/release-check.mjs");
+// The fixture copies the repo, so markdoc keeps its own (independent) version.
+const MARKDOC_VERSION = JSON.parse(readFileSync(path.join(ROOT, "packages/nowaki-markdoc/package.json"), "utf8")).version;
 
 let failed = 0;
 const eq = (got, want, label) => {
@@ -185,7 +187,7 @@ const has = (list, re) => list.some((e) => re.test(e));
   const r = check(d, "1.0.0-rc.1");
   eq(r.errors, [], "1.0.0-rc.1 with nowaki-core 0.20.0 pinned =0.20.0 passes");
   eq(r.warnings, [], "  … and has no warning");
-  eq(r.meta, { version: "1.0.0-rc.1", tag: "v1.0.0-rc.1", prerelease: true, coreVersion: "0.20.0", markdocVersion: "0.1.0" }, "  … meta");
+  eq(r.meta, { version: "1.0.0-rc.1", tag: "v1.0.0-rc.1", prerelease: true, coreVersion: "0.20.0", markdocVersion: MARKDOC_VERSION }, "  … meta");
 }
 {
   const d = fixture();

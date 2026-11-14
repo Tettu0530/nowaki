@@ -23,6 +23,32 @@ pub fn check(root: &Path) -> Result<()> {
     check_version(&installed, MIN_RUNTIME)
 }
 
+/// `node_modules/@nowaki-dev/runtime/server/<file>` under `root`, or an error naming `what` needs
+/// it. [`check`] already refuses a runtime of another version, so a missing file means the runtime
+/// isn't installed or the install is broken.
+pub fn script(root: &Path, file: &str, what: &str) -> Result<std::path::PathBuf> {
+    let path = root
+        .join("node_modules/@nowaki-dev/runtime/server")
+        .join(file);
+    if path.exists() {
+        return Ok(path);
+    }
+    let installed = installed_version(root, "@nowaki-dev/runtime")
+        .ok()
+        .flatten();
+    let state = match installed {
+        Some(v) => format!(
+            "@nowaki-dev/runtime {v} is installed, but server/{file} is missing (a broken install)"
+        ),
+        None => "@nowaki-dev/runtime is not installed".to_string(),
+    };
+    bail!(
+        "{what} needs @nowaki-dev/runtime: {state}.\n  → Run `npm install @nowaki-dev/runtime@{}` in {}.",
+        env!("CARGO_PKG_VERSION"),
+        root.display()
+    )
+}
+
 /// The `version` of `node_modules/<name>/package.json` under `root`, if it is installed.
 pub fn installed_version(root: &Path, name: &str) -> Result<Option<String>> {
     let file = root.join("node_modules").join(name).join("package.json");
@@ -312,5 +338,40 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(repo.join("package.json")).unwrap())
                 .unwrap();
         assert!(check_version(v["version"].as_str().unwrap(), MIN_RUNTIME).is_ok());
+    }
+
+    #[test]
+    fn a_missing_runtime_script_names_the_fix() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = script(dir.path(), "fonts-fetch.mjs", "Google fonts")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.starts_with(
+                "Google fonts needs @nowaki-dev/runtime: @nowaki-dev/runtime is not installed."
+            ),
+            "{err}"
+        );
+        assert!(
+            err.contains(&format!("npm install @nowaki-dev/runtime@{MIN_RUNTIME}")),
+            "{err}"
+        );
+        let pkg = dir.path().join("node_modules/@nowaki-dev/runtime");
+        std::fs::create_dir_all(pkg.join("server")).unwrap();
+        std::fs::write(
+            pkg.join("package.json"),
+            format!(r#"{{"version":"{MIN_RUNTIME}"}}"#),
+        )
+        .unwrap();
+        let err = script(dir.path(), "fonts-fetch.mjs", "Google fonts")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("server/fonts-fetch.mjs is missing (a broken install)"),
+            "{err}"
+        );
+        assert!(!err.contains("or newer"), "{err}");
+        std::fs::write(pkg.join("server/fonts-fetch.mjs"), "").unwrap();
+        assert!(script(dir.path(), "fonts-fetch.mjs", "Google fonts").is_ok());
     }
 }

@@ -18,7 +18,6 @@ use oxc::ast::ast::{
 use oxc::codegen::{Codegen, CodegenOptions, CommentOptions, LegalComment};
 use oxc::minifier::{Minifier, MinifierOptions};
 use oxc::span::SourceType;
-use xxhash_rust::xxh3::xxh3_64;
 
 use crate::NowakiCore;
 
@@ -565,7 +564,9 @@ fn import_spec_local(s: &ImportDeclarationSpecifier) -> String {
     }
 }
 
-fn decl_bound_names(decl: &Declaration) -> Vec<String> {
+/// Every name an exported declaration binds. Shared with `server_fn::collect_exports`, so a
+/// server-function module and a hoisted chunk see the same exports.
+pub(crate) fn decl_bound_names(decl: &Declaration) -> Vec<String> {
     match decl {
         Declaration::VariableDeclaration(v) => v
             .declarations
@@ -640,6 +641,5 @@ pub fn minify_chunk(name: &str, source: &str) -> Result<(String, Option<String>)
         .with_scoping(minified.scoping)
         .build(&program);
     let map = ret.map.map(|m| m.to_json_string());
-    let _ = xxh3_64(source.as_bytes());
     Ok((ret.code, map))
 }

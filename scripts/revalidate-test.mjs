@@ -20,6 +20,8 @@ const check = (name, ok, detail = "") => {
   if (!ok) failures++;
 };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// The longest valid path, of 3-byte UTF-8 characters (9 bytes each once percent-encoded).
+const LONG_PATH = "/" + "\u65e5".repeat(1999);
 
 // --- the shared fixture -------------------------------------------------------------------------
 const fx = JSON.parse(readFileSync(new URL("../crates/nowaki/tests/fixtures/purge-cases.json", import.meta.url), "utf8"));
@@ -102,6 +104,13 @@ const modules = {
       return { ok: true };
     },
   },
+  "routes/api/long.ts": {
+    POST: () => {
+      R.revalidateTag("small");
+      R.revalidatePath(LONG_PATH);
+      return { ok: true };
+    },
+  },
 };
 const table = {
   routes: [
@@ -112,6 +121,7 @@ const table = {
     { file: "routes/api/touch.ts", segments: [{ lit: "api" }, { lit: "touch" }], dir: "/api", isApi: true },
     { file: "routes/api/late.ts", segments: [{ lit: "api" }, { lit: "late" }], dir: "/api", isApi: true },
     { file: "routes/api/many.ts", segments: [{ lit: "api" }, { lit: "many" }], dir: "/api", isApi: true },
+    { file: "routes/api/long.ts", segments: [{ lit: "api" }, { lit: "long" }], dir: "/api", isApi: true },
   ],
   layouts: [],
   middleware: [],
@@ -165,6 +175,15 @@ R.setRevalidateEnv(start);
   const overflow = lines.flatMap((l) => R.decodeEntries(l.trim().split(" ")[2]));
   check("over 8 KB: the header is capped", header.length <= 8192, String(header.length));
   check("over 8 KB: the rest goes through stdout with the token", lines.every((l) => l.startsWith("NOWAKI_PURGE tok123 ")) && R.decodeEntries(header).length + overflow.length === 600, `${R.decodeEntries(header).length}+${overflow.length}`);
+
+  // A valid 2000-character non-ASCII path encodes to ~30 KB: it can't ride on the header.
+  lines.length = 0;
+  const long = await post(start, "/api/long");
+  const longHeader = long.headers["x-nowaki-purge"] ?? "";
+  const longLines = lines.flatMap((l) => R.decodeEntries(l.trim().split(" ")[2]));
+  check("a long path is a valid path", R.validPath(LONG_PATH));
+  check("long path: the header stays under 8 KB with the small entries", longHeader.length <= 8192 && same(R.decodeEntries(longHeader), ["t:small"]), longHeader.slice(0, 80));
+  check("long path: sent through stdout with the token", lines.length >= 1 && lines.every((l) => l.startsWith("NOWAKI_PURGE tok123 ")) && same(longLines, [`p:${encodeURI(LONG_PATH)}`, `p:${encodeURI(LONG_PATH)}/`]), String(lines.length));
 
   lines.length = 0;
   R.revalidateTag("a");

@@ -1903,6 +1903,18 @@ mod tests {
         assert_eq!(purge_line(&format!("[app] NOWAKI_PURGE {token} t:x")), None);
     }
 
+    /// A 2000-character non-ASCII path is a ~30 KB line (its browser path's `%` escapes are
+    /// escaped again): the stdout channel carries what the 8 KB header can't.
+    #[test]
+    fn a_long_purge_line_decodes() {
+        let token = crate::live::publish_token();
+        let path = format!("/{}", "%E6%97%A5".repeat(1999));
+        let line = format!("NOWAKI_PURGE {token} p:{}", path.replace('%', "%25"));
+        assert!(line.len() > 24 * 1024);
+        let purge = purge_line(&line).unwrap();
+        assert_eq!(purge.paths, vec![path]);
+    }
+
     #[test]
     fn internal_response_headers_never_pass_through() {
         assert!(is_internal_response_header("x-nowaki-purge"));
@@ -1911,5 +1923,44 @@ mod tests {
         // The client router reads this one from an intercepted fragment.
         assert!(!is_internal_response_header("x-nowaki-slot"));
         assert!(!is_internal_response_header("cache-control"));
+    }
+
+    /// The live.js tag of an assembled page matches what prodDocument writes for `nowaki start`
+    /// (the fixture is shared with scripts/router-test.mjs).
+    #[test]
+    fn assembled_live_script_matches_the_shared_fixture() {
+        let fx: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/live-script-cases.json")).unwrap();
+        let manifest = Manifest {
+            runtime: fx["manifest"]["runtime"].as_str().map(str::to_string),
+            live_runtime: fx["manifest"]["liveRuntime"].as_str().map(str::to_string),
+            asset_base: fx["assetBase"].as_str().unwrap().to_string(),
+            ..Default::default()
+        };
+        let mut n = 0;
+        for c in fx["cases"].as_array().unwrap() {
+            if c["target"] != "start" {
+                continue;
+            }
+            n += 1;
+            let meta = PageMeta {
+                body: c["body"].as_str().unwrap().to_string(),
+                title: "t".into(),
+                head: String::new(),
+                lang: "en".into(),
+                html_attrs: String::new(),
+                body_attrs: String::new(),
+                router: false,
+            };
+            let html = assemble(&manifest, &meta, None);
+            match c["script"].as_str() {
+                Some(tag) => {
+                    assert!(html.contains(tag), "{tag} in {html}");
+                    assert_eq!(html.matches("id=\"nowaki-live\"").count(), 1);
+                }
+                None => assert!(!html.contains("id=\"nowaki-live\""), "{html}"),
+            }
+        }
+        assert!(n >= 2);
     }
 }

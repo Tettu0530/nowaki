@@ -573,7 +573,7 @@ export function genFiles(root) {
   const configs = probe(root, "packages/nowaki-runtime/server/site-config.mjs", /for \(const name of \[("nowaki\.config[^\]]*)\]\)/, "nowaki.config")[1];
   out.push(`${strings(configs).join(" | ")}  # packages/nowaki-runtime/server/site-config.mjs`);
   const dotenv = probe(root, "packages/nowaki-runtime/server/env.mjs", /for \(const file of \[(".env"[^\]]*)\]\)/, ".env files")[1];
-  out.push(`${strings(dotenv).join(" | ")} (loaded into process.env, never overriding it)  # packages/nowaki-runtime/server/env.mjs`);
+  out.push(`${strings(dotenv).join(" | ")} (.env.local wins over .env; loaded into process.env, never overriding it)  # packages/nowaki-runtime/server/env.mjs`);
   probe(root, "crates/nowaki/src/typegen.rs", /out_dir\.join\("types\.d\.ts"\)/, ".nowaki/types.d.ts");
   out.push(".nowaki/types.d.ts (typegen output)  # crates/nowaki/src/typegen.rs");
   const sources = probe(root, lib, /Some\(("ts" \| "tsx"[^)]*)\)/, "source extensions")[1];

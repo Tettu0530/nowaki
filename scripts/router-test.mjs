@@ -680,5 +680,22 @@ eq(stripRouteGroups("/(.)/x"), "/(.)/x", "(.) stays literal");
   eq(render(h("img", { style: transitionName("photo-1") })), '<img style="view-transition-name:photo-1;"/>', "transitionName in a style prop (SSR)");
 }
 
+// The live.js tag per server: the fixture shared with start.rs `assemble`. `nowaki start` asks for
+// liveTransport "auto" (prod-sidecar.mjs), the adapters take the default, prerender passes live false.
+{
+  const fx = JSON.parse(await readFile(new URL("../crates/nowaki/tests/fixtures/live-script-cases.json", import.meta.url), "utf8"));
+  const optsFor = { start: { liveTransport: "auto" }, adapter: {}, prerender: { live: false } };
+  const liveTag = (html) => html.match(/<script[^>]*id="nowaki-live"[^>]*><\/script>/g) ?? [];
+  for (const c of fx.cases) {
+    const opts = { ...optsFor[c.target], assetBase: fx.assetBase };
+    const doc = prodDocument(fx.manifest, { mod: {}, body: c.body, meta: { title: "t" } }, opts);
+    eq(liveTag(doc), c.script ? [c.script] : [], `live.js tag, ${c.target}: ${c.body}`);
+    const { tail } = prodShell(fx.manifest, {}, { title: "t" }, opts);
+    eq(liveTag(tail), c.streamed ? [c.streamed] : [], `live.js tag in a streamed shell, ${c.target}`);
+  }
+  const none = prodShell({ runtime: "islands-1.js" }, {}, { title: "t" }, {});
+  eq(liveTag(none.tail), [], "no live islands in the build: no live.js in a streamed shell");
+}
+
 console.log(failed ? `\nROUTER TEST FAILED (${failed})` : "\nROUTER TEST PASSED");
 process.exit(failed ? 1 : 0);

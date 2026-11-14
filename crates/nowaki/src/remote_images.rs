@@ -18,14 +18,7 @@ struct NodeFetch {
 impl NodeFetch {
     fn run(&self, patterns: &[RemotePattern], requests: &[RemoteRequest]) -> Result<Vec<Value>> {
         use std::io::Write;
-        let script = self
-            .root
-            .join("node_modules/@nowaki-dev/runtime/server/images-fetch.mjs");
-        if !script.exists() {
-            return Err(anyhow!(
-                "remote images need @nowaki-dev/runtime 0.17 or newer (server/images-fetch.mjs not found)"
-            ));
-        }
+        let script = crate::runtime::script(&self.root, "images-fetch.mjs", "remote images")?;
         let mut child = std::process::Command::new("node")
             .arg(&script)
             .current_dir(&self.root)

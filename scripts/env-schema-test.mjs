@@ -8,10 +8,12 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { defineEnv, validateEnv, initServerEnv } from "../packages/nowaki-runtime/server/env-schema.mjs";
 import { env } from "../packages/nowaki-runtime/server/env-server.mjs";
+import { loadEnv } from "../packages/nowaki-runtime/server/env.mjs";
 
 const repo = path.resolve(import.meta.dirname, "..");
 const helloModules = path.join(repo, "examples/hello/node_modules");
@@ -74,6 +76,31 @@ await initServerEnv({ default: def }, { DATABASE_URL: "https://db.example", TOKE
 check("built public values win over the runtime environment", env.PUBLIC_API === "/built" && env.TOKEN === "abc");
 await initServerEnv(null, {});
 check("no env.ts → empty env", Object.keys(env).length === 0 && env.ANY === undefined);
+
+// .env / .env.local / environment precedence: the fixture shared with the Rust client defines
+// (crates/nowaki-core/tests/dotenv.rs).
+{
+  const fixture = JSON.parse(readFileSync(path.join(repo, "crates/nowaki-core/tests/fixtures/dotenv-cases.json"), "utf8"));
+  const dir = path.join(os.tmpdir(), `nowaki-dotenv-${process.pid}`);
+  for (const c of fixture.cases) {
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    for (const [name, content] of Object.entries(c.files)) writeFileSync(path.join(dir, name), content);
+    const keys = new Set([...Object.keys(c.expect), ...Object.keys(c.process)]);
+    const saved = Object.fromEntries([...keys].map((k) => [k, process.env[k]]));
+    for (const k of keys) delete process.env[k];
+    Object.assign(process.env, c.process);
+    loadEnv(dir);
+    const got = Object.fromEntries(Object.keys(c.expect).map((k) => [k, process.env[k] ?? null]));
+    check(`dotenv: ${c.name}`, JSON.stringify(got) === JSON.stringify(c.expect), JSON.stringify(got));
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+  rmSync(dir, { recursive: true, force: true });
+  check("dotenv fixture has cases", fixture.cases.length > 0);
+}
 
 // --- end to end ---
 const bin = path.resolve(process.argv[2] ?? path.join(repo, "target/debug", process.platform === "win32" ? "nowaki.exe" : "nowaki"));

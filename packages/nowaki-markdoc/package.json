@@ -1,6 +1,6 @@
 {
   "name": "@nowaki-dev/markdoc",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Markdoc for Nowaki — compiles .mdoc files to Preact modules at build time",
   "license": "MIT",
   "author": "Tettu0530",

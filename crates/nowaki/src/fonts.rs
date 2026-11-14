@@ -317,10 +317,7 @@ type GoogleFaces = Vec<(usize, Vec<Face>, Option<PathBuf>)>;
 
 fn fetch_google(root: &Path, specs: &[(usize, Value)]) -> Result<GoogleFaces> {
     use std::io::Write;
-    let script = root.join("node_modules/@nowaki-dev/runtime/server/fonts-fetch.mjs");
-    if !script.exists() {
-        bail!("Google fonts need @nowaki-dev/runtime 0.16 or newer (server/fonts-fetch.mjs not found)");
-    }
+    let script = crate::runtime::script(root, "fonts-fetch.mjs", "Google fonts")?;
     let cache = root.join("node_modules/.cache/nowaki/fonts");
     let mut child = std::process::Command::new("node")
         .arg(&script)

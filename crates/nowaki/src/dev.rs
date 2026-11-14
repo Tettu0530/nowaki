@@ -685,7 +685,7 @@ async fn hmr_ws(
     headers: axum::http::HeaderMap,
     State(state): State<Arc<DevState>>,
 ) -> Response {
-    if !ws_origin_ok(&headers, state.expose) {
+    if !ws_origin_ok(&headers, state.expose, state.port) {
         return (StatusCode::FORBIDDEN, "forbidden origin").into_response();
     }
     ws.on_upgrade(move |socket| handle_hmr(socket, state))
@@ -698,7 +698,7 @@ async fn live_ws(
     State(state): State<Arc<DevState>>,
 ) -> Response {
     // Cross-site WebSocket hijacking (CSWSH) guard: reject cross-origin upgrades.
-    if !ws_origin_ok(&headers, state.expose) {
+    if !ws_origin_ok(&headers, state.expose, state.port) {
         return (StatusCode::FORBIDDEN, "forbidden origin").into_response();
     }
     let http = state.http.clone();
@@ -1417,24 +1417,61 @@ async fn host_guard(
 }
 
 /// Checks the `Origin` of a WebSocket upgrade (CSWSH guard). No `Origin` (not a browser) passes.
-/// A same-origin upgrade passes, but on a loopback bind only with a loopback `Host` (DNS
-/// rebinding). A loopback `Origin` always passes.
-fn ws_origin_ok(headers: &axum::http::HeaderMap, expose: bool) -> bool {
-    let origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
-    let Some(origin) = origin else {
+/// Otherwise the page must come from this dev server: an `Origin` equal to `Host` (when `Host`
+/// passes [`dev_host_allowed`]), or an `Origin` on the dev server's own `port` whose host the
+/// server answers to: `localhost` / `127.0.0.1` / `[::1]` (the default bind, and the extra
+/// 127.0.0.1 listener of an exposed one), and with `--host` the names [`exposed_host_allowed`]
+/// accepts (IP literals, `*.local`, `NOWAKI_DEV_ALLOWED_HOSTS`). Another server on localhost (a
+/// different port) can't open the HMR or live socket.
+fn ws_origin_ok(headers: &axum::http::HeaderMap, expose: bool, port: u16) -> bool {
+    ws_origin_allowed(headers, expose, port, dev_allowed_hosts())
+}
+
+fn ws_origin_allowed(
+    headers: &axum::http::HeaderMap,
+    expose: bool,
+    port: u16,
+    extra: &[String],
+) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN) else {
         return true;
     };
-    let Some(origin_host) = origin.split("://").nth(1).map(|h| h.trim_end_matches('/')) else {
+    let Some((authority, origin_port)) = origin.to_str().ok().and_then(parse_origin) else {
         return false;
     };
+    // The names the dev server answers to (as dev_host_allowed checks `Host`).
+    let answers_to = |a: &str| is_loopback_host(a) || (expose && exposed_host_allowed(a, extra));
     let host = headers.get(header::HOST).and_then(|v| v.to_str().ok());
-    if let Some(host) = host {
-        if origin_host == host {
-            return expose || is_loopback_host(host);
-        }
+    if host.is_some_and(|h| h.eq_ignore_ascii_case(authority)) {
+        return answers_to(authority);
     }
-    // Even without a Host match, an explicit loopback Origin (localhost:port etc.) is allowed.
-    is_loopback_host(origin_host)
+    origin_port == port && answers_to(authority)
+}
+
+/// The authority (`host[:port]`, as `Host` writes it) and the port of an `http(s)://` Origin; the
+/// port defaults to the scheme's. None for `null` or another scheme.
+fn parse_origin(origin: &str) -> Option<(&str, u16)> {
+    let (scheme, rest) = origin.split_once("://")?;
+    let default = match scheme.to_ascii_lowercase().as_str() {
+        "http" => 80,
+        "https" => 443,
+        _ => return None,
+    };
+    let authority = rest.trim_end_matches('/');
+    if authority.is_empty() || authority.contains(['/', '@', '?', '#']) {
+        return None;
+    }
+    // `[::1]:3000` / `[::1]`, else `name:3000` / `name`.
+    let port = if authority.starts_with('[') {
+        authority.split_once("]:").map(|(_, p)| p)
+    } else {
+        authority.rsplit_once(':').map(|(_, p)| p)
+    };
+    let port = match port {
+        Some(p) => p.parse().ok()?,
+        None => default,
+    };
+    Some((authority, port))
 }
 
 fn mime_for(path: &Path) -> &'static str {
@@ -1515,8 +1552,8 @@ mod tests {
     fn ws_origin_rejects_cross_site() {
         // A cross-origin upgrade is refused on either bind (CSWSH).
         let h = hdrs(&[("host", "localhost:3000"), ("origin", "http://evil.com")]);
-        assert!(!ws_origin_ok(&h, false));
-        assert!(!ws_origin_ok(&h, true));
+        assert!(!ws_origin_ok(&h, false, 3000));
+        assert!(!ws_origin_ok(&h, true, 3000));
     }
 
     #[test]
@@ -1525,30 +1562,37 @@ mod tests {
             ("host", "localhost:3000"),
             ("origin", "http://localhost:3000"),
         ]);
-        assert!(ws_origin_ok(&h, false));
+        assert!(ws_origin_ok(&h, false, 3000));
         let h2 = hdrs(&[
             ("host", "127.0.0.1:3000"),
             ("origin", "http://127.0.0.1:3000"),
         ]);
-        assert!(ws_origin_ok(&h2, false));
+        assert!(ws_origin_ok(&h2, false, 3000));
     }
 
     #[test]
     fn ws_origin_defeats_dns_rebinding_on_default_bind() {
-        // Origin matches a non-loopback Host: refused on a loopback bind, allowed when exposed.
+        // Origin matches a non-loopback Host: refused on a loopback bind, and when exposed too
+        // unless the name is allowed (the Host check refuses the same names).
         let h = hdrs(&[
             ("host", "attacker.test:3000"),
             ("origin", "http://attacker.test:3000"),
         ]);
-        assert!(!ws_origin_ok(&h, false));
-        assert!(ws_origin_ok(&h, true));
+        assert!(!ws_origin_allowed(&h, false, 3000, &[]));
+        assert!(!ws_origin_allowed(&h, true, 3000, &[]));
+        assert!(ws_origin_allowed(
+            &h,
+            true,
+            3000,
+            &["attacker.test".to_string()]
+        ));
     }
 
     #[test]
     fn ws_origin_allows_missing_origin() {
         // Non-browser WS clients (no Origin) are allowed.
         let h = hdrs(&[("host", "localhost:3000")]);
-        assert!(ws_origin_ok(&h, false));
+        assert!(ws_origin_ok(&h, false, 3000));
     }
 
     #[test]
@@ -1558,8 +1602,66 @@ mod tests {
             ("host", "192.168.1.10:3000"),
             ("origin", "http://192.168.1.10:3000"),
         ]);
-        assert!(ws_origin_ok(&h, true));
-        assert!(!ws_origin_ok(&h, false));
+        assert!(ws_origin_ok(&h, true, 3000));
+        assert!(!ws_origin_ok(&h, false, 3000));
+    }
+
+    #[test]
+    fn ws_origin_is_only_this_dev_server() {
+        let ok = |host: &str, origin: &str, expose: bool| {
+            let h = hdrs(&[("host", host), ("origin", origin)]);
+            ws_origin_allowed(&h, expose, 3000, &["devbox.example.com".to_string()])
+        };
+        // Another dev server on localhost (another port) is not this one.
+        assert!(!ok("localhost:3000", "http://localhost:5173", false));
+        assert!(!ok("127.0.0.1:3000", "http://127.0.0.1:8080", false));
+        assert!(!ok("localhost:3000", "http://[::1]:5173", true));
+        assert!(!ok("localhost:3000", "http://localhost", false));
+        // Its own port under another loopback name passes (localhost page, 127.0.0.1 socket).
+        assert!(ok("127.0.0.1:3000", "http://localhost:3000", false));
+        assert!(ok("localhost:3000", "http://[::1]:3000", false));
+        // Exposed: the extra 127.0.0.1 listener, LAN IPs and allowlisted names on the same port.
+        assert!(ok("10.0.0.5:3000", "http://127.0.0.1:3000", true));
+        assert!(ok("127.0.0.1:3000", "http://10.0.0.5:3000", true));
+        assert!(ok("10.0.0.5:3000", "http://devbox.example.com:3000", true));
+        assert!(!ok("10.0.0.5:3000", "http://devbox.example.com:4000", true));
+        assert!(!ok("10.0.0.5:3000", "http://other.example.com:3000", true));
+        // Allowlisted names count only with --host.
+        assert!(!ok(
+            "localhost:3000",
+            "http://devbox.example.com:3000",
+            false
+        ));
+        // Behind a proxy that keeps Host, Origin == Host is the dev server's own origin.
+        assert!(ok("devbox.example.com", "https://devbox.example.com", true));
+        assert!(!ok(
+            "devbox.example.com",
+            "https://devbox.example.com",
+            false
+        ));
+        // Not an http(s) origin.
+        assert!(!ok("localhost:3000", "null", false));
+        assert!(!ok("localhost:3000", "file://localhost:3000", false));
+        assert!(!ok("localhost:3000", "http://localhost:abc", false));
+    }
+
+    #[test]
+    fn parses_origins() {
+        assert_eq!(
+            parse_origin("http://localhost:3000"),
+            Some(("localhost:3000", 3000))
+        );
+        assert_eq!(
+            parse_origin("https://example.com"),
+            Some(("example.com", 443))
+        );
+        assert_eq!(
+            parse_origin("http://[::1]:3000"),
+            Some(("[::1]:3000", 3000))
+        );
+        assert_eq!(parse_origin("http://[::1]"), Some(("[::1]", 80)));
+        assert_eq!(parse_origin("http://a@b:1"), None);
+        assert_eq!(parse_origin("null"), None);
     }
 
     #[test]

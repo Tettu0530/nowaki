@@ -191,10 +191,7 @@ pub fn build(root: &Path, dist: &Path, config: &Value) -> Result<()> {
         &Images::Build(dist.join("client")),
         &locales(config.get("routing")),
     )?;
-    let script = root.join("node_modules/@nowaki-dev/runtime/server/content-check.mjs");
-    if !script.exists() {
-        return Err(anyhow!("content collections need @nowaki-dev/runtime 0.16 or newer (server/content-check.mjs not found)"));
-    }
+    let script = crate::runtime::script(root, "content-check.mjs", "content collections")?;
     let out = std::process::Command::new("node")
         .arg(&script)
         .arg(dist.join("server"))

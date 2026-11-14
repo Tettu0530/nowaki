@@ -26,6 +26,9 @@ persistRooms(appRoot);
 const { env, liveRegistry } = await createApp({
   clientDir: path.join(appRoot, "dist/client"),
   serverDir: path.join(appRoot, "dist/server"),
+  // The Rust front terminates /__nowaki/live, so streamed pages let live.js use the WebSocket
+  // (start.rs `assemble` does the same for the others).
+  liveTransport: "auto",
 });
 
 // Pages return body+meta markers instead of final HTML. Streaming bypasses the markers.

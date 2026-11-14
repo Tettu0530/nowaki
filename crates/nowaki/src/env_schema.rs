@@ -18,12 +18,7 @@ pub fn start(root: &Path) -> Result<Pending> {
     let Some(file) = nowaki_core::env::env_file(root) else {
         return Ok(Pending(None));
     };
-    let script = root.join("node_modules/@nowaki-dev/runtime/server/env-check.mjs");
-    if !script.exists() {
-        return Err(anyhow!(
-            "env.ts needs @nowaki-dev/runtime 0.17 or newer (server/env-check.mjs not found)"
-        ));
-    }
+    let script = crate::runtime::script(root, "env-check.mjs", "env.ts")?;
     let child = std::process::Command::new("node")
         .arg(&script)
         .arg(&file)

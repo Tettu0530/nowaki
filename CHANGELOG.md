@@ -11,6 +11,20 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-11-14 · API freeze (the last breaking release before 1.0)
+
+Packages: `nowaki` / `nowaki-core`, `@nowaki-dev/runtime`, `create-nowaki` /
+`create-nowaki-app`, all 0.20.0; `@nowaki-dev/markdoc` 0.2.0 (it now peers on
+`@nowaki-dev/runtime` and uses its `NowakiPlugin` type). `nowaki-core` is internal from
+here on, on its own 0.x version line, pinned exactly by `nowaki`.
+
+The public API is frozen from this release: what is covered is listed in `api/` and
+described in docs/STABILITY.md, and CI refuses a removal or change to it without the
+`breaking` label. Next come `1.0.0-rc.N` releases on the npm `next` tag, then 1.0.0. This
+release makes the breaking cleanups that had to land before the freeze, ships the
+pre-1.0 security review, and moves releases to one tag-driven workflow with provenance.
+Run `nowaki upgrade --check` in an app to list what it needs to change.
+
 ### Upgrade notes
 - **Breaking: `nowaki dev` and `nowaki start` read `PORT`.** Without `--port` they listen on
   `PORT` (as the node / bun / deno adapters already did), else 3000. If `PORT` is set in
@@ -113,6 +127,25 @@ milestone's worth of work; the codename is noted per entry.
 - **`nowaki prerender` (and the static adapter) writes pages without a nonce**, also when
   `NOWAKI_CSP` is set: a static file has no per-response nonce, so the one it baked in was the
   same for every visitor. Set a static site's CSP in `_headers` yourself.
+- **Breaking: `.env.local` overrides `.env` on the server too.** The server (`nowaki dev` /
+  `start`, the adapters, env.ts validation) used to keep the `.env` value of a key both files
+  set, while the inlined `import.meta.env.PUBLIC_*` took the `.env.local` one. Both now use one
+  order: `.env`, then `.env.local` over it, then the real environment over both. The client
+  build also reads `PUBLIC_*` from the environment now (`PUBLIC_API=… nowaki build` inlines
+  it; before, only the files were read without an env.ts). `nowaki dev` / `build` / `start` /
+  `prerender` read the `NOWAKI_*` settings (`NOWAKI_CSP`, `NOWAKI_TRUST_PROXY`,
+  `NOWAKI_SECURITY_HEADERS`, …) from the files as well, so the Rust front and the renderer
+  agree; `PORT` and `NOWAKI_HOST` still come only from the environment. Who: apps with a key in
+  both files. How: keep the value you want in `.env.local` (or remove it there).
+- **`nowaki dev` accepts its HMR and live WebSockets only from its own origin** (dev only). Any
+  page on a loopback origin could open `/__nowaki/hmr` and the live socket, so another dev
+  server on localhost (another port) could listen to updates or drive live islands. The
+  `Origin` must now be the dev server's own port on `localhost` / `127.0.0.1` / `[::1]`, with
+  `--host` also an IP address, a `*.local` name or a name from `NOWAKI_DEV_ALLOWED_HOSTS` on
+  that port, or equal the request's `Host` (a proxy that keeps `Host`). Who: setups that load
+  the dev page from another origin (a second dev server or a proxy on another port that
+  rewrites `Host`). How: open the page from the dev server's own address, or keep `Host` in the
+  proxy.
 
 ### Added
 - **`nonce()` from `@nowaki-dev/runtime`**: the CSP nonce for an inline `<script>` / `<style>`
@@ -189,7 +222,36 @@ milestone's worth of work; the codename is noted per entry.
   the binaries with `SHA256SUMS` and GitHub artifact attestations. Tokens keep working until
   the trusted publishers are configured (docs/RELEASING.md, "One-time setup").
 
+### Removed
+- `nowaki-core` (internal crate): `asset::parse_query`, `asset::Transform` / `Fmt` and
+  `css::css_module_mapping_js`, unused since `?image` replaced the old `?w=&format=` asset
+  queries; `asset::optimize` takes no transform. No app-facing change.
+
 ### Fixed
+- Live islands on streamed pages (`export const streaming`) work in production. The streamed
+  shell had no live.js on `nowaki start` or the adapters (`nowaki dev` had it), so their events
+  did nothing. The shell now carries it whenever the build has live islands (with none on the
+  page it opens no connection): over the WebSocket on `nowaki start`, in POST mode on the
+  adapters, and not at all in `nowaki prerender` output, as for other pages.
+- `revalidatePath` with a long non-ASCII path under `nowaki start`: a valid path of 2000
+  characters encodes to ~30 KB, and it was put in the `x-nowaki-purge` response header anyway,
+  past its 8 KB cap. An entry that doesn't fit the header now goes through the token-guarded
+  stdout channel, and the header keeps the entries that fit.
+- Server functions exported by destructuring (`export const { a, b } = makeFns()`) are found
+  like other exports (the client got no proxy for them while the build's chunking saw them),
+  and the build's "unvalidated input" warning lists them, since their validation can't be seen.
+- A missing runtime file (the runtime isn't installed, or the install is broken) no longer asks
+  for "@nowaki-dev/runtime 0.16 or newer" (Google fonts, content collections) or 0.17 (env.ts,
+  remote images): the CLI already refuses a runtime of another version, so the error now says
+  which file is missing and the `npm install @nowaki-dev/runtime@<version>` that fixes it. The
+  node / bun / deno adapters' `dist/server/package.json` pins the CLI's runtime version when
+  none is installed, not `^0.6.0`.
+- `dist/client/manifest.json` and the server adapters' `dist/server/package.json` are written
+  with a JSON serializer: an island file name with a `'` or non-ASCII characters is escaped
+  properly. An island file name with `"`, `&`, `<`, `\` or a control character is now a build
+  error naming the file: the name goes into the page's `<nowaki-island name>` and is read back
+  to find the island's chunks, which those characters break (before, `"` or `\` wrote an
+  invalid manifest).
 - Server functions and `POST /__nowaki/live-event` answer **413** when the body goes over the
   limit while it is read (a chunked body has no `Content-Length`); they answered 400.
 - The `publish()` docs and its warning state what it does on the deploy adapters: nothing (it
