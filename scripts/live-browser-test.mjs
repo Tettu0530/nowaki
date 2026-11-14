@@ -11,7 +11,8 @@ import path from "node:path";
 
 const BASE = process.env.BASE || "http://127.0.0.1:8243";
 const EXPECT = process.env.EXPECT || "post";
-const PAGE = process.env.PAGE || "/live";
+// A leading "/" is optional (Git Bash on Windows rewrites an env value like /live-post into a path).
+const PAGE = "/" + String(process.env.PAGE || "/live").replace(/^\/+/, "");
 const CHROME =
   process.env.CHROME ||
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";

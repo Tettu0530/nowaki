@@ -246,7 +246,8 @@ jobs:
           BASE=http://127.0.0.1:8241 node scripts/lazy-hydration-test.mjs
           BASE=http://127.0.0.1:8241 pipe node scripts/router-browser-test.mjs
           BASE=http://127.0.0.1:8241 EXPECT=ws node scripts/live-browser-test.mjs
-          BASE=http://127.0.0.1:8241 EXPECT=post PAGE=/live-post node scripts/live-browser-test.mjs
+          # PAGE without its leading "/": Git Bash on Windows would turn /live-post into a file path.
+          BASE=http://127.0.0.1:8241 EXPECT=post PAGE=live-post node scripts/live-browser-test.mjs
           # Same pages under an enforced CSP: hydration, island CSS, and client navigation still work.
           NOWAKI_CSP=enforce ./target/debug/nowaki start examples/hello --port 8242 &
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8242/ >/dev/null && break; sleep 1; done

@@ -75,8 +75,17 @@ milestone's worth of work; the codename is noted per entry.
   `Set-Cookie` on shared-cacheable responses, and runs the session and revalidate checks
   against the Worker. CI runs `cargo deny check` with advisories (allowed unmaintained crates
   listed in `deny.toml` with reasons), audits the `create-nowaki` template's dependencies weekly,
-  adds Node 26 to the e2e matrix, and runs the browser tests (router, live, slots, gallery) and
-  the HMR / dev toolbar browser tests on Windows.
+  adds Node 26 to the e2e matrix, and runs the dev toolbar browser test and the lazy hydration,
+  live and locale browser tests on Windows. Still Linux / macOS only: the router,
+  intercepting-route and gallery tests (they drive Chrome over a CDP pipe, which Chrome on
+  Windows doesn't read) and the HMR test (on Windows an edit to a module an island imports
+  reloads the page instead of updating the island in place; open).
+
+### Fixed
+- **Node 26:** `module.register()` is deprecated there (DEP0205); the production React alias
+  hook (`server/app.mjs`) uses `module.registerHooks()` on Node 26, so `nowaki start` and the
+  node adapter print no deprecation warning (which also broke `NOWAKI_LOG=json` output). The
+  dev sidecar's loader hooks still use `register()` and print the warning once in `nowaki dev`.
 
 ### Docs
 

@@ -35,7 +35,7 @@ import { HEALTH_BODY, HEALTH_HEADERS, isHealth } from "./health.mjs";
 // Route modules are imported later, so libraries in them resolve React through this hook.
 // Bun and Deno don't implement Node's module.register; their SSR keeps the old behavior.
 // Node 26 deprecates module.register() (a warning on stderr at every start, which also breaks
-// NOWAKI_LOG=json output); it takes the in-thread module.registerHooks() instead.
+// JSON log output); it takes the in-thread module.registerHooks() instead.
 try {
   if (Number(process.versions.node?.split(".")[0]) >= 26 && typeof nodeModule.registerHooks === "function") {
     const { resolveSync } = await import("./react-alias-hooks.mjs");
