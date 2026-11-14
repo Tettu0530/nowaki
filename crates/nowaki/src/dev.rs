@@ -1,3 +1,7 @@
+//! `nowaki dev`: the dev server. It serves app modules transformed on request, proxies pages to
+//! the dev sidecar, watches the app for HMR, and mounts the dev-only endpoints (Jetstream WS, MCP,
+//! devtools, `/@fs/`).
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -18,6 +22,8 @@ use tokio::sync::broadcast;
 
 use crate::sidecar;
 
+/// State shared by every dev route: the core, the sidecar connection, the HMR channel and the
+/// security settings of the bind.
 pub struct DevState {
     pub(crate) core: NowakiCore,
     hmr_tx: broadcast::Sender<String>,
@@ -31,13 +37,14 @@ pub struct DevState {
     /// The address the dev server listens on (`--host` / `NOWAKI_HOST`), for `dev_config`.
     pub(crate) bind_ip: std::net::IpAddr,
     pub(crate) plugins: bool,
-    /// Roots /@fs/ may serve from (canonical paths). Anything else is rejected.
+    /// Roots that `/@fs/`, `/__nowaki/ssr-module`, `/__nowaki/css` and `/__nowaki/image` may read
+    /// from (canonical paths). Anything else is rejected.
     fs_allow: Vec<PathBuf>,
     /// Whether the bind is reachable from other machines (`--host`, `--host <addr>` or a
     /// non-loopback `NOWAKI_HOST`). Used for the Host and WS Origin checks.
     pub(crate) expose: bool,
-    /// nowaki.config routing from `.nowaki/routing.json` (read at startup; a change needs a restart,
-    /// which `apply_changes` says).
+    /// nowaki.config routing from `.nowaki/routing.json`, read at startup. A change needs a
+    /// restart, which `apply_changes` reports.
     front: Option<Arc<crate::front::Front>>,
     /// What `apply_changes` needs between batches: import edges and CSS Module class maps.
     hmr_graph: std::sync::Mutex<HmrGraph>,
@@ -54,6 +61,8 @@ impl DevState {
     }
 }
 
+/// Runs `nowaki dev` for the app at `root` (canonical) until a shutdown signal. `open` opens the
+/// browser once the server listens.
 pub async fn run(root: PathBuf, bind: crate::listen::Bind, open: bool) -> Result<()> {
     let started = Instant::now();
     // Bound first: a taken port fails before any child process starts. What the bind exposes is
@@ -86,8 +95,8 @@ pub async fn run(root: PathBuf, bind: crate::listen::Bind, open: bool) -> Result
     };
 
     // The plugin host imports nowaki.config (plugins, and the build-time config site-config.mjs
-    // normalizes) while typegen runs and the sidecar starts; it's waited for before serving:
-    // routing (.nowaki/routing.json) must be in place for the first request.
+    // normalizes) while typegen runs and the sidecar starts. It is waited for before serving,
+    // because routing (.nowaki/routing.json) must be in place for the first request.
     let plugin_host = crate::plugins::spawn(&root, true)?;
     // env.ts is checked in Node while the sidecar and plugin host start.
     let env_check = crate::env_schema::start(&root)?;
@@ -139,7 +148,7 @@ pub async fn run(root: PathBuf, bind: crate::listen::Bind, open: bool) -> Result
         hmr_tx: hmr_tx.clone(),
         ssr_version: AtomicU64::new(1),
         sidecar_port: sidecar.port,
-        // Pass redirects (302 etc.) through to the browser (don't follow server-side).
+        // Redirects from the sidecar go to the browser as they are, not followed here.
         http: reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .build()
@@ -202,7 +211,7 @@ pub async fn run(root: PathBuf, bind: crate::listen::Bind, open: bool) -> Result
         crate::ui::open_browser(&crate::ui::browser_url(local.ip(), port));
     }
 
-    // Don't wait for open HMR/live sockets on shutdown; just stop serving and drop the children.
+    // Shutdown does not wait for open HMR / live sockets: it stops serving and drops the children.
     let also_loopback = {
         let (app, base) = (app.clone(), base.clone());
         async move {
@@ -324,8 +333,8 @@ fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::Recommende
     Ok(watcher)
 }
 
-/// Whether `p` is inside a directory named one of `names` (by path component, so Windows `\`
-/// paths match too; "/x/" substring checks never did there).
+/// Whether `p` (relative to `root`) is inside a directory named one of `names`. Matches by path
+/// component, so Windows `\` paths match too.
 fn under(root: &Path, p: &Path, names: &[&str]) -> bool {
     p.strip_prefix(root)
         .unwrap_or(p)
@@ -335,7 +344,7 @@ fn under(root: &Path, p: &Path, names: &[&str]) -> bool {
 
 /// App-root files `nowaki dev` reads only at startup: nowaki.config (plugins, routing, site),
 /// env.ts (checked, public values inlined into browser modules) and the .env files the sidecar
-/// loads. (session.ts is re-imported for each SSR version.)
+/// loads. session.ts is not one of them: the sidecar re-imports it for each SSR version.
 const STARTUP_FILES: &[&str] = &[
     "nowaki.config.mjs",
     "nowaki.config.js",
@@ -360,6 +369,8 @@ fn needs_restart(root: &Path, paths: &[PathBuf]) -> Vec<String> {
     out
 }
 
+/// Applies one batch of changed files: warns about files that need a restart, rewrites the route
+/// types and content index when needed, bumps the SSR version, and sends the HMR messages.
 fn apply_changes(state: &DevState, relevant: Vec<PathBuf>) {
     let root = &state.core.root;
     let restart = needs_restart(root, &relevant);
@@ -455,17 +466,19 @@ impl HmrGraph {
 /// What a batch of file changes does to open pages.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct HmrPlan {
-    /// A full reload: config, env, session, content, a removed file, or a module no island or
-    /// route imports.
+    /// A full reload: a startup file (needs a restart), session.ts or what it imports, content/,
+    /// a removed file, a file that is neither a module nor a stylesheet, a changed module nothing
+    /// imports, or a walk past `HMR_WALK_CAP`.
     reload: bool,
     /// A route, layout or a module a route imports changed (a server-only `lib/` module too): the
     /// client refetches the page and morphs it in place.
     page: bool,
     /// Stylesheets to replace in place (the changed ones, and the ones that `@import` them).
     css: std::collections::BTreeSet<PathBuf>,
-    /// Island entries to re-import, and every module between them and the change (all get new
-    /// hot versions).
+    /// Island entries to re-import.
     islands: std::collections::BTreeSet<PathBuf>,
+    /// The island entries and every module between them and the change; all get new hot
+    /// versions.
     modules: std::collections::BTreeSet<PathBuf>,
 }
 
@@ -678,7 +691,7 @@ async fn hmr_ws(
     ws.on_upgrade(move |socket| handle_hmr(socket, state))
 }
 
-/// WS for server-reactive islands. Session logic lives in crate::live.
+/// The Jetstream WebSocket for live islands; the session itself runs in `crate::live`.
 async fn live_ws(
     ws: WebSocketUpgrade,
     headers: axum::http::HeaderMap,
@@ -721,8 +734,8 @@ async fn handle_hmr(mut socket: WebSocket, state: Arc<DevState>) {
     }
 }
 
-/// Server function allowlist (id → { module, export }). Dev doesn't build, so
-/// the sidecar looks RPCs up here to dispatch them.
+/// The server function allowlist (id → `{ module, export }`). Dev has no `functions.json`, so
+/// the sidecar looks RPC ids up here to dispatch them.
 async fn server_functions(State(state): State<Arc<DevState>>) -> Response {
     let core_state = state.clone();
     let body = tokio::task::spawn_blocking(move || {
@@ -750,15 +763,16 @@ async fn server_functions(State(state): State<Arc<DevState>>) -> Response {
     }
 }
 
+/// Query of `/__nowaki/ssr-module`, sent by the dev loader hooks (`server/loader-hooks.mjs`).
 #[derive(serde::Deserialize)]
 pub struct SsrModuleQuery {
     path: String,
-    #[allow(dead_code)] // cache buster (added by the Node loader)
+    #[allow(dead_code)] // The SSR version, a cache buster for Node's module cache.
     v: Option<String>,
 }
 
-/// SSR transform for the Node loader hook. `path` is user input, so canonicalize it and
-/// only pass transformable, non-sensitive files under allowed roots (blocks arbitrary reads like `?path=/etc/passwd`).
+/// The SSR transform for the Node loader hooks. `path` is user input: it is canonicalized, and
+/// only transformable, non-sensitive files under an allowed root pass (no `?path=/etc/passwd`).
 async fn ssr_module(
     State(state): State<Arc<DevState>>,
     Query(q): Query<SsrModuleQuery>,
@@ -777,8 +791,6 @@ struct RouteCssQuery {
     file: String,
 }
 
-/// The stylesheets a route (and its layouts) imports, as `/__nowaki/css` URLs, for the dev
-/// sidecar to link in the page head. Only route files under `routes/` are accepted.
 /// A self-hosted font file built by `fonts::build_dev` (`.nowaki/fonts/<name>`; names only).
 async fn dev_font(
     State(state): State<Arc<DevState>>,
@@ -856,6 +868,8 @@ async fn dev_image(
     }
 }
 
+/// The stylesheets a route (and its layouts) imports, as `/__nowaki/css` URLs, for the dev
+/// sidecar to link in the page head. Only route files under `routes/` are accepted.
 async fn route_css(State(state): State<Arc<DevState>>, Query(q): Query<RouteCssQuery>) -> Response {
     let routes_dir = state.core.root.join("routes");
     let Ok(canon) = dunce::canonicalize(&q.file) else {
@@ -944,8 +958,9 @@ async fn dev_css(State(state): State<Arc<DevState>>, Query(q): Query<DevCssQuery
         .into_response()
 }
 
-/// /@fs/<absolute path>: serves files outside the app root (pnpm store etc.). `rest` is user input, so
-/// canonicalize it, then check it's under an allowed root and non-sensitive (prevents path traversal).
+/// `/@fs/<absolute path>`: files outside the app root (the pnpm store, a workspace package).
+/// `rest` is user input: it is canonicalized and must be a non-sensitive file under an allowed
+/// root, so a path traversal goes nowhere.
 async fn serve_fs(
     State(state): State<Arc<DevState>>,
     axum::extract::Path(rest): axum::extract::Path<String>,
@@ -960,7 +975,8 @@ async fn serve_fs(
     serve_file(state, canon).await
 }
 
-/// Fallback: serve the file if it's under the app root, otherwise proxy SSR to the sidecar
+/// The fallback: config routing, then `public/` files, virtual modules and app files, else the
+/// sidecar renders the request.
 async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Response {
     let path = req.uri().path().to_string();
     if crate::forward::is_internal_path(&path) {
@@ -988,7 +1004,8 @@ async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Res
             return resp;
         }
     }
-    // Virtual ids never contain `..`, so reject it (prevents traversal via root.join when the synthetic dir exists).
+    // Virtual ids never contain `..`, so a path with one is refused (no traversal through
+    // `root.join` when the virtual directory exists).
     if path.starts_with(&format!("/{VIRTUAL_DIR}/")) {
         if path.split('/').any(|seg| seg == "..") {
             return (StatusCode::NOT_FOUND, "not found").into_response();
@@ -1005,7 +1022,8 @@ async fn serve_or_proxy(State(state): State<Arc<DevState>>, req: Request) -> Res
 }
 
 /// URLs `nowaki dev` serves itself, which config rules never apply to: framework endpoints, the
-/// runtime and dependencies, virtual modules, islands, and any other file of the app.
+/// runtime and dependencies, virtual modules, islands, and (on GET / HEAD) any other file of the
+/// app.
 fn dev_module_url(root: &Path, path: &str, read: bool) -> bool {
     path.starts_with("/__nowaki/")
         || path.starts_with("/node_modules/")
@@ -1125,7 +1143,7 @@ async fn serve_file(state: Arc<DevState>, abs: PathBuf) -> Response {
 }
 
 async fn transform_response(state: Arc<DevState>, abs: PathBuf, mode: Mode) -> Response {
-    // oxc transforms are CPU-bound, so run them on the blocking pool
+    // oxc transforms are CPU-bound, so they run on the blocking pool.
     let core_state = state.clone();
     let file = abs.clone();
     let result = tokio::task::spawn_blocking(move || core_state.core.load_module(&abs, mode)).await;
@@ -1142,7 +1160,8 @@ async fn transform_response(state: Arc<DevState>, abs: PathBuf, mode: Mode) -> R
             let msg = format!("{err:#}");
             eprintln!("[nowaki] transform error: {msg}");
             state.errors.record("build", &msg, Some(&file), None, None);
-            // Diagnostics may contain the full source, so keep them out of the HTTP body and send them only to the same-origin HMR overlay.
+            // Diagnostics may contain the full source: they go only to the same-origin HMR
+            // overlay, never into the HTTP body.
             let _ = state
                 .hmr_tx
                 .send(json!({ "type": "error", "message": msg }).to_string());
@@ -1229,8 +1248,9 @@ async fn proxy_to_sidecar(
     }
 }
 
-/// Allowed roots for /@fs/: the app root and workspace root (shared node_modules in pnpm/monorepos).
-/// Anything else (`/etc`, home, `.env` outside the root, etc.) is rejected.
+/// The allowed roots (`DevState::fs_allow`): the app root and the workspace root (shared
+/// `node_modules` in pnpm workspaces and monorepos). Anything else (`/etc`, the home directory,
+/// an `.env` outside the root) is rejected.
 fn compute_fs_allow(root: &Path) -> Vec<PathBuf> {
     let mut allow = Vec::new();
     if let Ok(c) = dunce::canonicalize(root) {
@@ -1307,6 +1327,7 @@ fn fs_path_allowed(canon: &Path, allow: &[PathBuf]) -> bool {
     !is_denied_fs_path(canon) && allow.iter().any(|root| canon.starts_with(root))
 }
 
+/// Whether a `Host` value (with or without a port) names `localhost`, `127.0.0.1` or `::1`.
 pub(crate) fn is_loopback_host(host: &str) -> bool {
     let h = if let Some(rest) = host.strip_prefix('[') {
         rest.split(']').next().unwrap_or(rest)
@@ -1352,7 +1373,7 @@ fn dev_allowed_hosts() -> &'static [String] {
     })
 }
 
-/// Whether `nowaki dev --host` answers a `Host` (see `dev_host_allowed`).
+/// Whether an exposed bind accepts a `Host` (see `dev_host_allowed`).
 fn exposed_host_allowed(host: &str, extra: &[String]) -> bool {
     let name = if let Some(rest) = host.strip_prefix('[') {
         // A bracketed IPv6 literal.
@@ -1395,8 +1416,9 @@ async fn host_guard(
         .into_response()
 }
 
-/// Validate the WebSocket upgrade Origin (CSWSH guard). No Origin (non-browser) is allowed;
-/// same-origin is allowed, but on the default bind Host must be loopback to defeat DNS rebinding.
+/// Checks the `Origin` of a WebSocket upgrade (CSWSH guard). No `Origin` (not a browser) passes.
+/// A same-origin upgrade passes, but on a loopback bind only with a loopback `Host` (DNS
+/// rebinding). A loopback `Origin` always passes.
 fn ws_origin_ok(headers: &axum::http::HeaderMap, expose: bool) -> bool {
     let origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
     let Some(origin) = origin else {
@@ -1437,10 +1459,10 @@ mod tests {
     #[test]
     fn rejects_paths_outside_allow_roots() {
         let allow = vec![PathBuf::from("/proj/node_modules")];
-        // Reject paths outside allowed roots (arbitrary file reads)
+        // Paths outside the allowed roots (arbitrary file reads).
         assert!(!fs_path_allowed(Path::new("/etc/passwd"), &allow));
         assert!(!fs_path_allowed(Path::new("/home/u/.ssh/id_rsa"), &allow));
-        // Also reject prefix-match slips (sibling directories)
+        // A sibling directory that only shares the prefix.
         assert!(!fs_path_allowed(
             Path::new("/proj/node_modules_evil/x"),
             &allow
@@ -1459,7 +1481,7 @@ mod tests {
     #[test]
     fn denies_sensitive_files_even_within_allow_roots() {
         let allow = vec![PathBuf::from("/proj")];
-        // Never serve .env / inside .git / private keys, even under allowed roots
+        // Never .env, files inside .git or private keys, even under an allowed root.
         assert!(!fs_path_allowed(Path::new("/proj/.env"), &allow));
         assert!(!fs_path_allowed(Path::new("/proj/.env.local"), &allow));
         assert!(!fs_path_allowed(Path::new("/proj/.git/config"), &allow));
@@ -1473,7 +1495,7 @@ mod tests {
 
     #[test]
     fn is_denied_fs_path_matches_components_not_substrings() {
-        // Don't misfire on directories whose name merely contains ".env"
+        // A directory whose name merely contains "env" is not denied.
         assert!(!is_denied_fs_path(Path::new("/proj/environments/dev.js")));
         assert!(is_denied_fs_path(Path::new("/proj/.env.production")));
     }
@@ -1491,7 +1513,7 @@ mod tests {
 
     #[test]
     fn ws_origin_rejects_cross_site() {
-        // Default bind: reject cross-origin connections to localhost (CSWSH)
+        // A cross-origin upgrade is refused on either bind (CSWSH).
         let h = hdrs(&[("host", "localhost:3000"), ("origin", "http://evil.com")]);
         assert!(!ws_origin_ok(&h, false));
         assert!(!ws_origin_ok(&h, true));
@@ -1513,7 +1535,7 @@ mod tests {
 
     #[test]
     fn ws_origin_defeats_dns_rebinding_on_default_bind() {
-        // Origin==Host but Host is non-loopback → rejected on default bind, allowed with --host
+        // Origin matches a non-loopback Host: refused on a loopback bind, allowed when exposed.
         let h = hdrs(&[
             ("host", "attacker.test:3000"),
             ("origin", "http://attacker.test:3000"),
@@ -1524,14 +1546,14 @@ mod tests {
 
     #[test]
     fn ws_origin_allows_missing_origin() {
-        // Native WS clients (no Origin) are allowed
+        // Non-browser WS clients (no Origin) are allowed.
         let h = hdrs(&[("host", "localhost:3000")]);
         assert!(ws_origin_ok(&h, false));
     }
 
     #[test]
     fn ws_origin_lan_same_origin_under_host() {
-        // With --host, same-origin on a LAN IP is allowed
+        // When exposed, a same-origin upgrade on a LAN IP is allowed.
         let h = hdrs(&[
             ("host", "192.168.1.10:3000"),
             ("origin", "http://192.168.1.10:3000"),
