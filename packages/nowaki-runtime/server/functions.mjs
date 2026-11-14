@@ -76,10 +76,17 @@ export async function dispatchServerFn(ctx, info, sf, { dev = false } = {}) {
   if (Number(ctx.get("content-length")) > BODY_LIMIT) {
     return errBody(413, "Payload Too Large");
   }
+  let text;
+  try {
+    text = await ctx.bodyText();
+  } catch (err) {
+    // Over the body limit while reading (a chunked body has no Content-Length): 413, not 400.
+    if (err?.name === "RequestBodyError") return errBody(err.status, err.status === 413 ? "Payload Too Large" : "Bad Request");
+    text = ""; // an unreadable body is a bad request (missing id), as before
+  }
+  if (text.length > BODY_LIMIT) return errBody(413, "Payload Too Large");
   let payload = null;
   try {
-    const text = await ctx.bodyText();
-    if (text.length > BODY_LIMIT) return errBody(413, "Payload Too Large");
     payload = text ? JSON.parse(text) : null;
   } catch {
     payload = null;

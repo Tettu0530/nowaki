@@ -121,7 +121,7 @@ Files starting with `_` do not become URLs; they are convention files with the f
 | `_layout.tsx` | Wraps pages under its directory (nestable, receives `children`) |
 | `_middleware.ts` | Pre-processes requests under its directory (nestable, returning a `Response` short-circuits) |
 | `_404.tsx` | Page for unmatched routes (status 404) |
-| `_500.tsx` / `_error.tsx` | Page for when a loader/render throws (receives `{ error }`, status 500) |
+| `_500.tsx` | Page for when a loader/render throws (receives `{ error }`, status 500) |
 
 ### Data loading (Remix-style loader)
 

@@ -1,7 +1,7 @@
 // env.ts: defineEnv declares the app's environment variables with Standard Schemas, and
 // validateEnv checks a source (process.env, Worker bindings) against them. No Node imports: the
 // edge adapters use this too.
-import { setServerEnv } from "./env-server.mjs";
+import { setServerEnv } from "./env-store.mjs";
 
 const MARK = "__nowakiEnv";
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;

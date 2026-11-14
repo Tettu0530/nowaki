@@ -1,6 +1,5 @@
 // Example API route (server-only). No secrets in responses; validate inputs on real endpoints.
-type Ctx = { json: (data: unknown) => unknown };
+// `ApiModule` types every export an API route can have (GET, POST, ..., csrf).
+import type { ApiModule } from "@nowaki-dev/runtime";
 
-export function GET(ctx: Ctx) {
-  return ctx.json({ ok: true });
-}
+export const GET: ApiModule["GET"] = (ctx) => ctx.json({ ok: true });

@@ -15,6 +15,7 @@ import { pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { configOf, normalizeConfig } from "./site-config.mjs";
 
 const appRoot = process.cwd();
 
@@ -33,24 +34,30 @@ async function loadConfig() {
     const p = path.join(appRoot, name);
     if (existsSync(p)) {
       const mod = await import(pathToFileURL(p).href);
-      return { name, config: mod.default ?? mod.config ?? {} };
+      try {
+        return { name, config: configOf(mod) };
+      } catch (error) {
+        return { name, config: {}, error };
+      }
     }
   }
   return { name: null, config: {} };
 }
 
-const { name: configName, config } = await loadConfig();
+const { name: configName, config, error: configError } = await loadConfig();
 
 // NOWAKI_SITE_CONFIG=1: the CLI also wants site-config.mjs's normalized config (site, fonts,
 // routing, images), answered in /caps. Doing it here saves a second Node start and config import.
 let siteConfig;
 if (process.env.NOWAKI_SITE_CONFIG === "1") {
   try {
-    const { normalizeConfig } = await import("./site-config.mjs");
+    if (configError) throw configError;
     siteConfig = { ok: configName ? await normalizeConfig(config) : {} };
   } catch (e) {
     siteConfig = { error: `${configName}: ${e?.message ?? e}` };
   }
+} else if (configError) {
+  console.error(`[nowaki] ${configName}: ${configError.message}`);
 }
 const plugins = (config.plugins ?? []).filter((p) => p && typeof p === "object");
 const transformers = plugins.filter((p) => typeof p.transform === "function");

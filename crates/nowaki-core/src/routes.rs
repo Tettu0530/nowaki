@@ -95,6 +95,20 @@ pub fn is_slot_or_intercept_rel(rel: &str) -> bool {
     is_slot_rel(rel) || rel.split(['/', '\\']).any(is_intercept_segment)
 }
 
+/// The error for a route file that uses a file convention removed before 1.0 (`_error.tsx`, the
+/// old alias of `_500.tsx`), or None. Slot files starting with `_` are ignored, so they never
+/// match. Matches router.mjs `scanRoutes`, which refuses the same files in dev.
+pub fn removed_convention(rel: &str) -> Option<String> {
+    let rel = rel.replace('\\', "/");
+    let stem = stem_from_rel(&rel)?;
+    if is_slot_rel(&rel) || file_base_name(&stem) != "_error" {
+        return None;
+    }
+    Some(format!(
+        "routes/{rel}: `_error` is no longer a file convention (removed in 0.20.0). Rename it to `_500` (the server's error page); `error.tsx` is the client navigation error boundary."
+    ))
+}
+
 pub fn is_api_route_rel(rel: &str) -> bool {
     let rel = strip_route_groups(&rel.replace('\\', "/"));
     rel == "api" || rel.starts_with("api/")
@@ -441,6 +455,25 @@ mod tests {
         assert_eq!(entry("api/hello.ts"), None);
         assert_eq!(entry("api/posts/[id].ts"), None);
         assert_eq!(entry("readme.md"), None);
+    }
+
+    #[test]
+    fn the_removed_error_alias_is_refused() {
+        let msg = removed_convention("_error.tsx").expect("refused");
+        assert!(
+            msg.contains("routes/_error.tsx") && msg.contains("`_500`"),
+            "{msg}"
+        );
+        assert!(removed_convention("admin/_error.ts").is_some());
+        assert!(removed_convention("(shop)\\_error.jsx").is_some());
+        assert_eq!(removed_convention("_500.tsx"), None);
+        assert_eq!(removed_convention("error.tsx"), None);
+        assert_eq!(
+            removed_convention("@modal/_error.tsx"),
+            None,
+            "slot `_` files are ignored"
+        );
+        assert_eq!(removed_convention("_error.md"), None);
     }
 
     #[test]

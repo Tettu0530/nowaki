@@ -93,12 +93,18 @@ export interface HrefOptions {
 export function href(path: StaticRoutePath | Href, options?: HrefOptions): Href;
 export function href(path: string, options?: HrefOptions): string;
 
-/** The current locale with `i18n` in nowaki.config (see `getLocale` in `@nowaki-dev/runtime`). */
+/**
+ * The current locale with `i18n` in nowaki.config (`ctx.locale` of the request being rendered,
+ * usable in components, layouts and islands). In the browser it is the page's locale. Undefined
+ * without i18n, outside a page request, and in server functions. Also exported from
+ * `@nowaki-dev/runtime`.
+ */
 export function getLocale(): string | undefined;
 
 /**
- * `path` in `locale`, default the current one (see `localePath` in `@nowaki-dev/runtime`), without
- * basePath: `localePath(route("/photo/[id]", { id: "1" }), "ja")` → `"/ja/photo/1"`. A link
+ * `path` in `locale`, default the current one, without basePath: `localePath("/about", "ja")` →
+ * `"/ja/about"`, `localePath("/ja/about", "en")` → `"/about"` when `en` is the default locale. The
+ * query and fragment are kept; without i18n, `path` comes back unchanged. `localePath(route("/photo/[id]", { id: "1" }), "ja")` → `"/ja/photo/1"`. A link
  * doesn't need it (`<Link href>` already keeps the current locale, and `<Link locale="ja">`
  * switches it); use it for a path in another locale outside a link, or `href()` for one under
  * basePath.
@@ -106,8 +112,22 @@ export function getLocale(): string | undefined;
 export function localePath(path: StaticRoutePath | Href, locale?: string): Href;
 export function localePath(path: string, locale?: string): string;
 
-/** Remembers the visitor's locale for `i18n.detect` (see `setLocale` in `@nowaki-dev/runtime`). */
+/**
+ * Remembers `locale` as the visitor's choice when nowaki.config has `i18n.detect`: sets the
+ * `nowaki_locale` cookie (Path = basePath, one year, SameSite=Lax), which the site's root follows
+ * instead of `Accept-Language`. Call it from an island (a language switcher) before navigating;
+ * a `<Link locale>` used inside an island does it on click. Does nothing on the server. Also
+ * exported from `@nowaki-dev/runtime`.
+ */
 export function setLocale(locale: string): void;
+
+/**
+ * The app path of a browser URL: nowaki.config `basePath` and a locale prefix taken off, the query
+ * and fragment left out (`/gallery/ja/photo/1` → `/photo/1`). The inverse of {@link href}, and
+ * the browser-side counterpart of `ctx.routePath`; works in components, layouts and islands. Use
+ * it to link to the current page in another locale: `<Link href={routePath(url)} locale="ja">`.
+ */
+export function routePath(url: URL | string): Href;
 
 /**
  * A `view-transition-name` for a `style` prop, so an element morphs into the element of the same

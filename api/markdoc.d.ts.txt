@@ -6,7 +6,7 @@
 # packages/nowaki-markdoc/index.d.ts
 export type Schema = { render?: string; attributes?: Record<string, unknown>; children?: string[]; selfClosing?: boolean; inline?: boolean; [key: string]: unknown; };
 export type MarkdocOptions = { components?: string; tags?: Record<string, Schema>; nodes?: Record<string, Schema>; variables?: Record<string, unknown>; functions?: Record<string, unknown>; partials?: Record<string, unknown>; parseFrontmatter?: (raw: string, format: "yaml" | "toml") => Record<string, unknown>; root?: string; };
-export type NowakiPlugin = { name: string; transform(code: string, id: string): string | null; };
+export type { NowakiPlugin } from "@nowaki-dev/runtime/config";
 export function markdoc(options?: MarkdocOptions): NowakiPlugin;
 export default markdoc;
 export function compileMarkdoc(source: string, id: string, options?: MarkdocOptions): string;

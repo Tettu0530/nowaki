@@ -123,7 +123,9 @@ pub fn spawn(root: &Path, with_config: bool) -> Result<Spawned> {
         );
         return Ok(none());
     }
-    let site_config = with_config && crate::site::mentions(root);
+    // Every config is validated (an unknown top-level key throws), not only one that names a
+    // build-time key: a typo like `basepath` names none of them.
+    let site_config = with_config && has_config;
 
     let mut cmd = Command::new("node");
     cmd.arg(&script)
@@ -376,5 +378,10 @@ mod tests {
             format!("{err:#}").contains("nowaki.config is invalid"),
             "{err:#}"
         );
+
+        // A config naming no build-time key is still checked: a typo is not silently ignored.
+        let app = app_with_config(r#"export default { basepath: "/app" };"#);
+        let (_, read) = spawn(app.path(), true).unwrap().finish().unwrap();
+        assert!(read.is_err(), "unknown top-level key");
     }
 }

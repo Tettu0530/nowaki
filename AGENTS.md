@@ -320,8 +320,12 @@ and `scripts/gallery-e2e.mjs` / `gallery-browser-test.mjs` check the exit criter
   The host (`server/plugin-host.mjs`, started by `plugins::spawn` before typegen) also
   normalizes the build-time config with site-config.mjs's `normalizeConfig` and returns it in
   `/caps` (`siteConfig`, under `NOWAKI_SITE_CONFIG=1`), so build / dev / prerender import
-  nowaki.config once. `runtime::check` (`MIN_RUNTIME`) refuses runtimes older than that,
-  so the CLI has no fallback paths for them.
+  nowaki.config once (every config, so an unknown top-level key always fails).
+  `runtime::check` (`MIN_RUNTIME`) refuses runtimes older than that, so the CLI has no fallback
+  paths for them. The config is the module's default export (`site-config.mjs` `configOf`; the
+  old `export const config` throws). Top-level keys are `CONFIG_KEYS`, font keys `FONT_KEYS`
+  (both in `site-config.mjs`, listed by `api/config.txt`): a new key goes there, in
+  `config.d.ts` (`NowakiConfig`, `@nowaki-dev/runtime/config`) and in the snapshot together.
 - **Scope hoisting / chunking** — `crates/nowaki-core/src/chunk.rs`.
 - **Deploy adapters** — `crates/nowaki/src/adapter.rs` (+ `server/edge-build.mjs`).
 - **Images (`?image`, `<Image>`)** — `crates/nowaki-core/src/image.rs` (widths, AVIF via ravif
@@ -349,7 +353,7 @@ and `scripts/gallery-e2e.mjs` / `gallery-browser-test.mjs` check the exit criter
   entries: `content.rs` (`module`). Tests: `node --test "packages/nowaki-markdoc/test/*.test.mjs"`.
 - **Typed env (`env.ts`)** — `defineEnv` / `validateEnv` / `initServerEnv` in
   `server/env-schema.mjs`, the frozen values behind `@nowaki-dev/runtime/env/server` in
-  `server/env-server.mjs`. Before a build (and at `nowaki dev` startup) `crates/nowaki/src/env_schema.rs`
+  `server/env-server.mjs` (filled through the internal `server/env-store.mjs` `setServerEnv`). Before a build (and at `nowaki dev` startup) `crates/nowaki/src/env_schema.rs`
   runs `server/env-check.mjs` and passes the public values to `NowakiCore::set_public_env`; the server
   build compiles env.ts to `dist/server/env.js` and writes `env-public.json`. Startup validation:
   `app.mjs` `createApp`, `web.mjs` (first request), dev `sidecar.mjs` (first request). Client import
@@ -419,7 +423,9 @@ and `scripts/gallery-e2e.mjs` / `gallery-browser-test.mjs` check the exit criter
   caches the string of a frozen htmlAttrs object: keep the per-request work to the split and the
   AsyncLocalStorage `run`). `<Link>` and `href()` (`navigation.js`) add the current locale
   (server: the request's locale state, browser: `data-nowaki-i18n`) unless the href has a locale
-  prefix or `locale={false}`, then the base. `env.i18n` is set by `app.mjs`, `web.mjs` (`routing`, passed by `edge-build.mjs`) and dev `sidecar.mjs`
+  prefix or `locale={false}`, then the base. The reverse, the app path of a URL, is
+  `ctx.routePath` (the path `routeRequest` matched, passed to `makeContext`) and `routePath(url)`
+  in `navigation.js`. `env.i18n` is set by `app.mjs`, `web.mjs` (`routing`, passed by `edge-build.mjs`) and dev `sidecar.mjs`
   (`.nowaki/routing.json`). Content locales: `content.rs` `split_locale` (locales from the routing
   config). Per-locale URLs: `isr-urls.mjs` `localeUrls`, `static-paths.mjs` `localePages`,
   `prerender.rs` `locale_urls` / `locale_404s` / `locale_redirects`; `locale_url` and
@@ -513,6 +519,10 @@ for `api/cli.txt`), classify any `[unclassified]` name, and commit the diff. CI 
 `--check`; from 0.20.0 a removed or changed `[stable]` entry needs the `breaking` PR
 label. Don't edit generated lines by hand, except the section and the text of entries
 in the classified files (`env.txt`, `http.txt`, `client.txt`, `route-exports.txt`).
+A new route export the runtime reads also goes in the route module types of `index.d.ts`
+(`PageModule`, `LayoutModule`, `ApiModule`, `MiddlewareModule`, `IslandModule`). Removed
+conventions (`_error.tsx`, `export const middleware`, `export const config`, lowercase API
+method exports) fail with an error naming the replacement; don't bring back a silent alias.
 Details: [CONTRIBUTING.md § API snapshots](./CONTRIBUTING.md#api-snapshots).
 
 ## Releasing (maintainers)

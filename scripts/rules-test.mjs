@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyRules, compileRules, negotiateLocale, ruleHeaders } from "../packages/nowaki-runtime/server/rules.mjs";
-import { normalizeConfig } from "../packages/nowaki-runtime/server/site-config.mjs";
+import { CONFIG_KEYS, FONT_KEYS, configOf, didYouMean, normalizeConfig } from "../packages/nowaki-runtime/server/site-config.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixture = JSON.parse(await readFile(path.join(ROOT, "crates/nowaki-core/tests/fixtures/rules-cases.json"), "utf8"));
@@ -137,10 +137,58 @@ eq(
   "images.remotePatterns",
 );
 eq(
-  (await normalizeConfig({ site: "https://example.com/", fonts: [{ family: "X" }] })),
-  { site: "https://example.com", fonts: [{ family: "X" }] },
+  (await normalizeConfig({ site: "https://example.com/", fonts: [{ family: "X", provider: "google" }] })),
+  { site: "https://example.com", fonts: [{ family: "X", provider: "google" }] },
   "site and fonts as before",
 );
+
+// Top-level keys: anything outside CONFIG_KEYS is a typo, with the closest key suggested.
+eq(CONFIG_KEYS.includes("plugins") && CONFIG_KEYS.includes("basePath"), true, "CONFIG_KEYS lists the keys");
+eq(await normalizeConfig({ plugins: [] }), {}, "plugins alone is fine");
+await rejects({ basepath: "/app" }, /^unknown top-level key "basepath"\. Did you mean "basePath"\?/, "unknown top-level key, with a hint");
+await rejects({ redirect: [] }, /Did you mean "redirects"\?/, "a missing s");
+await rejects({ trailingSlashes: "never" }, /Did you mean "trailingSlash"\?/, "an extra suffix");
+await rejects({ cors: {} }, /unknown top-level key "cors"\. \(allowed: site, fonts/, "no hint when nothing is close");
+await rejects({ plugins: {} }, /plugins must be an array/, "plugins must be an array");
+await rejects({ redirects: [{ source: "/a", destination: "/b", permanentz: true }] }, /Did you mean "permanent"\?/, "nested keys get the hint too");
+eq(didYouMean("i18N", CONFIG_KEYS), "i18n", "case is ignored");
+eq(didYouMean("x", CONFIG_KEYS), null, "a short unrelated name has no hint");
+
+// configOf: the default export; `export const config` alone was an alias, removed in 0.20.0.
+eq(configOf({ default: { site: "https://a.b" } }), { site: "https://a.b" }, "configOf reads the default export");
+eq(configOf({}), {}, "configOf: an empty module is an empty config");
+let aliasErr = "";
+try {
+  configOf({ config: { site: "https://a.b" } });
+} catch (e) {
+  aliasErr = e.message;
+}
+eq(/`export const config` is no longer read.*export default/.test(aliasErr), true, `export const config is refused (${aliasErr})`);
+
+// fonts: one shape per kind, unknown keys and the other kind's keys refused.
+const fontsOk = [
+  { family: "Inter", provider: "google", weights: [400, 700], styles: ["normal", "italic"], subsets: ["latin"], display: "optional", variable: "--font-body", preload: false, fallback: "serif" },
+  { family: "Brand", src: "./fonts/brand.ttf", weight: 400, style: "italic" },
+  { family: "Geist", src: "./fonts/v.woff2", weight: "100 900" },
+  { family: "Multi", src: [{ path: "./a.ttf", weight: 400 }, { path: "./b.ttf", weight: 700, style: "italic" }] },
+];
+eq((await normalizeConfig({ fonts: fontsOk })).fonts, fontsOk, "valid fonts pass as written");
+eq(FONT_KEYS.google.includes("weights") && FONT_KEYS.local.includes("weight"), true, "FONT_KEYS lists both shapes");
+await rejects({ fonts: {} }, /fonts must be an array/, "fonts must be an array");
+await rejects({ fonts: [{ family: "X" }] }, /fonts\[0\]: give `src`.*or `provider: "google"`/, "a font needs src or provider");
+await rejects({ fonts: [{ family: "X", provider: "adobe" }] }, /provider must be "google"/, "only the google provider");
+await rejects({ fonts: [{ family: "X", src: "./x.ttf", weights: [400] }] }, /`weights` is for `provider: "google"`; a local font takes `weight`/, "weights on a local font");
+await rejects({ fonts: [{ family: "X", src: "./x.ttf", subsets: ["latin"] }] }, /`subsets` is for `provider: "google"`/, "subsets on a local font");
+await rejects({ fonts: [{ family: "X", provider: "google", weight: 400 }] }, /`weight` is for a local font.*`weights: \[400, 700\]`/, "weight on a Google font");
+await rejects({ fonts: [{ family: "X", provider: "google", src: "./x.ttf" }] }, /`src` is for a local font/, "src and provider together");
+await rejects({ fonts: [{ family: "X", provider: "google", weightz: [400] }] }, /unknown key "weightz"\. Did you mean "weights"\?/, "a typo in a font key");
+await rejects({ fonts: [{ family: "X", src: [{ path: "./a.ttf" }], weight: 400 }] }, /put `weight` \/ `style` in each entry/, "weight beside an src array");
+await rejects({ fonts: [{ family: "X", src: [{ file: "./a.ttf" }] }] }, /src\[0\]: unknown key "file"/, "unknown src entry key");
+await rejects({ fonts: [{ family: "X", src: "./a.ttf", weight: 1200 }] }, /weight must be/, "weight out of range");
+await rejects({ fonts: [{ family: "X", src: "./a.ttf", style: "oblique" }] }, /style must be "normal" or "italic"/, "style");
+await rejects({ fonts: [{ family: "X", provider: "google", display: "fast" }] }, /display must be one of/, "display");
+await rejects({ fonts: [{ family: "X", provider: "google", variable: "font-x" }] }, /variable must be a CSS custom property/, "variable");
+await rejects({ fonts: [{ family: "", provider: "google" }] }, /family must be a non-empty string/, "family");
 
 await rejects({ site: "example.com" }, /site must be an absolute URL/, "invalid site keeps its message");
 await rejects({ basePath: "app" }, /basePath/, "basePath without a leading slash");

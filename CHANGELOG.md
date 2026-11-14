@@ -20,6 +20,26 @@ milestone's worth of work; the codename is noted per entry.
   multipart maps to **400** instead of a generic 500. `filename*` in multipart follows the platform
   parser (Node 22 rejects the whole body with **400**; newer runtimes may decode RFC 5987 names).
   Treat `File.name` as untrusted either way.
+- **Route module types.** `PageModule`, `LayoutModule`, `ApiModule`, `MiddlewareModule` and
+  `IslandModule` in `@nowaki-dev/runtime` type every export the runtime reads from a route
+  (`revalidate`, `tags`, `streaming`, `csrf`, `budget`, `viewTransition`, `staticPaths`, `meta`,
+  `title`, `head`, `lang`, `htmlAttrs`, `bodyAttrs`, `prerender`, `sitemap`, `scripts`, the method
+  handlers, `live`, ...), with the new `Revalidate` and `PageScripts` types:
+  `export const revalidate: PageModule["revalidate"] = 60`, or `mod satisfies PageModule` from
+  another file.
+- **`@nowaki-dev/runtime/config`**: `defineConfig()` (an identity function) and the
+  `NowakiConfig`, `NowakiPlugin`, `FontConfig` (`GoogleFont` / `LocalFont`), `RedirectRule`,
+  `RewriteRule`, `HeaderRule`, `I18nConfig` and `ImagesConfig` types for nowaki.config.
+- **`ctx.routePath`** (loaders, actions, middleware, API routes): the path routing used, without
+  basePath and the locale prefix (`/gallery/ja/photo/1` → `/photo/1`). **`routePath(url)`** in
+  `@nowaki-dev/runtime/navigation` does the same for a browser URL in components and islands.
+  `examples/gallery` uses it instead of its own helper.
+
+### Fixed
+- Server functions and `POST /__nowaki/live-event` answer **413** when the body goes over the
+  limit while it is read (a chunked body has no `Content-Length`); they answered 400.
+- The `publish()` docs and its warning state what it does on the deploy adapters: nothing (it
+  reaches the live connections of the same `nowaki dev` / `nowaki start` process).
 
 ### Upgrade notes
 - **Breaking: `ctx.formData()` always returns `FormData`.** Urlencoded bodies used to return
@@ -31,6 +51,48 @@ milestone's worth of work; the codename is noted per entry.
   every runtime (not only multipart). JSON API routes and larger `NOWAKI_FN_BODY_LIMIT` / live-event
   payloads must stay under the form limit when handlers read the body through these helpers, or read
   the raw stream another way.
+- **Breaking: unknown top-level `nowaki.config` keys are an error.** They used to be ignored, so a
+  typo (`basepath: "/app"`) did nothing. `nowaki dev` / `build` / `prerender` now stop with
+  `unknown top-level key "basepath". Did you mean "basePath"?` and the list of keys (`site`,
+  `fonts`, `basePath`, `trailingSlash`, `redirects`, `rewrites`, `headers`, `i18n`, `images`,
+  `plugins`). Nested keys already threw; they get the same hint. Who: apps whose config has any
+  other key (a leftover, or app settings kept in the same object). How: fix the typo, or move
+  your own settings out of the default export (a named export is fine, it isn't read). `plugins`
+  must now be an array.
+- **Breaking: `fonts` entries are validated, with one shape per kind.** A Google font is
+  `{ family, provider: "google", weights?, styles?, subsets? }`; a local font is
+  `{ family, src: "<file>", weight?, style? }` or `{ family, src: [{ path, weight?, style? }] }`;
+  both take `fallback`, `variable`, `display` and `preload`. Unknown keys, and keys of the other
+  kind (`weights` on a local font, `weight` on a Google one, `subsets` on a local one, `weight` /
+  `style` beside an `src` array), are an error naming the right key, as are invalid values
+  (`style` other than `"normal"` / `"italic"`, `display` outside the CSS keywords, a `variable`
+  that isn't `--name`). Before, such keys were silently ignored. Who: apps with `fonts` using a
+  key of the other kind. How: use the key the error names (a local font with several weights
+  becomes an `src` array, one entry per file).
+- **Breaking: `routes/_error.tsx` is no longer the server error page.** It was an undocumented
+  alias of `_500.tsx`, easy to confuse with `error.tsx` (the client navigation boundary). A file
+  named `_error.*` under `routes/` now fails `nowaki build` and every request in `nowaki dev` with
+  "rename it to `_500`". How: rename `routes/_error.tsx` to `routes/_500.tsx`.
+- **Breaking: `export const middleware` in `_middleware` is no longer read.** Use
+  `export default`. A `_middleware` module with only the named export now fails the requests it
+  covers with an error saying so (it used to run).
+- **Breaking: `export const config` in nowaki.config is no longer read.** Use `export default`
+  (or `export default defineConfig({...})`). A config module with only the named export fails
+  `nowaki dev` / `build` with an error saying so.
+- **Breaking: API method exports are uppercase only.** `export function get` (or `post`, `put`,
+  `patch`, `delete`, `head`, `options`) used to answer like `GET`. A route module with a lowercase
+  method export now fails every request with an error naming the uppercase export, instead of
+  answering 405 or falling through to `default`. How: rename `get` to `GET` and so on.
+- **Types: the root i18n helpers have the `/navigation` types.** `getLocale`, `href`,
+  `localePath` and `setLocale` from `@nowaki-dev/runtime` are now typed by `navigation.d.ts`
+  (they were always the same functions): `href(route(...))` and `localePath(route(...))` return
+  `Href`, so they can be passed to `<Link href>`. Code that assigned the result to `string`
+  still compiles.
+- **`setServerEnv` is no longer exported from `@nowaki-dev/runtime/env/server`.** It was an
+  undeclared internal (startup calls it to fill `env`); it moved to an internal module. Apps never
+  needed it: `env` is filled before app code runs.
+- **`@nowaki-dev/markdoc` takes `@nowaki-dev/runtime` as a peer** (`>=0.20.0 <2`) for the shared
+  `NowakiPlugin` type, which it re-exports.
 ### Docs
 
 - Stability, support and governance policies for 1.0: `docs/STABILITY.md` (the frozen
