@@ -1,9 +1,14 @@
+// Types for `@nowaki-dev/runtime/env`: `defineEnv` in the app root's env.ts.
+
 import type { StandardSchemaV1 } from "./index.js";
 
 type Shape = Record<string, StandardSchemaV1>;
 
+/** What {@link defineEnv} returns: the schemas of the server and the public variables. */
 export interface EnvDefinition<S extends Shape = Shape, P extends Shape = Shape> {
+  /** Server-only variables by name. */
   readonly server: Readonly<S>;
+  /** Public variables (`PUBLIC_*`) by name. */
   readonly public: Readonly<P>;
 }
 

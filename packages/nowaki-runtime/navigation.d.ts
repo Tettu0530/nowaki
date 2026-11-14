@@ -1,9 +1,9 @@
-// Types for type-safe navigation. `nowaki typegen` augments NowakiRoutes in .nowaki/types.d.ts
-// to register the actual routes. Until then, RoutePath falls back to string.
+// Types for `@nowaki-dev/runtime/navigation`: typed links and the i18n helpers. `nowaki typegen`
+// augments NowakiRoutes in .nowaki/types.d.ts with the app's routes; until then RoutePath is string.
 
 import type { VNode } from "preact";
 
-/** Generated types register path → params type here, e.g. { "/blog/[slug]": { slug: string } }. */
+/** Route pattern → params type, filled in by typegen: `{ "/blog/[slug]": { slug: string } }`. */
 export interface NowakiRoutes {}
 
 type Keys = keyof NowakiRoutes & string;
@@ -15,34 +15,36 @@ type ParamsOf<P extends string> = P extends keyof NowakiRoutes
   ? NowakiRoutes[P]
   : Record<string, string | string[]>;
 
-/** Union of static routes without params (usable directly as a Link href). */
+/** Routes without params, usable as a `<Link href>` as written. */
 type StaticRoutePath = [Keys] extends [never]
   ? string
   : { [P in Keys]: {} extends ParamsOf<P> ? P : never }[Keys];
 
-/** Branded type for a validated href returned by route(). */
+/** A checked href: what `route()`, `href()`, `localePath()` and `routePath()` return. */
 export type Href = string & { readonly __nowaki: "href" };
 
 /**
- * Builds a type-safe href for a dynamic route.
+ * Builds the route path of `pattern` with its params filled in. Each param is percent-encoded; a
+ * catch-all's array is joined with `/`. The result has no basePath or locale prefix: `<Link>` and
+ * `href()` add those. Unknown routes, missing params, and wrong keys are compile errors.
  *   route("/about")                       // no params
  *   route("/blog/[slug]", { slug: "hi" }) // required params
  *   route("/files/[...path]", { path: ["a", "b"] }) // catch-all takes an array
- * Unknown routes, missing params, and wrong keys are compile errors.
  */
 export function route<P extends RoutePath>(
   pattern: P,
   ...args: {} extends ParamsOf<P> ? [] : [params: ParamsOf<P>]
 ): Href;
 
+/** Props of {@link Link}. Other props pass through to the `<a>`. */
 export interface LinkProps {
-  /** A static route (type-checked), or an href built with route(). */
+  /** A route without params (type-checked), or an href built with `route()`. */
   href: StaticRoutePath | Href;
   class?: string;
   className?: string;
   target?: string;
   rel?: string;
-  /** Disables SPA navigation and falls back to a full page load. */
+  /** Turns off client navigation for this link: a click is a full page load. */
   "data-no-router"?: boolean;
   /** `false` keeps `href` as written under nowaki.config `basePath` (default: the base is added). */
   basePath?: boolean;
@@ -55,7 +57,7 @@ export interface LinkProps {
    */
   locale?: string | false;
   /**
-   * Run this navigation as a View Transition (`document.startViewTransition`). Renders
+   * Runs this navigation as a View Transition (`document.startViewTransition`). Renders
    * `data-nowaki-transition`, which also works on a plain `<a>` or on an element around links.
    * The client router transitions when the browser supports it and the visitor doesn't prefer
    * reduced motion; otherwise it swaps the page as usual. A page can opt in all navigations to and
@@ -68,11 +70,12 @@ export interface LinkProps {
 }
 
 /**
- * A typed <a>. The client router handles it as an SPA navigation. Its `href` is built by
- * {@link href}: the current locale (i18n) and basePath go in front.
+ * A typed `<a>`. The client router handles a click on it as a client navigation, as for any `<a>`.
+ * Its `href` goes through {@link href}: the current locale (i18n) and basePath go in front.
  */
 export function Link(props: LinkProps): VNode;
 
+/** Options of {@link href}. */
 export interface HrefOptions {
   /** A locale to link to instead of the current one, or `false` for no locale prefix. */
   locale?: string | false;
@@ -81,7 +84,7 @@ export interface HrefOptions {
 }
 
 /**
- * A path as the browser requests it, the way `<Link>` builds its href: in the current locale
+ * The browser path of a route path, the way `<Link>` builds its href: in the current locale
  * (with `i18n`; a path that already has a locale prefix keeps it) and under basePath. For the URLs
  * `<Link>` doesn't build, such as `<form action={href("/logout")}>`, `fetch(href("/api/x"))` or
  * `location.assign(...)`. Works in components, layouts and islands. Without i18n and basePath,
@@ -103,11 +106,11 @@ export function getLocale(): string | undefined;
 
 /**
  * `path` in `locale`, default the current one, without basePath: `localePath("/about", "ja")` →
- * `"/ja/about"`, `localePath("/ja/about", "en")` → `"/about"` when `en` is the default locale. The
- * query and fragment are kept; without i18n, `path` comes back unchanged. `localePath(route("/photo/[id]", { id: "1" }), "ja")` → `"/ja/photo/1"`. A link
- * doesn't need it (`<Link href>` already keeps the current locale, and `<Link locale="ja">`
- * switches it); use it for a path in another locale outside a link, or `href()` for one under
- * basePath.
+ * `"/ja/about"`, `localePath("/ja/about", "en")` → `"/about"` when `en` is the default locale, and
+ * `localePath(route("/photo/[id]", { id: "1" }), "ja")` → `"/ja/photo/1"`. The query and fragment
+ * are kept; without i18n, `path` comes back unchanged. A link doesn't need it (`<Link href>`
+ * already keeps the current locale, and `<Link locale="ja">` switches it); use it for a path in
+ * another locale outside a link, or `href()` for one under basePath.
  */
 export function localePath(path: StaticRoutePath | Href, locale?: string): Href;
 export function localePath(path: string, locale?: string): string;
@@ -122,7 +125,7 @@ export function localePath(path: string, locale?: string): string;
 export function setLocale(locale: string): void;
 
 /**
- * The app path of a browser URL: nowaki.config `basePath` and a locale prefix taken off, the query
+ * The route path of a browser URL: nowaki.config `basePath` and a locale prefix taken off, the query
  * and fragment left out (`/gallery/ja/photo/1` → `/photo/1`). The inverse of {@link href}, and
  * the browser-side counterpart of `ctx.routePath`; works in components, layouts and islands. Use
  * it to link to the current page in another locale: `<Link href={routePath(url)} locale="ja">`.
