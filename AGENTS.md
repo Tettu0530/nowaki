@@ -394,8 +394,8 @@ and `scripts/gallery-e2e.mjs` / `gallery-browser-test.mjs` check the exit criter
   (`dist/server/site.json`, normalized by `server/site-config.mjs`), `NOWAKI_SITE` winning. Unit checks:
   `scripts/seo-unit-test.mjs`.
 - **Routing config (`basePath`, `trailingSlash`, `redirects`, `rewrites`, `headers`)** —
-  normalized and validated by `server/site-config.mjs`, read before the build (in the plugin
-  host's Node process, `plugins.rs` `spawn`, or by `site.rs` `config` on its own) and
+  normalized and validated by `server/site-config.mjs`, read before the build in the plugin
+  host's Node process (`plugins.rs` `spawn(_, true)`, returned by `Spawned::finish`) and
   written to `dist/server/routing.json` (dev: `.nowaki/routing.json`). The compiler / matcher
   exists twice, `crates/nowaki-core/src/rules.rs` and `server/rules.mjs`, driven by one fixture
   (`crates/nowaki-core/tests/fixtures/rules-cases.json`, run by `tests/rules.rs` and
