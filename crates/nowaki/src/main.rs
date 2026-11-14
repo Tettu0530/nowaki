@@ -127,6 +127,7 @@ fn main() -> anyhow::Result<()> {
         } => {
             let root = dunce::canonicalize(&dir)?;
             runtime::check(&root)?;
+            load_dotenv_knobs(&root);
             let bind = listen::resolve(port, host)?;
             // Read by the dev renderer (server/render.mjs), which the sidecar runs with this
             // environment. Set here, before the runtime starts any other thread.
@@ -141,6 +142,7 @@ fn main() -> anyhow::Result<()> {
         Command::Build { dir, adapter } => {
             let root = dunce::canonicalize(&dir)?;
             runtime::check(&root)?;
+            load_dotenv_knobs(&root);
             // The static adapter hands off to prerender (build, a temporary server, then each
             // route rendered to a file).
             if adapter == Adapter::Static {
@@ -208,6 +210,7 @@ fn main() -> anyhow::Result<()> {
         Command::Start { dir, port, host } => {
             let root = dunce::canonicalize(&dir)?;
             runtime::check(&root)?;
+            load_dotenv_knobs(&root);
             let bind = listen::resolve(port, host)?;
             // Rust (axum) serves static files and assembles HTML; the Node prod-sidecar renders.
             tokio::runtime::Builder::new_multi_thread()
@@ -222,6 +225,7 @@ fn main() -> anyhow::Result<()> {
         } => {
             let root = dunce::canonicalize(&dir)?;
             runtime::check(&root)?;
+            load_dotenv_knobs(&root);
             let out = if out.is_absolute() {
                 out
             } else {
@@ -340,6 +344,26 @@ fn print_island_hints(core: &nowaki_core::NowakiCore, client_dir: &std::path::Pa
     println!();
 }
 
+/// The `NOWAKI_*` knobs `.env` / `.env.local` set that the environment doesn't: the Node half
+/// (`server/env.mjs` `loadEnv`) reads them from those files, so the Rust half has to as well, or
+/// e.g. a CSP mode in `.env` would turn on the nonces but not the header. Same precedence
+/// (`nowaki_core::env::dotenv_values`). `NOWAKI_HOST` stays out, like `PORT`: the listen address
+/// comes from the shell or the flags.
+fn dotenv_knobs(root: &std::path::Path, is_set: impl Fn(&str) -> bool) -> Vec<(String, String)> {
+    nowaki_core::env::dotenv_values(root, [])
+        .into_iter()
+        .filter(|(k, _)| k.starts_with("NOWAKI_") && k != "NOWAKI_HOST" && !is_set(k))
+        .collect()
+}
+
+/// Applies [`dotenv_knobs`] to this process (and so to the sidecar it starts). Called before the
+/// async runtime starts any other thread.
+fn load_dotenv_knobs(root: &std::path::Path) {
+    for (k, v) in dotenv_knobs(root, |k| std::env::var_os(k).is_some()) {
+        std::env::set_var(k, v);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -454,5 +478,21 @@ mod tests {
              NOWAKI_UPDATE_SNAPSHOTS=1 cargo test -p nowaki --bin nowaki cli_surface), review the \
              diff and commit it.\n--- generated ---\n{got}"
         );
+    }
+
+    #[test]
+    fn dotenv_knobs_follow_the_dotenv_precedence() {
+        let dir = std::env::temp_dir().join(format!("nowaki-knobs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(".env"),
+            "NOWAKI_LIVE_MAX=5\nNOWAKI_TRUST_PROXY=1\nNOWAKI_HOST=0.0.0.0\nPORT=1\nOTHER=x\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join(".env.local"), "NOWAKI_LIVE_MAX=9\n").unwrap();
+        let got = dotenv_knobs(&dir, |k| k == "NOWAKI_TRUST_PROXY");
+        assert_eq!(got, [("NOWAKI_LIVE_MAX".to_string(), "9".to_string())]);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

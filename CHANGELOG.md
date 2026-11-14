@@ -113,6 +113,16 @@ milestone's worth of work; the codename is noted per entry.
 - **`nowaki prerender` (and the static adapter) writes pages without a nonce**, also when
   `NOWAKI_CSP` is set: a static file has no per-response nonce, so the one it baked in was the
   same for every visitor. Set a static site's CSP in `_headers` yourself.
+- **Breaking: `.env.local` overrides `.env` on the server too.** The server (`nowaki dev` /
+  `start`, the adapters, env.ts validation) used to keep the `.env` value of a key both files
+  set, while the inlined `import.meta.env.PUBLIC_*` took the `.env.local` one. Both now use one
+  order: `.env`, then `.env.local` over it, then the real environment over both. The client
+  build also reads `PUBLIC_*` from the environment now (`PUBLIC_API=… nowaki build` inlines
+  it; before, only the files were read without an env.ts). `nowaki dev` / `build` / `start` /
+  `prerender` read the `NOWAKI_*` settings (`NOWAKI_CSP`, `NOWAKI_TRUST_PROXY`,
+  `NOWAKI_SECURITY_HEADERS`, …) from the files as well, so the Rust front and the renderer
+  agree; `PORT` and `NOWAKI_HOST` still come only from the environment. Who: apps with a key in
+  both files. How: keep the value you want in `.env.local` (or remove it there).
 
 ### Added
 - **`nonce()` from `@nowaki-dev/runtime`**: the CSP nonce for an inline `<script>` / `<style>`

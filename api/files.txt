@@ -30,7 +30,7 @@ public/  # crates/nowaki-core/src/public.rs
 env.ts | env.mts | env.js | env.mjs  # crates/nowaki-core/src/env.rs
 session.ts | session.mts | session.js | session.mjs  # crates/nowaki-core/src/build.rs
 nowaki.config.mjs | nowaki.config.js  # packages/nowaki-runtime/server/site-config.mjs
-.env | .env.local (loaded into process.env, never overriding it)  # packages/nowaki-runtime/server/env.mjs
+.env | .env.local (.env.local wins over .env; loaded into process.env, never overriding it)  # packages/nowaki-runtime/server/env.mjs
 .nowaki/types.d.ts (typegen output)  # crates/nowaki/src/typegen.rs
 source extensions: .ts .tsx .js .jsx .mjs .tsrx .mdx .mdoc  # crates/nowaki-core/src/lib.rs
 .tsrx (compiled with the app's @tsrx/preact)  # crates/nowaki/src/plugins.rs

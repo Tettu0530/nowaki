@@ -1,0 +1,41 @@
+{
+  "comment": ".env precedence, shared by crates/nowaki-core/tests/dotenv.rs (env.rs dotenv_values) and scripts/env-schema-test.mjs (server/env.mjs loadEnv): .env, then .env.local over it, then the real environment over both. `expect` maps a key to its value, or null for unset.",
+  "cases": [
+    {
+      "name": ".env.local overrides .env",
+      "files": { ".env": "PUBLIC_DOTENV_A=from-env\nPUBLIC_DOTENV_B=only-env\n", ".env.local": "PUBLIC_DOTENV_A=from-local\nPUBLIC_DOTENV_C=only-local\n" },
+      "process": {},
+      "expect": { "PUBLIC_DOTENV_A": "from-local", "PUBLIC_DOTENV_B": "only-env", "PUBLIC_DOTENV_C": "only-local" }
+    },
+    {
+      "name": "the environment overrides both files",
+      "files": { ".env": "PUBLIC_DOTENV_A=from-env\nDOTENV_SECRET=file\n", ".env.local": "PUBLIC_DOTENV_A=from-local\n" },
+      "process": { "PUBLIC_DOTENV_A": "from-process", "DOTENV_SECRET": "process" },
+      "expect": { "PUBLIC_DOTENV_A": "from-process", "DOTENV_SECRET": "process" }
+    },
+    {
+      "name": "an empty value in the environment still wins",
+      "files": { ".env.local": "PUBLIC_DOTENV_A=from-local\n" },
+      "process": { "PUBLIC_DOTENV_A": "" },
+      "expect": { "PUBLIC_DOTENV_A": "" }
+    },
+    {
+      "name": "only .env.local",
+      "files": { ".env.local": "# comment\n\nPUBLIC_DOTENV_A = \"quoted value\"\nPUBLIC_DOTENV_B='single'\nnot a line\n" },
+      "process": {},
+      "expect": { "PUBLIC_DOTENV_A": "quoted value", "PUBLIC_DOTENV_B": "single", "PUBLIC_DOTENV_C": null }
+    },
+    {
+      "name": "a lone quote is kept",
+      "files": { ".env": "PUBLIC_DOTENV_A=\"\nPUBLIC_DOTENV_B=a=b\n" },
+      "process": {},
+      "expect": { "PUBLIC_DOTENV_A": "\"", "PUBLIC_DOTENV_B": "a=b" }
+    },
+    {
+      "name": "CRLF line endings",
+      "files": { ".env": "PUBLIC_DOTENV_A=one\r\nPUBLIC_DOTENV_B=two\r\n", ".env.local": "PUBLIC_DOTENV_B=three\r\n" },
+      "process": {},
+      "expect": { "PUBLIC_DOTENV_A": "one", "PUBLIC_DOTENV_B": "three" }
+    }
+  ]
+}

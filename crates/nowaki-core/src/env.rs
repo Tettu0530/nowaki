@@ -4,16 +4,18 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// Reads `.env` / `.env.local` and builds constant-replacement pairs safe to expose to the client.
-/// - Only `PUBLIC_`-prefixed variables are exposed, as `import.meta.env.PUBLIC_X` (secrets never
-///   are).
-/// - Also adds `import.meta.env.MODE` / `DEV` / `PROD` (from `NODE_ENV`, default `development`),
-///   `process.env.NODE_ENV`, and `import.meta.env.BASE_URL` (`/`).
-///
-/// Returns `(key, JS literal)` pairs for ReplaceGlobalDefines.
-pub fn load_client_defines(root: &Path) -> Vec<(String, String)> {
+/// The `.env` files, in order: a later file overrides an earlier one (`.env.local` wins).
+pub const ENV_FILES: [&str; 2] = [".env", ".env.local"];
+
+/// The effective variables of `root`: `.env`, then `.env.local` over it, then `process` (the real
+/// environment) over both. `server/env.mjs` `loadEnv` applies the same order (fixture:
+/// `tests/fixtures/dotenv-cases.json`).
+pub fn dotenv_values(
+    root: &Path,
+    process: impl IntoIterator<Item = (String, String)>,
+) -> BTreeMap<String, String> {
     let mut vars: BTreeMap<String, String> = BTreeMap::new();
-    for file in [".env", ".env.local"] {
+    for file in ENV_FILES {
         let Ok(content) = std::fs::read_to_string(root.join(file)) else {
             continue;
         };
@@ -33,6 +35,28 @@ pub fn load_client_defines(root: &Path) -> Vec<(String, String)> {
             vars.insert(key, val);
         }
     }
+    vars.extend(process);
+    vars
+}
+
+/// Reads `.env` / `.env.local` and the environment ([`dotenv_values`]) and builds
+/// constant-replacement pairs safe to expose to the client.
+/// - Only `PUBLIC_`-prefixed variables are exposed, as `import.meta.env.PUBLIC_X` (secrets never
+///   are).
+/// - Also adds `import.meta.env.MODE` / `DEV` / `PROD` (from `NODE_ENV`, default `development`),
+///   `process.env.NODE_ENV`, and `import.meta.env.BASE_URL` (`/`).
+///
+/// Returns `(key, JS literal)` pairs for ReplaceGlobalDefines.
+pub fn load_client_defines(root: &Path) -> Vec<(String, String)> {
+    // vars_os: std::env::vars panics on a variable that isn't UTF-8.
+    let process = std::env::vars_os().filter_map(|(k, v)| {
+        let k = k.into_string().ok()?;
+        if !k.starts_with("PUBLIC_") {
+            return None;
+        }
+        Some((k, v.into_string().ok()?))
+    });
+    let vars = dotenv_values(root, process);
 
     let mode = std::env::var("NODE_ENV").unwrap_or_else(|_| "development".to_string());
     let is_prod = mode == "production";
