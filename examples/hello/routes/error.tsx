@@ -1,4 +1,4 @@
-// error boundary. Fallback UI shown when a client navigation fails.
+// The error boundary: the UI shown when a client navigation fails.
 // The client router wires the message into the data-nowaki-error slot and retry into the
 // data-nowaki-reset button (this component itself is not an island).
 export default function ErrorBoundary() {

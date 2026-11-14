@@ -1,4 +1,4 @@
-// Jetstream form, input, and change events (scripts/live-form-browser-test.mjs drives this page).
+// Jetstream form, input, and change events (scripts/live-browser-test.mjs drives this page).
 import LiveTodos from "../islands/LiveTodos.tsx";
 
 export const title = "Live form — Nowaki";

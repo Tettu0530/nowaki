@@ -3,7 +3,7 @@ import ServerTodos from "../islands/ServerTodos.tsx";
 
 export const title = "Server functions — Nowaki";
 
-// Server-to-server calls are direct (no HTTP). Just await it in the loader.
+// On the server, a server function is a direct call (no HTTP): the loader awaits it.
 export const loader = async () => {
   return await listTodos();
 };

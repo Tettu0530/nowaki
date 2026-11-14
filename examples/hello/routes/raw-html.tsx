@@ -1,7 +1,7 @@
-// Raw HTML under NOWAKI_CSP (scripts/csp-e2e.mjs, router-browser-test.mjs): the nonce goes only on
-// the tags Nowaki emits and on tags carrying nonce(), so the inline <script> / <style> below (as
-// if injected into a CMS field) get none and stay blocked under `enforce`, a guessed nonce
-// included. The fake island and runtime tag must not make islands.js import anything.
+// Raw HTML under NOWAKI_CSP (scripts/csp-e2e.mjs, security-e2e.mjs, router-browser-test.mjs): the
+// nonce goes only on the tags Nowaki emits and on tags carrying nonce(), so the inline <script> /
+// <style> below (as if injected into a CMS field) get none and stay blocked under `enforce`, a
+// guessed nonce included. The fake island and runtime tag must not make islands.js import anything.
 import { nonce } from "@nowaki-dev/runtime";
 import Counter from "../islands/Counter.tsx";
 

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { addTodo, addTodoForm, listTodos, whoami } from "../actions/todos.ts";
 
-// A client island calling server functions over RPC. The browser only gets island JS + the proxy.
+// A client island calling server functions over RPC. The browser gets the island's JS and a fetch
+// proxy per server function, not their code.
 export default function ServerTodos({ initial = [] }: { initial?: string[] }) {
   const [todos, setTodos] = useState<string[]>(initial);
   const [text, setText] = useState("");
@@ -48,8 +49,8 @@ export default function ServerTodos({ initial = [] }: { initial?: string[] }) {
         />{" "}
         <button data-testid="add" type="submit">add</button>
       </form>
-      {/* Pass a server function directly as the form action (React 19 style). On submit, FormData
-          goes to the server function, which runs on the server. */}
+      {/* A server function as the form action. On submit, the form's fields go to it as a plain
+          object ({ text }); the result arrives as a `nowaki:action` event on the form. */}
       <form action={addTodoForm} ref={formRef} data-testid="fa-form">
         <input data-testid="fa-input" name="text" placeholder="todo via form action" />{" "}
         <button data-testid="fa-add" type="submit">add (form action)</button>

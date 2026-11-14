@@ -1,8 +1,8 @@
-// Nowaki config. `plugins` can have a transform hook (transform) and virtual modules (resolveId/load).
+// `plugins` entries can have a transform hook (transform) and virtual modules (resolveId / load).
 //   transform(code, id)        — called on transformable source before oxc runs
 //   resolveId(source, importer) — claims a specifier and returns an id (called only when normal resolution fails)
 //   load(id)                    — returns the source for that id (a virtual module not on disk)
-// Return null/undefined for no change (fast path).
+// A hook returns null or undefined to leave the input unchanged.
 import { markdoc } from "@nowaki-dev/markdoc";
 
 export default {

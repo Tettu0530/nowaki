@@ -1,5 +1,6 @@
-// Choosing the Jetstream transport. By default live.js uses the /__nowaki/live WebSocket and sends an
-// event over POST /__nowaki/live-event whenever the socket isn't open. This meta tag pins it:
+// Choosing the Jetstream transport. By default live.js uses the /__nowaki/live WebSocket (where the
+// server has one) and sends an event over POST /__nowaki/live-event whenever the socket isn't open.
+// This meta tag pins it:
 // "post" never opens the socket (presence stays at its SSR value), "ws" never falls back to POST.
 import LiveCounter from "../islands/LiveCounter.tsx";
 

@@ -15,7 +15,7 @@ import { t } from "../../lib/i18n.ts";
 export const revalidate = 3600;
 export const tags = ({ params }: { params: { id: string } }) => ["photos", `photo:${params.id}`];
 
-// First-load JS for this page (gzip): `nowaki build` fails past it, and the dev toolbar's JS tab
+// First-load JS for this page (KB, gzip): `nowaki build` fails past it, and the dev toolbar's JS tab
 // shows the page against it.
 export const budget = { js: 12 };
 
@@ -27,7 +27,8 @@ export function loader(ctx: LoaderContext) {
   return { caption: caption(id) };
 }
 
-// Reached only signed in (routes/posts/_middleware.ts) and same-site (the default origin check).
+// Reached only signed in (routes/posts/_middleware.ts) and from this site: a cross-site POST gets
+// 403 before the action runs (the default CSRF check).
 export async function action(ctx: LoaderContext) {
   const id = String(ctx.params.id);
   const text = String((await ctx.formData()).get("caption") ?? "").trim();

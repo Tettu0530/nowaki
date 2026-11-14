@@ -1,5 +1,5 @@
-// action (form submission) demo. PRG pattern with a cookie as storage.
-// GET: the loader reads the list from the cookie / POST: the action appends and redirects to /todos.
+// Page action demo: Post/Redirect/Get, with a cookie as the storage. On GET the loader reads the
+// list from the cookie; on POST the action appends to it and redirects to /todos.
 type Ctx = {
   cookies: Record<string, string>;
   formData: () => Promise<FormData>;
