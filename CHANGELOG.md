@@ -12,6 +12,19 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Added
+- **`nowaki upgrade --to <version>` readiness report.** For a version on a newer major (or
+  0.x minor) from 0.20.0 on, `nowaki upgrade` first prints what in the app must change,
+  with `file:line` and the fix: `_error.*` route files, `export const middleware` in
+  `_middleware`, `export const config` in `nowaki.config`, lowercase method exports in API
+  routes, unknown top-level `nowaki.config` keys, `--host <dir>` in package.json scripts, a
+  CLI / runtime version mismatch and a Node older than 22. It also lists heuristics to
+  review: `ctx.formData()` results used as `URLSearchParams`, API routes with a write
+  handler that may need `export const csrf = false` (apps from before 0.19.3), `PORT` in the
+  shell or a `.env` file, `engines.node`, and a rustc older than the MSRV. It installs
+  nothing while something must change. The new `--check` flag only prints the report (exit
+  code 1 when something must change). The report never writes to the app.
+- `nowaki upgrade --to` accepts an npm dist-tag (`--to next`), strips a leading `v`, and says
+  when the target is a release candidate.
 - **`multipart/form-data` in `ctx.formData()`.** Actions, API routes, and middleware can read file
   uploads from a `FormData` body (`File` parts keep `name`, `type`, and bytes). The whole body is
   buffered (same as urlencoded today) with a default cap of 10 MiB (`NOWAKI_FORM_BODY_LIMIT`) on
@@ -42,6 +55,20 @@ milestone's worth of work; the codename is noted per entry.
   reaches the live connections of the same `nowaki dev` / `nowaki start` process).
 
 ### Upgrade notes
+- **Breaking: `nowaki dev` and `nowaki start` read `PORT`.** Without `--port` they listen on
+  `PORT` (as the node / bun / deno adapters already did), else 3000. If `PORT` is set in
+  your environment for something else, pass `--port`. An invalid `PORT` is an error.
+- **Breaking: `--host` takes an optional address** on `nowaki dev` and `nowaki start`:
+  `--host` alone still listens on all interfaces (`0.0.0.0`), `--host 10.0.0.5` on one
+  address. The flag wins over `NOWAKI_HOST`, which `nowaki dev` now reads too (default
+  `127.0.0.1`). A word right after `--host` is read as the address, so write
+  `nowaki dev my-app --host` (directory first) instead of `nowaki dev --host my-app`; the
+  CLI stops with that hint when the value is a directory.
+- **Breaking: the CLI refuses a `@nowaki-dev/runtime` of another major**, not only an older
+  one (on 0.x a minor counts as a major, so CLI 0.20.x refuses runtime 0.21.0). Prereleases
+  are ordered as SemVer says (`1.0.0-rc.1` < `1.0.0-rc.2` < `1.0.0`), so CLI 1.0.0 refuses a
+  1.0.0-rc runtime. Install the same version of `nowaki` and `@nowaki-dev/runtime`; the error
+  names both versions and the command to fix it.
 - **Breaking: `ctx.formData()` always returns `FormData`.** Urlencoded bodies used to return
   `URLSearchParams`. Both media types now return `FormData`, as the platform `Request.formData()`
   does. `form.get()` is `string | File | null`. Read text with `String(form.get("x") ?? "")`.
@@ -102,6 +129,16 @@ milestone's worth of work; the codename is noted per entry.
   refreshed issue and PR templates. The API-route CSRF default is documented as "since 0.19.3"
   (it said 0.19.0, a version the runtime skipped).
 ### Changed
+- **`nowaki-core` is on its own 0.x version line** (a literal `version` in its Cargo.toml),
+  documented as the CLI's engine and not a supported API, and the `nowaki` crate pins it
+  exactly (`=0.19.3`), so `cargo install nowaki` cannot pick a newer, incompatible
+  nowaki-core. `scripts/release-check.mjs` now fails on a caret pin instead of warning.
+- `nowaki dev` and `nowaki start` bind their port before starting Node, so a taken port fails
+  right away with the fix (`--port` / `PORT`). Whether `nowaki dev` is exposed (any `Host`
+  accepted, the Network URL shown) is read from the bound address: `--host 127.0.0.1`, or
+  a `NOWAKI_HOST` that resolves to loopback, keeps the loopback-only Host check. With an
+  address that doesn't cover 127.0.0.1, dev also listens on 127.0.0.1 (the renderer calls
+  back there, and the MCP endpoint stays loopback-only). The banner shows the bound address.
 - **Releases are published by one workflow.** Pushing a `vX.Y.Z` or `vX.Y.Z-rc.N` tag runs
   `release.yml`: a version gate (`scripts/release-check.mjs`: every shared-version file,
   the scaffold template pins, the CHANGELOG section, the `nowaki-core` pin, the lockfiles),
@@ -124,6 +161,13 @@ milestone's worth of work; the codename is noted per entry.
   CI fails when a snapshot is out of date or a new name is unclassified, and from 0.20.0
   when a PR removes or changes a stable entry without the `breaking` label.
   `api/cli.txt` is checked by `cargo test`. See CONTRIBUTING.md § API snapshots.
+
+### Fixed
+- The Rust front (`nowaki dev` / `nowaki start`) answered a request body that failed to read
+  for a reason other than its size (a client that went away, a malformed chunked body) with
+  400 "request body too large."; it is now 400 "Bad Request". A non-multipart body over the
+  proxy limit (16 MiB, or `NOWAKI_FORM_BODY_LIMIT` when larger) is 413 "Payload Too Large"
+  instead of 400, also when `Content-Length` announces it before the body is read.
 
 ## [0.19.3] — 2026-11-12 · "Bora": production and dev experience
 

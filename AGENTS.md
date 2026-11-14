@@ -141,7 +141,7 @@ code locations and CI coverage.
   dev/start return 404 instead of proxying it.
 - **The dev MCP stays loopback-only and dev-only.** `/__nowaki/mcp`
   (`crates/nowaki/src/mcp.rs`) answers only a loopback peer with a loopback
-  `Host` and `Origin`, also under `--host`; only `nowaki dev` mounts it. Keep
+  `Host` and `Origin`, also under `--host` / `--host <addr>`; only `nowaki dev` mounts it. Keep
   its tools read-only. The dev toolbar's `/__nowaki/devtools` sits behind the
   same gate and stays read-only too; the toolbar is loaded only by dev `hmr.js`. Dev errors reach its log from the sidecar through a
   stdout line carrying `NOWAKI_PUBLISH_TOKEN`, like `publish()`.
@@ -321,8 +321,9 @@ and `scripts/gallery-e2e.mjs` / `gallery-browser-test.mjs` check the exit criter
   normalizes the build-time config with site-config.mjs's `normalizeConfig` and returns it in
   `/caps` (`siteConfig`, under `NOWAKI_SITE_CONFIG=1`), so build / dev / prerender import
   nowaki.config once (every config, so an unknown top-level key always fails).
-  `runtime::check` (`MIN_RUNTIME`) refuses runtimes older than that, so the CLI has no fallback
-  paths for them. The config is the module's default export (`site-config.mjs` `configOf`; the
+  `runtime::check` (`MIN_RUNTIME`) refuses runtimes older than that or of another major
+  (`runtime::Version`, SemVer prerelease order), so the CLI has no fallback paths for them.
+  The config is the module's default export (`site-config.mjs` `configOf`; the
   old `export const config` throws). Top-level keys are `CONFIG_KEYS`, font keys `FONT_KEYS`
   (both in `site-config.mjs`, listed by `api/config.txt`): a new key goes there, in
   `config.d.ts` (`NowakiConfig`, `@nowaki-dev/runtime/config`) and in the snapshot together.
@@ -527,14 +528,15 @@ Details: [CONTRIBUTING.md § API snapshots](./CONTRIBUTING.md#api-snapshots).
 
 ## Releasing (maintainers)
 
-Since 0.19.3 the CLI and crates (`Cargo.toml` `[workspace.package]`, the `nowaki`
-crate's `nowaki-core` path-dep version, `packages/nowaki-cli`), `@nowaki-dev/runtime`
-and `create-nowaki` / `create-nowaki-app` share one version and are bumped together;
-`@nowaki-dev/markdoc` (`packages/nowaki-markdoc`) keeps its own semver (0.1.x). The
-CLI refuses a runtime older than its own version (`runtime::MIN_RUNTIME`). The
-scaffold template (`packages/create-nowaki/templates/_shared/package.json`) pins
-that version for both. `nowaki-core` may be on its own version, pinned with `=` by the
-`nowaki` crate. After bumping, run `pnpm install` and `cargo build` so the lockfiles
+Since 0.19.3 the CLI (`Cargo.toml` `[workspace.package]`, `packages/nowaki-cli`),
+`@nowaki-dev/runtime` and `create-nowaki` / `create-nowaki-app` share one version and
+are bumped together; `@nowaki-dev/markdoc` (`packages/nowaki-markdoc`) keeps its own
+semver (0.1.x). The CLI refuses a runtime older than its own version or of another
+major (`runtime::MIN_RUNTIME`). The scaffold template
+(`packages/create-nowaki/templates/_shared/package.json`) pins that version for both.
+`nowaki-core` is internal and on its own 0.x line (a literal `version` in
+`crates/nowaki-core/Cargo.toml`), pinned with `=` by the `nowaki` crate; bump both
+when its code changed (docs/RELEASING.md). After bumping, run `pnpm install` and `cargo build` so the lockfiles
 match, and `node scripts/release-check.mjs vX.Y.Z --new-tag` (the gate `release.yml`
 runs; tests in `scripts/release-check-test.mjs`). Pushing the `vX.Y.Z` (or
 `vX.Y.Z-rc.N`) tag publishes everything from `release.yml`: npm packages (rc → `next`

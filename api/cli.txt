@@ -17,8 +17,8 @@ command help  # Print this message or the help of the given subcommand(s)
 
 [stable nowaki dev]
 <DIR> default=.  # App root directory
---port -p <PORT> default=3000
---host default=false  # Expose on the LAN (listen on 0.0.0.0, show the Network URL)
+--port -p <PORT>  # Port to listen on (default: PORT, else 3000)
+--host <ADDR>  # Address to listen on; `--host` alone listens on all interfaces (0.0.0.0) [default: NOWAKI_HOST, else 127.0.0.1]
 --open default=false  # Open the default browser after startup
 --no-toolbar default=false  # Don't load the dev toolbar in the browser (same as NOWAKI_TOOLBAR=0)
 --help -h  # Print help
@@ -30,8 +30,8 @@ command help  # Print this message or the help of the given subcommand(s)
 
 [stable nowaki start]
 <DIR> default=.  # App root directory
---port -p <PORT> default=3000
---host default=false  # Listen on all interfaces (default: NOWAKI_HOST or 127.0.0.1)
+--port -p <PORT>  # Port to listen on (default: PORT, else 3000)
+--host <ADDR>  # Address to listen on; `--host` alone listens on all interfaces (0.0.0.0) [default: NOWAKI_HOST, else 127.0.0.1]
 --help -h  # Print help
 
 [stable nowaki prerender]
@@ -42,7 +42,8 @@ command help  # Print this message or the help of the given subcommand(s)
 
 [stable nowaki upgrade]
 <DIR> default=.  # App root directory
---to <TO>  # Version to update to (default: latest), e.g. --to 0.11.0
+--to <TO>  # Version or npm dist-tag to update to (default: latest), e.g. --to 1.0.0 or --to next. A version on a newer major first prints a readiness report and installs nothing while it lists something to change
+--check default=false  # Only print the readiness report for --to (read-only; exits 1 when something must change)
 --help -h  # Print help
 
 [stable nowaki typegen]
