@@ -14,11 +14,13 @@ use axum::http::{header, HeaderMap, StatusCode};
 const DEFAULT_LIMIT: u64 = 10 * 1024 * 1024;
 const LEGACY_PROXY_FLOOR: u64 = 16 * 1024 * 1024;
 
-/// Max bytes buffered on the Rust→sidecar hop (at least 16 MiB for general SSR, or `NOWAKI_FORM_BODY_LIMIT` when larger).
+/// Max bytes buffered on the Rust→sidecar hop: 16 MiB, or `NOWAKI_FORM_BODY_LIMIT` when that is
+/// larger.
 pub fn proxy_body_limit() -> usize {
     std::cmp::max(LEGACY_PROXY_FLOOR, form_body_limit()) as usize
 }
 
+/// `NOWAKI_FORM_BODY_LIMIT` in bytes (a positive integer), else 10 MiB, read once per process.
 pub fn form_body_limit() -> u64 {
     static LIMIT: OnceLock<u64> = OnceLock::new();
     *LIMIT.get_or_init(|| {
@@ -30,6 +32,7 @@ pub fn form_body_limit() -> u64 {
     })
 }
 
+/// Whether a `Content-Type` value is `multipart/form-data` (case-insensitive, parameters allowed).
 pub fn is_multipart_form_data(ct: &str) -> bool {
     const PREFIX: &str = "multipart/form-data";
     let bytes = ct.as_bytes();
@@ -46,7 +49,8 @@ pub fn is_multipart_form_data(ct: &str) -> bool {
     !b.is_ascii_alphanumeric() && b != b'_'
 }
 
-/// True when `Content-Length` exceeds the multipart cap (same gate as `ctx.formData()` on Node).
+/// True when a multipart request's `Content-Length` exceeds [`form_body_limit`], the cap the
+/// sidecar's `ctx.formData()` applies as well.
 pub fn multipart_content_length_over_limit(headers: &HeaderMap) -> bool {
     let ct = headers
         .get(header::CONTENT_TYPE)
@@ -62,6 +66,7 @@ pub fn multipart_content_length_over_limit(headers: &HeaderMap) -> bool {
     len.is_some_and(|n| n > form_body_limit())
 }
 
+/// The 413 response the front sends for a body over a limit.
 pub fn payload_too_large() -> (StatusCode, &'static str) {
     (StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large")
 }

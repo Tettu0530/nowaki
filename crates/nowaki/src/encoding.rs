@@ -6,6 +6,7 @@ use axum::body::Bytes;
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::Response;
 
+/// The `Content-Encoding` a response goes out with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Encoding {
     Brotli,
@@ -13,7 +14,7 @@ pub enum Encoding {
     Identity,
 }
 
-/// One response body in every encoding we have for it.
+/// One response body in every encoding that is available for it.
 #[derive(Debug, Clone)]
 pub struct Variants {
     pub plain: Bytes,
@@ -24,6 +25,7 @@ pub struct Variants {
 }
 
 impl Variants {
+    /// Variants from bodies already at hand (`None` for an encoding that has none).
     pub fn new(plain: Bytes, gzip: Option<Bytes>, brotli: Option<Bytes>) -> Self {
         let etag = etag_of(&plain);
         Variants {
@@ -89,6 +91,7 @@ impl Variants {
     }
 }
 
+/// A weak ETag from the xxh3 hash of `data`.
 pub fn etag_of(data: &[u8]) -> String {
     format!("W/\"{:016x}\"", xxhash_rust::xxh3::xxh3_64(data))
 }

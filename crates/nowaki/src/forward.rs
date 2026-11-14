@@ -1,8 +1,9 @@
 //! Request headers the Rust front passes on to the Node sidecar.
 //!
-//! The sidecar trusts `x-forwarded-host` (the server-function same-origin check) and reads internal
-//! `x-nowaki-*` headers, so neither may come from the client unchecked. Client-sent
-//! forwarding headers are honored only with `NOWAKI_TRUST_PROXY=1`, for a reverse proxy that sets them.
+//! The sidecar trusts `x-forwarded-host` (the cross-site checks in `server/origin.mjs`, `ctx.url`)
+//! and reads internal `x-nowaki-*` headers, so neither may come from the client unchecked.
+//! Client-sent forwarding headers are honored only with `NOWAKI_TRUST_PROXY`, for a reverse proxy
+//! that sets them.
 
 use std::sync::OnceLock;
 
@@ -10,7 +11,7 @@ use axum::http::{header, HeaderMap, HeaderName};
 
 /// Never proxied from a client: sidecar-only endpoints Rust calls itself (the sidecar trusts
 /// `live-render` bodies: state to re-render, the request context for `getContext()`; `dev-info`
-/// lists app files; `isr-urls` lists ISR pages and renders `staticPaths`), and the dev MCP and dev
+/// lists app files; `isr-urls` lists ISR pages and runs `staticPaths`), and the dev MCP and dev
 /// toolbar paths, which only `nowaki dev` mounts (loopback-only).
 const INTERNAL_PATHS: [&str; 5] = [
     "/__nowaki/live-render",
@@ -20,6 +21,8 @@ const INTERNAL_PATHS: [&str; 5] = [
     "/__nowaki/devtools",
 ];
 
+/// Whether `path` is one of the internal endpoints above (or below one of them), which dev and
+/// start answer with 404 instead of proxying.
 pub fn is_internal_path(path: &str) -> bool {
     INTERNAL_PATHS.iter().any(|p| {
         path.strip_prefix(p)
@@ -36,6 +39,7 @@ const CLIENT_NOWAKI_HEADERS: [&str; 4] = [
     "x-nowaki-intercept",
 ];
 
+/// Whether `NOWAKI_TRUST_PROXY` is set (`1` / `true` / `yes`), read once per process.
 pub fn trust_proxy() -> bool {
     static TRUST: OnceLock<bool> = OnceLock::new();
     *TRUST.get_or_init(|| {
@@ -86,7 +90,7 @@ pub fn passes(name: &HeaderName, trust: bool) -> bool {
     !n.starts_with("x-nowaki-") || CLIENT_NOWAKI_HEADERS.contains(&n)
 }
 
-/// Copy the client's headers onto a sidecar request, minus the ones it must not control, plus
+/// Copies the client's headers onto a sidecar request, minus the ones it must not control, plus
 /// canonical `x-forwarded-host` / `x-forwarded-proto`.
 pub fn apply(
     builder: reqwest::RequestBuilder,

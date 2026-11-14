@@ -18,6 +18,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use futures_util::StreamExt;
 
+/// The `NOWAKI_CSP` setting.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Mode {
     Off,
@@ -25,6 +26,7 @@ pub enum Mode {
     Enforce,
 }
 
+/// Reads a `NOWAKI_CSP` value the way `server/csp.mjs` `cspMode` does; anything unknown is off.
 pub fn parse_mode(v: &str) -> Mode {
     match v.trim().to_ascii_lowercase().as_str() {
         "report-only" | "report" => Mode::ReportOnly,
@@ -52,6 +54,7 @@ fn report_uri() -> Option<&'static str> {
     .as_deref()
 }
 
+/// 16 random bytes as 32 lowercase hex digits.
 pub fn new_nonce() -> String {
     let mut b = [0u8; 16];
     getrandom::fill(&mut b).expect("OS random source");
@@ -72,8 +75,8 @@ object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
     p
 }
 
-/// The response header a render names its marker in (`server/nonce.mjs`). Internal: the layer
-/// removes it from every response.
+/// The response header a render names its marker in (`server/nonce.mjs`). Internal: with a CSP
+/// mode on, the layer removes it from every response; with it off, no render sets it.
 pub const MARKER_HEADER: &str = "x-nowaki-csp-marker";
 
 /// A marker as the runtime makes them (32 lowercase hex digits, like a nonce). Anything else is

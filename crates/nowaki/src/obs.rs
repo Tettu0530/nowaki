@@ -12,6 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Map, Value};
 use tokio::sync::{mpsc, oneshot};
 
+/// The observability settings of this process, read once by [`get`].
 pub struct Obs {
     /// `server-timing` on `nowaki start` responses (dev's sidecar sends its own).
     pub timing: bool,
@@ -21,10 +22,12 @@ pub struct Obs {
 }
 
 impl Obs {
+    /// Whether any of Server-Timing, JSON logs or tracing is on.
     pub fn active(&self) -> bool {
         self.timing || self.json || self.otel.is_some()
     }
 
+    /// The trace exporter, when tracing is on.
     pub fn otel(&self) -> Option<&Otel> {
         self.otel.as_ref()
     }
@@ -60,6 +63,7 @@ fn truthy(v: &str) -> bool {
 
 // ---- W3C trace context ----
 
+/// A parsed W3C `traceparent` header.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TraceParent {
     pub trace_id: [u8; 16],
@@ -133,11 +137,12 @@ pub fn format_traceparent(trace_id: &[u8; 16], span_id: &[u8; 8], sampled: bool)
 
 // ---- sampling ----
 
+/// The sampling rule from `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sampler {
     /// A parent's sampled flag decides when there is one.
     pub parent: bool,
-    /// The root decision: 1 = always, 0 = never.
+    /// The share of root traces sampled: 1 = always, 0 = never.
     pub ratio: f64,
 }
 
@@ -180,6 +185,7 @@ impl Sampler {
 
 // ---- configuration ----
 
+/// The OTLP exporter settings read from the `OTEL_*` variables.
 #[derive(Debug, PartialEq)]
 pub struct OtelConfig {
     pub endpoint: String,
@@ -191,8 +197,9 @@ pub struct OtelConfig {
     pub max_queue: usize,
 }
 
-/// `Ok(None)`: tracing is off (no endpoint, or OTEL_SDK_DISABLED=true). `Err`: it was asked for
-/// but can't run here (an `https://` endpoint: this binary speaks plain HTTP to the collector).
+/// `Ok(None)`: tracing is off (no endpoint, or `OTEL_SDK_DISABLED=true`). `Err`: it was asked for
+/// but can't run here (an endpoint that isn't `http://`: this binary speaks plain HTTP to the
+/// collector).
 pub fn otel_config(var: impl Fn(&str) -> Option<String>) -> Result<Option<OtelConfig>, String> {
     if var("OTEL_SDK_DISABLED").is_some_and(|v| truthy(&v)) {
         return Ok(None);
@@ -245,7 +252,8 @@ pub fn otel_config(var: impl Fn(&str) -> Option<String>) -> Result<Option<OtelCo
     }))
 }
 
-/// `k1=v1,k2=v2`, values percent-decoded (OTEL_EXPORTER_OTLP_HEADERS).
+/// Parses `k1=v1,k2=v2` with values percent-decoded (`OTEL_EXPORTER_OTLP_TRACES_HEADERS`, else
+/// `OTEL_EXPORTER_OTLP_HEADERS`).
 pub fn parse_headers(raw: &str) -> Vec<(String, String)> {
     raw.split(',')
         .filter_map(|part| {
@@ -291,6 +299,7 @@ pub enum Attr {
     Int(i64),
 }
 
+/// A span of the Rust front, exported when it ends sampled.
 #[derive(Clone, Debug)]
 pub struct Span {
     pub trace_id: [u8; 16],
@@ -358,6 +367,7 @@ pub fn otlp_span(s: &Span) -> Value {
     Value::Object(out)
 }
 
+/// An OTLP/JSON export request body: one resource with one scope holding `spans`.
 pub fn otlp_body(resource: &[(&str, String)], spans: &[Span]) -> Value {
     let attrs: Vec<Value> = resource
         .iter()
@@ -379,6 +389,7 @@ enum Msg {
     Flush(oneshot::Sender<()>),
 }
 
+/// The trace exporter: creates spans and queues finished ones for the export task.
 pub struct Otel {
     sampler: Sampler,
     tx: mpsc::Sender<Msg>,
@@ -442,6 +453,7 @@ impl Otel {
         }
     }
 
+    /// A span under a local `parent`, sharing its trace and sampling decision.
     pub fn child(&self, parent: &Span, name: String, kind: Kind) -> Span {
         Span {
             trace_id: parent.trace_id,
@@ -638,7 +650,7 @@ pub fn log(level: &str, msg: &str, fields: &[(&str, Value)]) {
 }
 
 /// A line the sidecar printed: passed through when it is already a JSON object (log.mjs), else
-/// wrapped as `{ source: "sidecar", msg }`; outside JSON mode, `[sidecar] line` as before.
+/// wrapped as `{ source: "sidecar", msg }`; outside JSON mode, printed as `[sidecar] line`.
 pub fn sidecar_line(line: &str) {
     if !get().json {
         println!("[sidecar] {line}");

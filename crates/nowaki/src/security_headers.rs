@@ -7,13 +7,15 @@ use std::sync::OnceLock;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use axum::response::Response;
 
+/// The default headers, each added only when the response doesn't set it.
 pub const DEFAULTS: [(&str, &str); 4] = [
     ("x-content-type-options", "nosniff"),
     ("x-frame-options", "SAMEORIGIN"),
     ("referrer-policy", "strict-origin-when-cross-origin"),
     ("cross-origin-opener-policy", "same-origin"),
 ];
-/// Only when the app sends no CSP of its own; it restricts framing and nothing else.
+/// Added only when the response has no CSP (neither the app's nor the `NOWAKI_CSP` one); it
+/// restricts framing and nothing else.
 pub const FRAME_CSP: &str = "frame-ancestors 'self'";
 
 fn enabled() -> bool {
@@ -30,6 +32,7 @@ fn enabled() -> bool {
     })
 }
 
+/// Adds every default `headers` doesn't already have.
 pub fn fill(headers: &mut HeaderMap) {
     for (name, value) in DEFAULTS {
         let name = HeaderName::from_static(name);
