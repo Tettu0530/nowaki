@@ -2,7 +2,7 @@
 // clientDir / serverDir are passed in, so it's tied to neither cwd nor import.meta's location.
 
 import { createServer } from "node:http";
-import { register } from "node:module";
+import * as nodeModule from "node:module";
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -21,7 +21,7 @@ import { configureSessions, sessionConfigOf } from "./session.mjs";
 import { liveProps, warnIfEphemeralLiveKey } from "./live-sign.mjs";
 import { indexPublic, lookupPublic } from "./public-files.mjs";
 import { resolveSite } from "./seo.mjs";
-import { requestOrigin } from "./origin.mjs";
+import { requestOrigin, requestUrl } from "./origin.mjs";
 import { compileRules } from "./rules.mjs";
 import { compileI18n } from "./i18n.mjs";
 import { LOCALE_VARY, frontHeaders, frontLocale, frontStep, withVaryHeaders } from "./front.mjs";
@@ -34,8 +34,15 @@ import { HEALTH_BODY, HEALTH_HEADERS, isHealth } from "./health.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
 // Bun and Deno don't implement Node's module.register; their SSR keeps the old behavior.
+// Node 26 deprecates module.register() (a warning on stderr at every start, which also breaks
+// JSON log output); it takes the in-thread module.registerHooks() instead.
 try {
-  register(new URL("./react-alias-hooks.mjs", import.meta.url));
+  if (Number(process.versions.node?.split(".")[0]) >= 26 && typeof nodeModule.registerHooks === "function") {
+    const { resolveSync } = await import("./react-alias-hooks.mjs");
+    nodeModule.registerHooks({ resolve: resolveSync });
+  } else {
+    nodeModule.register(new URL("./react-alias-hooks.mjs", import.meta.url));
+  }
 } catch {}
 
 const CONTENT_TYPE = {
@@ -209,7 +216,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
   const moduleKey = (file) => path.relative(serverDir, file).split(path.sep).join("/");
   const serverFunctions = Object.keys(serverFnTable).length
     ? {
-        lookup: (id) => serverFnTable[id] ?? null,
+        lookup: (id) => (Object.hasOwn(serverFnTable, id) ? serverFnTable[id] : null),
         importModule: (m) => importOnce(pathToFileURL(path.join(serverDir, m)).href),
       }
     : null;
@@ -287,7 +294,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
     // Set before the response's own headers, which override any of these by name.
     for (const [k, v] of missingSecurityHeaders(() => false)) res.setHeader(k, v);
     try {
-      const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
+      const url = requestUrl(req.url, requestOrigin((name) => req.headers[name]));
       let pathname = url.pathname;
       let routePath;
       let localeVary = false;

@@ -11,9 +11,12 @@ import path from "node:path";
 import { resolveSite } from "./seo.mjs";
 import { compileI18n, splitLocale } from "./i18n.mjs";
 import { loadEnv } from "./env.mjs";
-import { requestOrigin } from "./origin.mjs";
+import { requestOrigin, requestUrl, trustSidecarHop } from "./origin.mjs";
 import { traceFromEnv } from "./trace.mjs";
 import { HEALTH_BODY, HEALTH_HEADERS, HEALTH_PATH } from "./health.mjs";
+
+// Spawned by `nowaki dev`: a loopback Host is the Rust hop (see origin.mjs).
+trustSidecarHop();
 
 // load .env before routes so routes/loaders can read process.env
 loadEnv();
@@ -339,7 +342,7 @@ const env = {
   serverFunctions: {
     async lookup(id, version) {
       const entries = await serverFnEntries(String(version ?? "0"));
-      return entries[id] ?? null;
+      return Object.hasOwn(entries, id) ? entries[id] : null;
     },
     // dev has no dist, so import sources directly (loader-hooks bridges to the Rust transform).
     importModule: (m, version) =>
@@ -447,7 +450,7 @@ const server = createServer(async (req, res) => {
     if (envReady !== true) await ensureEnv(version);
     await ensureContent(version);
     await ensureSession(version);
-    const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
+    const url = requestUrl(req.url, requestOrigin((name) => req.headers[name]));
     const result = await handleRequest(env, {
       method: req.method,
       url,

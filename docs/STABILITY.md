@@ -184,13 +184,20 @@ Every release has a `vX.Y.Z` tag and a CHANGELOG entry.
 ## Platforms
 
 - **Node.js**: every package declares `engines.node >=22`. Nowaki supports the Node LTS lines
-  that are not end-of-life. CI runs Node 22 and 24 on Linux and Node 22 on macOS and Windows.
+  that are not end-of-life. CI runs Node 22, 24 and 26 on Linux and Node 22 on macOS and Windows.
   A Node line may be dropped in a minor once it reaches end-of-life (Node 22: 2027-04-30),
   announced in the CHANGELOG of the minor before.
 - **Bun and Deno**: supported for the `bun` and `deno` adapters, at the current stable release
   CI installs.
 - **Operating systems**: macOS (arm64, x64), Linux (x64, arm64, glibc) and Windows (x64), the
-  five prebuilt CLI binaries.
+  five prebuilt CLI binaries. musl (Alpine) and Windows arm64 have no prebuilt binary
+  (`cargo install nowaki` works there); adding one is an additive change. On Windows there is no
+  SIGTERM for the sidecar, so Jetstream rooms (`NOWAKI_LIVE_ROOMS_FILE`) rely on the periodic
+  write (every 2 s) rather than a final write at shutdown. CI runs the dev toolbar and most
+  browser tests on Windows too; not the ones that drive Chrome over a CDP pipe (router,
+  intercepting routes, the gallery), which Chrome on Windows doesn't read, nor the HMR test (on
+  Windows an edit to a module an island imports reloads the page instead of updating the
+  island).
 - **Rust** (only for building from source or `cargo install nowaki`; npm users do not need
   Rust): the MSRV is 1.97, set in `Cargo.toml` (`rust-version`) and checked in CI. It may rise
   in a minor (the oxc upgrade usually drives it), never in a patch, and every rise is noted in

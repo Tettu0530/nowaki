@@ -28,12 +28,12 @@ export async function dispatchLiveEvent(ctx, info, live) {
 
   let text = "";
   try {
-    text = await ctx.bodyText();
+    // Capped while streaming (a chunked body has no Content-Length to check above).
+    text = await ctx.__bodyText(BODY_LIMIT);
   } catch (err) {
-    // Over the body limit while reading (a chunked body has no Content-Length): 413, not 400.
+    // Over the body limit while reading: 413, not 400.
     if (err?.name === "RequestBodyError") return errBody(err.status, err.status === 413 ? "Payload Too Large" : "Bad Request");
   }
-  if (text.length > BODY_LIMIT) return errBody(413, "Payload Too Large");
   let body = null;
   try {
     body = JSON.parse(text);

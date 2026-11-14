@@ -145,6 +145,12 @@ code locations and CI coverage.
   its tools read-only. The dev toolbar's `/__nowaki/devtools` sits behind the
   same gate and stays read-only too; the toolbar is loaded only by dev `hmr.js`. Dev errors reach its log from the sidecar through a
   stdout line carrying `NOWAKI_PUBLISH_TOKEN`, like `publish()`.
+- **The dev `Host` check follows the bound socket.** `crates/nowaki/src/listen.rs`
+  resolves `--host [addr]` / `NOWAKI_HOST` / `PORT`; `listen::is_exposed` reads exposure from
+  the bound address, so `--host 127.0.0.1` stays loopback-only. Not exposed: `dev.rs`
+  `host_guard` accepts only `localhost` / `127.0.0.1` / `[::1]`. Exposed: IP literals,
+  `localhost`, `*.localhost`, `*.local` and `NOWAKI_DEV_ALLOWED_HOSTS` (`*` for any). MCP and
+  devtools check the peer address on top and stay loopback-only.
 - **`publish()` has no network endpoint.** The sidecar reaches the Rust hub only
   through its stdout with `NOWAKI_PUBLISH_TOKEN`; keep it that way, and keep the
   topic caps in `live.rs` and `live.mjs` in step.
@@ -153,8 +159,9 @@ code locations and CI coverage.
   sidecar hop unless `NOWAKI_TRUST_PROXY` is set; new client-facing `x-nowaki-*`
   request headers must be added to its allowlist. Adapter runtimes (Node/Edge)
   apply the same host trust in `server/origin.mjs` (`browserHost`) for CSRF
-  checks — `NOWAKI_TRUST_PROXY`, loopback sidecar `Host`, Vercel `x-forwarded-host`,
-  otherwise `Host`; do not derive the comparison host from `Origin`.
+  checks — `NOWAKI_TRUST_PROXY`, a loopback `Host` only on the sidecars that call
+  `trustSidecarHop()` (the Rust hop; the node / bun / deno adapters never do), Vercel
+  `x-forwarded-host`, otherwise `Host`; do not derive the comparison host from `Origin`.
 - **Client-supplied Jetstream state is used only after its signature verifies**
   (`live.mjs` checks before every render and handler run); do not skip or bypass
   that path. The POST transport (`server/live-event.mjs`, `/__nowaki/live-event`)

@@ -2,6 +2,8 @@
 // Runs in CI (browser job) and locally. Drives Chrome directly over CDP (no puppeteer).
 // Usage: BASE=http://127.0.0.1:8241 node scripts/lazy-hydration-test.mjs
 import { spawn } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
 
 const BASE = process.env.BASE || "http://127.0.0.1:8241";
 const CHROME =
@@ -65,7 +67,7 @@ try {
     "--no-first-run",
     "--no-default-browser-check",
     "--window-size=800,600",
-    "--user-data-dir=/tmp/nwk-chrome-lazy",
+    `--user-data-dir=${path.join(os.tmpdir(), "nwk-chrome-lazy")}`,
     "about:blank",
   ]);
   let targets;

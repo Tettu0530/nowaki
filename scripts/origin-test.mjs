@@ -1,5 +1,5 @@
 // Unit tests for server/origin.mjs (browserHost / isCrossSite / NOWAKI_TRUST_PROXY).
-import { browserHost, isCrossSite, requestOrigin, trustProxy } from "../packages/nowaki-runtime/server/origin.mjs";
+import { browserHost, isCrossSite, requestOrigin, requestUrl, trustProxy, trustSidecarHop } from "../packages/nowaki-runtime/server/origin.mjs";
 
 let failures = 0;
 const check = (label, cond) => {
@@ -40,6 +40,37 @@ check(
   ),
 );
 
+// Node / bun / deno adapters (no sidecar hop): a loopback Host is a reverse proxy on the same
+// machine, which may pass a client's x-forwarded-* through, so they are not trusted.
+check(
+  "adapter: loopback Host does not trust a client x-forwarded-host",
+  browserHost(hdr({ host: "localhost:3000", "x-forwarded-host": "evil.test" })) === "localhost:3000",
+);
+check(
+  "adapter: loopback Host does not trust a client x-forwarded-proto / -host in requestOrigin",
+  requestOrigin(hdr({ host: "127.0.0.1:3000", "x-forwarded-host": "evil.test", "x-forwarded-proto": "https" })) ===
+    "http://127.0.0.1:3000",
+);
+check(
+  "adapter: [::1] with a port is not a trusted hop either",
+  browserHost(hdr({ host: "[::1]:3000", "x-forwarded-host": "evil.test" })) === "[::1]:3000",
+);
+check("adapter: no Host and a client x-forwarded-host gives no host", browserHost(hdr({ "x-forwarded-host": "evil.test" })) === undefined);
+
+// requestUrl: the request target never picks the origin.
+for (const t of ["//evil.test/reset", "http://evil.test/reset", "https://evil.test:8443/reset"]) {
+  const u = requestUrl(t, "https://app.example");
+  check(`requestUrl keeps the origin for ${t}`, u.origin === "https://app.example" && u.pathname === "/reset");
+}
+check("requestUrl keeps path and query", requestUrl("/a/b?x=1", "http://h:1").href === "http://h:1/a/b?x=1");
+check("requestUrl: //evil.test/x?q=1 keeps the query", requestUrl("//evil.test/x?q=1", "http://h").href === "http://h/x?q=1");
+
+// Inside a sidecar spawned by the Rust front, a loopback Host is the Rust hop.
+trustSidecarHop();
+check(
+  "sidecar hop: [::1] with a port is loopback",
+  browserHost(hdr({ host: "[::1]:3000", "x-forwarded-host": "app.example" })) === "app.example",
+);
 check(
   "browserHost uses x-forwarded-host when Host is absent (Rust sidecar hop)",
   browserHost(hdr({ "x-forwarded-host": "127.0.0.1:3301" })) === "127.0.0.1:3301",

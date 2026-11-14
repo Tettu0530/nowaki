@@ -145,7 +145,7 @@ export function createFetchHandler({
   const serverFunctions =
     serverFnTable && Object.keys(serverFnTable).length
       ? {
-          lookup: (id) => serverFnTable[id] ?? null,
+          lookup: (id) => (Object.hasOwn(serverFnTable, id) ? serverFnTable[id] : null),
           importModule: (key) => modules[key],
         }
       : null;
@@ -246,7 +246,7 @@ export function createFetchHandler({
       url,
       version: "prod",
       headers,
-      readBody: () => readBodyWithLimit(request, headers),
+      readBody: (limit) => readBodyWithLimit(request, headers, limit),
       routePath: front?.routePath,
     };
     if (isr && isr.eligible(request.method, url.pathname, headers)) return cached(info, front, exec);

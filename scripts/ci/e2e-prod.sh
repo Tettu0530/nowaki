@@ -185,6 +185,8 @@ node scripts/livetest.mjs http://127.0.0.1:3300
 # leak) and collapse unused-query floods (#6/#7).
 ! grep -rl "$HOME" examples/hello/dist/client || exit 1
 node scripts/security-e2e.mjs prod http://127.0.0.1:3300
+# no internal x-nowaki-* response header, no Set-Cookie on a shared-cacheable response
+node scripts/security-e2e.mjs headers http://127.0.0.1:3300 "nowaki start"
 # content collections: Markdown rendered at build time, headings with anchors, a TOC from them,
 # and the docs list ordered by frontmatter
 curl -sf http://127.0.0.1:3300/docs | grep -q 'href="/docs/intro">Introduction</a></li><li><a href="/docs/routing"'
