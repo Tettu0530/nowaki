@@ -1,12 +1,9 @@
 //! Image asset optimization (pure Rust, no C codecs, so it cross-compiles).
 //!
-//! The client build passes every imported PNG through [`optimize`] with the default
-//! [`Transform`]: it is re-encoded losslessly and kept only if smaller (metadata is dropped
-//! too). Other formats are copied as they are.
-//!
-//! A non-default [`Transform`] (from [`parse_query`]) resizes, converts, and sets the quality,
-//! but no import query reaches it: responsive images use `?image` (`image.rs`), which
-//! encodes its fallback variants through `encode_as`.
+//! The client build passes every imported asset through [`optimize`]: a PNG is re-encoded
+//! losslessly and kept only if smaller (metadata is dropped too); other formats are copied as
+//! they are. Responsive images use `?image` (`image.rs`), which encodes its fallback variants
+//! through `encode_as`.
 //!
 //! WebP is encoded lossless (image-webp). SVG, ICO, video, etc. are untouched.
 
@@ -14,12 +11,11 @@ use anyhow::Result;
 use image::codecs::jpeg::JpegEncoder;
 use image::codecs::png::{CompressionType, FilterType as PngFilter, PngEncoder};
 use image::codecs::webp::WebPEncoder;
-use image::imageops::FilterType;
 use image::{DynamicImage, ImageEncoder, ImageFormat};
 
 /// A raster format this module decodes and encodes.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Fmt {
+enum Fmt {
     Png,
     Jpeg,
     Webp,
@@ -41,94 +37,29 @@ impl Fmt {
             Fmt::Webp => "webp",
         }
     }
-    fn image_format(self) -> ImageFormat {
-        match self {
-            Fmt::Png => ImageFormat::Png,
-            Fmt::Jpeg => ImageFormat::Jpeg,
-            Fmt::Webp => ImageFormat::WebP,
-        }
-    }
 }
 
-/// What [`optimize`] does beyond the automatic PNG re-encode. The default is nothing.
-#[derive(Default, Clone)]
-pub struct Transform {
-    /// Target width in pixels.
-    pub width: Option<u32>,
-    /// Target height in pixels. With only one of width and height, the image fits within it and
-    /// keeps its aspect ratio; with both, it is resized to exactly that size.
-    pub height: Option<u32>,
-    /// Output format (default: the input's).
-    pub format: Option<Fmt>,
-    /// JPEG quality, 1 to 100 (default 80). WebP is always lossless.
-    pub quality: Option<u8>,
-}
-
-impl Transform {
-    /// Whether no resize, format, or quality is set (automatic optimization only).
-    fn is_noop(&self) -> bool {
-        self.width.is_none()
-            && self.height.is_none()
-            && self.format.is_none()
-            && self.quality.is_none()
-    }
-}
-
-/// Parses a query string (`w=800&format=webp&quality=80`; also `width`, `h` / `height`, `q`,
-/// `f`) into a [`Transform`]. Unknown keys and invalid values are ignored.
-pub fn parse_query(q: &str) -> Transform {
-    let mut t = Transform::default();
-    for pair in q.split('&').filter(|s| !s.is_empty()) {
-        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
-        match k {
-            "w" | "width" => t.width = v.parse().ok(),
-            "h" | "height" => t.height = v.parse().ok(),
-            "q" | "quality" => t.quality = v.parse::<u8>().ok().map(|n| n.clamp(1, 100)),
-            "format" | "f" => {
-                t.format = match v.to_ascii_lowercase().as_str() {
-                    "webp" => Some(Fmt::Webp),
-                    "jpeg" | "jpg" => Some(Fmt::Jpeg),
-                    "png" => Some(Fmt::Png),
-                    _ => None,
-                }
-            }
-            _ => {}
-        }
-    }
-    t
-}
-
-/// Optimizes image bytes. Returns (optimized bytes, output extension). Unsupported input, a
-/// failure, or (in automatic mode) a larger result returns the original bytes and extension.
-pub fn optimize(bytes: &[u8], ext: &str, t: &Transform) -> (Vec<u8>, String) {
-    match try_optimize(bytes, ext, t) {
+/// Optimizes an imported asset. Returns (bytes, output extension): a PNG re-encoded losslessly
+/// when that is smaller, anything else (or a failure) the original untouched.
+pub fn optimize(bytes: &[u8], ext: &str) -> (Vec<u8>, String) {
+    match try_optimize(bytes, ext) {
         Ok(Some(out)) => out,
         _ => (bytes.to_vec(), ext.to_string()),
     }
 }
 
-fn try_optimize(bytes: &[u8], ext: &str, t: &Transform) -> Result<Option<(Vec<u8>, String)>> {
-    let Some(in_fmt) = Fmt::from_ext(ext) else {
-        return Ok(None); // no image processing for svg/ico/gif/video etc.
-    };
-    // Automatic (no query) is lossless PNG re-encoding only. Auto-recompressing JPEG/WebP can
-    // degrade quality, so it only happens with an explicit query (resize, format, quality).
-    if t.is_noop() && in_fmt != Fmt::Png {
+fn try_optimize(bytes: &[u8], ext: &str) -> Result<Option<(Vec<u8>, String)>> {
+    // Lossless PNG re-encoding only: recompressing JPEG / WebP could degrade them.
+    if Fmt::from_ext(ext) != Some(Fmt::Png) {
         return Ok(None);
     }
-    let out_fmt = t.format.unwrap_or(in_fmt);
-
     // Upright pixels: the EXIF orientation is applied here, since re-encoding drops it.
-    let mut img = crate::image::decode_oriented(bytes, Some(in_fmt.image_format()))?;
-    if t.width.is_some() || t.height.is_some() {
-        img = resize(&img, t.width, t.height);
-    }
-    let out = encode(&img, out_fmt, t.quality)?;
-
-    if t.is_noop() && out.len() >= bytes.len() {
+    let img = crate::image::decode_oriented(bytes, Some(ImageFormat::Png))?;
+    let out = encode(&img, Fmt::Png, None)?;
+    if out.len() >= bytes.len() {
         return Ok(None);
     }
-    Ok(Some((out, out_fmt.ext().to_string())))
+    Ok(Some((out, Fmt::Png.ext().to_string())))
 }
 
 /// Encodes a decoded image in the format of `ext` (png / jpg / jpeg / webp), for `image.rs`'s
@@ -142,16 +73,6 @@ pub(crate) fn encode_as(
         return Ok(None);
     };
     Ok(Some((encode(img, fmt, quality)?, fmt.ext())))
-}
-
-/// One dimension: fit within it, keeping the aspect ratio. Both: exact resize.
-fn resize(img: &DynamicImage, w: Option<u32>, h: Option<u32>) -> DynamicImage {
-    match (w, h) {
-        (Some(w), Some(h)) => img.resize_exact(w, h, FilterType::Lanczos3),
-        (Some(w), None) => img.resize(w, u32::MAX, FilterType::Lanczos3),
-        (None, Some(h)) => img.resize(u32::MAX, h, FilterType::Lanczos3),
-        (None, None) => img.clone(),
-    }
 }
 
 fn encode(img: &DynamicImage, fmt: Fmt, quality: Option<u8>) -> Result<Vec<u8>> {
@@ -211,56 +132,29 @@ mod tests {
     }
 
     #[test]
-    fn parses_query() {
-        let t = parse_query("w=800&format=webp&quality=80");
-        assert_eq!(t.width, Some(800));
-        assert_eq!(t.quality, Some(80));
-        assert!(matches!(t.format, Some(Fmt::Webp)));
-    }
-
-    #[test]
-    fn resize_changes_dimensions() {
-        let png = sample_png();
-        let t = Transform {
-            width: Some(32),
-            ..Default::default()
-        };
-        let (out, ext) = optimize(&png, "png", &t);
-        assert_eq!(ext, "png");
-        let decoded = image::load_from_memory(&out).unwrap();
-        assert_eq!(decoded.width(), 32); // 64 → 32 (aspect ratio kept)
-    }
-
-    #[test]
-    fn converts_to_webp_and_jpeg() {
-        let png = sample_png();
-        let (webp, ext) = optimize(
-            &png,
-            "png",
-            &Transform {
-                format: Some(Fmt::Webp),
-                ..Default::default()
-            },
-        );
+    fn encodes_webp_and_jpeg() {
+        let img = image::load_from_memory(&sample_png()).unwrap();
+        let (webp, ext) = encode_as(&img, "webp", None).unwrap().unwrap();
         assert_eq!(ext, "webp");
         assert_eq!(image::guess_format(&webp).unwrap(), ImageFormat::WebP);
-
-        let (jpg, ext) = optimize(
-            &png,
-            "png",
-            &Transform {
-                format: Some(Fmt::Jpeg),
-                quality: Some(70),
-                ..Default::default()
-            },
-        );
+        let (jpg, ext) = encode_as(&img, "jpeg", Some(70)).unwrap().unwrap();
         assert_eq!(ext, "jpg");
         assert_eq!(image::guess_format(&jpg).unwrap(), ImageFormat::Jpeg);
+        assert!(encode_as(&img, "gif", None).unwrap().is_none());
+    }
+
+    #[test]
+    fn jpeg_is_not_recompressed() {
+        let img = image::load_from_memory(&sample_png()).unwrap();
+        let (jpg, _) = encode_as(&img, "jpg", Some(100)).unwrap().unwrap();
+        let (out, ext) = optimize(&jpg, "jpg");
+        assert_eq!(out, jpg);
+        assert_eq!(ext, "jpg");
     }
 
     #[test]
     fn non_image_passes_through() {
-        let (out, ext) = optimize(b"<svg/>", "svg", &Transform::default());
+        let (out, ext) = optimize(b"<svg/>", "svg");
         assert_eq!(out, b"<svg/>");
         assert_eq!(ext, "svg");
     }
@@ -283,7 +177,7 @@ mod tests {
         )
         .unwrap();
 
-        let (out, ext) = optimize(&weak, "png", &Transform::default());
+        let (out, ext) = optimize(&weak, "png");
         assert_eq!(ext, "png");
         assert!(
             out.len() < weak.len(),

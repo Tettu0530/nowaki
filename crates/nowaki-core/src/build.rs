@@ -1085,7 +1085,7 @@ fn write_asset(abs: &Path, out_dir: &Path) -> Result<(String, u64, u64)> {
     let raw = fs::read(abs).with_context(|| format!("failed to read: {}", abs.display()))?;
     let ext = abs.extension().and_then(|e| e.to_str()).unwrap_or("bin");
     let stem = output_stem(abs, "asset");
-    let (bytes, out_ext) = crate::asset::optimize(&raw, ext, &crate::asset::Transform::default());
+    let (bytes, out_ext) = crate::asset::optimize(&raw, ext);
     let hash = xxh3_64(&bytes) as u32;
     let name = format!("{stem}.{hash:08x}.{out_ext}");
     fs::create_dir_all(out_dir)?;

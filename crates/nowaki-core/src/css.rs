@@ -309,12 +309,6 @@ pub fn css_module_client_js(style_id: &str, scoped_css: &str, map: &[(String, St
     )
 }
 
-/// A CSS Module for SSR: no DOM, so no injection; exports only the class name map. (The SSR
-/// transform and the server build inline the same module as a `data:` URL.)
-pub fn css_module_mapping_js(map: &[(String, String)]) -> String {
-    format!("export default {};\n", mapping_object(map))
-}
-
 /// Converts .css into the source of a JS module that injects a `<style>` (shared by dev and
 /// build). Reuses the style with the same id, so the module never injects twice and a hot update
 /// replaces the text. Copies the page's CSP nonce (`window.__nowakiNonce`, set by the client

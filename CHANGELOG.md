@@ -199,7 +199,15 @@ milestone's worth of work; the codename is noted per entry.
   the binaries with `SHA256SUMS` and GitHub artifact attestations. Tokens keep working until
   the trusted publishers are configured (docs/RELEASING.md, "One-time setup").
 
+### Removed
+- `nowaki-core` (internal crate): `asset::parse_query`, `asset::Transform` / `Fmt` and
+  `css::css_module_mapping_js`, unused since `?image` replaced the old `?w=&format=` asset
+  queries; `asset::optimize` takes no transform. No app-facing change.
+
 ### Fixed
+- Server functions exported by destructuring (`export const { a, b } = makeFns()`) are found
+  like other exports (the client got no proxy for them while the build's chunking saw them),
+  and the build's "unvalidated input" warning lists them, since their validation can't be seen.
 - A missing runtime file (the runtime isn't installed, or the install is broken) no longer asks
   for "@nowaki-dev/runtime 0.16 or newer" (Google fonts, content collections) or 0.17 (env.ts,
   remote images): the CLI already refuses a runtime of another version, so the error now says
