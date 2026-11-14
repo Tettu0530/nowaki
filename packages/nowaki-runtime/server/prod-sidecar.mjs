@@ -81,7 +81,8 @@ const server = createServer(async (req, res) => {
       );
       // A WebSocket event has no response for x-nowaki-purge to ride on.
       flushDetached(ctx);
-      // Rust reuses a shareable render for every connection in the room (one render per publish).
+      // Rust reuses a shareable render for every connection waiting on the same refresh (one
+      // render per publish and state).
       result.shareable = liveShareable(entry.mod, { handler, load, contextRead: !!ctx && contextReads.has(ctx) });
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(result));

@@ -6,9 +6,9 @@
 // - ISR responses carry `Vercel-Cache-Tag`, a comma-separated list Vercel's CDN reads (and strips
 //   before the browser sees it). The tags are the route's `t:<tag>` entries plus `p:<browser path>`,
 //   so revalidatePath() is a purge by tag too.
-// - A purge calls `dangerouslyDeleteByTag` from `@vercel/functions` (decision: purged pages are
-//   deleted, so the next request renders fresh). vercel-build.mjs copies the package into the
-//   function when the app has it installed; without it, a purge warns once and does nothing.
+// - A purge calls `dangerouslyDeleteByTag` from `@vercel/functions` (purged pages are
+//   deleted rather than marked stale, so the next request renders fresh). vercel-build.mjs
+//   copies the package into the function when the app has it installed; without it, a purge warns once and does nothing.
 //
 // Vercel's limits (vercel.com/docs/caching/cdn-cache/purge#limits): at most 256 UTF-8 bytes per
 // tag, quotes and backslashes counting escaped, no commas, 128 tags per response, tags are case

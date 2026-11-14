@@ -9,6 +9,8 @@ export class RequestBodyError extends Error {
   }
 }
 
+// The 4xx response for a RequestBodyError, else null. Only dev shows the 400 message (a 413 is
+// always "Payload Too Large").
 export function requestBodyResult(err, { dev = false, json = false } = {}) {
   if (err?.name !== "RequestBodyError") return null;
   const status = err.status ?? 400;

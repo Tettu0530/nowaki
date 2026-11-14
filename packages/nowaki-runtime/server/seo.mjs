@@ -59,8 +59,6 @@ function absolute(value, base) {
   }
 }
 
-/// The head tags for a resolved meta. `title` is the page's <title> (Open Graph / Twitter
-/// default to it). `pathname` and `origin` are the request's; `site` wins over `origin`.
 /// A page's path as the static output serves it: `/docs/a` is written to `docs/a/index.html`, so
 /// its URL there is `/docs/a/` (a static host redirects the bare form). Paths that end in a file
 /// name (`/feed.xml`) or a slash stay as they are.
@@ -78,6 +76,8 @@ export function pagePath(p, trailingSlash = "ignore", staticOutput = false) {
   return trailingSlash === "always" || staticOutput ? staticPagePath(p) : p;
 }
 
+/// The head tags for a resolved meta. `title` is the page's <title> (Open Graph / Twitter
+/// default to it). `pathname` and `origin` are the request's; `site` wins over `origin`.
 /// `trailingSlash` / `staticOutput` (prerendering for `nowaki build --adapter static`) shape this
 /// page's own URL (canonical: true, the default og:url) with `pagePath`.
 export function seoTags(meta, { title, pathname, origin, site, trailingSlash, staticOutput = false }) {

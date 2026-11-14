@@ -37,12 +37,19 @@ const HTML = { "content-type": "text/html; charset=utf-8" };
 const JSON_CT = { "content-type": "application/json; charset=utf-8" };
 
 /// env provides:
-///   routeTable(version) -> { routes, layouts, middleware, notFound, errorRoute }
+///   routeTable(version) -> { routes, layouts, middleware, slots, notFound, errorRoute,
+///     loadingBoundaries, errorBoundaries }
 ///   importModule(file, version) -> module
 ///   ensureIslands(version) -> prepares the island registry (call before rendering)
-///   renderDocument({ mod, body }) -> final HTML string
+///   renderDocument({ mod, body, meta }) -> final HTML string
+///   renderShell({ mod, meta }) (optional) -> { head, tail } for streamed pages
 ///   renderError(err) -> { status, headers, body } (500 page differs between dev/prod)
 ///   onError(err, ctx) (optional) -> called for every error that becomes a 500 page
+///   routeCss(file, version) / routeScripts(file, mod, version) (optional) -> a route's
+///     stylesheet URLs / page scripts (see withRouteCss / withScripts)
+///   fonts (optional) -> { css, preload } of the self-hosted fonts
+///   site, trailingSlash, staticOutput, i18n, dev (optional) -> the app's settings
+///   serverFunctions (optional) -> the server function registry for SERVER_FN_PATH
 ///   live (optional) -> { lookup(name, version), render } for POST /__nowaki/live-event
 ///   isrStore (optional) -> true on `nowaki start`: ISR responses carry `x-nowaki-tags`, and
 ///     revalidate*() calls ride on the response as `x-nowaki-purge` (server/revalidate.mjs)
@@ -85,7 +92,7 @@ async function routeRequest(env, info, localized) {
     enumerable: true,
   });
 
-  // Handle server function RPC before routing.
+  // Framework endpoints answer before routing and middleware.
   if (env.serverFunctions && url.pathname === SERVER_FN_PATH) {
     ctx.__purgeClosed = false;
     return finalize(ctx, await dispatchServerFn(ctx, info, env.serverFunctions, { dev: env.dev === true }));
@@ -436,7 +443,7 @@ async function handleApi(mod, ctx, fileExt) {
       body: out instanceof ArrayBuffer ? new Uint8Array(out) : out,
     };
   }
-  // also supports legacy { status, headers, body }
+  // A plain `{ status, headers, body }` object: a string body is sent as-is, anything else as JSON.
   if (out && typeof out === "object" && ("body" in out || "status" in out)) {
     return {
       status: out.status ?? 200,
@@ -522,7 +529,7 @@ async function renderRoute(env, table, match, mod, ctx, version, path) {
     }
   }
   const tok = tr?.begin("render", "render");
-  // try / finally adds no frame: the untraced render runs exactly as before.
+  // try / finally adds no frame, so an untraced render pays nothing for it.
   try {
     const meta = await withDocAttrs(env, table, match.file, mod, version, withFonts(env, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data, params: ctx.params, url: ctx.url }), slotFiles)), slotFiles)));
     const node = await wrapLayouts(env, table, match.file, h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url }), ctx, version, slots);
@@ -531,7 +538,8 @@ async function renderRoute(env, table, match, mod, ctx, version, path) {
     // reads x-nowaki-revalidate and caches in memory.
     const revalidate = isrSeconds(mod);
 
-    // Streaming SSR sends the shell immediately to cut TTFB (only in envs with env.renderShell).
+    // `streaming = true`: the shell goes out once the loaders have run, then the body streams
+    // (only in envs with env.renderShell).
     if (mod.streaming === true && typeof env.renderShell === "function") {
       const { head, tail } = env.renderShell({ mod, meta });
       const bodyStream = await renderToReadableStream(node);
@@ -1147,7 +1155,7 @@ function toResult(out) {
   if (typeof Response !== "undefined" && out instanceof Response) {
     return responseToResult(out);
   }
-  if (out && out.__nowakiResult) return out; // returned by ctx.redirect()/ctx.json()
+  if (out && out.__nowakiResult) return out; // ctx.redirect() / json() / html() / text()
   return null;
 }
 

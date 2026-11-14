@@ -1,5 +1,6 @@
-// Server-side helper for server-reactive islands. Rust (WS) holds state per connection, or the
-// client sends it back with each POST event; Node only does pure re-evaluation. The returned html is the unwrapped content (the client morphs it in).
+// Server side of live islands. The WebSocket hub (Rust live.rs, or live-hub.mjs on a JS server)
+// holds each connection's state, or the client sends it back with each POST event; this module
+// only re-renders. The returned html is the unwrapped content (the client morphs it in).
 
 import { h } from "preact";
 import { renderToStringAsync } from "preact-render-to-string";
@@ -95,11 +96,6 @@ export class LiveForbiddenError extends Error {
   }
 }
 
-// Called for the /__nowaki/live WS and POST /__nowaki/live-event. Without a `handler`, re-renders
-// with the state unchanged.
-// To prevent state forgery, always verifies sig before running the handler, and signs the new state on return.
-// `live.authorize({ name, handler, state, payload })` runs after the signature check and before the
-// handler; anything but `true` refuses the event. getContext() works in both (see sidecars).
 /// `live.subscribe`: an array of topics, or a function of the state returning one. Capped like live.rs
 /// (16 topics, 128 chars each) since the client echoes them back on join.
 export function liveTopics(mod, state) {
@@ -117,8 +113,13 @@ export function liveTopics(mod, state) {
   ).slice(0, 16);
 }
 
-/// `load: { topic }` is a `publish(topic)` refresh: `live.load(state, { topic })` replaces the
-/// handler. The result carries the island's current topics.
+/// Re-renders a live island for the /__nowaki/live WebSocket and POST /__nowaki/live-event.
+/// The signature is always verified before any handler runs (no forged state), and the new state
+/// is signed on return. `live.authorize({ name, handler, state, payload })` runs after the
+/// signature check and before the handler; anything but `true` refuses the event. Without a
+/// `handler`, the state is re-rendered unchanged. `load: { topic }` is a `publish(topic)` refresh:
+/// `live.load(state, { topic })` replaces the handler. The result carries the island's current
+/// topics.
 export async function liveRender(mod, state, handler, payload, name, sig, { load } = {}) {
   const status = verifyStatus(name, state, sig);
   if (status === "expired") {

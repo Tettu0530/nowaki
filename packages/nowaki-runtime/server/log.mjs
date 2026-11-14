@@ -1,6 +1,6 @@
 // Server-side log lines. With NOWAKI_LOG=json each line is one JSON object (time, level, msg,
 // source, trace_id, span_id, plus the error), the shape `nowaki start` writes too (obs.rs `log`);
-// otherwise they read as before (`[nowaki] …` with the error and its stack). Only logs carry error
+// otherwise each is a text line (`[nowaki] …` with the error and its stack). Only logs carry error
 // details: what reaches a client stays generic. Runtime-neutral (no node: imports).
 
 const JSON_MODE = String(globalThis.process?.env?.NOWAKI_LOG ?? "").trim().toLowerCase() === "json";

@@ -152,8 +152,8 @@ async function ruleList(value, name) {
   return list;
 }
 
-// `locale: false` (match the path with its locale prefix) is kept; the default `true` is left out,
-// so routing.json without i18n stays as it was.
+// `locale: false` (match the path with its locale prefix) is kept; the default `true` is left out
+// of routing.json.
 function withLocale(rule, x, label) {
   if (x.locale === undefined || x.locale === true) return rule;
   if (x.locale !== false) throw new Error(`${label}.locale must be a boolean`);

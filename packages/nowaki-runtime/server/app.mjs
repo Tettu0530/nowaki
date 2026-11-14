@@ -1,5 +1,7 @@
-// Core of the production app, shared by `nowaki start` and each adapter's self-contained entry.
-// clientDir / serverDir are passed in, so it's tied to neither cwd nor import.meta's location.
+// Core of the production app over dist/. `nowaki start` (prod-sidecar.mjs) uses its env behind
+// the Rust front; the node / bun / deno entries, the Vercel function and `nowaki prerender`'s
+// render servers use its node:http handler. clientDir / serverDir are passed in, so it's tied to
+// neither cwd nor import.meta's location.
 
 import { createServer } from "node:http";
 import * as nodeModule from "node:module";
@@ -33,7 +35,7 @@ import { logError } from "./log.mjs";
 import { HEALTH_BODY, HEALTH_HEADERS, isHealth } from "./health.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
-// Bun and Deno don't implement Node's module.register; their SSR keeps the old behavior.
+// Bun and Deno don't implement Node's module.register: the call throws and they run without it.
 // Node 26 deprecates module.register() (a warning on stderr at every start, which also breaks
 // JSON log output); it takes the in-thread module.registerHooks() instead.
 try {
@@ -166,7 +168,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
           const { state: propState, ...rest } = props;
           const state = propState ?? liveInitialState(info.mod, rest);
           const nid = `L${liveCounter++}`;
-          // Use the same signing helper as render.mjs so verify can't always fail on a missing signature.
+          // Signed with the same helper as render.mjs, so the live endpoint can verify the state.
           return h(
             "nowaki-live",
             liveProps(info.name, nid, state, liveTopics(info.mod, state)),
@@ -193,7 +195,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
   } catch {}
   // Production modules never change, so each is imported once. A bare `import()` per request is
   // not free: with the react-alias loader hooks registered, every call does a synchronous round
-  // trip to the hooks thread to resolve the specifier, which was half the CPU time of a page.
+  // trip to the hooks thread to resolve the specifier, which can be half the CPU time of a page.
   const modules = new Map();
   const importOnce = (href) => {
     let p = modules.get(href);
@@ -398,8 +400,9 @@ function wireCdn(env, cdn) {
   setRevalidateEnv(env);
 }
 
-/// Listens via node:http. Shared launcher for adapters and `nowaki start`.
-/// The deployable (dist/server/index.mjs) uses host=0.0.0.0 so it's reachable from containers.
+/// Listens via node:http: the node / bun / deno entry (dist/server/index.mjs) and the render
+/// servers of `nowaki prerender` (start.mjs). The host defaults to NOWAKI_HOST, else 0.0.0.0, so
+/// the deployed entry is reachable from outside a container.
 export async function startServer({
   clientDir,
   serverDir,
@@ -410,7 +413,7 @@ export async function startServer({
   const server = createServer(app.handle);
   await new Promise((resolve) => {
     server.listen(port, host, () => {
-      // with PORT=0, report the actually assigned port (used by prerender etc.)
+      // With port 0 this reports the port the OS assigned (prerender reads it).
       const actual = server.address().port;
       console.log(`NOWAKI_START_READY ${actual}`);
       console.log(`[nowaki] serving production: http://${host}:${actual}`);

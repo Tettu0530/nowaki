@@ -28,7 +28,8 @@ export async function withCspMarker(fn) {
   return markResult(result, marker);
 }
 
-/// `result` with `marker` named in its headers when it is HTML (any value the app set is dropped).
+/// `result` with `marker` named in its headers when it is HTML (replacing any value the app set);
+/// any other result is returned as it is.
 export function markResult(result, marker) {
   const headers = result?.headers;
   if (!headers) return result;

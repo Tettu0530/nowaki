@@ -1,4 +1,6 @@
-// Shared request-body size gate for Edge/Worker adapters (Node uses readBodyNode in context.mjs).
+// Request-body size checks. context.mjs uses the Content-Length and buffered-size checks on every
+// runtime; readBodyWithLimit reads a Web Request's body (web.mjs), where Node uses readBodyNode in
+// context.mjs.
 import { FORM_BODY_LIMIT } from "./multipart.mjs";
 import { RequestBodyError } from "./request-body.mjs";
 
@@ -6,7 +8,10 @@ function tooLarge(limit = FORM_BODY_LIMIT) {
   return new RequestBodyError(`request body exceeds ${limit} byte limit`, { status: 413 });
 }
 
-/** Reject oversize bodies while streaming (chunked bodies without Content-Length included). */
+/**
+ * Reads a Web Request's body, rejecting (413) one over `limit` bytes while streaming, chunked
+ * bodies without Content-Length included.
+ */
 export async function readBodyWithLimit(request, headers, limit = FORM_BODY_LIMIT) {
   const len = Number(headers["content-length"]);
   if (Number.isFinite(len) && len > limit) {

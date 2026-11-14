@@ -1,4 +1,4 @@
-// Minimal dependency-free .env loader (cwd's .env / .env.local → unset process.env keys).
+// Dependency-free .env loader: the app root's .env and .env.local fill unset process.env keys.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -24,7 +24,8 @@ function parse(content) {
 }
 
 export function loadEnv(root = process.cwd()) {
-  // by convention .env.local overrides .env, but existing process.env values are never overwritten
+  // Only unset keys are filled: process.env wins, then .env, then .env.local (the first file
+  // read wins a key both define).
   for (const file of [".env", ".env.local"]) {
     let content;
     try {

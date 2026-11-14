@@ -166,10 +166,10 @@ export async function scanRoutes(appRoot) {
     });
   }
 
-  // static > dynamic > catch-all. Descending specificity (literal count); on ties, catch-all goes last.
+  // static > dynamic > catch-all: descending specificity (literal segments, a suffixed param
+  // counting half); on ties, catch-all goes last.
   routes.sort(bySpecificity);
-  // root→leaf order (shorter prefixes first)
-  // (by segment count: "/[o]/x" is deeper than "/abcdefgh" though shorter as a string).
+  // Root → leaf order, by segment count ("/[o]/x" is deeper than "/abcdefgh").
   layouts.sort((a, b) => prefixDepth(a.prefix) - prefixDepth(b.prefix));
   middleware.sort((a, b) => prefixDepth(a.prefix) - prefixDepth(b.prefix));
   // The client takes the boundary of the deepest URL prefix and, at the same prefix, the last
@@ -303,7 +303,7 @@ export function pathParts(pathname) {
 
 // Two route files serving the same URL is an error when a group causes it ((a)/about vs
 // (b)/about, or about.tsx vs (b)/about.tsx). Param names don't matter: [slug] and [id] collide.
-// Other duplicates (about.tsx vs about/index.tsx) are left as they were. Returns the earlier
+// Other duplicates (about.tsx vs about/index.tsx) are not an error here. Returns the earlier
 // file's rel on a collision.
 function claimUrl(seen, segments, rel, inGroup) {
   const key = segments.map((s) => (s.lit !== undefined ? `=${s.lit}` : s.rest ? "*" : `:${s.suffix ?? ""}`)).join("/");
