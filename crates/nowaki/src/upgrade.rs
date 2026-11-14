@@ -1,11 +1,13 @@
-//! `nowaki upgrade`: update an existing app's nowaki (CLI) and @nowaki-dev/runtime to the latest version.
+//! `nowaki upgrade`: updates an existing app's `nowaki` (CLI) and `@nowaki-dev/runtime` to the
+//! latest version, or to the version or dist-tag given with `--to`.
 //!
-//! On 0.x a caret (`^0.x`) locks the minor, so `npm update` won't go from 0.10 → 0.11.
-//! Install `@latest` (or `--to`) explicitly to update the range in package.json too.
+//! On 0.x a caret (`^0.x`) locks the minor, so `npm update` doesn't go from 0.10 to 0.11. The
+//! command installs `<name>@<spec>` explicitly, which updates the range in package.json too.
 //!
-//! `--to` a version on a newer major (or 0.x minor) than the app, from 0.20.0 on, first prints
-//! the readiness report ([`crate::readiness`]) and installs nothing while it lists something to
-//! change. `--check` prints the report and never installs.
+//! When `--to` names a version (0.20.0 or later) on a newer major (or 0.x minor) than the app,
+//! the command first prints the readiness report ([`crate::readiness`]) and installs nothing
+//! while the report lists something that must change. `--check` prints the report and never
+//! installs.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -19,6 +21,8 @@ use crate::ui;
 const RUNTIME: &str = "@nowaki-dev/runtime";
 const CLI: &str = "nowaki";
 
+/// Runs `nowaki upgrade` in `root`. `to` is a version or dist-tag (default `latest`); `check`
+/// only prints the readiness report.
 pub fn run(root: PathBuf, to: Option<String>, check: bool) -> Result<()> {
     let pkg_path = root.join("package.json");
     if !pkg_path.exists() {
@@ -98,7 +102,8 @@ pub fn run(root: PathBuf, to: Option<String>, check: bool) -> Result<()> {
     }
     println!();
 
-    // runtime goes in dependencies, CLI in devDependencies (matching where it was).
+    // The runtime goes in dependencies; the CLI stays where it was (devDependencies or
+    // dependencies).
     if cur_runtime.is_some() {
         run_pm(&root, &pm, false, &format!("{RUNTIME}@{spec}"))?;
     }
@@ -131,9 +136,10 @@ pub fn run(root: PathBuf, to: Option<String>, check: bool) -> Result<()> {
     Ok(())
 }
 
-/// The readiness report runs for a version on a newer line (major, or minor on 0.x) than the
-/// app's, from 0.20.0 (the release that removed the aliases it looks for) on. A dist-tag
-/// (`latest`, `next`) is not resolved here (no network), so it gets the report only with --check.
+/// Whether the readiness report runs before installing: for a target version on a newer line
+/// (major, or minor on 0.x) than the app's, from 0.20.0 (the release that removed the aliases
+/// the report looks for) on. A dist-tag (`latest`, `next`) is not resolved here (no network), so
+/// it gets the report only with `--check`.
 fn needs_report(target: Option<&Version>, current: Option<&Version>) -> bool {
     let Some(target) = target else {
         return false;
@@ -217,6 +223,7 @@ impl Pm {
     }
 }
 
+/// The package manager from the app's lockfile; npm without one.
 fn detect_pm(root: &Path) -> Pm {
     if root.join("pnpm-lock.yaml").exists() {
         Pm::Pnpm
@@ -229,7 +236,7 @@ fn detect_pm(root: &Path) -> Pm {
     }
 }
 
-/// Run `<pm> add/install [dev-flag] <spec>` (stdio is inherited and shown as-is).
+/// Runs `<pm> add|install [dev flag] <spec>` with inherited stdio.
 fn run_pm(root: &Path, pm: &Pm, dev: bool, spec: &str) -> Result<()> {
     let (prog, verb, dev_flag) = match pm {
         Pm::Npm => ("npm", "install", "-D"),

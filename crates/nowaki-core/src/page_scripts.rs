@@ -13,7 +13,8 @@ use oxc::allocator::Allocator;
 use oxc::ast::ast::{ArrayExpressionElement, BindingPattern, Declaration, Expression, Statement};
 
 /// The specifiers in `export const scripts = [...]`, in order. Empty when there is no such
-/// export; an error when there is one we can't read, so a typo never drops a script silently.
+/// export; an error when there is one that can't be read, so a typo never drops a script
+/// silently.
 pub fn parse_scripts(path: &Path, source: &str) -> Result<Vec<String>> {
     if !source.contains("scripts") {
         return Ok(Vec::new());

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# CI: Deploy adapters — self-contained node entry + static + streaming SSR
-# Run from the repo root after `cargo build -p nowaki` and `pnpm install`.
+# CI: builds examples/hello with each deploy adapter and checks the output: the node adapter's
+# server over HTTP (ports 3310-3312), static output on disk, the cloudflare worker called in Node,
+# and the vercel function over HTTP (3320). Then runs rules-e2e.mjs, i18n-e2e.mjs and
+# gallery-e2e.mjs on the adapters.
+# Needs `cargo build -p nowaki` and `pnpm install`; run as `bash scripts/ci/e2e-adapters.sh`.
 set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 # A failed step exits here: stop the servers this script started, or they keep the ports.
@@ -24,7 +27,7 @@ curl -sf http://127.0.0.1:3310/ | grep -q "nowaki-island"   # SSR + island marke
 # HMR and the dev toolbar are dev-only: no trace of them in a production page
 ! curl -sf http://127.0.0.1:3310/ | grep -qE 'hmr\.js|toolbar\.js|refresh\.js|data-toolbar|__nowaki/(hmr|devtools)' || exit 1
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3310/__nowaki/devtools?url=/)" = 404
-# ISR cache headers reach the CDN directly here (0.16.2): a cookie-dependent page is private, a
+# ISR cache headers reach the CDN directly here: a cookie-dependent page is private, a
 # header-dependent one names the header in Vary, one that reads nothing stays public
 curl -s -D - -o /dev/null -H 'cookie: user=alice' http://127.0.0.1:3310/isr-cookie | grep -qi '^cache-control: private'
 ! curl -s -D - -o /dev/null -H 'cookie: user=alice' http://127.0.0.1:3310/isr-cookie | grep -qi '^cache-control:.*s-maxage' || exit 1
@@ -36,7 +39,7 @@ curl -s -D - -o /dev/null http://127.0.0.1:3310/isr | grep -qi '^cache-control: 
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-sets-cookie | grep -qi '^set-cookie: visited=1'
 curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-sets-cookie | grep -qi '^cache-control: private, no-cache'
 ! curl -s -D - -o /dev/null http://127.0.0.1:3310/isr-sets-cookie | grep -qiE '^cache-control:.*(public|s-maxage)' || exit 1
-# route / layout CSS: linked in the head, served as text/css (0.16.1)
+# route and layout CSS is linked in the head
 curl -sf http://127.0.0.1:3310/styled | grep -qE '<link rel="stylesheet" href="/_nowaki/styled\.[0-9a-f]+\.css"'
 curl -sf http://127.0.0.1:3310/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'
 # `export const viewTransition` through the node adapter's document (document.mjs prodDocument)
@@ -64,7 +67,7 @@ test -f examples/hello/dist/server/session.js
 SESSION_COOKIE=$(curl -s -D - -o /dev/null -XPOST -H 'origin: http://127.0.0.1:3310' -d 'op=login&user=node' http://127.0.0.1:3310/api/session | tr -d '\r' | awk 'tolower($1)=="set-cookie:" {print $2}' | cut -d';' -f1)
 echo "$SESSION_COOKIE" | grep -q '^hello_session=v1\.'
 curl -sf -H "cookie: $SESSION_COOKIE" http://127.0.0.1:3310/api/session | grep -q '"user":"node"'
-# API routes reject cross-site writes by default (0.19): the session is untouched, `csrf = false` opts out
+# API routes reject cross-site writes by default: the session is untouched, `csrf = false` opts out
 test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://evil.test' -H "cookie: $SESSION_COOKIE" -d 'op=inc' http://127.0.0.1:3310/api/session)" = 403
 curl -sf -H "cookie: $SESSION_COOKIE" http://127.0.0.1:3310/api/session | grep -q '"user":"node","n":0'
 test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://127.0.0.1:3310' -H 'content-type: application/json' -d '{}' http://127.0.0.1:3310/api/echo)" = 200
@@ -196,8 +199,8 @@ grep -q '<nowaki-island name="Counter"' examples/hello/dist/static/docs/componen
 grep -q '<h1 id="a-markdoc-page">A Markdoc page</h1>' examples/hello/dist/static/markdoc/index.html
 grep -q '<nowaki-island name="Counter"' examples/hello/dist/static/markdoc/index.html
 grep -q 'class="callout callout-warning"' examples/hello/dist/static/docs/markdoc/index.html
-# SEO in the static output: sitemap.xml generated against the site, public/robots.txt kept
-# static output: page URLs end in / (the page is docs/intro/index.html)
+# SEO in the static output: sitemap.xml generated against the site (page URLs end in /, as the
+# page is docs/intro/index.html), public/robots.txt kept
 grep -q '<loc>https://hello.nowaki.dev/docs/intro/</loc>' examples/hello/dist/static/sitemap.xml
 ! grep -qE '/boom<|/secret<' examples/hello/dist/static/sitemap.xml || exit 1
 grep -q 'User-agent: \*' examples/hello/dist/static/robots.txt
@@ -245,9 +248,9 @@ grep -q '"directory": "./assets"' examples/hello/dist/worker/wrangler.jsonc
 ls examples/hello/dist/worker/assets/_nowaki/manifest.json >/dev/null
 grep -q 'User-agent' examples/hello/dist/worker/assets/robots.txt
 ! test -e examples/hello/dist/worker/assets/.hidden || exit 1
-# vercel adapter: Build Output API v3 (.vercel/output): config + static + a
-# self-contained Node serverless function. Run the function (Vercel's launcher
-# invokes its default (req,res) handler) and confirm SSR + islands + API work.
+# vercel adapter: Build Output API v3 (.vercel/output): config, static files and a
+# self-contained Node serverless function. The function's default (req, res) handler (what
+# Vercel's launcher calls) is served on 3320 for the checks below.
 ./target/debug/nowaki build examples/hello --adapter vercel
 test -f examples/hello/.vercel/output/config.json
 grep -q '"version": 3' examples/hello/.vercel/output/config.json
@@ -259,9 +262,9 @@ test -d examples/hello/.vercel/output/static/_nowaki
 grep -q 'User-agent' examples/hello/.vercel/output/static/robots.txt
 ! test -e examples/hello/.vercel/output/static/.hidden || exit 1
 grep -q 'media/hello%20world' examples/hello/.vercel/output/config.json
-# the function must NOT carry a nested preact (would double-instance and break hooks)
+# the function must not carry a nested preact (a second instance breaks hooks)
 ! test -d examples/hello/.vercel/output/functions/index.func/node_modules/@nowaki-dev/runtime/node_modules || exit 1
-# Started with its PID kept, so it is stopped below (a subshell left it running after the script).
+# `exec` makes $! the PID of node itself, so the kill below stops it.
 (cd examples/hello/.vercel/output/functions/index.func \
   && exec node -e 'import("./index.mjs").then(m=>require("http").createServer(m.default).listen(3320))') &
 VERCEL_PID=$!
@@ -290,5 +293,6 @@ node scripts/rules-e2e.mjs node cloudflare vercel static --port 3313
 node scripts/i18n-e2e.mjs node cloudflare static --port 3315
 # examples/gallery on the node adapter (3331), the cloudflare worker (with a stand-in Cache API
 # and zone purge: an edited post is fresh on the next request), the vercel function behind a
-# stand-in CDN with a fake @vercel/functions (3331), and what static output can serve of it
+# stand-in CDN with a fake @vercel/functions (also 3331, after the node server stopped), and
+# what static output can serve of it
 node scripts/gallery-e2e.mjs node cloudflare vercel static --port 3331

@@ -1,5 +1,6 @@
-// Web-standard fetch handler factory for Edge. Uses neither node:http nor runtime file imports;
-// routes/islands/manifest arrive as maps statically imported at build time.
+// Web-standard fetch handler factory for the Cloudflare Workers adapter (the worker entry
+// edge-build.mjs generates calls it). Uses neither node:http nor runtime file imports: routes,
+// islands and the manifest arrive as maps statically imported at build time.
 
 import { resolveSite } from "./seo.mjs";
 import { compileI18n } from "./i18n.mjs";
@@ -36,7 +37,7 @@ export function resultToResponse(result, defaults) {
   return withSecurityHeaders(new Response(body, { status: result.status ?? 200, headers }));
 }
 
-// Same rule as live.mjs liveInitialState, without its node:crypto import.
+// live.mjs liveInitialState without rooms, for when `live` has no `initial`.
 function initialState(mod, props) {
   const init = mod.live?.state;
   if (typeof init === "function") return init(props ?? {});
@@ -62,7 +63,7 @@ function installIslandHook(registry, liveRegistry, live) {
         const { state: propState, ...rest } = props;
         const state = propState ?? (live?.initial ?? initialState)(mod, rest);
         const inner = h(Original, { state: live?.view ? live.view(mod, state) : state, __nowakiLiveInner: true });
-        // Without the signing helpers (an older worker entry) the island stays on its initial SSR.
+        // Without `live` (the signing helpers) the island stays on its initial SSR.
         return live ? h("nowaki-live", live.props(name, `L${liveCounter++}`, state), inner) : inner;
       };
     } else if (
@@ -78,14 +79,19 @@ function installIslandHook(registry, liveRegistry, live) {
   };
 }
 
-/// Creates a fetch handler for Edge.
+/// Creates the Worker's fetch handler.
 ///   manifest         : client manifest (islands/runtime/preload)
 ///   modules          : route table file key → statically imported module namespace
 ///   islandComponents : island name → component (default export)
 ///   liveIslands      : live island name → module namespace (default export + `live`)
 ///   routeTable       : scanRoutes equivalent (file is a key of modules)
-///   live             : { render: liveRender, props: liveProps } when there are live islands. Passed
-///                      in by the worker entry so this module never imports node:crypto itself.
+///   serverFunctions  : functions.json (server function id → { module, ... }), keys into modules
+///   live             : { render, props, initial, view } (live.mjs / live-sign.mjs) when there are
+///                      live islands. Passed in by the worker entry so this module never imports
+///                      node:crypto itself.
+///   content          : { raw, config }: content/index.json and the content/config module
+///   site             : nowaki.config `site` (NOWAKI_SITE wins)
+///   fonts            : dist/server/fonts.json, when the app uses `fonts`
 ///   envModule        : the compiled env.ts (dist/server/env.js) when the app has one
 ///   envPublic        : the public values the build inlined (dist/server/env-public.json)
 ///   sessionModule    : the compiled session.ts (dist/server/session.js) when the app has one
@@ -188,7 +194,7 @@ export function createFetchHandler({
   env.trace = traceFromEnv(globalThis.process?.env, { runtime: "workerd" });
 
   // The ISR cache (Cache API) and its purge, only when some page exports `revalidate`: an app
-  // without ISR pages runs exactly as before. Zone credentials come from the latest request's
+  // without ISR pages never touches the Cache API. Zone credentials come from the latest request's
   // bindings (CLOUDFLARE_ZONE_ID / CLOUDFLARE_API_TOKEN), else process.env.
   let latestBindings;
   const cdn =

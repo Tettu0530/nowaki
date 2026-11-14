@@ -1,6 +1,8 @@
 // Unit checks for i18n: the locale split and localePath (shared fixture with prerender.rs), the
 // handler's localized requests (ctx.locale, getLocale(), <html lang>, hreflang, redirects, 404s),
-// the sitemap's alternates, getCollection / getEntry per locale, and the page list per locale.
+// the sitemap's alternates, getCollection / getEntry per locale, the page list per locale, the
+// client's <Link> / href(), and locale detection at the JS fronts.
+// Usage: node scripts/i18n-test.mjs
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";

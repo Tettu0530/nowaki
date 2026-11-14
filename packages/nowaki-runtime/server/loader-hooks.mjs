@@ -1,5 +1,6 @@
-// Node module loader hooks. To keep Rust as the single transformer, .tsx/.ts are
-// fetched from the Rust dev server's transform endpoint and returned as ESM (vite-node style).
+// Node module loader hooks for the dev sidecar. Rust stays the only transformer: .ts / .tsx / .jsx /
+// .tsrx / .mdx / .mdoc modules are fetched from the Rust dev server's transform endpoint
+// (/__nowaki/ssr-module) and returned as ESM (vite-node style).
 
 import { realpathSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -33,7 +34,8 @@ export function versioned(url) {
 
 export async function resolve(specifier, context, nextResolve) {
   const result = await nextResolve(specifier, context);
-  // propagate the parent module's ?v= (HMR generation) to relative imports to force re-evaluation after changes
+  // Copy the parent module's ?v= (HMR generation) onto the imports it resolves, so an edit
+  // re-evaluates them too.
   if (context.parentURL && result.url.startsWith("file:")) {
     const parentV = safeParam(context.parentURL, "v");
     if (parentV) {

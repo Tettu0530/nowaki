@@ -1,3 +1,6 @@
+//! Transform caches: in memory per process ([`ModuleCache`], [`InputsCache`]) and on disk
+//! across restarts ([`DiskCache`]).
+
 use std::path::{Path, PathBuf};
 
 use dashmap::DashMap;
@@ -6,7 +9,9 @@ use xxhash_rust::xxh3::xxh3_64;
 /// Transform mode. Browser rewrites bare imports to URLs; Ssr leaves them to Node resolution.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Mode {
+    /// Output for the browser (dev server modules).
     Browser,
+    /// Output for server-side rendering in Node.
     Ssr,
 }
 
@@ -19,9 +24,11 @@ impl Mode {
     }
 }
 
+/// A transformed module in the [`ModuleCache`].
 pub struct CachedModule {
-    /// xxh3 hash of the source. Used to check freshness when the file is re-read.
+    /// Hash of the file's own text and the cache salts. Checked against a fresh read of the file.
     pub source_hash: u64,
+    /// The transformed code.
     pub code: String,
 }
 
@@ -55,18 +62,19 @@ pub type ModuleCache = DashMap<(PathBuf, Mode), CachedModule>;
 /// when it was cached. The entry is fresh only while the hash still matches.
 pub type InputsCache = DashMap<(PathBuf, Mode), (Vec<PathBuf>, u64)>;
 
-/// Persistent transform cache that survives restarts. Content-addressed, so it doesn't depend on mtime;
-/// entries are reused when source, mode, and salt (nowaki version + defines) match.
-/// Stored in `node_modules/.cache/nowaki/` (disabled with a fallback if unavailable).
+/// Persistent transform cache that survives restarts. Content-addressed, so it doesn't depend on
+/// mtime; entries are reused when source, mode, and salt (nowaki-core version, client defines,
+/// and [`resolution_fingerprint`]) match. Stored in `node_modules/.cache/nowaki/`; when that
+/// directory can't be created, the cache is off.
 pub struct DiskCache {
     dir: Option<PathBuf>,
     salt: u64,
 }
 
 impl DiskCache {
-    /// The salt mixes in the nowaki version + a hash of client_defines
-    /// (so upgrades and env changes invalidate the cache automatically), and here
-    /// [`resolution_fingerprint`] (so does an install that changes where imports resolve).
+    /// `salt` is the caller's hash of the nowaki-core version and the client defines (so upgrades
+    /// and env changes invalidate the cache automatically); [`resolution_fingerprint`] is mixed in
+    /// here (so an install that changes where imports resolve does too).
     pub fn new(root: &Path, salt: u64) -> Self {
         let dir = root.join("node_modules/.cache/nowaki");
         let dir = std::fs::create_dir_all(&dir).ok().map(|_| dir);
@@ -88,9 +96,6 @@ impl DiskCache {
         xxh3_64(&buf)
     }
 
-    /// The cached code for `key` and the inputs it inlines. A module with inputs is stored under
-    /// `key` mixed with [`inputs_hash`] of them (the list itself is in `<key>.inputs`), so an
-    /// entry whose inlined files changed is never returned.
     /// The cached code for `key` (see [`DiskCache::get_with_inputs`]).
     pub fn get(&self, key: u64) -> Option<String> {
         self.get_with_inputs(key).map(|(code, _)| code)
@@ -101,6 +106,9 @@ impl DiskCache {
         self.put_with_inputs(key, code, &[]);
     }
 
+    /// The cached code for `key` and the inputs it inlines. A module with inputs is stored under
+    /// `key` mixed with [`inputs_hash`] of them (the list itself is in `<key>.inputs`), so an
+    /// entry whose inlined files changed is never returned.
     pub fn get_with_inputs(&self, key: u64) -> Option<(String, Vec<PathBuf>)> {
         let dir = self.dir.as_ref()?;
         let inputs: Vec<PathBuf> =
@@ -113,9 +121,10 @@ impl DiskCache {
         Some((code, inputs))
     }
 
+    /// Stores `code` for `key`, with the files it inlines (see [`DiskCache::get_with_inputs`]).
     pub fn put_with_inputs(&self, key: u64, code: &str, inputs: &[PathBuf]) {
         if let Some(dir) = &self.dir {
-            // A write failure isn't fatal (it just degrades to no cache)
+            // A write failure isn't fatal (it just degrades to no cache).
             let list = dir.join(format!("{key:016x}.inputs"));
             if inputs.is_empty() {
                 let _ = std::fs::remove_file(list);

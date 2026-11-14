@@ -8,7 +8,7 @@
 // request renders fresh. Outside a request the entries go to the Rust front through a stdout line
 // carrying the per-process NOWAKI_PUBLISH_TOKEN (as publish() does), so log output can't purge.
 //
-// An entry is `t:<tag>` or `p:<browser path>`. Paths are expanded from the app path (as written in
+// An entry is `t:<tag>` or `p:<browser path>`. Paths are expanded from the route path (as written in
 // `<Link href>`) to every URL a browser can cache it under: each locale, the basePath, both forms
 // under trailingSlash "ignore". The header encoding (`encodeEntries`) is shared with start.rs
 // through crates/nowaki/tests/fixtures/purge-cases.json.
@@ -47,7 +47,7 @@ export function validTag(tag) {
   return typeof tag === "string" && tag.length > 0 && tag.length <= TAG_MAX && !/[\s,\p{Cc}]/u.test(tag) && wellFormed(tag);
 }
 
-/// Whether `path` is a root-relative app path (`/blog`, not `//host` or `blog`).
+/// Whether `path` is a root-relative route path (`/blog`, not `//host` or `blog`).
 export function validPath(path) {
   return typeof path === "string" && path.length <= PATH_MAX && path[0] === "/" && path[1] !== "/" && path[1] !== "\\" && !/\p{Cc}/u.test(path) && wellFormed(path);
 }
@@ -62,7 +62,7 @@ function wellFormed(s) {
   }
 }
 
-/// Every browser path an app path can be cached under. `cfg`: `{ base, trailingSlash, i18n }`
+/// Every browser path a route path can be cached under. `cfg`: `{ base, trailingSlash, i18n }`
 /// (i18n compiled by i18n.mjs `compileI18n`). The query and fragment are dropped (every query
 /// variant is purged), the path is normalized the way a browser sends it (percent-encoded, dot
 /// segments resolved).
@@ -106,7 +106,8 @@ export function decodeEntries(value) {
   return out;
 }
 
-/// Purges every page tagged `tag` (`export const tags`) from the ISR cache. See index.d.ts.
+/// Purges every page tagged `tag` (`export const tags`) from the ISR cache or the adapter's CDN.
+/// See index.d.ts.
 export function revalidateTag(tag) {
   if (!validTag(tag)) {
     throw new TypeError("revalidateTag(tag): tag must be a string of 1 to 256 characters, without whitespace, commas or control characters");
@@ -114,7 +115,7 @@ export function revalidateTag(tag) {
   add([`t:${tag}`], `revalidateTag(${JSON.stringify(tag)})`);
 }
 
-/// Purges every cached variant of the page at the app path `path`. See index.d.ts.
+/// Purges every cached variant of the page at the route path `path`. See index.d.ts.
 export function revalidatePath(path) {
   if (!validPath(path)) {
     throw new TypeError('revalidatePath(path): path must be a root-relative app path such as "/blog" (at most 2048 characters)');
@@ -192,7 +193,8 @@ function writeLines(lines) {
   for (const line of lines) out.write(`NOWAKI_PURGE ${token} ${line}\n`);
 }
 
-// Encoded lists of at most `max` bytes each (an entry is at most ~6 KB encoded, so each fits).
+// Encoded lists of at most `max` bytes each. An entry longer than `max` on its own (a long path
+// of non-ASCII characters) still becomes a list of its own, over the limit.
 function chunks(entries, max) {
   const out = [];
   let cur = "";

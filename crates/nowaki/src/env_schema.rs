@@ -57,7 +57,7 @@ pub fn finish(pending: Pending, core: &mut NowakiCore) -> Result<()> {
     Ok(())
 }
 
-/// Validates env.ts on `--skip-build` and checks that `PUBLIC_*` values matches
+/// Validates env.ts on `--skip-build` and checks that the `PUBLIC_*` values match
 /// `dist/server/env-public.json` from the prior build (what the client bundle inlined).
 pub fn finish_skip_build(pending: Pending, root: &Path) -> Result<()> {
     let Some(child) = pending.0 else {

@@ -1,7 +1,8 @@
-//! Rust hot path for production serving. Used by `nowaki start`.
+//! `nowaki start`: the production server.
 //!
-//! Rust (axum) handles the HTTP edge, static files, and HTML assembly; the Node prod-sidecar
-//! only renders components (pages return body + meta as JSON). Separate from the deploy adapters.
+//! Rust (axum) is the front: routing config, static files, the ISR cache, `/__nowaki/health`,
+//! the Jetstream WebSocket and HTML assembly. The Node prod-sidecar (`server/prod-sidecar.mjs`)
+//! only renders (pages come back as body + meta JSON). The deploy adapters don't use this module.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -21,6 +22,7 @@ use axum::Router;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
+/// `dist/client/manifest.json`: the runtime chunks, island entries and their preloads.
 #[derive(serde::Deserialize, Default)]
 struct Manifest {
     runtime: Option<String>,
@@ -37,6 +39,7 @@ struct Manifest {
     asset_base: String,
 }
 
+/// A page render from the sidecar (`x-nowaki-page`), assembled into HTML by [`assemble`].
 #[derive(serde::Deserialize)]
 struct PageMeta {
     body: String,
@@ -44,7 +47,7 @@ struct PageMeta {
     head: String,
     lang: String,
     /// ` name="value"…` for `<html>` / `<body>`, escaped by the runtime (document.mjs
-    /// `pageMeta`); empty from runtimes older than 0.15.3.
+    /// `pageMeta`).
     #[serde(default, rename = "htmlAttrs")]
     html_attrs: String,
     #[serde(default, rename = "bodyAttrs")]
@@ -73,12 +76,13 @@ struct ProdState {
     health: Mutex<Option<(Instant, bool)>>,
 }
 
-/// In-memory ISR cache (routes with `export const revalidate = <seconds>`, stale-while-revalidate).
+/// The in-memory ISR cache for routes with `export const revalidate = <seconds>`
+/// (stale-while-revalidate). One per process.
 struct IsrCache {
     entries: Mutex<HashMap<String, Arc<CacheEntry>>>,
-    inflight: Mutex<HashSet<String>>, // revalidation single-flight
-    specs: Mutex<HashMap<String, VarySpec>>, // learned Vary spec per pathname
-    max: usize,                       // entry cap (oldest evicted when exceeded)
+    inflight: Mutex<HashSet<String>>, // keys being revalidated (single-flight)
+    specs: Mutex<HashMap<String, VarySpec>>, // learned Vary spec per ISR path
+    max: usize,                       // entry cap (`NOWAKI_ISR_MAX`, default 1024)
     /// Bumped by every purge. A render records it before asking the sidecar, so a purge that
     /// happens while the render runs keeps its result out of the cache (see `IsrCache::insert`).
     epoch: AtomicU64,
@@ -176,13 +180,14 @@ fn purge_line(line: &str) -> Option<Purge> {
     (token == crate::live::publish_token()).then(|| decode_purge(entries.trim()))
 }
 
-/// Inputs a route's render depends on (Vary). Learned from x-nowaki-vary and folded into the cache key
-/// to prevent cross-user leaks on header-dependent pages and cache floods from unused queries.
+/// The inputs a route's render depends on (Vary), learned from `x-nowaki-vary` /
+/// `x-nowaki-vary-query` and folded into the cache key, so a page that reads a header can't leak
+/// across users and unread queries can't flood the cache.
 #[derive(Default, Clone)]
 struct VarySpec {
-    query: bool,                                 // depends on the query string
-    headers: std::collections::BTreeSet<String>, // request header names depended on (lowercase, stable order)
-    no_cache: bool,                              // depends on all headers ("*") → uncacheable
+    query: bool,                                 // reads the query string
+    headers: std::collections::BTreeSet<String>, // header names read (lowercase, sorted)
+    no_cache: bool,                              // varies on "*": never cached
 }
 
 struct CacheEntry {
@@ -191,12 +196,15 @@ struct CacheEntry {
     /// so only `plain` is kept and no ETag is sent (see `isr_store`).
     body: crate::encoding::Variants,
     with_etag: bool,
-    headers: Vec<(String, String)>, // response headers to restore (cookie/length headers excluded)
+    headers: Vec<(String, String)>, // response headers to restore (see `kept_headers`)
     stored_at: Instant,
     revalidate: Duration,
-    // Request context for regenerating the same variant during background revalidation.
-    refetch_path: String,                   // path(+query) sent to the sidecar
-    refetch_headers: Vec<(String, String)>, // actual values of the folded-in Vary headers
+    /// The path (with the query when the route reads it) a background revalidation sends to the
+    /// sidecar to render the same variant.
+    refetch_path: String,
+    /// The headers that revalidation sends with it: the varied values, the public origin and the
+    /// route path.
+    refetch_headers: Vec<(String, String)>,
     /// The browser path of the key (before `\u{1d}`): what `revalidatePath` matches.
     path: Box<str>,
     /// `export const tags` of the render (`x-nowaki-tags`): what `revalidateTag` matches.
@@ -305,6 +313,7 @@ fn tags_of(h: &reqwest::header::HeaderMap) -> Box<[Box<str>]> {
         .unwrap_or_default()
 }
 
+/// The route pattern from `x-nowaki-route` (sent only while tracing).
 fn route_of(h: &reqwest::header::HeaderMap) -> Option<Box<str>> {
     h.get(ROUTE_HEADER)
         .and_then(|v| v.to_str().ok())
@@ -318,6 +327,7 @@ fn purge_from(isr: &IsrCache, h: &reqwest::header::HeaderMap) {
     }
 }
 
+/// Runs `nowaki start` for the built app in `root` until a shutdown signal.
 pub async fn run(root: PathBuf, bind: crate::listen::Bind) -> Result<()> {
     let started = std::time::Instant::now();
     let client_dir = root.join("dist/client");
@@ -431,7 +441,8 @@ pub async fn run(root: PathBuf, bind: crate::listen::Bind) -> Result<()> {
         .layer(axum::middleware::from_fn(crate::csp::layer))
         .layer(axum::middleware::map_response(crate::security_headers::add));
     let actual = local.port();
-    // Also report the actual port when PORT=0 (a marker grepped by prerender / adapters / bench; keep it).
+    // The bound port (also with `--port 0`). prerender, the e2e scripts and the benchmarks wait
+    // for this line; keep its format.
     println!("NOWAKI_START_READY {actual}");
     if obs.json {
         crate::obs::log(
@@ -457,7 +468,8 @@ pub async fn run(root: PathBuf, bind: crate::listen::Bind) -> Result<()> {
     if isr_warm_enabled() {
         tokio::spawn(warm_isr(warm_state, format!("127.0.0.1:{actual}")));
     }
-    // The sidecar lives outside the shared state (request tasks hold that), so it is killed here on shutdown.
+    // The sidecar lives outside the shared state (request tasks hold that), so it is stopped here
+    // on shutdown.
     tokio::select! {
         r = serve(listener, app, base) => r?,
         _ = crate::shutdown::signal() => {}
@@ -507,8 +519,9 @@ async fn live_ws(
     })
 }
 
-/// Validate the WS upgrade Origin (CSWSH guard). Prod is assumed public, so only Origin==Host is allowed
-/// (no Origin = non-browser is allowed).
+/// The CSWSH guard for the Jetstream upgrade: production is assumed public, so a browser's
+/// `Origin` must name the request's public host (`forward::public_host`, which honors
+/// `NOWAKI_TRUST_PROXY`). A request without `Origin` (not a browser) passes.
 fn prod_ws_origin_ok(headers: &axum::http::HeaderMap) -> bool {
     let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
         return true;
@@ -563,9 +576,9 @@ async fn health(State(state): State<Arc<ProdState>>) -> Response {
 /// Sent by the client router for an intercepting route's fragment (handler.mjs `renderIntercept`).
 const INTERCEPT_HEADER: &str = "x-nowaki-intercept";
 
-/// Whether the ISR cache may answer (and store) a request: GETs, except the client router asking for
-/// an intercepting slot's fragment. The ISR key is the path, so a cached full page must not answer
-/// that request, and the fragment must not be stored.
+/// Whether the ISR cache may answer (and store) a request: GETs, except the client router asking
+/// for an intercepting slot's fragment. The ISR key is the path, so a cached full page must not
+/// answer that request, and the fragment must not be stored.
 fn isr_eligible(method: &Method, headers: &axum::http::HeaderMap) -> bool {
     *method == Method::GET && !headers.contains_key(INTERCEPT_HEADER)
 }
@@ -588,8 +601,9 @@ struct RouteName(String);
 #[derive(Clone)]
 struct ServerSpan(crate::obs::Span);
 
-/// A request with Server-Timing, JSON logs or tracing on: a SERVER span around it (an incoming
-/// `traceparent` is its parent), `isr` and `total` appended to Server-Timing, and an access log line.
+/// Handles a request with Server-Timing, JSON logs or tracing on: a SERVER span around it (an
+/// incoming `traceparent` is its parent), `isr` and `total` appended to Server-Timing, and an
+/// access log line.
 async fn observed(
     obs: &'static crate::obs::Obs,
     state: Arc<ProdState>,
@@ -663,6 +677,8 @@ async fn observed(
     resp
 }
 
+/// Routes a request: internal paths get a 404, then the routing config, `/_nowaki/*` assets,
+/// `public/` files, the ISR cache, and the sidecar.
 async fn route(state: Arc<ProdState>, req: Request) -> Response {
     let path = req.uri().path().to_string();
     if crate::forward::is_internal_path(&path) {
@@ -677,8 +693,8 @@ async fn route(state: Arc<ProdState>, req: Request) -> Response {
         },
     };
     let lookup = route_path.as_deref().unwrap_or(&path);
-    // Rust serves static assets directly (high-volume hot path).
-    // HEAD mirrors GET everywhere below; axum drops the body.
+    // Build assets are served from memory, without the sidecar. HEAD is handled as GET here and
+    // below; axum drops the body.
     if matches!(*req.method(), Method::GET | Method::HEAD) && lookup.starts_with("/_nowaki/") {
         return serve_static(&state, lookup, req.headers()).await;
     }
@@ -720,12 +736,13 @@ fn isr_path<'a>(pathname: &'a str, route_path: Option<&str>) -> std::borrow::Cow
     }
 }
 
-/// Header values are folded in the BTreeSet's stable order. `None` means the request must bypass
-/// the cache (no lookup, no store): a varied header that repeats, or whose value isn't visible
-/// ASCII (plus SP/HTAB), can't be keyed faithfully. The sidecar sees every value (Node joins
-/// repeats and keeps obs-text bytes), so keying on a lossy view of them would store one visitor's
-/// render under another visitor's key. An absent header and an empty one get different keys, since
-/// a loader can tell them apart.
+/// The ISR key: the ISR path, the query when the route reads it, the public origin, and the
+/// varied headers in the spec's sorted order. `None` means the request bypasses the cache (no
+/// lookup, no store): a varied header that repeats, or whose value isn't visible ASCII (plus
+/// SP/HTAB), can't be keyed faithfully. The sidecar sees every value (Node joins repeats and
+/// keeps obs-text bytes), so keying on a lossy view of them would store one visitor's render
+/// under another visitor's key. An absent header and an empty one get different keys, since a
+/// loader can tell them apart.
 fn isr_key(
     pathname: &str,
     query: Option<&str>,
@@ -752,7 +769,7 @@ fn isr_key(
         k.push_str(&host);
     }
     for name in &spec.headers {
-        k.push('\u{1f}'); // Unit Separator: header boundary (to_str() rejects control chars in values)
+        k.push('\u{1f}'); // header boundary (to_str() rejects control characters in values)
         k.push_str(name);
         let mut values = headers.get_all(name.as_str()).iter();
         let Some(first) = values.next() else {
@@ -848,7 +865,8 @@ async fn warm_isr(state: Arc<ProdState>, host: String) {
             let state = state.clone();
             let host = host.clone();
             async move {
-                // The URLs are route paths; warm the URL a browser asks for (basePath, trailing slash).
+                // The URLs are route paths; warm the URL a browser asks for (basePath,
+                // trailing slash).
                 let uri = match &state.front {
                     Some(front) => front.browser_path(&path),
                     None => path,
@@ -884,7 +902,7 @@ async fn warm_isr(state: Arc<ProdState>, host: String) {
     );
 }
 
-/// Single-flight: only one revalidation runs per key.
+/// Revalidates `key` in the background, unless a revalidation of it is already running.
 fn spawn_revalidate(state: Arc<ProdState>, key: String) {
     {
         let mut inflight = state.isr.inflight.lock().unwrap();
@@ -920,7 +938,8 @@ async fn revalidate_entry(state: &Arc<ProdState>, key: &str) -> Option<()> {
     Some(())
 }
 
-/// Conditions: 200 / x-nowaki-page / x-nowaki-revalidate>0 / no Set-Cookie (per-user excluded).
+/// A revalidation's response as a cache entry: only a 200 page (`x-nowaki-page`) with
+/// `x-nowaki-revalidate` > 0 and no Set-Cookie (a per-user response).
 async fn page_to_entry(
     state: &ProdState,
     resp: reqwest::Response,
@@ -975,8 +994,9 @@ fn isr_secs_of(h: &reqwest::header::HeaderMap) -> Option<u64> {
         .filter(|n| *n > 0)
 }
 
-/// Set-Cookie is never restored from the shared cache, and neither is the render's Server-Timing
-/// (a hit gets its own, from `observed`).
+/// The response headers a cache entry restores: all but `x-nowaki-*`, Content-Type,
+/// Content-Length, Transfer-Encoding and Set-Cookie (never served from the shared cache). The render's Server-Timing is
+/// dropped too (a hit gets its own, from `observed`).
 fn kept_headers(h: &reqwest::header::HeaderMap) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for (name, value) in h.iter() {
@@ -997,7 +1017,8 @@ fn kept_headers(h: &reqwest::header::HeaderMap) -> Vec<(String, String)> {
     out
 }
 
-/// Learn the per-pathname spec from x-nowaki-vary, then store. `"*"` is uncacheable, to be safe.
+/// Merges the render's `x-nowaki-vary` / `x-nowaki-vary-query` into the ISR path's spec, then
+/// stores the render under the resulting key. A `"*"` marks the path uncacheable.
 #[allow(clippy::too_many_arguments)]
 fn maybe_store(
     state: &Arc<ProdState>,
@@ -1040,7 +1061,7 @@ fn maybe_store(
         spec.clone()
     };
 
-    // A varied header that repeats or isn't visible ASCII: this render can't be keyed, don't store it.
+    // A varied header that repeats or isn't visible ASCII: the render can't be keyed or stored.
     let Some(key) = isr_key(&key_path, query, req_headers, &spec) else {
         return;
     };
@@ -1274,6 +1295,8 @@ async fn serve_static(state: &ProdState, path: &str, req: &axum::http::HeaderMap
     }
 }
 
+/// Sends the request to the sidecar. A page is assembled into HTML (and stored when `cacheable`
+/// and the render opts into ISR); anything else streams through.
 async fn proxy(
     state: Arc<ProdState>,
     req: Request,
@@ -1445,7 +1468,8 @@ async fn proxy(
     }
 }
 
-/// Rust port of prodDocument (JS). Islands are picked from <nowaki-island name="..."> in the body.
+/// The page document, as `document.mjs` `prodDocument` builds it on the adapters. Islands are
+/// picked from `<nowaki-island name="...">` in the body.
 /// `marker`: the render's CSP marker (`x-nowaki-csp-marker`), written on the scripts added here so
 /// the CSP layer gives them the response's nonce, as the renderer did for its own tags.
 fn assemble(manifest: &Manifest, meta: &PageMeta, marker: Option<&str>) -> String {
@@ -1485,7 +1509,7 @@ fn assemble(manifest: &Manifest, meta: &PageMeta, marker: Option<&str>) -> Strin
         .collect::<Vec<_>>()
         .join("\n");
     let runtime_script = if has_islands {
-        // Put the lazy router chunk's URL in data-router (islands.js imports it when idle).
+        // The lazy router chunk's URL goes in data-router (islands.js imports it when idle).
         let data_router = match &manifest.router_runtime {
             Some(r) => format!(" data-router=\"{base}{r}\""),
             None => String::new(),

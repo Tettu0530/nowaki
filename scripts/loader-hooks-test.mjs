@@ -1,5 +1,6 @@
-// Unit tests for server/loader-hooks.mjs resolve(): which modules get the parent's ?v= (HMR
+// Unit test for server/loader-hooks.mjs resolve(): which modules get the parent's ?v= (HMR
 // generation), so dev SSR re-evaluates them after an edit.
+// Usage: node scripts/loader-hooks-test.mjs
 import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";

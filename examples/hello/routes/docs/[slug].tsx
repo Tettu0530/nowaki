@@ -1,4 +1,4 @@
-// One entry of the docs collection: its HTML was rendered at build time, with heading anchors.
+// One entry of the docs collection, rendered at build time with heading anchors.
 import { getCollection, getEntry } from "@nowaki-dev/runtime/content";
 import type { LoaderContext } from "@nowaki-dev/runtime";
 import { h } from "preact";
@@ -14,7 +14,8 @@ export const loader = async (ctx: LoaderContext) => {
 };
 
 // Typed metadata: description, canonical, Open Graph (its image is the og/[card].png file route),
-// Twitter, and JSON-LD. Relative URLs resolve against `site` in nowaki.config.
+// and JSON-LD, merged over the root layout's meta. Relative URLs resolve against `site` in
+// nowaki.config.
 export const meta = ({ data, params }: { data: { title: string }; params: { slug: string } }) => ({
   title: `${data.title} — Nowaki docs`,
   description: `${data.title}, from the Nowaki demo docs.`,

@@ -1,4 +1,6 @@
-// Unit checks for server/seo.mjs (meta tags, sitemap, robots, site URL). No server needed.
+// Unit checks for server/seo.mjs (meta tags, sitemap, robots, site URL, trailingSlash) and
+// server/base-path.mjs (withBase, <Link>, ctx.redirect under a basePath). No server needed.
+// Usage: node scripts/seo-unit-test.mjs (also run by scripts/ci/e2e-dev.sh)
 import { mergeMeta, normalizeSite, pagePath, robotsTxt, seoTags, sitemapXml, staticPagePath } from "../packages/nowaki-runtime/server/seo.mjs";
 import { basePath, setBasePath, withBase } from "../packages/nowaki-runtime/server/base-path.mjs";
 import { Link } from "../packages/nowaki-runtime/navigation.js";

@@ -1,3 +1,9 @@
+//! The per-module transform behind `NowakiCore::load_module`: one source file in, one ES module
+//! out, for `nowaki dev` (browser modules and SSR). TS types are stripped, JSX compiles to
+//! Preact's automatic runtime, client defines are inlined, and imports are rewritten for the
+//! target. Also the shared oxc parse / transform / diagnostics helpers the client and server
+//! builds (`build.rs`, `chunk.rs`) use.
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
@@ -16,11 +22,12 @@ use crate::cache::Mode;
 use crate::resolve::fs_path_to_url;
 
 /// Plugin virtual-module resolution. Called for specifiers that normal resolution failed on.
-/// Split into two methods because Browser and SSR produce different targets (dev URL vs data: module).
+/// Split into two methods because Browser and SSR produce different targets (dev URL vs `data:`
+/// module).
 pub trait VirtualResolve {
     /// Browser: synthetic path of the virtual module (the caller turns it into a dev URL).
     fn virtual_browser(&self, dir: &Path, spec: &str) -> Option<PathBuf>;
-    /// SSR: a data: module Node can import directly (self-contained ESM).
+    /// SSR: a `data:` module Node can import directly (self-contained ESM).
     fn virtual_ssr_module(&self, dir: &Path, spec: &str) -> Option<String>;
     /// A remote image import (`https://…?image`): the cached download with its `?image` query
     /// (see `NowakiCore::resolve_remote_image`). None for any other specifier.
@@ -29,7 +36,9 @@ pub trait VirtualResolve {
     }
 }
 
-/// Transforms one file: TS type stripping + JSX (automatic, preact) + import rewriting (Browser only).
+/// Transforms one file: TS type stripping, JSX (automatic runtime, Preact), client defines, and
+/// import rewriting (dev server URLs for `Mode::Browser`; CSS, assets, and virtual modules as
+/// `data:` modules for `Mode::Ssr`).
 #[allow(clippy::too_many_arguments)]
 pub fn transform_file(
     root: &Path,
@@ -153,8 +162,8 @@ pub(crate) fn transform_file_dev(
             dev.versions,
         );
     } else {
-        // SSR: .css becomes a no-op, assets become URL-string data modules (so Node doesn't crash
-        // importing svg etc. directly; the rendered <img src> matches the client).
+        // SSR: CSS becomes its text or class map, assets become URL-string data modules (so Node
+        // doesn't crash importing svg etc. directly; the rendered <img src> matches the client).
         rewrite_ssr_imports(
             &allocator,
             root,
@@ -235,7 +244,8 @@ fn rewrite_imports<'a>(
     }
 }
 
-/// Shared by dev transform, production build, and chunk render (defines before or after JSX per caller).
+/// Inlines the client defines (`import.meta.env.*`, `process.env.NODE_ENV`). Shared by the dev
+/// transform, the builds, and chunk rendering; an invalid define list is ignored.
 pub(crate) fn apply_client_defines<'a>(
     allocator: &'a Allocator,
     scoping: Scoping,
@@ -255,7 +265,7 @@ pub(crate) fn apply_client_defines<'a>(
     }
 }
 
-/// oxc `SourceType` for a project file path (falls back to TSX).
+/// The oxc `SourceType` for a project file path (falls back to TSX).
 pub(crate) fn source_type_for_path(path: &Path) -> SourceType {
     SourceType::from_path(path).unwrap_or_else(|_| SourceType::tsx())
 }
@@ -266,6 +276,8 @@ pub(crate) fn with_version(url: &str, n: u64) -> String {
     format!("{url}{sep}t={n}")
 }
 
+/// Transform options: TypeScript, JSX with Preact's automatic runtime, and React Refresh when
+/// `refresh`.
 fn preact_transform_options(refresh: bool) -> TransformOptions {
     let mut options = TransformOptions::default();
     options.jsx.runtime = JsxRuntime::Automatic;
@@ -298,6 +310,8 @@ pub(crate) fn parse_program<'a>(
     Ok(parsed.program)
 }
 
+/// The scoping (symbols and scopes) of a parsed program, which the transforms and the minifier
+/// take.
 pub(crate) fn semantic_scoping(program: &Program<'_>) -> Scoping {
     SemanticBuilder::new()
         .build(program)
@@ -305,7 +319,8 @@ pub(crate) fn semantic_scoping(program: &Program<'_>) -> Scoping {
         .into_scoping()
 }
 
-/// TS strip + automatic JSX (preact). Preserves ordering: run after `apply_client_defines` in dev/build paths.
+/// TS strip and automatic JSX (Preact). The dev transform and the builds run it after
+/// `apply_client_defines`; chunk rendering (`chunk.rs`) applies the defines after it.
 pub(crate) fn run_preact_transform<'a>(
     allocator: &'a Allocator,
     path: &Path,
@@ -336,7 +351,8 @@ fn run_preact_transform_with<'a>(
     Ok(ret.scoping)
 }
 
-/// Formats oxc diagnostics as a code frame (file:line:col + caret). Shared by dev transform and production build.
+/// Formats oxc diagnostics as a code frame (file:line:col and a caret). Shared by the dev
+/// transform and the builds.
 pub(crate) fn render_diagnostics(path: &Path, source: &str, diags: &[OxcDiagnostic]) -> String {
     let handler = GraphicalReportHandler::new_themed(GraphicalTheme::unicode_nocolor());
     let name = path.to_string_lossy().to_string();
@@ -357,8 +373,8 @@ pub(crate) fn render_diagnostics(path: &Path, source: &str, diags: &[OxcDiagnost
     out
 }
 
-/// Resolves a specifier to a URL. None if no rewrite is needed or possible.
-/// Assets (images, fonts, etc.) are wrapped in a data module that default-exports the URL string.
+/// Resolves a specifier to a dev server URL. None if no rewrite is needed or possible. Assets
+/// (images, fonts, etc.) and remote images become `data:` modules (see `dev_asset_module`).
 fn map_specifier(
     spec: &str,
     dir: &Path,
@@ -387,7 +403,8 @@ fn map_specifier(
             })
         }
         Err(err) => {
-            // Virtual modules get a dev URL for their synthetic path; the dev server serves them via load.
+            // Virtual modules get a dev URL for their synthetic path; the dev server serves them
+            // through `load`.
             if let Some(p) = vr.and_then(|v| v.virtual_browser(dir, spec)) {
                 return Some(fs_path_to_url(root, &p));
             }
@@ -400,18 +417,18 @@ fn map_specifier(
     }
 }
 
-/// Returns a data: module with an arbitrary JS body (importable from both Node and the browser).
+/// A `data:` module with an arbitrary JS body (importable from both Node and the browser).
 pub(crate) fn data_module(body: &str) -> String {
     format!("data:text/javascript,{}", percent_encode_js(body))
 }
 
-/// Returns, as a data: URI, a tiny JS module that default-exports the asset's served URL.
+/// A `data:` URL of a tiny JS module that default-exports the asset's served URL.
 /// `import logo from "./logo.png"` → logo === "<asset url>" (the binary is served separately).
 pub(crate) fn asset_module_data_url(url: &str) -> String {
     data_module(&format!("export default {url:?}"))
 }
 
-/// Minimal percent-encoding that is safe for a data: URI body.
+/// Minimal percent-encoding that is safe for a `data:` URL body.
 fn percent_encode_js(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 2);
     for b in s.bytes() {
@@ -425,8 +442,9 @@ fn percent_encode_js(s: &str) -> String {
     out
 }
 
-/// For SSR: rewrites `.css` side-effect imports to an empty module and asset imports to URL-string
-/// data modules (the server has no DOM; Node can't import svg etc.).
+/// For SSR: rewrites React imports to Preact, virtual modules to `data:` modules, CSS Modules to
+/// their class map, plain CSS to its text (an empty module when it can't be read), and asset and
+/// `?image` imports to `data:` modules (the server has no DOM; Node can't import svg etc.).
 fn rewrite_ssr_imports<'a>(
     allocator: &'a Allocator,
     root: &Path,
@@ -455,7 +473,8 @@ fn rewrite_ssr_imports<'a>(
             lit.raw = None;
             spec = aliased;
         }
-        // Inline virtual modules as data: (assumed self-contained ESM). Checked before bare resolution.
+        // Inline virtual modules as `data:` URLs (assumed self-contained ESM). Checked before
+        // bare resolution.
         if !spec.starts_with('.') && !spec.starts_with('/') && !spec.contains("://") {
             if let Some(data) = vr.and_then(|v| v.virtual_ssr_module(dir, spec)) {
                 lit.value = allocator.alloc_str(&data).into();
@@ -554,8 +573,8 @@ fn remote_image_module(
     data_module(&format!("throw new Error({msg:?});"))
 }
 
-/// The data: module an asset import becomes in dev, for the browser and SSR alike: its URL, or for
-/// `?image` the image set with `/__nowaki/image` URLs (sizes from the file header; the variants
+/// The `data:` module an asset import becomes in dev, for the browser and SSR alike: its URL, or
+/// for `?image` the image set with `/__nowaki/image` URLs (sizes from the file header; the variants
 /// are encoded when the browser asks). None when `full` isn't an asset.
 /// For `?image`, the file goes into `inputs` (its sizes are inlined).
 fn dev_asset_module(root: &Path, full: &Path, inputs: &mut Vec<PathBuf>) -> Option<String> {

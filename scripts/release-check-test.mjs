@@ -133,7 +133,7 @@ const editJson = (dir, rel, fn) => edit(dir, rel, (s) => JSON.stringify(fn(JSON.
 function bump(dir, v, { core = v, pin = `=${core}`, changelog = true } = {}) {
   const cur = JSON.parse(readFileSync(path.join(dir, "packages/nowaki-cli/package.json"), "utf8")).version;
   edit(dir, "Cargo.toml", (s) => s.replace(/(\[workspace\.package\]\s*\nversion = )"[^"]+"/, `$1"${v}"`));
-  // nowaki-core has its own line: a literal version (the workspace one before 0.20.0).
+  // nowaki-core has its own version line; the regex also accepts `version.workspace = true`.
   edit(dir, "crates/nowaki-core/Cargo.toml", (s) =>
     s.replace(/^version(?:\.workspace = true| = "[^"]+")$/m, `version = "${core}"`),
   );

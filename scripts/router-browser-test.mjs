@@ -1,9 +1,12 @@
-// Client router behavior test in a real browser (Chrome).
-// Runs in CI (browser job) and locally. Drives Chrome directly over CDP (no puppeteer), through
-// --remote-debugging-pipe: no debugging port to collide with, and a fresh profile directory per
-// run (CI runs this twice in a row; a fixed port and profile could still be held by the previous
-// Chrome while it shut down, and the new one then exposed no page target).
-// Usage: BASE=http://127.0.0.1:8233 node scripts/router-browser-test.mjs
+// Client router behavior in headless Chrome against a running examples/hello: lazy router load,
+// SPA navigation, Router Cache, loading / error boundaries, head and attribute swaps, page
+// scripts, scroll and fragments, View Transitions, intercepting slots, and raw HTML under CSP.
+// The CSP checks apply when the server sends a nonce policy (NOWAKI_CSP).
+// Drives Chrome directly over CDP (no puppeteer), through --remote-debugging-pipe: no debugging
+// port to collide with, and a fresh profile directory per run (CI's browser job runs this twice
+// in a row, without and with NOWAKI_CSP=enforce; a fixed port and profile could still be held by
+// the previous Chrome while it shut down, and the new one then exposed no page target).
+// Usage: BASE=http://127.0.0.1:8233 node scripts/router-browser-test.mjs (CHROME= sets the binary)
 // For an app built with nowaki.config `basePath`, put the base in BASE
 // (BASE=http://127.0.0.1:8233/app): the paths below are then checked under it.
 import { spawn } from "node:child_process";
@@ -141,7 +144,7 @@ try {
     return { path: location.pathname, h1: document.querySelector('h1')?.textContent || '', hasIslandRuntime: !!window.__nowakiRouter, same: window.__sameDoc === 1 };`);
   check(`SPA navigation swapped to /about (${JSON.stringify(afterAbout)})`, afterAbout.path === "/about" && /About/i.test(afterAbout.h1) && afterAbout.same);
 
-  // Router Cache: go back, then /about again. Fetch count doesn't grow
+  // Router Cache: go back, then /about again. The fetch count doesn't grow.
   await cdp.evalAsync(`history.back(); return true;`);
   await sleep(400);
   const fetchesBefore = await cdp.evalAsync(`
@@ -156,7 +159,7 @@ try {
     after.path === "/about" && after.fetches === fetchesBefore,
   );
 
-  // loading boundary
+  // Loading boundary.
   await cdp.evalAsync(`history.back(); return true;`);
   await sleep(400);
   await cdp.evalAsync(`window.__nav('/slow?ms=700'); return true;`);
@@ -169,10 +172,10 @@ try {
     return { hasSlow: !!document.querySelector('[data-testid="slow"]'), hasLoading: !!document.querySelector('[data-testid="loading"]') };`);
   check("slow page replaces the loading boundary once loaded", afterSlow.hasSlow && !afterSlow.hasLoading);
 
-  // error boundary: block the fetch -> fallback shown -> reset recovers
+  // Error boundary: a blocked fetch shows the fallback, and reset recovers.
   await cdp.evalAsync(`history.back(); return true;`);
   await sleep(400);
-  // The Router Cache would serve it, so block a different URL (?e=1 is uncached)
+  // The Router Cache would serve /about, so block a different URL (?e=1 is uncached).
   await cdp.send("Network.setBlockedURLs", { urls: ["*/about?e=1*", "*/about\\?e=1*", "*about?e=1*"] });
   await cdp.evalAsync(`window.__nav('/about?e=1'); return true;`);
   await sleep(700);
@@ -188,7 +191,7 @@ try {
     return { path: location.pathname + location.search, hasAbout: /About/i.test(document.querySelector('h1')?.textContent||'') };`);
   check("reset retries and recovers the page", afterReset.hasAbout);
 
-  // <head> styles and <html lang> follow the page on client navigation (and are dropped when leaving)
+  // <head> styles and <html lang> follow the page on client navigation (and are dropped when leaving).
   // A style injected at runtime (as CSS-in-JS libraries do) is outside the page's head region.
   await cdp.evalAsync(`const s = document.createElement('style'); s.id = 'runtime-css'; s.nonce = window.__nowakiNonce ?? ''; document.head.appendChild(s);
     window.__cspViolations = []; addEventListener('securitypolicyviolation', (e) => window.__cspViolations.push(e.violatedDirective + ' ' + e.blockedURI));

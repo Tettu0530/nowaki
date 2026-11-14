@@ -1,7 +1,8 @@
-// Unit checks for server/otel.mjs, trace.mjs and log.mjs: traceparent / sampler / OTLP span shape
-// against the fixture obs.rs tests too (crates/nowaki/tests/fixtures/otel-cases.json), the
-// Server-Timing header, `env.trace` being null when everything is off, the exporter's bounds, the
-// @opentelemetry/api bridge, and NOWAKI_LOG=json lines.
+// Unit test for server/otel.mjs, trace.mjs and log.mjs: traceparent, sampler and OTLP span shape
+// against the fixture obs.rs also tests (crates/nowaki/tests/fixtures/otel-cases.json), the
+// Server-Timing header, `env.trace` being null when everything is off, the exporter's batching and
+// bounds, the @opentelemetry/api bridge, and NOWAKI_LOG=json lines.
+// Usage: node scripts/otel-test.mjs
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";

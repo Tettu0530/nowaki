@@ -1,5 +1,6 @@
-// Entry for `nowaki start` (cwd = app root).
-// Local `nowaki start` binds to 127.0.0.1 (only the deploy entry uses 0.0.0.0).
+// Entry for the Node render servers `nowaki prerender` starts (cwd = app root): app.mjs over
+// dist/. `nowaki start` does not use it (it runs prod-sidecar.mjs). Binds 127.0.0.1 unless
+// NOWAKI_HOST is set.
 
 import "./exit-with-parent.mjs";
 import path from "node:path";

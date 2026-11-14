@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# CI: run the bun / deno / cloudflare adapter output on its real runtime.
-# Usage: scripts/ci/e2e-runtimes.sh <bun|deno|cloudflare>
-# Run from the repo root after `cargo build -p nowaki` and `pnpm install`.
+# CI: builds examples/hello with the bun, deno or cloudflare adapter, runs the output on that
+# runtime (wrangler dev for cloudflare) on port 3500, and checks pages, API routes, CSRF, live
+# events and sessions.
+# Usage: bash scripts/ci/e2e-runtimes.sh <bun|deno|cloudflare>
+# Needs `cargo build -p nowaki`, `pnpm install` and the runtime itself.
 set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 cd "$(dirname "$0")/../.."

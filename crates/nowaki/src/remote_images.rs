@@ -71,8 +71,9 @@ impl RemoteFetch for NodeFetch {
 
 static CURRENT: OnceLock<Arc<RemoteImages>> = OnceLock::new();
 
-/// Reads `images.remotePatterns` from the config (`plugins::Spawned::finish`) and gives them, with the Node
-/// fetcher, to `core` and to content entries. Without patterns every remote `?image` is refused.
+/// Reads `images.remotePatterns` from the config (`plugins::Spawned::finish`) and gives them, with
+/// the Node fetcher, to `core` and to content entries. Without patterns every remote `?image` is
+/// refused.
 pub fn configure(core: &mut nowaki_core::NowakiCore, root: &Path, config: &Value) -> Result<()> {
     let patterns: Vec<RemotePattern> = match config.pointer("/images/remotePatterns") {
         Some(v) => serde_json::from_value(v.clone())
@@ -91,7 +92,7 @@ pub fn configure(core: &mut nowaki_core::NowakiCore, root: &Path, config: &Value
     Ok(())
 }
 
-/// The settings `configure` installed (None before, e.g. in unit tests).
+/// The settings [`configure`] installed (`None` before it ran, as in unit tests).
 pub fn current() -> Option<Arc<RemoteImages>> {
     CURRENT.get().cloned()
 }

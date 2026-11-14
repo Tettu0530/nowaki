@@ -1,4 +1,5 @@
-//! Terminal output styling (colors, banners). Respects NO_COLOR and non-TTY; stays readable without color.
+//! Terminal output: colors, the server banner, the build report. No color without a TTY or with
+//! `NO_COLOR`; the text reads the same without it.
 
 use std::io::IsTerminal;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, UdpSocket};
@@ -34,8 +35,9 @@ pub fn red(s: &str) -> String {
     paint("31", s)
 }
 
-/// File change → HMR log. `kind` is "hot" (islands swapped in place), "css" (stylesheets
-/// replaced), "page" or "reload" (the page reloads).
+/// Logs one HMR message for the changed files. `kind` is "hot" (modules swapped in place), "css"
+/// (stylesheets replaced), "page" (the page HTML refetched and morphed) or "reload" (a full
+/// reload).
 pub fn hmr_log(kind: &str, files: &[String]) {
     let list = files.join(", ");
     if matches!(kind, "hot" | "css") {
@@ -45,6 +47,7 @@ pub fn hmr_log(kind: &str, files: &[String]) {
     }
 }
 
+/// One dev request line: method, path, status (colored by class) and duration.
 pub fn request_log(method: &str, path: &str, status: u16, ms: u128) {
     let code = status.to_string();
     let st = if status < 300 {
@@ -63,7 +66,7 @@ pub fn request_log(method: &str, path: &str, status: u16, ms: u128) {
     );
 }
 
-/// Guess the LAN IPv4 (a UDP connect only looks up the route; no packets are sent).
+/// Guesses the LAN IPv4 (a UDP connect only looks up the route; no packets are sent).
 pub fn lan_ip() -> Option<String> {
     let sock = UdpSocket::bind("0.0.0.0:0").ok()?;
     sock.connect("8.8.8.8:80").ok()?;
@@ -73,7 +76,7 @@ pub fn lan_ip() -> Option<String> {
     }
 }
 
-/// Total size of *.js directly in the directory (KB, raw minified bytes).
+/// Total size of the `.js` files directly in `dir`, in KB (minified, not compressed).
 pub fn dir_js_kb(dir: &std::path::Path) -> f64 {
     let mut bytes = 0u64;
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -126,6 +129,8 @@ pub fn route_js_report(routes: &[nowaki_core::budget::RouteJs]) -> usize {
     over
 }
 
+/// The `nowaki build` summary: module and island counts, client JS size, image savings, build
+/// time and the output directory.
 #[allow(clippy::too_many_arguments)]
 pub fn build_summary(
     client_modules: usize,
@@ -190,9 +195,10 @@ pub fn browser_url(bind: IpAddr, port: u16) -> String {
     }
 }
 
-/// `bind` is the address the server listens on: all interfaces (`0.0.0.0` / `::`) show the Local
-/// and the LAN URL, a loopback address the Local URL, any other address its own Network URL. `mcp`
-/// is `nowaki dev`'s MCP endpoint, shown with the command that registers it with Claude Code.
+/// Prints the startup banner. `bind` is the address the server listens on: all interfaces
+/// (`0.0.0.0` / `::`) show the Local and the LAN URL, a loopback address the Local URL, any other
+/// address its own Network URL. `mcp` is `nowaki dev`'s MCP endpoint, shown with the command that
+/// registers it with Claude Code.
 pub fn server_banner(
     label: &str,
     version: &str,
@@ -258,7 +264,7 @@ pub fn server_banner(
     println!();
 }
 
-/// Open the URL in the default browser (per OS; failures are silently ignored).
+/// Opens `url` in the default browser (`open`, `start` or `xdg-open`); failures are ignored.
 pub fn open_browser(url: &str) {
     let mut cmd = if cfg!(target_os = "macos") {
         let mut c = std::process::Command::new("open");

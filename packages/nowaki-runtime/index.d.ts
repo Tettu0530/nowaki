@@ -1,13 +1,16 @@
-// Public types for the Nowaki framework (getContext is also exported as a value).
+// Public API of `@nowaki-dev/runtime`: the types, and the functions index.js exports.
 
 import type { ComponentChildren } from "preact";
 
 /** Route params. `[slug]` is a string; `[...slug]` (catch-all) is a string[]. */
 export type RouteParams = Record<string, string | string[]>;
 
+/** Options for `ctx.setCookie` / `ctx.deleteCookie`. */
 export interface CookieOptions {
+  /** Lifetime in seconds (`Max-Age`). */
   maxAge?: number;
   expires?: Date | string;
+  /** Defaults to "/". */
   path?: string;
   domain?: string;
   /** Defaults to true. Set to false explicitly to drop HttpOnly. */
@@ -17,6 +20,7 @@ export interface CookieOptions {
   sameSite?: "Lax" | "Strict" | "None" | "lax" | "strict" | "none";
 }
 
+/** The status (default 200) and extra headers of a `ctx.json` / `html` / `text` response. */
 export interface ResponseInit {
   status?: number;
   headers?: Record<string, string>;
@@ -31,13 +35,20 @@ export interface ResponseInit {
 export interface Session {
   /**
    * True where the session can't be changed: on a cross-site request that changes state (it is
-   * also empty there, CSRF), and in live island renders. Writes throw.
+   * also empty there, CSRF) unless the route exports `csrf = false`, and in live island renders.
+   * Writes throw there.
    */
   readonly readOnly: boolean;
+  /** The value of `key`, or undefined. */
   get<T = unknown>(key: string): Promise<T | undefined>;
+  /** Whether `key` is set. */
   has(key: string): Promise<boolean>;
-  /** Sets a JSON value (`undefined` deletes). Throws when the cookie would pass 4 KB. */
+  /**
+   * Sets a JSON value (`undefined` deletes). Without a `store`, throws when the cookie would pass
+   * 4 KB. Throws after the response headers were sent (a `streaming = "early"` page's loaders).
+   */
   set(key: string, value: unknown): Promise<void>;
+  /** Removes `key`. */
   delete(key: string): Promise<void>;
   /** A fresh cookie (and, with a store, a new id), keeping the values. Call it on sign-in. */
   regenerate(): Promise<void>;
@@ -45,7 +56,7 @@ export interface Session {
   destroy(): Promise<void>;
 }
 
-/** Result of ctx.json / html / text / redirect (returning it finalizes the response). */
+/** The result of `ctx.json` / `html` / `text` / `redirect`. Return it to send that response. */
 export interface NowakiResult {
   readonly __nowakiResult: true;
 }
@@ -59,7 +70,7 @@ export interface LoaderContext {
   /** The request URL, as the browser sent it (basePath and locale prefix included). */
   readonly url: URL;
   /**
-   * The app path routing used: `url.pathname` without nowaki.config `basePath` and without the
+   * The route path: `url.pathname` without nowaki.config `basePath` and without the
    * locale prefix (`/gallery/ja/photo/1` → `/photo/1`), the form `<Link href>`, `href()` and
    * `revalidatePath()` take. After a config rewrite, it is the rewritten path. In components, use
    * `routePath(url)` from `@nowaki-dev/runtime/navigation`.
@@ -92,7 +103,10 @@ export interface LoaderContext {
    * await ctx.session.set("userId", user.id);
    */
   readonly session: Session;
-  /** Node's IncomingMessage (undefined on Edge). */
+  /**
+   * Node's `IncomingMessage` where there is one (undefined on the edge adapters). Not covered by
+   * semver. Reading it makes an ISR page uncacheable.
+   */
   readonly req?: unknown;
   /** Arbitrary data middleware passes to loaders and pages. */
   state: Record<string, unknown>;
@@ -112,7 +126,7 @@ export interface LoaderContext {
   formData(): Promise<FormData>;
   /** Reads the request body as a string. */
   bodyText(): Promise<string>;
-  /** Reads the request body as JSON. */
+  /** Reads the request body as JSON (`null` for an empty body). */
   bodyJson<T = unknown>(): Promise<T>;
 
   /** Sets the response status (chainable). */
@@ -139,10 +153,13 @@ export interface LoaderContext {
   text(s: string, init?: ResponseInit): NowakiResult;
 }
 
-/** Server-only loader. Its return value is passed to the page as `data`. */
+/** A server-only loader. Its return value is passed to the page (or layout) as `data`. */
 export type Loader<T = unknown> = (ctx: LoaderContext) => T | Promise<T>;
 
-/** Action that runs on non-GET requests. Returns a Response/redirect, or data for re-rendering. */
+/**
+ * A page action: runs on every method but GET, HEAD and OPTIONS. Returns a redirect or response,
+ * or data for the re-render (`actionData`).
+ */
 export type Action = (ctx: LoaderContext) => unknown | Promise<unknown>;
 
 /**
@@ -185,12 +202,14 @@ export type Streaming = boolean | "early";
  *
  * `false` accepts cross-site writes, for webhooks and third-party callbacks. Authenticate such a
  * route another way (a signature header, a shared secret): its cookies are the visitor's.
- * API routes reject by default since 0.19.3.
  * @example export const csrf = false; // routes/api/webhook.ts
  */
 export type Csrf = boolean;
 
-/** API route handler (per-method export or default). */
+/**
+ * An API route handler (a method export or `default`). Returns a `Response`, a `ctx` result, or
+ * any other value, sent as JSON; in a file route (`feed.xml.ts`), a string or bytes is the file.
+ */
 export type ApiHandler = (
   ctx: LoaderContext,
 ) => Response | NowakiResult | unknown | Promise<Response | NowakiResult | unknown>;
@@ -208,10 +227,15 @@ export type DocumentAttrs = Record<string, string | number | boolean | null | un
 
 /** Page metadata (`<title>` / `<head>` / `<html lang>` / `<html>` and `<body>` attributes). */
 export interface Meta {
+  /** `<title>`. */
   title?: string;
+  /** Raw HTML put in `<head>` as written (no escaping: never build it from user input). */
   head?: string;
+  /** `<html lang>`. */
   lang?: string;
+  /** Attributes for `<html>` (see {@link DocumentAttrs}). */
   htmlAttrs?: DocumentAttrs;
+  /** Attributes for `<body>` (see {@link DocumentAttrs}). */
   bodyAttrs?: DocumentAttrs;
   /** `<meta name="description">`; Open Graph and Twitter fall back to it. */
   description?: string;
@@ -248,11 +272,10 @@ export interface Meta {
 export type OpenGraphImage = string | { url: string; type?: string; width?: number; height?: number; alt?: string };
 
 /**
- * Route metadata: `export const meta: Meta = {...}`, or a function of the loader data (`MetaFn`).
- * A layout's `meta` object applies to every page under it (page values win; `openGraph` and
- * `twitter` merge one level deep).
+ * `export const meta` as a function: metadata from the loader data, params and URL, possibly
+ * async. Route metadata is either this or a {@link Meta} object. A layout's `meta` object applies
+ * to every page under it (page values win; `openGraph` and `twitter` merge one level deep).
  */
-/** Dynamic, possibly async metadata. Can be derived from loader data or params. */
 export type MetaFn<D = unknown> = (info: {
   data: D;
   params: RouteParams;
@@ -265,7 +288,9 @@ export interface RouteProps<D = unknown> {
   data: D;
   /** The action's return value, if any. */
   actionData?: unknown;
+  /** Route params. */
   params: RouteParams;
+  /** The request URL. */
   url: URL;
 }
 
@@ -309,18 +334,20 @@ export type LoadingComponent = () => unknown;
  * element marked `data-nowaki-error` and wires retry to the element marked `data-nowaki-reset`.
  */
 export interface ErrorPageProps {
+  /** The failure; `message` is what the router puts into `data-nowaki-error`. */
   error: { message: string };
+  /** Retries the navigation. */
   reset: () => void;
 }
 
 /**
- * Jetstream (server-reactive island) declaration. When an island has `export const live`,
- * no component JS is sent to the client: the server holds the state and updates via HTML patches.
+ * `export const live` in an island module: a live island (Jetstream). No component JS is sent to
+ * the browser: the server holds the state and sends HTML patches.
  */
 export interface Live<S = any> {
-  /** Initial state (may take props). */
+  /** The initial state, from the island's props. */
   state: (props?: any) => S;
-  /** Handlers keyed by `data-live="name"` event, each returning the new state. */
+  /** Event handlers by name (`data-live="name"`), each returning the new state. */
   on: Record<string, (state: S, payload?: any) => S | Promise<S>>;
   /**
    * Runs after the state signature is verified and before each handler; anything but `true`
@@ -369,7 +396,7 @@ export type RouteTags =
 
 /**
  * Purges every cached copy of the page at `path` from the ISR cache, so the next request renders
- * it fresh (and waits for that render). `path` is an app path, as written in `<Link href>`: without
+ * it fresh (and waits for that render). `path` is a route path, as written in `<Link href>`: without
  * the basePath or a locale prefix. Every form a browser can cache it under is purged: each query
  * string and `Vary` variant, each locale, the basePath, and both trailing-slash forms under
  * `trailingSlash: "ignore"`. A rewritten URL is cached under the browser's path; use a tag for it.
@@ -377,9 +404,10 @@ export type RouteTags =
  * Call it from a page `action`, an API route, a server function or a live handler after data
  * changes: under `nowaki start` the purge happens before that response is sent, so a redirect
  * after the action already shows fresh content. Calls made outside a request, or after its
- * response was sent (a timer, a queue consumer), reach the cache shortly after. The ISR cache lives in each `nowaki start` process;
- * with several instances, fan the purge out with `POST /__nowaki/revalidate` (see
- * `revalidateTag`). Throws a TypeError for a path that isn't root-relative (`/blog`).
+ * response was sent (a timer, a queue consumer), reach the cache shortly after. The ISR cache
+ * lives in each `nowaki start` process; with several instances, fan the purge out with
+ * `POST /__nowaki/revalidate` (see `revalidateTag`). Throws a TypeError for a path that isn't
+ * root-relative (`/blog`) or is over 2048 characters.
  *
  * Per server:
  *
@@ -442,7 +470,7 @@ export function getContext(): LoaderContext | null;
  */
 export function nonce(): string;
 
-// The i18n helpers, the same functions (and types) as `@nowaki-dev/runtime/navigation`.
+// The i18n helpers: the same functions (and types) as in `@nowaki-dev/runtime/navigation`.
 export { getLocale, href, localePath, setLocale } from "./navigation.js";
 
 /** A [Standard Schema](https://standardschema.dev) (zod, valibot, arktype, ...). */
@@ -457,6 +485,7 @@ export interface StandardSchemaV1<Input = unknown, Output = Input> {
   };
 }
 
+/** What a Standard Schema's `validate` returns: the value, or the issues. */
 export type StandardSchemaResult<Output> =
   | { readonly value: Output; readonly issues?: undefined }
   | {
@@ -494,8 +523,9 @@ export declare function serverFn<S extends StandardSchemaV1, R, Rest extends unk
 ): (input: SchemaInput<S>, ...rest: Rest) => Promise<Awaited<R>>;
 
 /**
- * Throw from a server function to send `status` and `message` (and `data`) to the client.
- * Any other error becomes a generic 500 in production.
+ * Throw from a server function to send `status` (default 400; a value outside 400-599 becomes 400)
+ * and `message` (and `data`) to the client. `data` is sent as-is, so keep secrets out of it. Any
+ * other error becomes a generic 500 in production.
  */
 export declare class ServerFnError extends Error {
   constructor(message: string, options?: { status?: number; data?: unknown });
@@ -547,6 +577,7 @@ export interface PageModule<D = any> {
   /** The page component. */
   default: (props: RouteProps<D>) => unknown;
   loader?: Loader<D>;
+  /** Runs on every method but GET, HEAD and OPTIONS. */
   action?: Action;
   meta?: Meta | MetaFn<D>;
   /** `<title>`. `meta.title` wins over it. */
@@ -573,6 +604,7 @@ export interface PageModule<D = any> {
 
 /** The exports a `_layout` module may have (a layout's `meta` applies to every page under it). */
 export interface LayoutModule<D = any> {
+  /** The layout component. */
   default: (props: LayoutProps<D>) => unknown;
   loader?: Loader<D>;
   meta?: Meta | MetaFn<D>;
@@ -611,6 +643,7 @@ export interface MiddlewareModule {
 
 /** An island module (`islands/*.tsx`): the component, and `live` for a Jetstream island. */
 export interface IslandModule<S = any> {
+  /** The island component. */
   default: (props: any) => unknown;
   live?: Live<S>;
 }

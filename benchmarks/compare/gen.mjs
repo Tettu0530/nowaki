@@ -1,4 +1,4 @@
-// Writes one framework's blog app at a given scale.
+// Writes the generated sources of one framework's blog app (or every framework's) at a given scale.
 // Usage: node benchmarks/compare/gen.mjs <framework|all> [--pages 10] [--islands 1] [--mode static|server]
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";

@@ -91,7 +91,8 @@ function whenMedia(query, go) {
 }
 
 // Intercepts `<form action={serverFn}>`. Preact puts the server fn's toString ("__nowaki_action:<id>")
-// in the action attribute, so we catch submit here and send FormData to the server fn (no navigation).
+// in the action attribute; the submit is caught here and the form's fields go to the server fn as
+// one plain object (no navigation).
 // The result is dispatched on the form as a `nowaki:action` event (detail: { id, ok, result, error }).
 const ACTION_PREFIX = "__nowaki_action:";
 document.addEventListener("submit", async (ev) => {

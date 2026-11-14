@@ -29,6 +29,7 @@ use serde_json::{json, Value};
 
 use crate::dev::DevState;
 
+/// The MCP endpoint.
 pub const PATH: &str = "/__nowaki/mcp";
 /// The dev toolbar's data (`GET ?url=<browser path>`), behind the same gate as [`PATH`].
 pub const DEVTOOLS_PATH: &str = "/__nowaki/devtools";
@@ -40,10 +41,13 @@ const MAX_ERRORS: usize = 50;
 /// Per-field cap so a huge diagnostic can't grow the log much past 50 entries' worth.
 const MAX_FIELD: usize = 16 * 1024;
 
+/// The endpoint's loopback URL, for the startup banner and the `dev_config` tool.
 pub fn url(port: u16) -> String {
     format!("http://127.0.0.1:{port}{PATH}")
 }
 
+/// One recorded dev error. `source` is `build`, `ssr`, `live` or `hmr`; `file` is relative to the
+/// app root (with `:line:column` when it comes from a stack), `path` the request's browser path.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct DevError {
     pub time: String,
@@ -72,6 +76,7 @@ struct SidecarError {
 }
 
 impl ErrorLog {
+    /// An empty log for the app at `root` (paths are shown relative to it).
     pub fn new(root: &Path) -> Arc<Self> {
         Arc::new(Self {
             root: root.to_path_buf(),
@@ -79,6 +84,8 @@ impl ErrorLog {
         })
     }
 
+    /// Adds an error, dropping the oldest past `MAX_ERRORS`. Without `file`, the first app frame
+    /// of `stack` names it. Message and stack are truncated to `MAX_FIELD` bytes.
     pub fn record(
         &self,
         source: &str,
@@ -158,8 +165,8 @@ fn rel_path(root: &Path, p: &Path) -> String {
         .replace('\\', "/")
 }
 
-/// First stack frame in an app file (not node_modules), as `routes/x.tsx:12:5`.
-/// Frames are `at fn (loc)` or `at loc`; `loc` is a `file://` URL or, after source maps, a plain path.
+/// First stack frame in an app file (not node_modules), as `routes/x.tsx:12:5`. Frames are
+/// `at fn (loc)` or `at loc`; `loc` is a `file://` URL or, after source maps, a plain path.
 fn stack_file(root: &Path, stack: &str) -> Option<String> {
     for line in stack.lines() {
         let line = line.trim();
@@ -277,6 +284,7 @@ pub(crate) fn request_allowed(peer: IpAddr, headers: &HeaderMap) -> bool {
     }
 }
 
+/// `/__nowaki/mcp`: one JSON-RPC message or batch per POST, behind [`request_allowed`].
 pub async fn handle(
     State(state): State<Arc<DevState>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -717,6 +725,7 @@ pub(crate) async fn page(state: &Arc<DevState>, url: &str) -> Result<Value, Stri
     Ok(page)
 }
 
+/// The query of [`devtools`]: the browser path to describe (`/` when absent).
 #[derive(serde::Deserialize)]
 pub struct DevtoolsQuery {
     url: Option<String>,

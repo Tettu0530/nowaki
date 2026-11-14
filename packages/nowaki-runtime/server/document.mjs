@@ -172,7 +172,7 @@ ${runtimeScript}
   return { head, tail };
 }
 
-// islands.js lazily imports the SPA router from this URL when idle.
+// islands.js imports the SPA router from this URL on link intent (hover, focus, touch, or a click).
 function dataRouter(manifest, assetBase) {
   return manifest.routerRuntime ? ` data-router="${assetBase}${manifest.routerRuntime}"` : "";
 }

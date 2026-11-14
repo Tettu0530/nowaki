@@ -1,13 +1,14 @@
 //! Server functions (`"use server"`). An RSC-style server↔client boundary.
 //!
 //! A module with a top-level `"use server"` directive becomes a "server module", and its
-//! exported functions become RPC endpoints that stay on the server. The client gets only
-//! a tiny proxy instead of the implementation (async functions forwarding to `POST /__nowaki/fn`).
-//! To keep server-only dependencies (DB drivers etc.) out of the client graph, both build
-//! and dev treat server modules as a "zero-dependency boundary".
+//! exported functions become RPC endpoints that stay on the server. The client gets only a tiny
+//! proxy instead of the implementation (async functions forwarding to `POST /__nowaki/fn`, under
+//! basePath when one is set). To keep server-only dependencies (DB drivers etc.) out of the
+//! client graph, both build and dev treat server modules as a "zero-dependency boundary".
 //!
-//! The id is a stable hash of `<moduleKey>#<export>`. moduleKey is the root-relative posix path
-//! without extension, so the client proxy and the server allowlist compute the same id independently.
+//! The id is a stable hash of `<moduleKey>#<export>`. moduleKey is the root-relative POSIX path
+//! without extension, so the client proxy and the server allowlist compute the same id
+//! independently.
 
 use std::path::Path;
 
@@ -16,11 +17,12 @@ use oxc::allocator::Allocator;
 use oxc::ast::ast::{Declaration, Expression, ModuleExportName, Statement};
 use xxhash_rust::xxh3::xxh3_64;
 
-/// RPC endpoint the client calls in a single request.
+/// The RPC endpoint the client proxies post to, at the root (see [`client_proxy_at`] for
+/// basePath).
 pub const SERVER_FN_PATH: &str = "/__nowaki/fn";
 
-/// Whether this source is a server module (leading `"use server"` directive).
-/// Doesn't parse; scans only the directive prologue (the leading run of string-literal statements).
+/// Whether this source is a server module (leading `"use server"` directive). Doesn't parse;
+/// scans only the directive prologue (the leading run of string-literal statements).
 pub fn has_use_server(source: &str) -> bool {
     has_directive(source, "use server")
 }
@@ -71,7 +73,8 @@ fn has_directive(source: &str, want: &str) -> bool {
         if &source[start..j] == want {
             return true;
         }
-        // A different directive: skip the closing quote, optional `;`, and whitespace, then continue
+        // A different directive: skip the closing quote, optional `;`, and whitespace, then
+        // continue.
         i = j + 1;
         while i < bytes.len() && (bytes[i] == b';' || bytes[i].is_ascii_whitespace()) {
             i += 1;
@@ -79,13 +82,13 @@ fn has_directive(source: &str, want: &str) -> bool {
     }
 }
 
-/// Root-relative posix path without extension (stable key for id computation).
+/// Root-relative POSIX path without extension (the stable key for id computation).
 pub fn module_key(root: &Path, abs: &Path) -> String {
     let rel = abs.strip_prefix(root).unwrap_or(abs);
     rel.with_extension("").to_string_lossy().replace('\\', "/")
 }
 
-/// Root-relative posix path (with extension).
+/// Root-relative POSIX path (with extension).
 pub fn source_rel(root: &Path, abs: &Path) -> String {
     abs.strip_prefix(root)
         .unwrap_or(abs)
@@ -101,8 +104,9 @@ pub fn server_fn_id(module_key: &str, export: &str) -> String {
     )
 }
 
-/// Collects the names a module exports (named declarations, `export {a}`, default).
-/// Re-exports like `export * from` and `export {a} from` are excluded (they can't be proxied).
+/// Collects the names a module exports (named declarations, `export {a}`, default), sorted.
+/// Re-exports like `export * from` and `export {a} from` are excluded (they can't be proxied), and
+/// so are destructured declarations (`export const { a } = o`).
 pub fn collect_exports(abs: &Path, source: &str) -> Result<Vec<String>> {
     let allocator = Allocator::default();
     let program = crate::transform::parse_program(
@@ -189,8 +193,9 @@ pub fn unvalidated_exports(abs: &Path, source: &str) -> Result<Vec<String>> {
     Ok(out)
 }
 
-/// Generates the client proxy source for a server module (a dependency-free leaf).
-/// Each export is an async function that does `fetch(SERVER_FN_PATH)`. The implementation never reaches the client.
+/// Generates the client proxy source for a server module (a dependency-free leaf). Each export
+/// is an async function that posts to [`SERVER_FN_PATH`]. The implementation never reaches the
+/// client.
 pub fn client_proxy(module_key: &str, exports: &[String]) -> String {
     client_proxy_at(module_key, exports, SERVER_FN_PATH)
 }
@@ -207,12 +212,14 @@ pub fn client_proxy_at(module_key: &str, exports: &[String], path: &str) -> Stri
     out.push_str(
         "// nowaki: client proxy for a \"use server\" module (the implementation stays on the server).\n",
     );
-    // Turn the FormData passed by `<form action={serverFn}>` into an object so it can be JSON-encoded.
+    // Turn the FormData passed by `<form action={serverFn}>` into an object so it can be
+    // JSON-encoded.
     out.push_str(
         "const __nowakiArg = (a) => (typeof FormData !== \"undefined\" && a instanceof FormData) ? Object.fromEntries(a) : a;\n",
     );
-    // The proxy itself. For `<form action={fn}>`, toString returns `__nowaki_action:<id>`
-    // (preact stringifies a function action into the attribute, and the client form interceptor picks it up).
+    // The proxy itself. For `<form action={fn}>`, toString returns `__nowaki_action:<id>` (Preact
+    // stringifies a function action into the attribute, and the client form interceptor picks
+    // it up).
     out.push_str(&format!(
         "const __nowakiCall = (id) => {{\n  \
 const fn = async (...args) => {{\n    \
@@ -240,11 +247,13 @@ return fn;\n\
 
 /// One discovered server function.
 pub struct DiscoveredFn {
+    /// [`server_fn_id`] of `module_key` and `export`.
     pub id: String,
-    /// Root-relative posix path (with extension, for dev source imports)
+    /// Root-relative POSIX path (with extension, for dev source imports).
     pub source_rel: String,
-    /// moduleKey without extension
+    /// [`module_key`]: the path without extension.
     pub module_key: String,
+    /// The export name (`default` for the default export).
     pub export: String,
 }
 
@@ -289,7 +298,7 @@ pub fn discover(core: &crate::NowakiCore, dirs: &[&str]) -> Vec<DiscoveredFn> {
 }
 
 /// `<source_rel>#<export>` for each discovered server function that takes unvalidated input
-/// (see `unvalidated_exports`). `nowaki build` warns about these.
+/// (see [`unvalidated_exports`]). `nowaki build` warns about these.
 pub fn discover_unvalidated(core: &crate::NowakiCore, dirs: &[&str]) -> Vec<String> {
     let mut by_file: std::collections::BTreeMap<String, Vec<String>> = Default::default();
     for f in discover(core, dirs) {
@@ -327,7 +336,8 @@ fn export_name_str(n: &ModuleExportName) -> String {
     match n {
         ModuleExportName::IdentifierName(i) => i.name.to_string(),
         ModuleExportName::IdentifierReference(i) => i.name.to_string(),
-        // Export names must be well-formed Unicode (an early error otherwise), so `display` is exact.
+        // Export names must be well-formed Unicode (an early error otherwise), so `display` is
+        // exact.
         ModuleExportName::StringLiteral(s) => s.value.display().to_string(),
     }
 }
@@ -377,12 +387,12 @@ mod tests {
     fn detects_use_server_directive() {
         assert!(has_use_server("\"use server\";\nexport function a(){}"));
         assert!(has_use_server("'use server'\nexport const b = 1"));
-        // skips leading comments and blank lines
+        // Skips leading comments and blank lines.
         assert!(has_use_server("// top\n\n  \"use server\";\n"));
         assert!(has_use_server("/* c */ \"use server\";"));
-        // found even after another directive
+        // Found even after another directive.
         assert!(has_use_server("\"use strict\";\n\"use server\";"));
-        // strings mid-body are not false positives
+        // Strings mid-body are not false positives.
         assert!(!has_use_server("export const x = \"use server\";"));
         assert!(!has_use_server("const a = 1;\n\"use server\";"));
         assert!(!has_use_server(
@@ -439,7 +449,7 @@ export default async function(){}\n";
         assert!(proxy.contains("export const addTodo = __nowakiCall("));
         assert!(proxy.contains("export default __nowakiCall("));
         assert!(proxy.contains(SERVER_FN_PATH));
-        // no trace of the implementation
+        // No trace of the implementation.
         assert!(!proxy.contains("function addTodo"));
     }
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# CI: nowaki upgrade — command surface + non-app guard (no network)
-# Run from the repo root after `cargo build -p nowaki` and `pnpm install`.
+# CI: `nowaki upgrade` without network access: the CLI flags, the guard against a non-Nowaki
+# package.json, and the `--to` readiness report.
+# Needs `cargo build -p nowaki` and `pnpm install`; run as `bash scripts/ci/e2e-upgrade.sh`.
 set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 cd "$(dirname "$0")/../.."

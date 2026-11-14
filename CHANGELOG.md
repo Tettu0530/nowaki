@@ -257,6 +257,7 @@ milestone's worth of work; the codename is noted per entry.
   process (`rfcs/`), CONTRIBUTING.md sections on RFCs, breaking changes and releases, and
   refreshed issue and PR templates. The API-route CSRF default is documented as "since 0.19.3"
   (it said 0.19.0, a version the runtime skipped).
+- Code comments and the `.d.ts` JSDoc were reviewed for accuracy before the 1.0 API freeze.
 
 ## [0.19.3] — 2026-11-12 · "Bora": production and dev experience
 

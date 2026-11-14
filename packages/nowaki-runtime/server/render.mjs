@@ -111,7 +111,7 @@ export function renderDocument({ mod, body, meta }) {
 // Under NOWAKI_CSP each tag carries the render's marker (the response's nonce once sent).
 function devScripts({ islands, live: hasLive }) {
   const n = nonceAttr();
-  // As in prod, islands.js lazily imports the SPA router from data-router after hydration.
+  // As in prod, islands.js imports the SPA router from data-router on link intent.
   const router = islands
     ? `<script${n} id="nowaki-runtime" type="module" src="/node_modules/@nowaki-dev/runtime/client/islands.js" data-router="/node_modules/@nowaki-dev/runtime/client/router.js"></script>\n`
     : "";

@@ -2,7 +2,8 @@
 // /__nowaki/live WebSocket or, per event, POST /__nowaki/live-event. Transport: the app's
 // <meta name="nowaki-live" content="ws|post"> wins; then the server's data-live-transport on this
 // script (adapters without a WS endpoint say "post"); otherwise WS, with POST for any event sent
-// while the socket isn't open. If nothing works, the initial SSR stays intact.//
+// while the socket isn't open. If nothing works, the initial SSR stays intact.
+//
 // __NOWAKI_BASE_URL__ is import.meta.env.BASE_URL (nowaki.config basePath + "/"), inlined at build
 // under a name that keeps this file a classic script (an `import.meta` would make it a module and
 // change its minified output for every app).
@@ -94,7 +95,7 @@ function connect() {
       } catch {
         return;
       }
-      // A server without the count sends no `page`; its messages are taken as they come.
+      // A message without `page` ("at capacity") is taken as it comes.
       if ((msg.type === "patch" || msg.type === "error") && msg.page !== undefined && msg.page !== joins) return;
       if (msg.type === "patch") {
         const el = document.querySelector(`nowaki-live[nid="${cssEscape(msg.nid)}"]`);

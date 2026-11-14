@@ -3,7 +3,7 @@
 // maps, under node --enable-source-maps) or `nowaki dev` (the dev SSR transform). The logged stack
 // must point at <app>/routes/(account)/..., not at a path joined onto dist/server/routes/....
 //   node scripts/sourcemap-e2e.mjs <start|dev>... [--port 4840]
-// NOWAKI_BIN overrides the binary (default target/debug/nowaki).
+// The Nth mode listens on --port + N. NOWAKI_BIN overrides the binary (default target/debug/nowaki).
 
 import { spawn, spawnSync } from "node:child_process";
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";

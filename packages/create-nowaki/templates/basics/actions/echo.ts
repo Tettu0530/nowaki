@@ -2,7 +2,7 @@
 
 import { getContext, serverFn } from "@nowaki-dev/runtime";
 
-// Hand-written Standard Schema (no zod/valibot) — same pattern as examples/hello/actions/todos.ts.
+// A hand-written Standard Schema. Zod, Valibot or ArkType schemas work the same way.
 const message = {
   "~standard": {
     version: 1 as const,
@@ -14,7 +14,10 @@ const message = {
   },
 };
 
-/** Example server function — validated input and getContext() for auth in real apps. */
+/**
+ * An example server function: the input is validated, and getContext() gives the request (for
+ * auth in a real app).
+ */
 export const echo = serverFn(message, async (text) => ({
   ok: true,
   echo: text,

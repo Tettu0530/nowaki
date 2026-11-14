@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# CI: after a nowaki server got SIGTERM (or SIGKILL), its Node children (sidecar, plugin host)
-# must be gone. On SIGKILL they go by themselves when their stdin pipe closes.
+# CI: waits for a nowaki server that was sent SIGTERM (or SIGKILL) to exit, then checks that its
+# Node children (sidecar, plugin host) are gone too. On SIGKILL the children exit by themselves
+# when their stdin pipe closes. Called from e2e-dev.sh and e2e-prod.sh.
 # Usage: scripts/ci/assert-no-orphans.sh <pid-of-nowaki>
 set -e
 pid=$1

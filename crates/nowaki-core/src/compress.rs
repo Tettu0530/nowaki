@@ -11,8 +11,8 @@ use rayon::prelude::*;
 /// Files smaller than this aren't worth a compressed sibling (headers cost more than they save).
 pub const MIN_SIZE: usize = 1024;
 
-/// Text types that compress well. Source maps are left out: only devtools fetch them, and
-/// brotli at quality 11 on large maps would slow every build down.
+/// Whether a file name has a text type that compresses well. Source maps are left out: only
+/// devtools fetch them, and brotli at quality 11 on large maps would slow every build down.
 pub fn is_compressible(name: &str) -> bool {
     matches!(
         name.rsplit('.').next().unwrap_or(""),
@@ -29,6 +29,7 @@ pub fn gzip(data: &[u8], level: u32) -> Vec<u8> {
     enc.finish().expect("in-memory write")
 }
 
+/// Brotli at `quality` (0 to 11) with a 4 MiB window.
 pub fn brotli(data: &[u8], quality: u32) -> Vec<u8> {
     let mut out = Vec::new();
     let params = brotli::enc::BrotliEncoderParams {
@@ -42,7 +43,8 @@ pub fn brotli(data: &[u8], quality: u32) -> Vec<u8> {
 }
 
 /// Writes `<file>.gz` and `<file>.br` next to every compressible file in `dir` (not recursive),
-/// at the highest levels, only when they come out smaller than the original.
+/// at the highest levels, only when they come out smaller than the original. Returns how many
+/// siblings it wrote.
 pub fn precompress_dir(dir: &Path) -> Result<usize> {
     let files: Vec<_> = fs::read_dir(dir)?
         .filter_map(|e| e.ok())

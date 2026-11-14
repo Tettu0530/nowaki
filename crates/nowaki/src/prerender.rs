@@ -11,7 +11,8 @@ use tokio::process::{Child, Command};
 /// Pages requested from the temporary prod server at once.
 const PRERENDER_JOBS: usize = 8;
 
-/// Use multiple Node render workers when the page count is at least this many (`NOWAKI_PRERENDER_POOL_THRESHOLD=0` disables the pool).
+/// Page count from which several Node render workers run; overridden by
+/// `NOWAKI_PRERENDER_POOL_THRESHOLD` (`0` disables the pool).
 const DEFAULT_POOL_THRESHOLD: usize = 256;
 
 struct ProdServer {
@@ -20,7 +21,8 @@ struct ProdServer {
     drain: tokio::task::JoinHandle<()>,
 }
 
-/// How many Node `start.mjs` processes to run for HTML rendering (always 1 below the pool threshold).
+/// How many Node `start.mjs` processes render HTML: 1 below the pool threshold, else one per page
+/// up to `max_workers` (default: the available parallelism).
 fn render_worker_count(
     page_count: usize,
     pool_threshold: usize,
@@ -34,6 +36,8 @@ fn render_worker_count(
     page_count.min(cap).max(1)
 }
 
+/// The pool threshold and the worker cap, from `NOWAKI_PRERENDER_POOL_THRESHOLD` and
+/// `NOWAKI_PRERENDER_WORKERS` (a cap of 0 or an invalid value means no cap).
 fn pool_settings() -> (usize, Option<usize>) {
     let threshold = std::env::var("NOWAKI_PRERENDER_POOL_THRESHOLD")
         .ok()
@@ -52,8 +56,9 @@ fn available_parallelism() -> usize {
         .unwrap_or(1)
 }
 
-/// Static site generation: build → start a temporary prod server → render each static route to HTML → write out.
-/// With `skip_build`, the transform/content steps are skipped and existing `dist/` is used (must be from `nowaki build`).
+/// Static site generation: build, start a temporary prod server, render each static route to a
+/// file under `out`. With `skip_build`, the existing `dist/` (from `nowaki build`) is used and only
+/// env.ts is checked against it.
 pub async fn run(root: PathBuf, out: PathBuf, skip_build: bool) -> Result<()> {
     // Checked before building: the build writes dist/, and clearing `out` must never reach it.
     let clear_out = check_out(&root, &out)?;
@@ -164,7 +169,7 @@ pub async fn run(root: PathBuf, out: PathBuf, skip_build: bool) -> Result<()> {
     let primary_port = ports[0];
     let render_jobs = workers.saturating_mul(PRERENDER_JOBS);
 
-    // Don't follow redirects; skip non-200 responses.
+    // Redirects aren't followed: like other non-2xx responses below, they are skipped.
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
@@ -303,7 +308,7 @@ pub async fn run(root: PathBuf, out: PathBuf, skip_build: bool) -> Result<()> {
     nowaki_core::build::clear_dir(&assets)?;
     std::fs::create_dir_all(&assets)?;
     // Hashed client chunks are immutable; hard links avoid duplicating them under `out/_nowaki`
-    // when `dist/client` lives on the same filesystem (falls back to copy on EXDEV).
+    // when `dist/client` lives on the same filesystem (copied otherwise).
     link_client_dir(&root.join("dist/client"), &assets)?;
     // public/ files at their own path, last, so they win over a page at the same path (as on a
     // server). A `_headers` of the app's own comes first in the generated one.
@@ -416,7 +421,7 @@ async fn start_prod_server(root: &Path, entry: &Path) -> Result<ProdServer> {
     Ok(ProdServer { child, port, drain })
 }
 
-/// Keep draining the server's stdout for the whole run: Node writes to a pipe synchronously on
+/// Drains the server's stdout for the whole run: Node writes to a pipe synchronously on
 /// Linux, so once app logs fill it (~64 KiB) the renderer would block and every request would hang.
 fn spawn_stdout_drain(
     mut server_out: BufReader<tokio::process::ChildStdout>,
@@ -914,7 +919,8 @@ fn link_client_dir(from: &Path, to: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Hard-link `src` to `dst` when both paths share a volume; otherwise copy the file bytes.
+/// Hard-links `src` to `dst`, or copies the file when the link would cross devices or the file
+/// system doesn't support hard links.
 fn hard_link_or_copy(src: &Path, dst: &Path) -> Result<()> {
     match std::fs::hard_link(src, dst) {
         Ok(()) => Ok(()),

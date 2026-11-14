@@ -1,11 +1,19 @@
-// App-layer security regression suite. Deterministically checks defenses for regressions (no Chrome). Called from CI e2e.
+// App-layer security regression suite against examples/hello (no browser). Run by
+// scripts/ci/e2e-dev.sh, e2e-prod.sh and e2e-adapters.sh against a running server:
 //   node scripts/security-e2e.mjs dev  <devBase>  <appRoot>
 //   node scripts/security-e2e.mjs prod <prodBase>
-// Covers (dev + prod unless noted): RPC CSRF, CSWSH, forged live state, the live-event POST gate, server functions,
-//         cross-site writes, sessions (cross-site writes rejected, forged cookies), default headers, config redirects (open redirects, CRLF, the internal
-//         x-nowaki-route-path header). Dev only: arbitrary file read (@fs/ssr-module/.env/
-//         virtual ..), the HMR socket. Prod only: generic 500s, ISR isolation and query-flood
-//         collapsing, /_nowaki/* basename static serving (path traversal).
+//   node scripts/security-e2e.mjs headers <base> [label]
+//   node scripts/security-e2e.mjs headers-worker <workerDir>
+// dev and prod: RPC CSRF and limits, server function hardening, cross-site writes to actions, API
+// and file routes, multipart limits, sessions (cross-site writes rejected, forged cookies),
+// default security headers, config redirects (open redirects, CRLF, the internal
+// x-nowaki-route-path header), CSWSH, forged live state and the live-event POST gate.
+// Dev only: arbitrary file read (@fs, ssr-module, .env, credential files, virtual-module `..`)
+// and the HMR socket. Prod only: generic 500s, ISR isolation, CDN cache headers and query-flood
+// collapsing, /_nowaki/* path traversal.
+// headers / headers-worker: the internal-header sweep and the raw-HTML nonce check against any
+// server or the Cloudflare Worker's fetch handler (which also runs the session and revalidate
+// checks).
 
 import http from "node:http";
 
@@ -149,7 +157,8 @@ async function crossSiteWritesRejected(b) {
     (await send("/todos", { "sec-fetch-site": "cross-site" })) === 403);
   check("action: same-origin POST allowed", (await send("/todos", { origin: b })) === 302);
   check("action: POST without Origin (non-browser) allowed", (await send("/todos", {})) === 302);
-  // API routes (0.19): the same rule and the same 403 as actions; `csrf = false` opts out.
+  // API routes (the default since 0.19.3): the same rule and the same 403 as actions;
+  // `csrf = false` opts out.
   const api = (path, h, method = "POST") =>
     fetch(`${b}${path}`, {
       method,
@@ -241,7 +250,8 @@ async function revalidateGate(b, setSecret) {
   setSecret(undefined);
 }
 
-// Default security headers on pages, 404s, and static assets (both modes) and on ISR hits (prod).
+// Default security headers on each of `paths`: pages and 404s in both modes, plus ISR hits and a
+// static asset in prod.
 async function securityHeadersPresent(b, paths) {
   for (const p of paths) {
     const h = (await fetch(`${b}${p}`)).headers;
@@ -254,8 +264,8 @@ async function securityHeadersPresent(b, paths) {
   }
 }
 
-// Checks that a forged live join gets no patch (rejected by signature verification).
-// The global WebSocket connects without Origin (ws_origin_ok allows it) -> tests the signature alone.
+// A forged live join gets no patch (rejected by signature verification). The global WebSocket
+// connects without Origin (ws_origin_ok allows it), so this tests the signature alone.
 async function liveForgeryRejected(b) {
   const html = await (await fetch(`${b}/live`)).text();
   const tag = html.match(/<nowaki-live\b[^>]*>/)?.[0];
@@ -308,7 +318,6 @@ async function liveEventGate(b) {
   check(`live-event forged signature gets no html (${forged.status})`, forged.status === 403 && !forgedText.includes("html"));
   check("live-event oversized body rejected (413)",
     (await post({}, { ...ev, payload: "x".repeat(70 * 1024) })).status === 413);
-  // The sidecar's internal render hook has no CSRF gate, so the Rust front must not proxy it.
   // The POST runs in its own request: live.authorize sees the request's real cookies.
   const admin = (cookie) =>
     fetch(`${b}/__nowaki/live-event`, {
@@ -320,6 +329,7 @@ async function liveEventGate(b) {
   check(`live-event: live.authorize refuses without the role cookie (${denied.status})`,
     denied.status === 403 && (await denied.json()).error === "forbidden");
   check("live-event: live.authorize allows with role=admin", (await admin("role=admin")).status === 200);
+  // The sidecar's internal render hook has no CSRF gate, so the Rust front must not proxy it.
   const internal = await fetch(`${b}/__nowaki/live-render`, { method: "POST", headers: { "content-type": "text/plain" }, body: JSON.stringify(ev) });
   check(`internal /__nowaki/live-render not reachable (${internal.status})`, internal.status === 404);
 }
@@ -387,8 +397,8 @@ async function configRoutingSafe(b) {
 
 if (mode === "dev") {
   const enc = encodeURIComponent;
-  // Arbitrary file read surface (canonicalize + allow-root + deny + transformable gates)
-  // A file that exists outside every allowed root, so "blocked" means 403 rather than 404.
+  // Arbitrary file read surface (canonicalize, allowed roots, deny list, transformable gates).
+  // `outside` exists outside every allowed root, so "blocked" means 403 rather than 404.
   const outside = process.platform === "win32" ? "C:/Windows/win.ini" : "/etc/passwd";
   const fsUrl = (p) => `${base}/@fs/${p.replace(/\\/g, "/").replace(/^\//, "")}`;
   check(`@fs arbitrary read blocked (${outside} → 403)`,
@@ -431,13 +441,14 @@ if (mode === "dev") {
     (await wsUpgrade(base, "/__nowaki/hmr", "http://evil.test")) === 403);
 }
 
-// Internal headers never reach a client, on every server: no `x-nowaki-*` response header except
-// the documented `x-nowaki-cache` (and the two client ones below), and no `Set-Cookie` next to a shared-cacheable `Cache-Control`
-// (`public` / `s-maxage`). `req(path, init)` returns a Response (fetch against a server, or a
-// Worker's fetch handler called in-process). Requests also send forged internal headers, which
-// must not be echoed back or change the answer into a shared one.
-// Allowed: the documented x-nowaki-cache, x-nowaki-slot (the intercepting-route fragment the client
-// router reads; private, no-store), and x-nowaki-mw (examples/hello's own _middleware sets it).
+// Internal headers never reach a client, on every server: no `x-nowaki-*` response header outside
+// CLIENT_HEADERS, and no `Set-Cookie` next to a shared-cacheable `Cache-Control` (`public` /
+// `s-maxage`). `req(path, init)` returns a Response (fetch against a server, or a Worker's fetch
+// handler called in-process). Each request is also sent with forged internal headers, which must
+// not be echoed back or turn the answer into a shared one.
+// CLIENT_HEADERS: the documented x-nowaki-cache, x-nowaki-slot (the intercepting-route fragment
+// the client router reads; private, no-store), and x-nowaki-mw (set by examples/hello's own
+// _middleware).
 const CLIENT_HEADERS = new Set(["x-nowaki-cache", "x-nowaki-slot", "x-nowaki-mw"]);
 async function internalHeaderSweep(req, label, origin) {
   const forged = { "x-nowaki-vary": "cookie", "x-nowaki-purge": "/", "x-nowaki-tags": "t", "x-nowaki-route": "/admin", "x-nowaki-route-path": "/secret" };
@@ -484,7 +495,8 @@ async function internalHeaderSweep(req, label, origin) {
 
 // Under NOWAKI_CSP (when the server sends a nonce policy): raw HTML in a page (routes/raw-html.tsx,
 // as if from a CMS) gets no nonce on its inline <script> / <style>, a guessed nonce stays wrong,
-// and only Nowaki's runtime tag and the nonce() style carry the response's nonce.
+// and every other <script> / <style> (the tags Nowaki emits and the nonce() style) carries the
+// response's nonce.
 async function rawHtmlNonce(req, label) {
   const r = await req("/raw-html");
   // Both headers: under report-only, the enforced one is the default `frame-ancestors` policy.
@@ -556,7 +568,7 @@ if (mode === "headers" || mode === "headers-worker") {
 // Checks that hold in both modes (dev and prod share the RPC gate, WS origin checks, live
 // signatures, and default headers).
 {
-  // CSRF gate for server function RPC
+  // CSRF gate for server function RPC.
   const fn = `${base}/__nowaki/fn`;
   const post = (h) =>
     fetch(fn, { method: "POST", headers: h, body: JSON.stringify({ id: "6c90d7dc921a9a3f", args: [] }) })
@@ -569,19 +581,19 @@ if (mode === "headers" || mode === "headers-worker") {
   await forwardedHostIgnored(base);
   await serverFnHardening(base, mode);
   await crossSiteWritesRejected(base);
-  // multipart upload limits (examples/hello /api/upload): dev and prod sidecars.
+  // Multipart upload limits (examples/hello /api/upload).
   await multipartFormGuards(base);
   await sessionGuards(base);
   await securityHeadersPresent(base, ["/", "/nope"]);
   await configRoutingSafe(base);
 
-  // CSWSH (Origin check on WS upgrade)
+  // CSWSH (Origin check on the WebSocket upgrade).
   check("CSWSH /__nowaki/live cross-origin upgrade rejected (403)",
     (await wsUpgrade(base, "/__nowaki/live", "http://evil.test")) === 403);
   check("WS same-origin upgrade allowed (101)",
     (await wsUpgrade(base, "/__nowaki/live", base)) === 101);
 
-  // forged live state
+  // Forged live state.
   check("forged live join is rejected (no patch)", await liveForgeryRejected(base));
   // The sidecar's internal re-render endpoint trusts its body (state, request context); the public
   // server must never proxy it.
@@ -604,10 +616,10 @@ if (mode === "prod") {
   const nestedBody = await nested.text();
   check(`prod fallback 500 is generic (${JSON.stringify(nestedBody.slice(0, 40))})`,
     nested.status === 500 && nestedBody === "Internal Server Error");
-  // ISR cross-user isolation (accept-language-dependent route /vary)
+  // ISR cross-user isolation (/vary depends on accept-language).
   const get = (lang) =>
     fetch(`${base}/vary`, { headers: { "accept-language": lang } });
-  await get("de-DE"); // first request: learns and stores the de variant
+  await get("de-DE"); // the first request stores the de variant
   const en = await get("en-US");
   const enBody = await en.text();
   const de2 = await get("de-DE");
@@ -629,14 +641,14 @@ if (mode === "prod") {
   check(`ISR page that reads nothing stays public without Vary (${plain.headers.get("cache-control")})`,
     /public, s-maxage=/.test(plain.headers.get("cache-control") || "") && !/accept-language|cookie/i.test(plain.headers.get("vary") || ""));
 
-  // ISR query-flood collapsing (/isr doesn't read the query -> ?cb collapses into one entry)
+  // ISR query-flood collapsing (/isr doesn't read the query, so every ?cb maps to one entry).
   await fetch(`${base}/isr`); // populate
   const f1 = (await fetch(`${base}/isr?cb=1`)).headers.get("x-nowaki-cache");
   const f2 = (await fetch(`${base}/isr?cb=2`)).headers.get("x-nowaki-cache");
   check("ISR query-flood collapses (distinct ?cb served from one entry)",
     /HIT|STALE/.test(f1 || "") && /HIT|STALE/.test(f2 || ""));
 
-  // Prod static assets: /_nowaki/* resolves by basename under dist/client only (start.rs serve_static).
+  // Static assets: /_nowaki/* resolves by basename under dist/client only (start.rs serve_static).
   const home = await (await fetch(`${base}/`)).text();
   const hashed = home.match(/\/_nowaki\/([A-Za-z0-9_.-]+\.js)/)?.[1];
   check("home page references a /_nowaki/*.js asset", Boolean(hashed));

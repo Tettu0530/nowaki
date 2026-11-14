@@ -1,4 +1,7 @@
-// Smoke + unit checks for packages/nowaki-cli (JS shim → native binary).
+// Unit and smoke checks for packages/nowaki-cli (the JS shim that runs the native binary): when the
+// shim replaces itself with execve, then (on a platform with a package) builds this platform's
+// @nowaki-dev/cli-<key> with build-npm.mjs, lays it out as node_modules, and checks that --version,
+// an unknown flag's exit code, and the process replacement pass through.
 // Usage: node scripts/npm-cli-shim-test.mjs
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

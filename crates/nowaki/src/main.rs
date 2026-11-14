@@ -141,7 +141,8 @@ fn main() -> anyhow::Result<()> {
         Command::Build { dir, adapter } => {
             let root = dunce::canonicalize(&dir)?;
             runtime::check(&root)?;
-            // The static adapter delegates to prerender (build → temporary server → render each route).
+            // The static adapter hands off to prerender (build, a temporary server, then each
+            // route rendered to a file).
             if adapter == Adapter::Static {
                 typegen::write(&root)?;
                 let out = root.join("dist/static");
@@ -208,7 +209,7 @@ fn main() -> anyhow::Result<()> {
             let root = dunce::canonicalize(&dir)?;
             runtime::check(&root)?;
             let bind = listen::resolve(port, host)?;
-            // Rust (axum) serves static files + assembles HTML; the Node prod-sidecar renders components.
+            // Rust (axum) serves static files and assembles HTML; the Node prod-sidecar renders.
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
@@ -416,7 +417,8 @@ mod tests {
 
     /// The CLI surface for api/cli.txt, from clap's own description of the commands (not the
     /// rendered help, so it doesn't depend on the terminal or the platform). Help text goes in
-    /// comments, so rewording it isn't a surface change.
+    /// the `#` comment after each entry, so rewording it updates the snapshot without changing a
+    /// command, flag or value.
     fn cli_surface() -> String {
         let mut cmd = Cli::command();
         cmd.build();

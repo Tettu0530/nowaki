@@ -1,8 +1,8 @@
-// nowaki.config routing (basePath, trailingSlash, redirects, rewrites, headers, i18n.detect) at the JS fronts:
-// app.mjs `handle` (node / bun / deno / vercel) and the Cloudflare worker from edge-build.mjs. The
-// rules come from rules.mjs, compiled once from dist/server/routing.json; with no routing config
-// they are null and a front skips all of this with one check. Runtime-neutral (no node: imports).
-// The Rust fronts do the same in crates/nowaki/src/front.rs.
+// nowaki.config routing (basePath, trailingSlash, redirects, rewrites, headers, i18n.detect) at
+// the JS fronts: app.mjs `handle` (node / bun / deno / vercel) and the Cloudflare worker from
+// edge-build.mjs. The rules come from rules.mjs, compiled once from dist/server/routing.json;
+// with no routing config they are null and a front skips all of this with one check.
+// Runtime-neutral (no node: imports). The Rust fronts do the same in crates/nowaki/src/front.rs.
 
 import { applyRules, negotiateLocale, ruleHeaders } from "./rules.mjs";
 

@@ -13,7 +13,7 @@ const edited = new Map<string, string>();
 
 export const CAPTION_MAX = 200;
 
-/// The caption in the request's locale, or the edited one (which replaces both).
+// The caption in the request's locale, or the edited one (which replaces both).
 export function caption(id: string): string {
   const own = defaults[id];
   return edited.get(id) ?? (getLocale() === "ja" ? own?.ja : own?.en) ?? "";

@@ -11,11 +11,15 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use anyhow::{bail, Context, Result};
 
+/// The port without `--port` or `PORT`.
 pub const DEFAULT_PORT: u16 = 3000;
+/// The host without `--host` or `NOWAKI_HOST`.
 pub const DEFAULT_HOST: &str = "127.0.0.1";
 /// What `--host` without a value means.
 pub const ALL_INTERFACES: &str = "0.0.0.0";
 
+/// A resolved listen address. `host` is a name or an IP literal (IPv6 without brackets), looked
+/// up by [`bind`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bind {
     pub host: String,

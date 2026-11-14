@@ -1,10 +1,10 @@
 // Used by `nowaki prerender`: lists the pages of dynamic routes from each route's
 // `export const staticPaths` (an array of params objects, or a function returning one).
-// Usage: node static-paths.mjs <dist/server>   → prints [{ url, file }] as JSON
+// Usage: node static-paths.mjs <dist/server>   → prints [{ url, file, kind? }] as JSON
 //   url  — percent-encoded request path, e.g. /blog/a%20b
 //   file — decoded path to write under the output dir, e.g. blog/a b/index.html
 // File routes (feed.xml.ts, og/[card].png.ts) are listed too, static ones included, with `file`
-// being the path itself (og/a.png), unless they `export const prerender = false`.
+// being the path itself (og/a.png) and `kind: "file"`, unless they `export const prerender = false`.
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";

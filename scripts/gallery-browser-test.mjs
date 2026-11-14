@@ -8,8 +8,8 @@
 // "forward", the thumbnail and the photo sharing a view-transition-name), and without one under
 // prefers-reduced-motion or without the API, the same navigation. Builds the example in place.
 // The `dev` half runs `nowaki dev` on a copy of the example (port + 1): an edit to an island
-// keeps its state (Fast Refresh, under the basePath), and the dev toolbar lists the page's islands
-// and its first-load JS against the route's `budget`.
+// keeps its state (Fast Refresh, under the basePath), and the dev toolbar lists the page's islands,
+// its first-load JS against the route's `budget`, and its ISR settings.
 //   node scripts/gallery-browser-test.mjs [start] [dev] [--port 5140]   (both by default)
 // Chrome is driven over --remote-debugging-pipe (no port); CHROME and NOWAKI_BIN (default
 // target/debug/nowaki) override the defaults.
@@ -126,12 +126,12 @@ async function start() {
   throw new Error(`nowaki start did not listen on ${PORT}`);
 }
 
-// CDP over Chrome's --remote-debugging-pipe (fd 3 in, fd 4 out, NUL-separated JSON), attached to
-// one page with a flat session (as in slot-browser-test.mjs).
-
 // A JS string literal for page code: JSON plus escapes for characters that matter in a script.
 const jsString = (v) =>
   JSON.stringify(String(v)).replace(/[<>\/\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+
+// CDP over Chrome's --remote-debugging-pipe (fd 3 in, fd 4 out, NUL-separated JSON), attached to
+// one page with a flat session (as in slot-browser-test.mjs).
 class CDP {
   constructor(input, output) {
     this.input = input;

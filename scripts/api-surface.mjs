@@ -7,7 +7,9 @@
 //                                                 is unclassified (CI)
 //   node scripts/api-surface.mjs --check --base <ref>
 //                                                 also list stable entries removed or changed
-//                                                 since <ref> (CI passes the PR's base commit)
+//                                                 since <ref>; without --base, a pull_request
+//                                                 event (GITHUB_EVENT_PATH) supplies the PR's
+//                                                 base commit, which is how CI runs it
 //
 // Format (api/README.md): `[status]` or `[status title]` section headers, one entry per line,
 // `#` comments. Text after "  # " on an entry line is a comment. An entry's identity is its

@@ -1,6 +1,7 @@
 // CI: outside contributors' PRs must stay under MAX changed lines (additions +
 // deletions), not counting lockfiles. The maintainer and Dependabot are exempt.
-// Env: GH_TOKEN, REPO (owner/name), PR (number), AUTHOR (login).
+// Env: GH_TOKEN, REPO (owner/name), PR (number), AUTHOR (login); the pr-size job in
+// ci.yml sets them.
 const MAX = 2000;
 const EXEMPT = new Set(["Tettu0530", "dependabot[bot]"]);
 const IGNORED = [/(^|\/)Cargo\.lock$/, /(^|\/)pnpm-lock\.yaml$/, /(^|\/)package-lock\.json$/];

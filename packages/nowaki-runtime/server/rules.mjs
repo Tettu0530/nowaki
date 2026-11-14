@@ -197,7 +197,7 @@ function compileLocales(i18n) {
 }
 
 // The configured locale (an index) the route path `p` starts with, or -1. Compared on the raw first
-// segment, as handler.mjs (splitLocale) does, so `/%6Aa/x` and `//ja/x` carry no locale.
+// segment, as i18n.mjs splitLocale does, so `/%6Aa/x` and `//ja/x` carry no locale.
 function localeHit(rules, p) {
   if (!rules.locales) return -1;
   const end = p.indexOf("/", 1);

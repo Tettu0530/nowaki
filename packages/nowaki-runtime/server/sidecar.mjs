@@ -1,4 +1,5 @@
-// Dev SSR sidecar. Spawned by the Rust dev server; handles page rendering and API routes.
+// Dev SSR sidecar. Spawned by the Rust dev server; renders pages and runs API routes, live island
+// renders (/__nowaki/live-render) and the dev tools' route info (/__nowaki/dev-info).
 // Signals readiness to Rust with "NOWAKI_SIDECAR_READY <port>" on stdout.
 
 import "./exit-with-parent.mjs";
@@ -133,7 +134,8 @@ function ensureBasePath() {
 
 const RUST = `http://127.0.0.1:${process.env.NOWAKI_RUST_PORT ?? "3000"}`;
 
-// dev doesn't build, so Rust discovers the server function allowlist. Cached per HMR generation.
+// Dev doesn't build, so the Rust dev server discovers the server function allowlist. Cached per
+// SSR version.
 const fnCache = new Map();
 // A page script's URL in dev: under the app root as its own path, elsewhere (node_modules in a pnpm
 // store, say) through /@fs/.

@@ -19,9 +19,15 @@ export interface NowakiConfig {
   fonts?: FontConfig[];
   /** Serves the app under a path prefix (`"/app"`). `<Link>`, `href()` and `ctx.redirect` add it. */
   basePath?: string;
-  /** `"never"` / `"always"` redirect to the form without / with a trailing slash; `"ignore"` (the default) serves both. */
+  /**
+   * `"never"` / `"always"` redirect to the form without / with a trailing slash; `"ignore"` (the
+   * default) serves both.
+   */
   trailingSlash?: "never" | "always" | "ignore";
-  /** Redirects, checked before routing. A function (possibly async) is called once at startup. */
+  /**
+   * Redirects, checked before routing. A function (possibly async) is called once, when
+   * `nowaki dev` / `nowaki build` reads the config.
+   */
   redirects?: RuleList<RedirectRule>;
   /** Internal rewrites: the request is routed by `destination`, the browser keeps its URL. */
   rewrites?: RuleList<RewriteRule>;
@@ -38,13 +44,13 @@ export interface NowakiConfig {
   plugins?: (NowakiPlugin | false | null | undefined)[];
 }
 
-/** An array of rules, or a function (possibly async) returning one, called once. */
+/** An array of rules, or a function (possibly async) returning one, called once at build time. */
 export type RuleList<R> = R[] | (() => R[] | Promise<R[]>);
 
 /**
- * `source` is a path pattern (`/blog/[slug]`, `/docs/[...rest]`); a `[param]` captured there can be
- * used in `destination`. With `i18n`, a rule matches the path without its locale prefix unless
- * `locale: false`.
+ * A `redirects` entry. `source` is a path pattern (`/blog/[slug]`, `/docs/[...rest]`); a `[param]`
+ * captured there can be used in `destination`. With `i18n`, a rule matches the path without its
+ * locale prefix unless `locale: false`. The same holds for rewrites and header rules.
  */
 export interface RedirectRule {
   source: string;
@@ -57,31 +63,40 @@ export interface RedirectRule {
   locale?: boolean;
 }
 
+/** A `rewrites` entry: a request matching `source` is routed as `destination`. */
 export interface RewriteRule {
   source: string;
   /** A path in this app (rewrites are internal; use a redirect for another site). */
   destination: string;
+  /** `false`: match `source` against the path with its locale prefix. */
   locale?: boolean;
 }
 
+/** A `headers` entry: response headers for the paths matching `source`. */
 export interface HeaderRule {
   source: string;
   /** Header names to values, or `{ key, value }` pairs. */
   headers: Record<string, string | number> | { key: string; value: string }[];
+  /** `false`: match `source` against the path with its locale prefix. */
   locale?: boolean;
 }
 
+/** The `i18n` key: the app's locales and how URLs carry them. */
 export interface I18nConfig {
   /** Locale tags (`"en"`, `"pt-BR"`). */
   locales: string[];
   /** One of `locales`, served without a prefix unless `prefixDefaultLocale`. */
   defaultLocale: string;
-  /** Serve the default locale under its prefix too (`/en/...`). Default false. */
+  /** Serves the default locale under its prefix too (`/en/...`). Default false. */
   prefixDefaultLocale?: boolean;
-  /** Send `/` to the visitor's locale (the `nowaki_locale` cookie, then `Accept-Language`). Default false. */
+  /**
+   * Sends `/` to the visitor's locale (the `nowaki_locale` cookie, then `Accept-Language`).
+   * Default false.
+   */
   detect?: boolean;
 }
 
+/** The `images` key: options for `<Image>`. */
 export interface ImagesConfig {
   /** The remote hosts `<Image src="https://...">` may fetch from at build time. */
   remotePatterns?: {
@@ -109,14 +124,14 @@ interface FontCommon {
   variable?: string;
   /** `font-display`. Default `"swap"`. */
   display?: "auto" | "block" | "swap" | "fallback" | "optional";
-  /** Preload the latin, upright faces. Default true. */
+  /** Preloads the latin, upright faces. Default true. */
   preload?: boolean;
 }
 
 /** Downloaded from Google Fonts at build time and served from the app (pages never call Google). */
 export interface GoogleFont extends FontCommon {
   provider: "google";
-  /** Default `[400]`. */
+  /** The weights to download. Default `[400]`. */
   weights?: (number | string)[];
   /** Default `["normal"]`. */
   styles?: ("normal" | "italic")[];
@@ -160,9 +175,15 @@ export type PluginCode = string | { code: string } | null | undefined;
 export interface NowakiPlugin {
   /** Shown in errors. */
   name: string;
-  /** Rewrites a module's source (`id` is its absolute path). Plugins run in order, each on the previous output. */
+  /**
+   * Rewrites a module's source (`id` is its absolute path). Plugins run in order, each on the
+   * previous output.
+   */
   transform?(code: string, id: string): PluginCode | Promise<PluginCode>;
-  /** Resolves an import specifier to an id (a virtual module, say). The first plugin to return one wins. */
+  /**
+   * Resolves an import specifier to an id (a virtual module, say). The first plugin to return one
+   * wins.
+   */
   resolveId?(
     source: string,
     importer: string,

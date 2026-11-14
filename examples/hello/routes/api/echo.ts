@@ -1,4 +1,5 @@
-// Per-method API exports (GET / POST). Dispatch by method name instead of default.
+// Per-method API exports: GET and POST each answer their method (names are uppercase); with no
+// `default` export, other methods get 405.
 // A cross-site POST is rejected (403) like a page action; same-origin and Origin-less calls pass.
 type Ctx = {
   url: URL;

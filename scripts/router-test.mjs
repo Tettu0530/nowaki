@@ -1,5 +1,8 @@
-// Router (scanRoutes / matchRoute) tests. Match results for examples/hello/routes
-// are pinned as snapshots; precedence is checked with a synthetic table.
+// Router tests (server/router.mjs plus parts of client/router-core.js). Match results for
+// examples/hello/routes are pinned as snapshots; precedence is checked with a synthetic table.
+// Temporary apps cover route groups, parallel routes (@slot), intercepting routes, and
+// middleware / layout / error-boundary containment end to end through handleRequest. Also covers
+// carryNonces / responseNonce for client navigation under CSP and the View Transitions output.
 // Usage: node scripts/router-test.mjs
 
 import path from "node:path";

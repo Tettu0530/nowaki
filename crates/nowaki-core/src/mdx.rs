@@ -1,7 +1,7 @@
-//! MDX: `.mdx` files become TSX modules before anything else sees them (`NowakiCore::read_source`
-//! calls `to_tsx`), so routes, islands, the import graph, dev, and the builds treat them like
-//! `.tsx`. Parsing is markdown-rs (CommonMark + GFM + MDX: ESM, JSX, `{expressions}`,
-//! frontmatter); no JavaScript runs.
+//! MDX: `.mdx` files become TSX modules before anything else sees them
+//! (`NowakiCore::read_source` calls [`to_tsx_with_remote`]), so routes, islands, the import graph,
+//! dev, and the builds treat them like `.tsx`. Parsing is markdown-rs (CommonMark + GFM + MDX:
+//! ESM, JSX, `{expressions}`, frontmatter); no JavaScript runs.
 //!
 //! The module:
 //!
@@ -21,7 +21,7 @@
 //! - JSX elements and expressions are passed through, so imported components and islands
 //!   (`<Counter client:visible />`) work as in TSX.
 //! - Frontmatter (YAML `---` or TOML `+++`) is skipped here; content collections read it in Rust
-//!   (`content.rs`).
+//!   (`content.rs` in the CLI).
 
 use std::fmt::Write;
 
@@ -32,11 +32,15 @@ use markdown::{Constructs, ParseOptions};
 /// One heading, for a table of contents.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Heading {
+    /// 1 for `#`, up to 6.
     pub depth: u8,
+    /// The heading's plain text.
     pub text: String,
+    /// The anchor id, as a Markdown entry would give it.
     pub id: String,
 }
 
+/// Parses MDX (with GFM and frontmatter) into an mdast tree.
 fn parse(source: &str) -> Result<Node> {
     let options = ParseOptions {
         constructs: Constructs {
@@ -122,6 +126,7 @@ pub fn to_tsx_with_remote(source: &str, remote: &dyn Fn(&str) -> bool) -> Result
     Ok(out)
 }
 
+/// The TSX generator: walks the mdast tree and writes JSX.
 #[derive(Default)]
 struct Gen<'r> {
     headings: Vec<Heading>,
@@ -353,7 +358,8 @@ impl Gen<'_> {
             Node::MdxJsxTextElement(e) => {
                 self.jsx(e.name.as_deref(), &e.attributes, &e.children, out)
             }
-            // ESM is hoisted by to_tsx; references and the rest are rare in MDX: kept as text.
+            // ESM is hoisted by to_tsx, frontmatter is skipped, and link reference definitions
+            // render nothing.
             Node::MdxjsEsm(_) | Node::Yaml(_) | Node::Toml(_) | Node::Definition(_) => {}
             Node::Html(h) => text(&h.value, out),
             other => {
@@ -418,6 +424,7 @@ fn plain_text(node: &Node) -> String {
     }
 }
 
+/// Whether an image URL is a relative path to a local asset (not absolute, a URL, or `data:`).
 fn is_local(url: &str) -> bool {
     !(url.is_empty()
         || url.starts_with('/')
@@ -455,6 +462,7 @@ fn js_attr(s: &str) -> String {
     format!("{{{}}}", js_string(s))
 }
 
+/// A string as a JSX expression: `{"…"}`.
 fn js_string_expr(s: &str) -> String {
     format!("{{{}}}", js_string(s))
 }

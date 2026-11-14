@@ -1,7 +1,8 @@
 //! WS session for server-reactive islands (Jetstream). Shared by dev and prod.
 //!
-//! State lives on the Rust side (this connection) as nid→(name, state); the Node sidecar's
-//! `/__nowaki/live-render` is a pure re-evaluation function. The resulting html is pushed as a `patch`.
+//! State lives on the Rust side (this connection) as nid → (name, state, signature, topics); the
+//! sidecar's `/__nowaki/live-render` keeps no state between calls. The resulting HTML is pushed as
+//! a `patch`.
 //!
 //! One render runs at a time per connection (each island's state chain stays ordered), off the
 //! select loop, so pings, presence, and new messages keep flowing while the sidecar works.
@@ -15,12 +16,14 @@ use axum::extract::ws::{Message, WebSocket};
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
 
-/// Heartbeat interval and idle timeout (disconnect if no pong/message within it).
+/// Heartbeat ping interval.
 const PING_INTERVAL: Duration = Duration::from_secs(30);
+/// Idle timeout: the connection closes when no message (pong included) arrives within it.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(75);
 /// Events waiting behind the in-flight render; more are answered with `busy` and dropped.
 const MAX_QUEUED: usize = 32;
 
+/// How long one sidecar render may take: `NOWAKI_LIVE_RENDER_TIMEOUT_MS`, default 10 s.
 fn render_timeout() -> Duration {
     let ms = std::env::var("NOWAKI_LIVE_RENDER_TIMEOUT_MS")
         .ok()
@@ -37,6 +40,8 @@ type Islands = HashMap<String, (String, Value, String, Vec<String>)>;
 const MAX_TOPICS: usize = 16;
 const MAX_TOPIC_LEN: usize = 128;
 
+/// The valid topics of a join or render reply: non-empty strings up to `MAX_TOPIC_LEN` bytes, at
+/// most `MAX_TOPICS` of them; anything else is skipped.
 pub fn parse_topics(v: Option<&Value>) -> Vec<String> {
     let Some(arr) = v.and_then(|t| t.as_array()) else {
         return Vec::new();
@@ -49,8 +54,9 @@ pub fn parse_topics(v: Option<&Value>) -> Vec<String> {
         .collect()
 }
 
-/// Random per process; only the sidecars Nowaki spawned get it (NOWAKI_PUBLISH_TOKEN), so a log
-/// line can't be mistaken for a publish.
+/// Random per process; only the sidecars Nowaki spawned get it (`NOWAKI_PUBLISH_TOKEN`), so a log
+/// line can't pass for a publish, an ISR purge (`NOWAKI_PURGE`) or a dev error
+/// (`NOWAKI_DEV_ERROR`).
 pub fn publish_token() -> &'static str {
     static TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     TOKEN.get_or_init(crate::csp::new_nonce)
@@ -165,7 +171,8 @@ struct Rendered {
     result: Result<RenderOk, RenderError>,
 }
 
-/// Hub for all connections. Enforces the concurrent connection cap and broadcasts presence (connection count).
+/// Hub for all connections. Enforces the concurrent connection cap, broadcasts presence
+/// (connection count, and per room) and fans out `publish(topic)`.
 pub struct LiveHub {
     active: AtomicUsize,
     max: usize,
@@ -183,6 +190,7 @@ pub struct LiveHub {
 }
 
 impl LiveHub {
+    /// A hub capped at `NOWAKI_LIVE_MAX` concurrent connections (default 10 000).
     pub fn new() -> Arc<Self> {
         let max = std::env::var("NOWAKI_LIVE_MAX")
             .ok()
@@ -304,7 +312,7 @@ impl LiveHub {
     }
 }
 
-/// [`LiveHub::stats`].
+/// The counters [`LiveHub::stats`] returns.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct LiveStats {
     pub connections: usize,
@@ -312,6 +320,7 @@ pub struct LiveStats {
     pub rooms: Vec<RoomStats>,
 }
 
+/// Open connections in one room.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct RoomStats {
     pub room: String,
@@ -344,6 +353,9 @@ fn sync_rooms(hub: &LiveHub, mine: &mut std::collections::HashSet<String>, islan
 /// connection; the sidecar never sees client-sent forwarding or internal headers.
 const CONTEXT_HEADERS: [&str; 4] = ["cookie", "authorization", "accept-language", "user-agent"];
 
+/// The request context of a connection: the `CONTEXT_HEADERS` of its upgrade request, plus the
+/// public host and protocol as `x-forwarded-host` / `x-forwarded-proto` (client-sent values only
+/// under `NOWAKI_TRUST_PROXY`).
 pub fn context_headers(headers: &axum::http::HeaderMap) -> serde_json::Map<String, Value> {
     let mut m = serde_json::Map::new();
     for name in CONTEXT_HEADERS {
@@ -367,6 +379,7 @@ pub fn context_headers(headers: &axum::http::HeaderMap) -> serde_json::Map<Strin
 /// the socket and its state).
 pub type Version = Arc<dyn Fn() -> String + Send + Sync>;
 
+/// Runs one WS connection until it closes, with a fixed module version (`nowaki start`).
 pub async fn handle(
     socket: WebSocket,
     hub: Arc<LiveHub>,
@@ -575,7 +588,8 @@ fn handle_text(islands: &mut Islands, page: &mut u64, txt: &str) -> Option<Pendi
                         .unwrap_or("")
                         .to_string();
                     let st = it.get("state").cloned().unwrap_or_else(|| json!({}));
-                    // Signature of the initial state (issued at SSR). The sidecar verifies it before running handlers.
+                    // Signature of the initial state (issued at SSR). The sidecar verifies it
+                    // before running handlers.
                     let sig = it
                         .get("sig")
                         .and_then(|x| x.as_str())
@@ -690,7 +704,8 @@ async fn verify_own_sig(
     }
 }
 
-/// The sidecar's `verifyOnly` answer: only "ok" passes; "expired" reloads the page like a render would.
+/// The sidecar's `verifyOnly` answer: only "ok" passes; "expired" reloads the page like a render
+/// would.
 fn sig_status(rv: &Value) -> Result<(), RenderError> {
     match rv.get("verified").and_then(|v| v.as_str()) {
         Some("ok") => Ok(()),
@@ -750,7 +765,8 @@ async fn render_once(
         }
         let rv: Value = serde_json::from_str(&r.text().await.map_err(|_| RenderError::Failed)?)
             .map_err(|_| RenderError::Failed)?;
-        // No html (e.g. a failed signature check): never keep forged state or send an empty render.
+        // No HTML (e.g. a failed signature check): never keep forged state or send an empty
+        // render.
         let html = rv
             .get("html")
             .and_then(|h| h.as_str())
@@ -787,8 +803,8 @@ async fn render_once(
     result
 }
 
-/// Store the new state and push the patch, or tell the client the event failed.
-/// false when the socket is gone.
+/// Stores the new state and pushes the patch, or tells the client the event failed. Returns false
+/// when the socket is gone.
 async fn apply_rendered(
     socket: &mut WebSocket,
     islands: &mut Islands,
@@ -847,7 +863,8 @@ fn still_joined(islands: &Islands, page: u64, r: &Rendered) -> bool {
     r.page == page && islands.get(&r.nid).is_some_and(|e| e.0 == r.name)
 }
 
-/// `page` is the server's count of replacing joins on this socket, as in a patch.
+/// Tells the client a render for `nid` failed. `page` is the server's count of replacing joins on
+/// this socket, as in a patch. Returns false when the socket is gone.
 async fn send_error(socket: &mut WebSocket, page: u64, nid: &str, reason: &str) -> bool {
     let msg = json!({ "type": "error", "page": page, "nid": nid, "reason": reason });
     socket

@@ -28,12 +28,13 @@ export function runWithContext(ctx, fn) {
   return ctx ? als.run(ctx, fn) : fn();
 }
 
-/// Called inside a server function, returns that call's LoaderContext (null otherwise).
-/// E.g. for auth or reading cookies.`import { getContext } from "@nowaki-dev/runtime/server/functions.mjs"`
 // Request contexts that something read through getContext(). A live render that never read its
 // context gives the same HTML for every connection, so `nowaki start` can share it (#97).
 export const contextReads = new WeakSet();
 
+/// The LoaderContext of the running server function, page action, API route, live event or
+/// `live.authorize` call, else null (`getContext` from `@nowaki-dev/runtime`). Marks the context
+/// as read (contextReads).
 export function getContext() {
   const ctx = als.getStore() ?? null;
   if (ctx) contextReads.add(ctx);
@@ -52,8 +53,8 @@ export async function dispatchServerFn(ctx, info, sf, { dev = false } = {}) {
   }
   // CSRF defense. Three layers against calls from cross-origin pages carrying the victim's cookies:
   //  (1) Content-Type must be application/json (rules out "simple requests" like text/plain)
-  //  (2) custom header x-nowaki-rpc required (needs a preflight, which fails since we grant no CORS)
-  //  (3) if Origin is present, only the same origin as Host is allowed
+  //  (2) custom header x-nowaki-rpc required (needs a preflight, which fails: Nowaki grants no CORS)
+  //  (3) if Origin is present, it must match the browser's host (browserHost)
   // A substring match would miss `multipart/form-data; boundary=application/json`, so
   // match the media type before `;` exactly.
   const ct = String(ctx.get("content-type") ?? "")
@@ -83,7 +84,7 @@ export async function dispatchServerFn(ctx, info, sf, { dev = false } = {}) {
   } catch (err) {
     // Over the body limit while reading: 413, not 400.
     if (err?.name === "RequestBodyError") return errBody(err.status, err.status === 413 ? "Payload Too Large" : "Bad Request");
-    text = ""; // an unreadable body is a bad request (missing id), as before
+    text = ""; // an unreadable body is a bad request (missing id)
   }
   let payload = null;
   try {

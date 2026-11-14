@@ -6,8 +6,8 @@
 //   serverBuild  build for a Node server that renders pages per request (no prerendering)
 //   caches       everything a cold run deletes first (build output and framework caches)
 //   generated    paths gen.mjs owns; deleted and rewritten on every generate
-//   idleJs       JS the framework loads only once the page is idle (counted in first-load JS,
-//                and also reported on its own)
+//   idleJs       JS the framework loads after the page itself (Nowaki's SPA router, which loads on
+//                link intent); counted in first-load JS when fetched, and also reported on its own
 
 export const FRAMEWORKS = {
   nowaki: {

@@ -1,6 +1,6 @@
 // Parses client:* lazy-hydration directives (load/idle/visible/media/only, default load) and
-// wraps in <nowaki-island>. Shared by dev / prod / edge. oxc passes namespaced JSX attributes
-// as prop keys like `"client:visible"`, so the transform needs no changes.
+// wraps the island in <nowaki-island>. Shared by dev / prod / edge. oxc passes namespaced JSX
+// attributes as prop keys like `"client:visible"`, so the directives need no transform step.
 
 import { h } from "preact";
 

@@ -1,8 +1,9 @@
-// multipart/form-data for LoaderContext.formData(). The capped buffer is parsed with the
-// platform FormData implementation (Node 22+, Bun, Deno, Workers). Full streaming uploads are
-// future work.
+// multipart/form-data for LoaderContext.formData(). The body is buffered up to the limit, then
+// parsed with the platform FormData implementation (Node 22+, Bun, Deno, Workers).
 import { RequestBodyError } from "./request-body.mjs";
 
+// The cap on a body read through ctx.formData() / bodyText() / bodyJson(): NOWAKI_FORM_BODY_LIMIT
+// bytes, else 10 MiB.
 const DEFAULT_BODY_LIMIT = 10 * 1024 * 1024;
 
 function positiveInt(v, fallback) {
@@ -23,7 +24,7 @@ function toUint8Array(buf) {
   return new Uint8Array(buf);
 }
 
-/** Media type is multipart/form-data (ignoring parameters). */
+/** Whether the media type is multipart/form-data (parameters ignored). */
 export function isMultipartFormData(contentType) {
   return (
     String(contentType ?? "")
@@ -47,7 +48,11 @@ function tooLarge(message) {
   return new RequestBodyError(message, { status: 413 });
 }
 
-/** Returns the boundary string, `null` when missing, or throws on an empty quoted boundary. */
+/**
+ * The boundary parameter of a multipart/form-data Content-Type: the string, `null` when it is
+ * missing, `undefined` when the type is not multipart/form-data. Throws a 400 RequestBodyError
+ * on an empty boundary or one over 70 characters.
+ */
 export function boundaryFromContentType(contentType) {
   if (!isMultipartFormData(contentType)) return undefined;
   for (const piece of String(contentType).split(";").slice(1)) {
@@ -79,6 +84,8 @@ export function boundaryFromContentType(contentType) {
 }
 
 /**
+ * Parses a buffered multipart/form-data body. Throws a RequestBodyError: 413 over the limit,
+ * 400 for a missing boundary or a malformed body.
  * @param {Uint8Array | ArrayBuffer | string} buf
  * @param {string} contentType
  * @param {{ bodyLimit?: number }} [opts]

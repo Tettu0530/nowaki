@@ -52,7 +52,7 @@ function underBase(p) {
   const base = import.meta.env.BASE_URL.slice(0, -1);
   return p === base || p.startsWith(base + "/");
 }
-// The path boundaries are matched by: the URL path without basePath.
+// The path boundaries match against: the browser path without basePath.
 function routePath(p) {
   if (import.meta.env.BASE_URL === "/" || !underBase(p)) return p;
   return p.slice(import.meta.env.BASE_URL.length - 1) || "/";
@@ -103,7 +103,7 @@ async function fetchPage(url, slot) {
 // as it parses, so the ones that response's server nonced (`from`) get this document's first.
 const parse = (html, from) => new DOMParser().parseFromString(carryNonces(html, window.__nowakiNonce, from), "text/html");
 
-// Fetch the SSR HTML for loading/error boundaries once and reuse it.
+// Fetches the SSR HTML of the loading / error boundaries once and reuses it.
 function loadBoundaries() {
   if (!boundariesPromise) {
     boundariesPromise = fetch(import.meta.env.BASE_URL + "__nowaki/boundaries", { headers: { "x-nowaki-nav": "1" } })
@@ -390,7 +390,7 @@ function showDefaultError(message) {
   document.body.replaceWith(body);
 }
 
-// Keep the current page and show just a bar at the top.
+// Keeps the current page and shows just a bar at the top.
 let progressEl = null;
 function showProgressBar() {
   if (progressEl) return;
@@ -426,7 +426,7 @@ function headRegion(d) {
   return marks.length === 2 ? marks : null;
 }
 
-// Replace the page-owned <head> region with the new page's. Anything outside it (island CSS,
+// Replaces the page-owned <head> region with the new page's. Anything outside it (island CSS,
 // styles injected at runtime by CSS-in-JS libraries) is left alone. <html lang>/<dir> follow too.
 function syncHead(doc) {
   const cur = headRegion(document);
@@ -439,7 +439,7 @@ function syncHead(doc) {
       cur[1].before(stampNonce(el));
     }
   } else {
-    // Older servers without markers: sync meta/link only, as before.
+    // An HTML response without the markers (not a page Nowaki rendered): syncs meta / link only.
     const synced = (el) => (el.tagName === "META" || el.tagName === "LINK") && !el.hasAttribute("data-nowaki-css");
     for (const el of [...document.head.children]) if (synced(el)) el.remove();
     for (const el of [...doc.head.children]) if (synced(el)) document.head.appendChild(el.cloneNode(true));
@@ -547,7 +547,7 @@ export function installRouter() {
     }).then((final) => final && key === curKey && restore());
   });
 
-  // disable the browser's default scroll restoration (we manage it)
+  // The router restores scroll positions itself (scrollPos).
   if ("scrollRestoration" in history) history.scrollRestoration = "manual";
 }
 

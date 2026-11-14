@@ -1,6 +1,7 @@
-// Real-browser behavior test for lazy hydration (client:* directives).
-// Runs in CI (browser job) and locally. Drives Chrome directly over CDP (no puppeteer).
-// Usage: BASE=http://127.0.0.1:8241 node scripts/lazy-hydration-test.mjs
+// Lazy hydration (client:load / idle / visible / only) in a real browser, on examples/hello's
+// /lazy page of a running server. Drives Chrome over CDP (no puppeteer), with CDP on port 9224.
+// CI's browser job runs it against `nowaki start`, then again under NOWAKI_CSP=enforce.
+// Usage: BASE=http://127.0.0.1:8241 [CHROME=/path/to/chrome] node scripts/lazy-hydration-test.mjs
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";

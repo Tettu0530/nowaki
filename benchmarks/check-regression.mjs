@@ -4,6 +4,7 @@
 //   node benchmarks/check-regression.mjs           # compare against baseline.json (exit 1 if exceeded)
 //   node benchmarks/check-regression.mjs --update   # update baseline.json with current values
 // Target is benchmarks/apps/nowaki-counter (minimal, stable). Threshold is gzip +12%.
+// Needs a built binary (target/release/nowaki, else target/debug/nowaki). CI runs it in the bench-regression job.
 
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";

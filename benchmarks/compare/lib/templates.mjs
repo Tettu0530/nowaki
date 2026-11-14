@@ -1,4 +1,4 @@
-// One blog app, written the idiomatic way in each framework. `files(opts)` returns the app's
+// One blog app, written the idiomatic way in each framework. `TEMPLATES[fw](opts)` returns the app's
 // generated sources as { relativePath: contents }; package.json, pnpm-workspace.yaml and the
 // lockfile are committed and never generated.
 //

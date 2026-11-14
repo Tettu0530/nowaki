@@ -27,6 +27,7 @@ use nowaki_core::rules::{Negotiated, Outcome, RoutingConfig, Rules, TrailingSlas
 /// Internal request header: the path the sidecar routes by (`info.routePath`).
 pub const ROUTE_PATH_HEADER: &str = "x-nowaki-route-path";
 
+/// The compiled routing rules of one app, shared by the request handlers and the layers below.
 pub struct Front {
     rules: Rules,
     trailing: TrailingSlash,
@@ -36,7 +37,9 @@ pub struct Front {
 /// The Vary of every response to the site's root under `i18n.detect`.
 const LOCALE_VARY: [&str; 2] = ["Accept-Language", "Cookie"];
 
+/// What [`Front::apply`] decides for a request.
 pub enum Step {
+    /// Answer with this response (a redirect, or a 404 outside basePath).
     Respond(Response),
     /// Go on; `Some` is the route path when it differs from the browser's path.
     Continue(Option<String>),
@@ -77,6 +80,8 @@ fn is_framework(path: &str) -> bool {
 }
 
 impl Front {
+    /// Runs the rules for a request: framework URLs pass untouched, everything else is
+    /// redirected, answered with a 404, or continues with its route path.
     pub fn apply(&self, method: &Method, uri: &Uri) -> Step {
         let path = uri.path();
         // Ahead of the rules: a catch-all rewrite or the trailing-slash policy must never move them.
@@ -97,8 +102,8 @@ impl Front {
         }
     }
 
-    /// Under basePath, a framework URL below it (`<base>/_nowaki/*` assets, `<base>/__nowaki/*`
-    /// endpoints) as the root path the server answers it at.
+    /// Under basePath, maps a framework URL below it (`<base>/_nowaki/*` assets,
+    /// `<base>/__nowaki/*` endpoints) to the root path the server answers it at.
     pub fn framework_path<'a>(&self, path: &'a str) -> Option<&'a str> {
         let base = self.rules.base_path();
         if base.is_empty() {
@@ -173,8 +178,8 @@ impl Front {
 
     /// Fills the config headers for the browser path `path` into a response, keeping any the
     /// response already set (they run before the default security headers, so they win over those).
-    /// None for the framework's `/__nowaki/*` endpoints (a catch-all `cache-control` must not reach
-    /// RPC or live responses).
+    /// Does nothing for the framework's `/__nowaki/*` endpoints (a catch-all `cache-control` must
+    /// not reach RPC or live responses).
     pub fn fill_headers(&self, path: &str, headers: &mut axum::http::HeaderMap) {
         if path.starts_with("/__nowaki/") {
             return;
