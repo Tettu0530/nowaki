@@ -120,11 +120,7 @@ pub fn build_client_with_info(
         };
         let mut entries: Vec<PathBuf> = Vec::new();
         for p in all {
-            let name = p
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("island")
-                .to_string();
+            let name = island_name(&p)?;
             if is_live_island(core, &p) {
                 live_islands.push(name); // no client chunk
             } else {
@@ -145,11 +141,7 @@ pub fn build_client_with_info(
         }
 
         for (island, set) in &reach {
-            let name = island
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("island")
-                .to_string();
+            let name = island_name(island)?;
             ctx.entry = Some(island.clone());
             let out = emit_island(core, island, set, &app_count, &client_dir, &mut ctx)?;
             islands.push((name, out));
@@ -182,40 +174,23 @@ pub fn build_client_with_info(
         live_runtime_out.as_deref(),
         &ctx.deps,
     );
-    // `"routeCss": { "routes/x.js": ["site.1a2b3c4d.css"] }`, added before the closing brace.
-    let fields: Vec<String> = route_css
+    // `"routeCss": { "routes/x.js": ["site.1a2b3c4d.css"] }`; `"routeScripts"` the same per module
+    // (route or layout; the runtime merges a page's layouts), and `"scriptPreload"`: each
+    // script's transitive chunks.
+    let script_files: BTreeSet<&String> = route_scripts.values().flatten().collect();
+    let script_preload: serde_json::Map<String, serde_json::Value> = script_files
         .iter()
-        .map(|(k, v)| {
-            let files: Vec<String> = v.iter().map(|f| format!("\"{f}\"")).collect();
-            format!("    {}: [{}]", crate::css::js_string(k), files.join(", "))
+        .map(|f| {
+            (
+                (*f).clone(),
+                serde_json::json!(transitive_deps(f, &ctx.deps)),
+            )
         })
         .collect();
-    let close = manifest.rfind('}').expect("manifest is an object");
-    manifest.truncate(close);
-    let trimmed = manifest.trim_end().to_string();
-    // `"routeScripts": { "routes/x.js": ["hero.1a2b3c4d.js"] }` per module (route or layout; the
-    // runtime merges a page's layouts), and `"scriptPreload"`: each script's transitive chunks.
-    let js_list = |v: &[String]| {
-        v.iter()
-            .map(|f| format!("\"{f}\""))
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-    let script_fields: Vec<String> = route_scripts
-        .iter()
-        .map(|(k, v)| format!("    {}: [{}]", crate::css::js_string(k), js_list(v)))
-        .collect();
-    let script_files: BTreeSet<&String> = route_scripts.values().flatten().collect();
-    let script_preload: Vec<String> = script_files
-        .iter()
-        .map(|f| format!("    \"{f}\": [{}]", js_list(&transitive_deps(f, &ctx.deps))))
-        .collect();
-    manifest = format!(
-        "{trimmed},\n  \"routeCss\": {{\n{}\n  }},\n  \"routeScripts\": {{\n{}\n  }},\n  \"scriptPreload\": {{\n{}\n  }}\n}}\n",
-        fields.join(",\n"),
-        script_fields.join(",\n"),
-        script_preload.join(",\n")
-    );
+    manifest["routeCss"] = serde_json::json!(route_css);
+    manifest["routeScripts"] = serde_json::json!(route_scripts);
+    manifest["scriptPreload"] = serde_json::Value::Object(script_preload);
+    let manifest = serde_json::to_string_pretty(&manifest)? + "\n";
     fs::write(client_dir.join("manifest.json"), manifest)?;
     // `.gz` / `.br` siblings: `nowaki start` serves them by Accept-Encoding, and most static hosts
     // pick them up too.
@@ -1046,6 +1021,31 @@ fn emit_island(
     }
 }
 
+/// The island name of `path` under islands/: its file stem. The name goes into the page as
+/// `<nowaki-island name="…">` (HTML-escaped) and the renderer reads it back from the markup to find
+/// the island in manifest.json, so a character HTML escapes (`"`, `&`, `<`) would not
+/// match, and `\` is a path separator on Windows. Such names are an error rather than an island
+/// that silently loses its preload.
+fn island_name(path: &Path) -> Result<String> {
+    let name = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
+        anyhow!(
+            "island file name is not valid UTF-8: {}. Rename the file.",
+            path.display()
+        )
+    })?;
+    if let Some(c) = name
+        .chars()
+        .find(|c| matches!(c, '"' | '&' | '<' | '\\') || c.is_control())
+    {
+        return Err(anyhow!(
+            "island file name {:?} contains {c:?}, which an island name can't: islands/{} (rename it; letters, digits, `_`, `-` and `.` are safe)",
+            name,
+            path.file_name().map(|f| f.to_string_lossy()).unwrap_or_default()
+        ));
+    }
+    Ok(name.to_string())
+}
+
 /// The file stem of `path` as an output name part (see [`sanitize_name`]); `fallback` when it has
 /// none.
 fn output_stem(path: &Path, fallback: &str) -> String {
@@ -1230,64 +1230,33 @@ fn render_manifest(
     live_islands: &[String],
     live_runtime: Option<&str>,
     deps: &HashMap<String, Vec<String>>,
-) -> String {
-    let runtime_field = match runtime {
-        Some(r) => format!("\"{r}\""),
-        None => "null".to_string(),
-    };
-    // routerRuntime is a lazy chunk: pages don't preload it (keeps the first load small).
-    let router_runtime_field = match router_runtime {
-        Some(r) => format!("\"{r}\""),
-        None => "null".to_string(),
-    };
-    let live_runtime_field = match live_runtime {
-        Some(r) => format!("\"{r}\""),
-        None => "null".to_string(),
-    };
-    let live_islands_field = live_islands
-        .iter()
-        .map(|n| format!("\"{n}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let island_fields: Vec<String> = islands
-        .iter()
-        .map(|(name, file)| format!("    \"{name}\": \"{file}\""))
-        .collect();
-
+) -> serde_json::Value {
+    use serde_json::{json, Map, Value};
     // Write the transitive deps of entry chunks (runtime + each island + lazy router) to preload.
-    // Router deps are recorded too, but the HTML doesn't preload the router (it's lazy-loaded).
+    // routerRuntime is a lazy chunk: its deps are recorded, but the HTML doesn't preload it.
     // Benchmarks use this dep list to exclude lazy chunks from the first load.
-    let mut entries: Vec<&str> = Vec::new();
-    let mut seen = HashSet::new();
-    if let Some(r) = runtime {
-        if seen.insert(r) {
-            entries.push(r);
+    let mut preload = Map::new();
+    let entries = runtime
+        .into_iter()
+        .chain(router_runtime)
+        .chain(islands.iter().map(|(_, file)| file.as_str()));
+    for entry in entries {
+        if !preload.contains_key(entry) {
+            preload.insert(entry.to_string(), json!(transitive_deps(entry, deps)));
         }
     }
-    if let Some(r) = router_runtime {
-        if seen.insert(r) {
-            entries.push(r);
-        }
-    }
-    for (_, file) in islands {
-        if seen.insert(file.as_str()) {
-            entries.push(file);
-        }
-    }
-    let preload_fields: Vec<String> = entries
+    let islands: Map<String, Value> = islands
         .iter()
-        .map(|entry| {
-            let chain = transitive_deps(entry, deps);
-            let arr: Vec<String> = chain.iter().map(|c| format!("\"{c}\"")).collect();
-            format!("    \"{entry}\": [{}]", arr.join(", "))
-        })
+        .map(|(name, file)| (name.clone(), json!(file)))
         .collect();
-
-    format!(
-        "{{\n  \"runtime\": {runtime_field},\n  \"routerRuntime\": {router_runtime_field},\n  \"liveRuntime\": {live_runtime_field},\n  \"liveIslands\": [{live_islands_field}],\n  \"islands\": {{\n{}\n  }},\n  \"preload\": {{\n{}\n  }}\n}}\n",
-        island_fields.join(",\n"),
-        preload_fields.join(",\n")
-    )
+    json!({
+        "runtime": runtime,
+        "routerRuntime": router_runtime,
+        "liveRuntime": live_runtime,
+        "liveIslands": live_islands,
+        "islands": islands,
+        "preload": preload,
+    })
 }
 
 #[cfg(test)]
@@ -1317,5 +1286,51 @@ mod tests {
             name("/app/lib/db.ts", "/elsewhere/server/lib/db.js"),
             "../../../app/lib/db.ts"
         );
+    }
+
+    #[test]
+    fn manifest_is_json_whatever_the_island_names() {
+        let deps = std::collections::HashMap::from([(
+            "it's.1.js".to_string(),
+            vec!["chunk-\"q\".js".to_string()],
+        )]);
+        let m = super::render_manifest(
+            Some("islands.1.js"),
+            None,
+            &[("it's>ü".to_string(), "it's.1.js".to_string())],
+            &["Live'One".to_string()],
+            None,
+            &deps,
+        );
+        let text = serde_json::to_string_pretty(&m).unwrap();
+        let back: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(back["islands"]["it's>ü"], "it's.1.js");
+        assert_eq!(back["liveIslands"][0], "Live'One");
+        assert_eq!(back["preload"]["it's.1.js"][0], "chunk-\"q\".js");
+        assert_eq!(back["routerRuntime"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn island_names_that_cannot_round_trip_are_rejected() {
+        assert_eq!(
+            super::island_name(Path::new("/app/islands/Counter.tsx")).unwrap(),
+            "Counter"
+        );
+        assert_eq!(
+            super::island_name(Path::new("/app/islands/it's-ü.tsx")).unwrap(),
+            "it's-ü"
+        );
+        for bad in [
+            "Say\"Hi\".tsx",
+            "a&b.tsx",
+            "a<b.tsx",
+            "a\\b.tsx",
+            "a\nb.tsx",
+        ] {
+            let err = super::island_name(&Path::new("/app/islands").join(bad))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("which an island name can't"), "{bad}: {err}");
+        }
     }
 }

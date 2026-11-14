@@ -81,23 +81,18 @@ await startServer({{
     std::fs::write(server_dir.join("index.mjs"), index)?;
 
     // Minimal package.json for `npm install` at deploy time (runtime deps only).
-    let pkg = format!(
-        r#"{{
-  "name": "nowaki-app-server",
-  "private": true,
-  "type": "module",
-  "scripts": {{
-    "start": "{run}"
-  }},
-  "dependencies": {{
-    "@nowaki-dev/runtime": "^{runtime_ver}",
-    "preact": "^{preact_ver}",
-    "preact-render-to-string": "^{prts_ver}"
-  }}
-}}
-"#,
-        run = adapter.run_cmd(),
-    );
+    let pkg = serde_json::json!({
+        "name": "nowaki-app-server",
+        "private": true,
+        "type": "module",
+        "scripts": { "start": adapter.run_cmd() },
+        "dependencies": {
+            "@nowaki-dev/runtime": format!("^{runtime_ver}"),
+            "preact": format!("^{preact_ver}"),
+            "preact-render-to-string": format!("^{prts_ver}"),
+        },
+    });
+    let pkg = serde_json::to_string_pretty(&pkg)? + "\n";
     std::fs::write(server_dir.join("package.json"), pkg)?;
 
     println!(
@@ -177,15 +172,47 @@ fn installed_version(root: &Path, pkg: &str) -> Option<String> {
     )
 }
 
-/// The first `"<field>": "..."` in a package.json, found by a plain text search (not a JSON
-/// parse, so a nested key of the same name can match first).
+/// The top-level string `field` of a package.json, if the file parses and has one.
 fn read_json_field(pj: &Path, field: &str) -> Option<String> {
     let text = std::fs::read_to_string(pj).ok()?;
-    let key = format!("\"{field}\"");
-    let i = text.find(&key)?;
-    let after = &text[i + key.len()..];
-    let start = after.find('"')? + 1;
-    let rest = &after[start..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value.get(field)?.as_str().map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_package_json_is_json_with_the_installed_versions() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // A nested "version" before the top-level one: read the top level.
+        let rt = root.join("node_modules/@nowaki-dev/runtime");
+        std::fs::create_dir_all(&rt).unwrap();
+        std::fs::write(
+            rt.join("package.json"),
+            r#"{"engines":{"version":"x"},"version":"1.2.3-rc.\"1\""}"#,
+        )
+        .unwrap();
+        let dist = root.join("dist");
+        emit_server(root, &dist, Adapter::Node).unwrap();
+        let text = std::fs::read_to_string(dist.join("server/package.json")).unwrap();
+        let pkg: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+        assert_eq!(
+            pkg["dependencies"]["@nowaki-dev/runtime"],
+            "^1.2.3-rc.\"1\""
+        );
+        assert_eq!(pkg["scripts"]["start"], "node index.mjs");
+
+        // No runtime installed: the version this CLI needs.
+        std::fs::remove_dir_all(&rt).unwrap();
+        emit_server(root, &dist, Adapter::Node).unwrap();
+        let text = std::fs::read_to_string(dist.join("server/package.json")).unwrap();
+        let pkg: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            pkg["dependencies"]["@nowaki-dev/runtime"],
+            format!("^{}", crate::runtime::MIN_RUNTIME)
+        );
+    }
 }

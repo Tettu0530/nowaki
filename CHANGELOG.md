@@ -206,6 +206,12 @@ milestone's worth of work; the codename is noted per entry.
   which file is missing and the `npm install @nowaki-dev/runtime@<version>` that fixes it. The
   node / bun / deno adapters' `dist/server/package.json` pins the CLI's runtime version when
   none is installed, not `^0.6.0`.
+- `dist/client/manifest.json` and the server adapters' `dist/server/package.json` are written
+  with a JSON serializer: an island file name with a `'` or non-ASCII characters is escaped
+  properly. An island file name with `"`, `&`, `<`, `\` or a control character is now a build
+  error naming the file: the name goes into the page's `<nowaki-island name>` and is read back
+  to find the island's chunks, which those characters break (before, `"` or `\` wrote an
+  invalid manifest).
 - Server functions and `POST /__nowaki/live-event` answer **413** when the body goes over the
   limit while it is read (a chunked body has no `Content-Length`); they answered 400.
 - The `publish()` docs and its warning state what it does on the deploy adapters: nothing (it
