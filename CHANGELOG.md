@@ -123,6 +123,15 @@ milestone's worth of work; the codename is noted per entry.
   `NOWAKI_SECURITY_HEADERS`, …) from the files as well, so the Rust front and the renderer
   agree; `PORT` and `NOWAKI_HOST` still come only from the environment. Who: apps with a key in
   both files. How: keep the value you want in `.env.local` (or remove it there).
+- **`nowaki dev` accepts its HMR and live WebSockets only from its own origin** (dev only). Any
+  page on a loopback origin could open `/__nowaki/hmr` and the live socket, so another dev
+  server on localhost (another port) could listen to updates or drive live islands. The
+  `Origin` must now be the dev server's own port on `localhost` / `127.0.0.1` / `[::1]`, with
+  `--host` also an IP address, a `*.local` name or a name from `NOWAKI_DEV_ALLOWED_HOSTS` on
+  that port, or equal the request's `Host` (a proxy that keeps `Host`). Who: setups that load
+  the dev page from another origin (a second dev server or a proxy on another port that
+  rewrites `Host`). How: open the page from the dev server's own address, or keep `Host` in the
+  proxy.
 
 ### Added
 - **`nonce()` from `@nowaki-dev/runtime`**: the CSP nonce for an inline `<script>` / `<style>`
