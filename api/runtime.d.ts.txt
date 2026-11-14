@@ -40,7 +40,7 @@ LoaderContext.readonly req?: unknown;
 LoaderContext.state: Record<string, unknown>;
 LoaderContext.actionData?: unknown;
 LoaderContext.get(name: string): string | undefined;
-LoaderContext.formData(): Promise<URLSearchParams>;
+LoaderContext.formData(): Promise<FormData>;
 LoaderContext.bodyText(): Promise<string>;
 LoaderContext.bodyJson<T = unknown>(): Promise<T>;
 LoaderContext.status(code: number): this;

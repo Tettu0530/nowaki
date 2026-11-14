@@ -178,6 +178,8 @@ jobs:
         run: node scripts/i18n-test.mjs
       - name: Sessions (encryption, tampering, expiry, key rotation, store mode, CSRF read-only)
         run: node scripts/session-test.mjs
+      - name: Multipart form bodies (LoaderContext.formData)
+        run: node scripts/form-data-test.mjs
       - name: Live session hub (join/event, queue, timeout, cap, presence)
         run: node scripts/live-hub-test.mjs
       - name: Markdoc plugin (compile, validation errors, escaping, frontmatter)

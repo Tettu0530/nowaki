@@ -1130,9 +1130,18 @@ async fn proxy_to_sidecar(
     let log_path = req.uri().path().to_string();
     let headers = req.headers().clone();
 
-    let body = match axum::body::to_bytes(req.into_body(), 16 * 1024 * 1024).await {
+    if crate::form_body::multipart_content_length_over_limit(&headers) {
+        let (status, body) = crate::form_body::multipart_payload_too_large();
+        return (status, body).into_response();
+    }
+
+    let proxy_limit = crate::form_body::proxy_body_limit();
+    let body = match axum::body::to_bytes(req.into_body(), proxy_limit).await {
         Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+        Err(err) => {
+            let (status, body) = crate::form_body::proxy_body_to_bytes_error(&headers, &err);
+            return (status, body).into_response();
+        }
     };
 
     let mut builder = state

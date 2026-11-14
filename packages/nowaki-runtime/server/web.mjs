@@ -14,6 +14,7 @@ import { initServerEnv } from "./env-schema.mjs";
 import { setServerEnv } from "./env-server.mjs";
 import { configureSessions, sessionConfigOf } from "./session.mjs";
 import { setBasePath } from "./base-path.mjs";
+import { readBodyWithLimit } from "./body-read.mjs";
 import { traceFromEnv } from "./trace.mjs";
 import { HEALTH_BODY, HEALTH_HEADERS, isHealth } from "./health.mjs";
 import { setRevalidateEnv } from "./revalidate.mjs";
@@ -245,7 +246,7 @@ export function createFetchHandler({
       url,
       version: "prod",
       headers,
-      readBody: async () => new Uint8Array(await request.arrayBuffer()),
+      readBody: () => readBodyWithLimit(request, headers),
       routePath: front?.routePath,
     };
     if (isr && isr.eligible(request.method, url.pathname, headers)) return cached(info, front, exec);

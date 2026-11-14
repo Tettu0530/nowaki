@@ -5,6 +5,7 @@ mod dev;
 mod encoding;
 mod env_schema;
 mod fonts;
+mod form_body;
 mod forward;
 mod front;
 mod live;

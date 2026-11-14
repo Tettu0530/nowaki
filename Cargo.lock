@@ -1708,6 +1708,7 @@ dependencies = [
  "dunce",
  "futures-util",
  "getrandom 0.4.3",
+ "http-body-util",
  "notify",
  "nowaki-core",
  "rayon",

@@ -11,6 +11,26 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **`multipart/form-data` in `ctx.formData()`.** Actions, API routes, and middleware can read file
+  uploads from a `FormData` body (`File` parts keep `name`, `type`, and bytes). The whole body is
+  buffered (same as urlencoded today) with a default cap of 10 MiB (`NOWAKI_FORM_BODY_LIMIT`) on
+  `formData()`, `bodyText()`, and `bodyJson()`; oversized `Content-Length` is rejected before read;
+  over-limit streamed reads on Node may **reset the connection** before a 413 is sent. Malformed
+  multipart maps to **400** instead of a generic 500. `filename*` in multipart follows the platform
+  parser (Node 22 rejects the whole body with **400**; newer runtimes may decode RFC 5987 names).
+  Treat `File.name` as untrusted either way.
+
+### Upgrade notes
+- **Breaking: `ctx.formData()` always returns `FormData`.** Urlencoded bodies used to return
+  `URLSearchParams`. Both media types now return `FormData`, as the platform `Request.formData()`
+  does. `form.get()` is `string | File | null`. Read text with `String(form.get("x") ?? "")`.
+  Methods that exist only on `URLSearchParams` (`toString()`, `sort()`) need rewriting. This is
+  not a patch-level change.
+- **`NOWAKI_FORM_BODY_LIMIT` (default 10 MiB)** now applies to **`bodyText()` and `bodyJson()`** on
+  every runtime (not only multipart). JSON API routes and larger `NOWAKI_FN_BODY_LIMIT` / live-event
+  payloads must stay under the form limit when handlers read the body through these helpers, or read
+  the raw stream another way.
 ### Docs
 
 - Stability, support and governance policies for 1.0: `docs/STABILITY.md` (the frozen

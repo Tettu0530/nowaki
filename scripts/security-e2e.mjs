@@ -99,6 +99,38 @@ async function serverFnHardening(b, m) {
     (await rpc(JSON.stringify({ id: "6c90d7dc921a9a3f", args: ["x".repeat(1100 * 1024)] }))).status === 413);
 }
 
+async function multipartFormGuards(b) {
+  const { FORM_BODY_LIMIT } = await import("../packages/nowaki-runtime/server/multipart.mjs");
+  const boundary = "nowakie2e";
+  const body = `--${boundary}\r\nContent-Disposition: form-data; name="note"\r\n\r\nhi\r\n--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="t.txt"\r\nContent-Type: text/plain\r\n\r\nok\r\n--${boundary}--\r\n`;
+  const ok = await fetch(`${b}/api/upload`, {
+    method: "POST",
+    headers: { "content-type": `multipart/form-data; boundary=${boundary}`, origin: b },
+    body,
+  });
+  const json = await ok.json().catch(() => ({}));
+  check("multipart upload round trip (file + field)", ok.status === 200 && json.hasFile && json.name === "t.txt" && json.field === "hi");
+  // fetch refuses a Content-Length / body length mismatch (undici); use raw http like the limits in
+  // context.mjs expect (oversized Content-Length rejected before the body is read).
+  const huge = await raw(b, "/api/upload", {
+    method: "POST",
+    headers: {
+      "content-type": `multipart/form-data; boundary=${boundary}`,
+      "content-length": String(FORM_BODY_LIMIT + 1),
+      origin: b,
+    },
+    body: "",
+    timeoutMs: 5000,
+  });
+  check("multipart Content-Length over limit (413)", huge.status === 413);
+  const bad = await fetch(`${b}/api/upload`, {
+    method: "POST",
+    headers: { "content-type": "multipart/form-data; boundary=missing", origin: b },
+    body: "not multipart",
+  });
+  check("multipart malformed body (400)", bad.status === 400);
+}
+
 // Page actions and API / file routes reject cross-site non-GET requests by default.
 async function crossSiteWritesRejected(b) {
   const send = (path, h) =>
@@ -266,16 +298,27 @@ async function liveEventGate(b) {
 }
 
 // Raw request (path sent verbatim): { status, headers, body }.
-function raw(b, path, { method = "GET", headers = {} } = {}) {
+function raw(b, path, { method = "GET", headers = {}, body, timeoutMs } = {}) {
   const u = new URL(b);
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
     const req = http.request({ host: u.hostname, port: u.port, path, method, headers }, (res) => {
-      let body = "";
+      let text = "";
       res.setEncoding("utf8");
-      res.on("data", (c) => (body += c));
-      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body }));
+      res.on("data", (c) => (text += c));
+      res.on("end", () => finish({ status: res.statusCode, headers: res.headers, body: text }));
     });
-    req.on("error", () => resolve({ status: 0, headers: {}, body: "" }));
+    req.on("error", () => finish({ status: 0, headers: {}, body: "" }));
+    if (timeoutMs) req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      finish({ status: 0, headers: {}, body: "" });
+    });
+    if (body !== undefined) req.write(body);
     req.end();
   });
 }
@@ -359,6 +402,8 @@ if (mode === "dev") {
   await forwardedHostIgnored(base);
   await serverFnHardening(base, mode);
   await crossSiteWritesRejected(base);
+  // multipart upload limits (examples/hello /api/upload): dev and prod sidecars.
+  await multipartFormGuards(base);
   await sessionGuards(base);
   await securityHeadersPresent(base, ["/", "/nope"]);
   await configRoutingSafe(base);

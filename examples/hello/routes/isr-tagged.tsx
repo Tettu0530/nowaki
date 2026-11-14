@@ -18,7 +18,7 @@ export const loader = async () => {
 
 export async function action(ctx: LoaderContext) {
   const form = await ctx.formData();
-  const kind = form.get("kind");
+  const kind = String(form.get("kind") ?? "");
   if (kind === "path") revalidatePath("/isr-tagged");
   // A call after the response went out (a timer, a queue job) still reaches the cache, just later.
   else if (kind === "late") setTimeout(() => revalidateTag("isr-demo"), 50);

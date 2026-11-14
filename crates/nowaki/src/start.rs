@@ -1286,6 +1286,12 @@ async fn proxy(
     let url = format!("http://127.0.0.1:{}{}", state.sidecar_port, path_q);
     let method = req.method().clone();
     let headers = req.headers().clone();
+
+    if crate::form_body::multipart_content_length_over_limit(&headers) {
+        let (status, body) = crate::form_body::multipart_payload_too_large();
+        return (status, body).into_response();
+    }
+
     // Only set by `observed` (tracing on): the CLIENT span of the sidecar hop goes under it.
     let client_span = req.extensions().get::<ServerSpan>().and_then(|s| {
         let otel = crate::obs::get().otel()?;
@@ -1296,9 +1302,13 @@ async fn proxy(
         );
         Some((otel, c))
     });
-    let body = match axum::body::to_bytes(req.into_body(), 16 * 1024 * 1024).await {
+    let proxy_limit = crate::form_body::proxy_body_limit();
+    let body = match axum::body::to_bytes(req.into_body(), proxy_limit).await {
         Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+        Err(err) => {
+            let (status, body) = crate::form_body::proxy_body_to_bytes_error(&headers, &err);
+            return (status, body).into_response();
+        }
     };
 
     let mut builder = state.http.request(method, &url).body(body.to_vec());

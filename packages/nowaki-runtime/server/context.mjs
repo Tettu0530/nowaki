@@ -2,12 +2,15 @@
 
 import { createSession } from "./session.mjs";
 import { withBase } from "./base-path.mjs";
+import { assertBufferedBodySize, contentLengthOverLimit } from "./body-read.mjs";
+import { FORM_BODY_LIMIT, isMultipartFormData, parseMultipartBody } from "./multipart.mjs";
+import { RequestBodyError } from "./request-body.mjs";
 
 export function makeContext(info) {
   const { url, params = {}, method = "GET", req } = info;
   // Callers may inject headers / readBody (Node: from req; Edge: from the Web Request).
   const reqHeaders = info.headers ?? req?.headers ?? {};
-  const readBodyFn = info.readBody ?? (() => readBodyNode(req));
+  const readBodyFn = info.readBody ?? (() => readBodyNode(req, FORM_BODY_LIMIT));
   const resHeaders = new Map();
   const setCookies = [];
 
@@ -96,16 +99,29 @@ export function makeContext(info) {
     },
     async formData() {
       reqAccessed = true; // depends on body/Content-Type → no shared ISR cache (prevents per-user mixups)
-      const buf = await readBodyFn();
-      return parseFormBody(buf, reqHeaders["content-type"] ?? "");
+      const ct = reqHeaders["content-type"] ?? "";
+      if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
+        discardUnreadBody(req);
+        throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
+      }
+      const buf = assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT);
+      return await parseFormBody(buf, ct);
     },
     async bodyText() {
       reqAccessed = true;
-      return decodeBody(await readBodyFn());
+      if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
+        discardUnreadBody(req);
+        throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
+      }
+      return decodeBody(assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT));
     },
     async bodyJson() {
       reqAccessed = true;
-      const s = decodeBody(await readBodyFn());
+      if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
+        discardUnreadBody(req);
+        throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
+      }
+      const s = decodeBody(assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT));
       return s ? JSON.parse(s) : null;
     },
 
@@ -186,13 +202,43 @@ function serializeCookie(name, value, opts) {
   return s;
 }
 
-function readBodyNode(req) {
+// Oversized Content-Length: drain the socket without destroying it so the 413 can still be sent.
+function discardUnreadBody(req) {
+  if (req && typeof req.resume === "function") req.resume();
+}
+
+function abortUnreadBody(req) {
+  if (req && typeof req.destroy === "function") req.destroy();
+  else discardUnreadBody(req);
+}
+
+function readBodyNode(req, maxBytes) {
   return new Promise((resolve, reject) => {
     if (!req || typeof req.on !== "function") return resolve(new Uint8Array(0));
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
+    let total = 0;
+    let settled = false;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    };
+    const finish = (buf) => {
+      if (settled) return;
+      settled = true;
+      resolve(buf);
+    };
+    req.on("data", (c) => {
+      total += c.length;
+      if (maxBytes !== undefined && total > maxBytes) {
+        abortUnreadBody(req);
+        fail(new RequestBodyError(`request body exceeds ${maxBytes} byte limit`, { status: 413 }));
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => finish(Buffer.concat(chunks)));
+    req.on("error", fail);
   });
 }
 
@@ -202,10 +248,15 @@ function decodeBody(buf) {
   return new TextDecoder().decode(buf);
 }
 
-function parseFormBody(buf, contentType) {
-  const text = decodeBody(buf);
-  if (contentType.includes("multipart/form-data")) {
-    throw new Error("multipart/form-data is not supported yet (use urlencoded)");
+function formDataFromUrlencoded(buf) {
+  const form = new FormData();
+  for (const [key, value] of new URLSearchParams(decodeBody(buf))) form.append(key, value);
+  return form;
+}
+
+async function parseFormBody(buf, contentType) {
+  if (isMultipartFormData(contentType)) {
+    return parseMultipartBody(buf, contentType);
   }
-  return new URLSearchParams(text);
+  return formDataFromUrlencoded(buf);
 }

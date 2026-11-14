@@ -22,10 +22,10 @@ export async function POST(ctx: LoaderContext) {
   const form = await ctx.formData();
   let wrote: true | string = true;
   try {
-    switch (form.get("op")) {
+    switch (String(form.get("op") ?? "")) {
       case "login":
         await ctx.session.regenerate();
-        await ctx.session.set("user", form.get("user") ?? "");
+        await ctx.session.set("user", String(form.get("user") ?? ""));
         break;
       case "inc":
         await ctx.session.set("n", ((await ctx.session.get<number>("n")) ?? 0) + 1);
