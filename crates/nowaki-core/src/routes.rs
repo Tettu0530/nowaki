@@ -1,18 +1,23 @@
-//! File-based route enumeration under `routes/` (shared by typegen, prerender, and JS parity tests).
+//! File-based route enumeration under `routes/`, shared by the build (route CSS, page scripts,
+//! budgets, URL conflict checks), typegen, prerender, and the tests that compare it with
+//! router.mjs.
 //!
-//! URL patterns use Nowaki's on-disk syntax (`/blog/[slug]`, `/files/[...path]`). Convention
-//! files (`_layout`, `loading`, …) and `api/` handlers are excluded from page-route scans.
+//! Route path patterns use Nowaki's on-disk syntax (`/blog/[slug]`, `/files/[...path]`).
+//! Convention files (`_layout`, `loading`, …), API routes, file routes, and slot and intercepting
+//! files are excluded from page-route scans.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
+/// Extensions of route modules besides [`MDX_EXTENSION`] (router.mjs `ROUTE_EXT`).
 pub const ROUTE_EXTENSIONS: [&str; 4] = ["tsx", "ts", "jsx", "js"];
 
-/// `.mdx` pages (compiled to TSX, see mdx.rs). Kept out of ROUTE_EXTENSIONS so its type stays.
+/// `.mdx` pages (compiled to TSX, see mdx.rs). Kept out of [`ROUTE_EXTENSIONS`] so that
+/// constant's type doesn't change.
 pub const MDX_EXTENSION: &str = "mdx";
 
-/// Recursively lists files under `routes_dir`.
+/// Recursively lists the files under `dir` (unsorted). A directory that can't be read is skipped.
 pub fn walk_routes_dir(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
     walk_dir(dir, &mut out)?;
@@ -44,7 +49,8 @@ fn file_base_name(stem_path: &str) -> &str {
     stem_path.rsplit('/').next().unwrap_or(stem_path)
 }
 
-/// Convention / boundary sources under `routes/` (not navigable pages for typegen).
+/// Whether a file's base name (without extension) is a convention or boundary file (`_layout`,
+/// `_middleware`, `_404`, `loading`, `error`, any other `_` name) rather than a page.
 pub fn is_convention_source(base: &str) -> bool {
     base.starts_with('_') || base == "loading" || base == "error"
 }
@@ -109,6 +115,7 @@ pub fn removed_convention(rel: &str) -> Option<String> {
     ))
 }
 
+/// Whether a path under `routes/` is an API route (under `api/`, route groups ignored).
 pub fn is_api_route_rel(rel: &str) -> bool {
     let rel = strip_route_groups(&rel.replace('\\', "/"));
     rel == "api" || rel.starts_with("api/")
@@ -128,14 +135,15 @@ pub fn is_endpoint_rel(rel: &str) -> bool {
     is_api_route_rel(rel) || stem_from_rel(rel).is_some_and(|s| is_file_route_stem(&s))
 }
 
-/// Stem path without extension (e.g. `blog/[slug]`).
+/// The stem path without extension (`blog/[slug].tsx` → `blog/[slug]`); None when the extension
+/// isn't a route module's.
 pub fn stem_from_rel(rel: &str) -> Option<String> {
     let rel = rel.replace('\\', "/");
     let (stem, ext) = rel.rsplit_once('.')?;
     (ROUTE_EXTENSIONS.contains(&ext) || ext == MDX_EXTENSION).then(|| stem.to_string())
 }
 
-/// URL pattern from a route stem (`blog/index` → `/blog`, `index` → `/`).
+/// The route path pattern of a route stem (`blog/index` → `/blog`, `index` → `/`).
 /// Route groups are left out (`(marketing)/about` → `/about`).
 pub fn url_pattern_from_stem(stem: &str) -> String {
     let mut url = format!("/{}", strip_route_groups(stem));
@@ -148,7 +156,8 @@ pub fn url_pattern_from_stem(stem: &str) -> String {
     url
 }
 
-/// Typegen entry: URL pattern and TS param type. None for conventions, API, or unsupported ext.
+/// Typegen entry: route path pattern and TS param type. None for conventions, endpoints, slot
+/// and intercepting files, and extensions that aren't a route module's.
 pub fn typegen_entry(rel: &str) -> Option<(String, String)> {
     let stem = stem_from_rel(rel)?;
     let base = file_base_name(&stem);
@@ -191,8 +200,9 @@ pub fn scan_typegen(routes_dir: &Path) -> Result<Vec<(String, String)>> {
     Ok(out)
 }
 
-/// Whether a built server route stem (`dist/server/routes/...` without `.js`) is a static HTML prerender target.
-/// File routes are listed by static-paths.mjs instead (written to their own path, not index.html).
+/// Whether a built server route stem (`dist/server/routes/...` without `.js`) is a static HTML
+/// prerender target. File routes are listed by static-paths.mjs instead (written to their own
+/// path, not index.html).
 pub fn is_static_prerender_stem(stem: &str) -> bool {
     !is_api_route_rel(stem)
         && !stem.contains('[')
@@ -201,7 +211,7 @@ pub fn is_static_prerender_stem(stem: &str) -> bool {
         && !is_slot_or_intercept_rel(stem)
 }
 
-/// Static prerender URLs from compiled `dist/server/routes/**/*.js`.
+/// Static prerender route paths from compiled `dist/server/routes/**/*.js`, sorted.
 pub fn enumerate_static_prerender_urls(routes_dir: &Path) -> Result<Vec<String>> {
     let mut urls = Vec::new();
     if !routes_dir.is_dir() {
@@ -223,7 +233,8 @@ pub fn enumerate_static_prerender_urls(routes_dir: &Path) -> Result<Vec<String>>
     Ok(urls)
 }
 
-/// Page URL patterns under source `routes/` (non-API), for parity with `scanRoutes` in router.mjs.
+/// Page route path patterns under source `routes/` (no conventions, endpoints, slot or
+/// intercepting files), for parity with `scanRoutes` in router.mjs.
 pub fn page_url_patterns(routes_dir: &Path) -> Result<Vec<String>> {
     let mut files = walk_routes_dir(routes_dir)?;
     files.sort();
@@ -246,7 +257,7 @@ pub fn page_url_patterns(routes_dir: &Path) -> Result<Vec<String>> {
     Ok(out)
 }
 
-/// The files of every parallel-route slot under `routes/`, as `"<owner dir>/@<name> <URL pattern>"`
+/// The files of every parallel-route slot under `routes/`, as `"<owner dir>/@<name> <pattern>"`
 /// (`"/@modal /photo/[id]"`, owner dir `""` for `routes/`), `"<owner dir>/@<name> default"` or,
 /// for an intercepting file, `"<owner dir>/@<name> intercept <target pattern>"`
 /// (`intercept_target`), sorted. A slot file's pattern is its owner directory's URL followed by

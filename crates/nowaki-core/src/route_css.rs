@@ -1,11 +1,12 @@
 //! CSS that routes and layouts import, for the page's `<head>`.
 //!
-//! Only islands ship JS to the browser, so `import "../styles/site.css"` in a route or layout used
-//! to reach nobody. The build now follows each page route's import graph (the route and every
-//! `_layout` above it, components included), collects the `.css` files it imports (plain and CSS
-//! Modules, app or package), and writes each one once to `dist/client` as `<name>.<hash>.css`.
-//! The manifest maps each route to its stylesheets (`routeCss`), keyed by the route's server
-//! module (`routes/blog/[slug].js`), and the document links them.
+//! Only islands ship JS to the browser, so a route or layout's `import "../styles/site.css"`
+//! can't inject the stylesheet itself. Instead the build follows each page route's import graph
+//! (the route and every `_layout` above it, components included; also `_404` and `_500`),
+//! collects the `.css` files it imports (plain and CSS Modules, app or package), and writes each
+//! one once to `dist/client` as `<name>.<hash>.css`. The manifest maps each route to its
+//! stylesheets (`routeCss`), keyed by the route's server module (`routes/blog/[slug].js`), and
+//! the document links them.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -17,8 +18,9 @@ use xxhash_rust::xxh3::xxh3_64;
 use crate::routes::{is_convention_source, is_endpoint_rel, stem_from_rel};
 use crate::NowakiCore;
 
-/// The CSS files (absolute paths, in import order) a module and the app modules it reaches
-/// import. Package modules aren't followed, but a package CSS file imported by the app counts.
+/// The CSS files (absolute paths, in import order) that `entries` and the app modules they reach
+/// statically import. Package modules and `import()` aren't followed, but a package CSS file
+/// imported by the app counts.
 pub fn css_of(core: &NowakiCore, entries: &[PathBuf]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut seen_css = HashSet::new();

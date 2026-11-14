@@ -1,3 +1,6 @@
+//! CSS handling: `@import` inlining, CSS Modules scoping, and the JS modules that inject
+//! stylesheets in the browser.
+
 use std::path::Path;
 
 use xxhash_rust::xxh3::xxh3_64;
@@ -120,7 +123,8 @@ fn inline_rec(
     out
 }
 
-/// `"x" screen` / `url(x) layer(a)` → ("x", "screen").
+/// Splits an `@import` rule's prelude into the specifier and its conditions:
+/// `"x" screen` → ("x", " screen"), `url(x) layer(a)` → ("x", " layer(a)").
 fn parse_import(rule: &str) -> (&str, &str) {
     let r = rule.trim();
     if let Some(inner) = r.strip_prefix("url(") {
@@ -138,11 +142,12 @@ fn parse_import(rule: &str) -> (&str, &str) {
     (spec, cond)
 }
 
-/// Empty module that neutralizes .css imports on the server (CSS is client-only).
+/// An empty module, for a CSS import on the server whose file can't be read and for a relative
+/// CSS `import()` (static imports of readable CSS get its text as the default export).
 pub const CSS_NOOP_SPECIFIER: &str = "data:text/javascript,";
 
-/// A JS string literal for `s`. (Rust's `{:?}` writes control characters as `\u{1f}`, which
-/// isn't JS.)
+/// A JS string literal for `s`, also valid JSON (Rust's `{:?}` writes control characters as
+/// `\u{1f}`, which JSON doesn't accept).
 pub fn js_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
@@ -163,6 +168,7 @@ pub fn js_string(s: &str) -> String {
     out
 }
 
+/// Whether `path` is a stylesheet (`.css`, CSS Modules included).
 pub fn is_css(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()) == Some("css")
 }
@@ -176,7 +182,8 @@ pub fn is_css_module(path: &Path) -> bool {
 ///
 /// Shipped to the client (style `data-nowaki-css`, scoped class suffix). Root-relative paths
 /// avoid leaking absolute paths; files outside the app root (pnpm store etc.) hash stably.
-/// Dev SSR, dev browser (`serve_file`), and production build must all use this function.
+/// Dev SSR, the dev server (`serve_file` in the CLI), and the production build must all use this
+/// function.
 pub fn css_scope_id(root: &Path, abs: &Path) -> String {
     match abs.strip_prefix(root) {
         Ok(rel) => rel.to_string_lossy().replace('\\', "/"),
@@ -185,7 +192,8 @@ pub fn css_scope_id(root: &Path, abs: &Path) -> String {
 }
 
 /// Scopes class selectors `.name` to `.name_<suffix>`; returns (scoped CSS, original→new names).
-/// The suffix derives from id, so it is stable (matches across dev/build and client/SSR). A simple scanner, not a full CSS parser.
+/// The suffix derives from `id`, so it is stable (matches across dev and build, client and SSR).
+/// A simple scanner, not a full CSS parser.
 pub fn scope_css(id: &str, css: &str) -> (String, Vec<(String, String)>) {
     let suffix = format!("{:08x}", xxh3_64(id.as_bytes()) as u32);
     let bytes = css.as_bytes();
@@ -239,7 +247,7 @@ pub fn scope_css(id: &str, css: &str) -> (String, Vec<(String, String)>) {
             };
             continue;
         }
-        // Class selector start: '.' followed by an ident-start (a-zA-Z_ or -<letter>)
+        // Class selector start: '.' followed by an ident start (a letter, `_`, or `-`).
         if c == b'.' && i + 1 < bytes.len() && is_ident_start(bytes[i + 1]) {
             out.push_str(&css[copied..i]);
             let start = i + 1;
@@ -301,15 +309,16 @@ pub fn css_module_client_js(style_id: &str, scoped_css: &str, map: &[(String, St
     )
 }
 
-/// For SSR / server builds: no DOM, so no injection; exports only the class name map.
+/// A CSS Module for SSR: no DOM, so no injection; exports only the class name map. (The SSR
+/// transform and the server build inline the same module as a `data:` URL.)
 pub fn css_module_mapping_js(map: &[(String, String)]) -> String {
     format!("export default {};\n", mapping_object(map))
 }
 
-/// Converts .css into the source of a JS module that injects a <style> (shared by dev/build).
-/// Reuses the style with the same id (avoids duplicate injection and HMR re-injection).
-/// Copies the page's CSP nonce (set by islands.js, or from a nonced script) so an enforced
-/// `style-src-elem` allows it.
+/// Converts .css into the source of a JS module that injects a `<style>` (shared by dev and
+/// build). Reuses the style with the same id, so the module never injects twice and a hot update
+/// replaces the text. Copies the page's CSP nonce (`window.__nowakiNonce`, set by the client
+/// runtime, or from a nonced script) so an enforced `style-src-elem` allows it.
 pub fn css_shim(id: &str, css: &str) -> String {
     css_shim_body(id, css) + "export default __css;\n"
 }
@@ -392,7 +401,7 @@ mod tests {
         let (scoped, map) = scope_css("/app/Badge.module.css", css);
         assert!(scoped.contains(".badge_"));
         assert!(scoped.contains(".badge-x_"));
-        // Dots with digits inside values (0.5rem) are not mistaken for classes
+        // Dots with digits inside values (0.5rem) are not mistaken for classes.
         assert!(scoped.contains("0.5rem"));
         assert_eq!(map.len(), 2);
         assert_eq!(map[0].0, "badge");

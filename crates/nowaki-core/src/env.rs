@@ -1,9 +1,14 @@
+//! Client environment: the `import.meta.env` constants inlined into modules, the public values
+//! `env.ts` validated, and the guard against client imports of `@nowaki-dev/runtime/env/server`.
+
 use std::collections::BTreeMap;
 use std::path::Path;
 
 /// Reads `.env` / `.env.local` and builds constant-replacement pairs safe to expose to the client.
-/// - Only `PUBLIC_`-prefixed variables are exposed, as `import.meta.env.PUBLIC_X` (secrets never are)
-/// - Also adds `import.meta.env.MODE` / `DEV` / `PROD`
+/// - Only `PUBLIC_`-prefixed variables are exposed, as `import.meta.env.PUBLIC_X` (secrets never
+///   are).
+/// - Also adds `import.meta.env.MODE` / `DEV` / `PROD` (from `NODE_ENV`, default `development`),
+///   `process.env.NODE_ENV`, and `import.meta.env.BASE_URL` (`/`).
 ///
 /// Returns `(key, JS literal)` pairs for ReplaceGlobalDefines.
 pub fn load_client_defines(root: &Path) -> Vec<(String, String)> {
@@ -35,7 +40,8 @@ pub fn load_client_defines(root: &Path) -> Vec<(String, String)> {
     let mut defines = Vec::new();
     for (k, v) in &vars {
         if k.starts_with("PUBLIC_") {
-            // {:?} escapes into a JS/JSON-compatible string literal
+            // `{:?}` gives a JS string literal (control characters become `\u{…}` escapes,
+            // which JSON doesn't accept).
             defines.push((format!("import.meta.env.{k}"), format!("{v:?}")));
         }
     }
@@ -48,6 +54,7 @@ pub fn load_client_defines(root: &Path) -> Vec<(String, String)> {
     defines
 }
 
+/// The define key of the base URL.
 const BASE_URL: &str = "import.meta.env.BASE_URL";
 /// The same value for the runtime's classic-script client files (client/live.js), which can't
 /// name `import.meta`.

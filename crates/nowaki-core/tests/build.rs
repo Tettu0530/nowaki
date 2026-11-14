@@ -115,8 +115,8 @@ fn build_output_is_the_same_every_time() {
     }
     let _ = fs::remove_dir_all(&root);
 
-    // The hoisted modules' order used to follow HashSet iteration, so the island chunk's
-    // names, bytes and hash (and the manifest) changed between identical builds.
+    // The hoisted modules' order must not follow HashSet iteration, or the island chunk's
+    // names, bytes and hash (and the manifest) change between identical builds.
     let names = |s: &Vec<(String, Vec<u8>)>| s.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
     let first = &builds[0];
     assert!(!first.is_empty());

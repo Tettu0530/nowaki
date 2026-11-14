@@ -56,6 +56,7 @@ pub fn exports_live(path: &Path, source: &str) -> bool {
     })
 }
 
+/// What the build suggests for a client island.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HintKind {
     /// State and click / form events only: works as a live island with no client JS.
@@ -64,8 +65,10 @@ pub enum HintKind {
     NoInteractivity,
 }
 
+/// A build hint for one client island.
 #[derive(Debug, Clone)]
 pub struct Hint {
+    /// The suggestion.
     pub kind: HintKind,
     /// What the island uses, for the message (e.g. "useState, onClick").
     pub uses: Vec<String>,
@@ -105,7 +108,8 @@ const BROWSER_GLOBALS: [&str; 22] = [
 ];
 
 /// Looks at one client island's own source. None when it needs the browser (other hooks, other
-/// events, browser globals, or imports other than preact / React / CSS), or can't be parsed.
+/// events, `ref`, browser globals, or imports other than Preact / React / CSS), when it has events
+/// but no state, or when it can't be parsed.
 /// Imported app modules aren't followed, so an island that imports one gets no hint.
 pub fn hint_for_island(path: &Path, source: &str) -> Option<Hint> {
     let allocator = Allocator::default();
@@ -155,6 +159,7 @@ pub fn hint_for_island(path: &Path, source: &str) -> Option<Hint> {
     None
 }
 
+/// What [`hint_for_island`] found while walking the AST.
 #[derive(Default)]
 struct Seen {
     hooks: BTreeSet<String>,

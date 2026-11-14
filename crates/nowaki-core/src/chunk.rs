@@ -1,11 +1,10 @@
-//! Scope-hoisting chunk generation.
+//! Scope-hoisting chunk generation for islands.
 //!
-//! The "app modules (under the project, not node_modules) reachable from an island and used
-//! only by that island" are concatenated into one scope (= scope hoisting).
-//! Top-level bindings are renamed to globally unique names; in-chunk imports become direct references,
-//! and imports outside the chunk (node_modules / shared modules) stay as ESM imports.
-//! node_modules are split into separate shared chunks, so there is only one preact instance.
-//! The whole chunk is minified after concatenation.
+//! The app modules (under the project, not node_modules) reachable from an island and used only
+//! by that island are concatenated into one scope. Top-level bindings are renamed to
+//! chunk-unique names (`<name>$<index>`); in-chunk imports become direct references, and imports
+//! from outside the chunk (packages, shared modules) stay ESM imports of their own chunks, so
+//! there is only one Preact instance. The whole chunk is minified after concatenation.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -39,7 +38,8 @@ pub fn module_deps(core: &NowakiCore, abs: &Path) -> Result<Vec<PathBuf>> {
         .collect())
 }
 
-/// Collects app-side modules reachable from entry (including entry). Doesn't descend into node_modules.
+/// Collects the app-side modules reachable from `entry` (including it). Doesn't descend into
+/// node_modules.
 pub fn collect_app_modules(core: &NowakiCore, entry: &Path) -> HashSet<PathBuf> {
     let mut set = HashSet::new();
     let mut stack = vec![entry.to_path_buf()];
@@ -58,7 +58,9 @@ pub fn collect_app_modules(core: &NowakiCore, entry: &Path) -> HashSet<PathBuf> 
     set
 }
 
-/// Whether this module contains syntax concatenation doesn't support (`export *` etc.).
+/// Whether this module can't be concatenated: it uses syntax concatenation doesn't support
+/// (`import * as`, `export *`, `export { … } from`, an anonymous or expression default export),
+/// is a `"use server"` module, or can't be read or parsed.
 pub fn needs_fallback(core: &NowakiCore, abs: &Path) -> bool {
     extract_meta(core, abs, 0)
         .map(|m| m.fallback)
@@ -67,20 +69,22 @@ pub fn needs_fallback(core: &NowakiCore, abs: &Path) -> bool {
 
 /// A module's import / export metadata (no AST kept).
 struct ModuleMeta {
-    /// (resolved absolute path, original specifier)
+    /// (resolved absolute path, original specifier).
     deps: Vec<(PathBuf, String)>,
-    /// export name → local binding name (`export {a as b}` gives b→a)
+    /// Export name → local binding name (`export {a as b}` gives b→a).
     exports: Vec<(String, String)>,
+    /// The module's import declarations.
     imports: Vec<ImportInfo>,
-    /// import local name → (source abs, imported name; `"default"` for a default import), so an
-    /// `export { x }` of an imported `x` (a barrel file) resolves to the binding it forwards
+    /// Import local name → (source abs, imported name; `"default"` for a default import), so an
+    /// `export { x }` of an imported `x` (a barrel file) resolves to the binding it forwards.
     import_bindings: HashMap<String, (PathBuf, String)>,
-    /// Global index used for the rename suffix
+    /// Chunk-wide index used for the rename suffix.
     idx: usize,
-    /// Contains unsupported syntax, so fall back to standalone emit
+    /// Contains unsupported syntax, so fall back to standalone emit.
     fallback: bool,
 }
 
+/// One import declaration: its resolved source and what it binds.
 struct ImportInfo {
     source_abs: PathBuf,
     items: Vec<ImportItem>,
@@ -90,15 +94,17 @@ struct ImportInfo {
 enum ImportItem {
     /// `import { imported as local }`
     Named { imported: String, local: String },
-    /// `import local`（default import）
+    /// `import local` (default import)
     Default { local: String },
     /// `import "x"` (side effects only)
     SideEffect,
 }
 
-/// Generates an island chunk's code. `internal` is the set of app modules concatenated into this chunk
-/// (including entry). `external_name` maps "out-of-chunk module abs → its separately emitted file name".
-/// Returns the chunk source (not minified). The entry's default export becomes the chunk's default.
+/// Generates an island chunk's code. `internal` is the set of app modules concatenated into this
+/// chunk (including `entry`). `external_name` maps each out-of-chunk module's absolute path to its
+/// separately emitted file name. Returns the chunk source (not minified). The entry's default
+/// export becomes the chunk's default. An import that doesn't resolve to a binding in the chunk is
+/// an error, so the caller can emit the island unbundled.
 #[allow(clippy::too_many_arguments)]
 pub fn hoist_chunk(
     core: &NowakiCore,
@@ -192,8 +198,8 @@ pub fn hoist_chunk(
 
 /// The chunk-wide name of `export_name` of the internal module `abs`. An export that forwards an
 /// import (`import { x } from "./a.ts"; export { x }`) resolves to the name render_body gives that
-/// import: the source module's binding when it is in the chunk, or our own suffixed alias of the
-/// external import. None when the module doesn't export the name.
+/// import: the source module's binding when it is in the chunk, or this module's suffixed alias of
+/// the external import. None when the module doesn't export the name.
 fn resolve_export(
     metas: &HashMap<PathBuf, ModuleMeta>,
     abs: &Path,
@@ -222,9 +228,11 @@ fn unresolved_import(importer: &Path, name: &str, source: &Path) -> anyhow::Erro
     )
 }
 
+/// How one module's imports are renamed in the chunk.
 #[derive(Default)]
 struct ImportWiring {
-    /// Original local name → renamed name (internal: the dep's global name; external: our own suffixed name)
+    /// Original local name → renamed name (internal: the dep's chunk-wide name; external: this
+    /// module's suffixed alias).
     rename_local: HashMap<String, String>,
 }
 
@@ -235,6 +243,7 @@ struct ExternalImports {
     files: Vec<ExternalImport>,
 }
 
+/// The import statement for one external chunk file.
 struct ExternalImport {
     file: String,
     default: Option<String>,
@@ -288,8 +297,8 @@ impl ExternalImport {
         }
     }
 
-    // Two modules can default-import the same file under different names; the second one
-    // becomes a named `default as` import so both bindings stay.
+    /// Two modules can default-import the same file under different names; the second one
+    /// becomes a named `default as` import so both bindings stay.
     fn add_default(&mut self, local: String) {
         match &self.default {
             None => self.default = Some(local),
@@ -299,12 +308,14 @@ impl ExternalImport {
     }
 }
 
-/// Extracts only import/export metadata (used for concatenation order and wiring).
+/// Extracts only import/export metadata (used for concatenation order and wiring). `idx` is the
+/// module's index in the chunk.
 fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta> {
     let allocator = Allocator::default();
     let source = core.read_source(abs)?;
-    // Server modules (`"use server"`) are a client concatenation boundary. Don't follow their deps (keeps
-    // server-only deps off the client) and don't concatenate them (emit makes the proxy a separate chunk).
+    // Server modules (`"use server"`) are a client concatenation boundary. Their deps aren't
+    // followed (keeps server-only deps off the client) and they aren't concatenated (`emit` makes
+    // the proxy a separate chunk).
     if crate::server_fn::has_use_server(&source) {
         return Ok(ModuleMeta {
             deps: Vec::new(),
@@ -376,7 +387,7 @@ fn extract_meta(core: &NowakiCore, abs: &Path, idx: usize) -> Result<ModuleMeta>
                 }
             }
             Statement::ExportFromDeclaration(d) => {
-                // `export {..} from` re-export unsupported. Still a dependency: the graph
+                // `export {..} from` re-exports are unsupported. Still a dependency: the graph
                 // walks (sharing counts, budgets) must see it.
                 meta.fallback = true;
                 if let Some(spec) = d.source.value.as_str() {
@@ -441,7 +452,7 @@ fn render_body(core: &NowakiCore, abs: &Path, idx: usize, wiring: &ImportWiring)
         &core.client_defines,
     );
 
-    // Set of import local names (to tell them apart from own bindings)
+    // Set of import local names (to tell them apart from own bindings).
     let mut import_locals: HashSet<String> = HashSet::new();
     for stmt in &program.body {
         if let Statement::ImportDeclaration(d) = stmt {
@@ -454,7 +465,8 @@ fn render_body(core: &NowakiCore, abs: &Path, idx: usize, wiring: &ImportWiring)
     }
 
     // Rename root-scope bindings:
-    //   import binding -> wiring.rename_local (the dep's global name or the external import's alias)
+    //   import binding -> wiring.rename_local (the dep's chunk-wide name or the external
+    //                     import's alias)
     //   own binding    -> `<name>$<idx>`
     let mut scoping = scoping;
     let root = scoping.root_scope_id();
@@ -491,7 +503,7 @@ fn render_body(core: &NowakiCore, abs: &Path, idx: usize, wiring: &ImportWiring)
             Statement::ExportDeclaration(d) => {
                 new_body.push(Statement::from(d.unbox().declaration))
             }
-            // Specifiers only (`export {a}`): the binding already exists, so drop it
+            // Specifiers only (`export {a}`): the binding already exists, so drop it.
             Statement::ExportNamedDeclaration(_) | Statement::ExportFromDeclaration(_) => {}
             Statement::ExportDefaultDeclaration(d) => {
                 let d = d.unbox();
@@ -518,6 +530,8 @@ fn render_body(core: &NowakiCore, abs: &Path, idx: usize, wiring: &ImportWiring)
     Ok(code)
 }
 
+/// Resolves an import as the client build does (remote images, React aliases, the client
+/// runtime alias). None for absolute paths, URLs, and `data:`.
 fn resolve(core: &NowakiCore, dir: &Path, spec: &str) -> Option<PathBuf> {
     if crate::resolve::split_remote_spec(spec).is_some() {
         return core.resolve_spec(dir, spec);
@@ -537,7 +551,8 @@ fn export_name_str(n: &ModuleExportName) -> String {
     match n {
         ModuleExportName::IdentifierName(i) => i.name.to_string(),
         ModuleExportName::IdentifierReference(i) => i.name.to_string(),
-        // Export names must be well-formed Unicode (an early error otherwise), so `display` is exact.
+        // Export names must be well-formed Unicode (an early error otherwise), so `display` is
+        // exact.
         ModuleExportName::StringLiteral(s) => s.value.display().to_string(),
     }
 }
@@ -573,6 +588,8 @@ fn decl_bound_names(decl: &Declaration) -> Vec<String> {
     }
 }
 
+/// Appends `abs` to `order` after its in-chunk deps (post-order DFS; a cycle stops at a module
+/// already on the stack).
 fn order_modules(
     abs: &Path,
     metas: &HashMap<PathBuf, ModuleMeta>,
@@ -601,7 +618,8 @@ pub(crate) fn client_codegen_options(source_map_path: PathBuf) -> CodegenOptions
     CodegenOptions {
         minify: true,
         source_map_path: Some(source_map_path),
-        // Nothing bundles the output again, so `/* @__PURE__ */` and other annotations are dead bytes.
+        // Nothing bundles the output again, so `/* @__PURE__ */` and other annotations are dead
+        // bytes.
         comments: CommentOptions {
             legal: LegalComment::Inline,
             ..CommentOptions::disabled()
@@ -610,8 +628,8 @@ pub(crate) fn client_codegen_options(source_map_path: PathBuf) -> CodegenOptions
     }
 }
 
-/// Re-parses the concatenated chunk source, then minifies + codegens it (with an external source map).
-/// Returns (final code, source map JSON).
+/// Re-parses the concatenated chunk source, then minifies and prints it with an external source
+/// map. Returns (final code, source map JSON).
 pub fn minify_chunk(name: &str, source: &str) -> Result<(String, Option<String>)> {
     let allocator = Allocator::default();
     let path = Path::new(name);

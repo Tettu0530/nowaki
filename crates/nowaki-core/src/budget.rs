@@ -26,9 +26,10 @@ use crate::routes::{
 };
 use crate::NowakiCore;
 
+/// First-load client JS of one page route, and its budget.
 #[derive(Debug, Clone)]
 pub struct RouteJs {
-    /// URL pattern, e.g. `/blog/[slug]`.
+    /// Route path pattern, e.g. `/blog/[slug]`.
     pub url: String,
     /// Route file relative to the app root (POSIX separators).
     pub file: String,
@@ -45,15 +46,19 @@ pub struct RouteJs {
 }
 
 impl RouteJs {
+    /// First-load gzip size in KiB.
     pub fn kb(&self) -> f64 {
         self.gzip_bytes as f64 / 1024.0
     }
+    /// Whether the route has a budget and its first load is over it.
     pub fn over_budget(&self) -> bool {
         self.budget_kb.is_some_and(|b| self.kb() > b)
     }
 }
 
-/// Every page route (API routes and convention files excluded), in URL order.
+/// The first-load JS of every page route (API routes, convention files, and slot or intercept
+/// files excluded), sorted by route path. `client_dir` is the client build output the sizes are
+/// read from. A `budget` export that can't be read is an error.
 pub fn route_first_load(
     core: &NowakiCore,
     client: &ClientInfo,
@@ -200,7 +205,8 @@ fn add_with_preloads(chunks: &mut BTreeSet<String>, chunk: &str, client: &Client
     }
 }
 
-/// `_layout.*` files that wrap `rel`: one per directory from `routes/` down to the route's own.
+/// `_layout.*` files that wrap `rel` (relative to `routes/`): at most one per directory from
+/// `routes/` down to the route's own.
 pub fn layouts_for(routes_dir: &Path, rel: &str) -> Vec<PathBuf> {
     let mut dirs = vec![routes_dir.to_path_buf()];
     let mut dir = routes_dir.to_path_buf();
@@ -326,7 +332,8 @@ fn is_streaming(path: &Path, source: &str) -> bool {
 }
 
 /// Reads `export const budget = { js: <KiB> }` from the route's AST. None when there is no such
-/// export; an error when there is one we can't read, so a typo never silently disables a budget.
+/// export; an error when there is one that can't be read, so a typo never silently disables a
+/// budget.
 pub fn parse_budget(path: &Path, source: &str) -> Result<Option<f64>> {
     if !source.contains("budget") {
         return Ok(None);

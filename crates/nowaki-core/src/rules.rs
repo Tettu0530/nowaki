@@ -1,6 +1,6 @@
 //! Config-level routing rules: nowaki.config `basePath`, `trailingSlash`, `redirects`,
-//! `rewrites` and `headers`, read from the normalized `dist/server/routing.json` (the CLI's
-//! site-config.mjs normalizes and validates the config at build time).
+//! `rewrites`, `headers` and `i18n`, read from the normalized `dist/server/routing.json` (the
+//! runtime's `server/site-config.mjs` normalizes and validates the config at build time).
 //!
 //! Pure data and string matching, the same compiler and matcher as the runtime's
 //! `server/rules.mjs`; `tests/fixtures/rules-cases.json` drives both. Sources and destinations
@@ -20,10 +20,15 @@ use serde::{Deserialize, Serialize};
 pub struct RoutingConfig {
     /// `""` or a path like `/app` (no trailing slash).
     pub base_path: String,
+    /// `trailingSlash`.
     pub trailing_slash: TrailingSlash,
+    /// `redirects`, in config order.
     pub redirects: Vec<RedirectRule>,
+    /// `rewrites`, in config order.
     pub rewrites: Vec<RewriteRule>,
+    /// `headers`, in config order.
     pub headers: Vec<HeaderRule>,
+    /// `i18n`, when configured.
     pub i18n: Option<I18nConfig>,
 }
 
@@ -32,18 +37,24 @@ pub struct RoutingConfig {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TrailingSlash {
+    /// `/about/` redirects to `/about`.
     Never,
+    /// `/about` redirects to `/about/` (paths whose last segment has a `.` excepted).
     Always,
+    /// Both forms are served.
     #[default]
     Ignore,
 }
 
+/// One `redirects` entry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct RedirectRule {
+    /// The route path pattern to match (`/old/[slug]`).
     pub source: String,
     /// A path (`/new/[slug]`) or an `http(s)://` URL.
     pub destination: String,
+    /// 301, 302, 303, 307 (the default) or 308.
     #[serde(default = "default_status")]
     pub status: u16,
     /// With i18n configured, `false` matches the source against the path with its locale prefix
@@ -64,42 +75,56 @@ fn is_true(b: &bool) -> bool {
     *b
 }
 
+/// One `rewrites` entry: the request is routed as `destination` without a redirect.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct RewriteRule {
+    /// The route path pattern to match.
     pub source: String,
     /// An internal path only.
     pub destination: String,
-    /// See [`RedirectRule::locale`].
+    /// As `locale` on [`RedirectRule`].
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub locale: bool,
 }
 
+/// One `headers` entry: response headers for the paths `source` matches.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct HeaderRule {
+    /// The route path pattern to match.
     pub source: String,
+    /// The headers to set.
     pub headers: Vec<Header>,
-    /// See [`RedirectRule::locale`].
+    /// As `locale` on [`RedirectRule`].
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub locale: bool,
 }
 
+/// One response header of a [`HeaderRule`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Header {
+    /// The header name (a token).
     pub key: String,
+    /// The value (no CR, LF or NUL).
     pub value: String,
 }
 
+/// nowaki.config `i18n`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct I18nConfig {
+    /// Every locale tag, the default included.
     pub locales: Vec<String>,
+    /// The locale served without a prefix (unless `prefix_default_locale`).
     pub default_locale: String,
+    /// `prefixDefaultLocale`: the default locale gets a `/<locale>` prefix too.
     #[serde(default)]
     pub prefix_default_locale: bool,
+    /// `detect`: the site's root redirects by cookie or `Accept-Language` (see
+    /// [`Rules::negotiate`]).
     #[serde(default)]
     pub detect: bool,
 }
@@ -107,7 +132,8 @@ pub struct I18nConfig {
 /// What a request becomes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
-    /// Send a redirect. `location` doesn't carry the request's query; the caller appends it.
+    /// Send a redirect with `status`. `location` doesn't carry the request's query; the caller
+    /// appends it.
     Redirect { status: u16, location: String },
     /// Route this internal path instead (basePath already removed).
     Rewrite(String),
@@ -135,6 +161,8 @@ const MAX_ACCEPT_LANGUAGE: usize = 4096;
 /// Language ranges read from `Accept-Language`; the rest are ignored.
 const MAX_LANGUAGE_RANGES: usize = 32;
 
+/// One compiled segment of a source or destination: a literal, `[name]`, `[name].ext`, or
+/// `[...name]`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Seg {
     Lit(String),
@@ -346,6 +374,7 @@ impl Rules {
         Some(Negotiated::Redirect(self.browser_path(&path, false)))
     }
 
+    /// The configured basePath (`""` at the root).
     pub fn base_path(&self) -> &str {
         &self.base
     }
@@ -617,6 +646,7 @@ fn decode_parts(p: &str) -> Option<Vec<String>> {
         .collect()
 }
 
+/// A source parameter's value: one segment, or the segments `[...name]` matched.
 #[derive(Debug, Clone)]
 enum Capture {
     One(String),
@@ -870,6 +900,7 @@ fn is_control(c: char) -> bool {
     c < ' ' || c == '\u{7f}'
 }
 
+/// Checks a basePath: `""`, or `/` followed by non-empty segments and no trailing slash.
 pub(crate) fn check_base_path(base: &str) -> Result<(), String> {
     if base.is_empty() {
         return Ok(());

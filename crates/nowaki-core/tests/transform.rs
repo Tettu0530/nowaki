@@ -1,5 +1,5 @@
 //! Integration tests for transform_file (cases that need no import resolution).
-//! Covers TS type stripping, JSX→preact, and the react→preact/compat alias.
+//! Covers TS type stripping, JSX → Preact, and the `react` → `preact/compat` alias.
 
 use std::path::Path;
 

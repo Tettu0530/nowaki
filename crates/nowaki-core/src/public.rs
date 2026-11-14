@@ -55,7 +55,8 @@ pub fn resolve(base: &Path, url_path: &str) -> Option<PathBuf> {
 }
 
 /// Every file under `base`, as `(url path, file path)`, sorted by URL. Empty when `base` doesn't
-/// exist. Skipped entries are the ones `resolve` would refuse.
+/// exist. Names `resolve` refuses (dotfiles except `.well-known`) and names that aren't UTF-8 are
+/// skipped; files under the reserved prefixes are listed, and [`copy_to`] rejects them.
 pub fn list(base: &Path) -> Result<Vec<(String, PathBuf)>> {
     let mut out = Vec::new();
     if base.is_dir() {
