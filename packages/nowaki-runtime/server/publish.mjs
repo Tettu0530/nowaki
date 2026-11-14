@@ -2,7 +2,7 @@
 // running its `live.load` and pushing the patch. Under `nowaki dev` / `nowaki start` the sidecar
 // tells the Rust live hub through a stdout line carrying a per-process token only Nowaki's own
 // sidecars receive (NOWAKI_PUBLISH_TOKEN), so log output can't trigger it. It reaches connections
-// in this process only. The adapters have no live push yet, so it's a no-op there (warned once).
+// in this process only. On the deploy adapters it does nothing (warned once).
 
 const env = globalThis.process?.env ?? {};
 let warned = false;
@@ -18,6 +18,6 @@ export function publish(topic) {
   }
   if (!warned) {
     warned = true;
-    console.warn("[nowaki] publish() reaches live islands only under `nowaki dev` / `nowaki start` for now.");
+    console.warn("[nowaki] publish() reaches live islands only under `nowaki dev` / `nowaki start`; on this server it does nothing.");
   }
 }

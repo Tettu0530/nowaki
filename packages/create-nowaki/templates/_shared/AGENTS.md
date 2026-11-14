@@ -76,8 +76,10 @@ session.ts   ctx.session options (optional)
    `params.path` is the array `["a","b","c"]`. Add `export const revalidate = 60`
    (seconds) to a route for ISR: the HTML is cached and regenerated in the
    background when stale (don't put per-user data on an ISR page).
-5. **API routes** are `routes/api/*.ts` with per-method exports; return a value
-   (JSON-encoded) or a `Response`:
+5. **API routes** are `routes/api/*.ts` with per-method exports (uppercase: `GET`,
+   `POST`, ...); return a value (JSON-encoded) or a `Response`. `PageModule`,
+   `LayoutModule` and `ApiModule` from `@nowaki-dev/runtime` type every route
+   export (`export const revalidate: PageModule["revalidate"] = 60`):
    ```ts
    export const GET = (ctx) => ctx.json({ ok: true });
    export const POST = async (ctx) => ctx.json({ got: await ctx.bodyJson() });
@@ -183,9 +185,11 @@ session.ts   ctx.session options (optional)
     `site` in nowaki.config for absolute URLs and the generated `/sitemap.xml` and
     `/robots.txt`.
 14. **Routing config** in `nowaki.config.mjs` (sources use the route syntax),
-    applied by `nowaki dev`, `nowaki start`, and every adapter:
+    applied by `nowaki dev`, `nowaki start`, and every adapter. `defineConfig` types
+    it; an unknown key is an error (with a "did you mean" hint):
     ```js
-    export default {
+    import { defineConfig } from "@nowaki-dev/runtime/config";
+    export default defineConfig({
       site: "https://example.com",
       basePath: "/docs",                  // everything lives under /docs
       trailingSlash: "never",             // or "always" / "ignore" (default)
@@ -193,7 +197,7 @@ session.ts   ctx.session options (optional)
       rewrites: [{ source: "/p/[slug]", destination: "/blog/[slug]" }],
       headers: [{ source: "/api/[...rest]", headers: { "cache-control": "no-store" } }],
       i18n: { locales: ["en", "ja"], defaultLocale: "en", detect: true },
-    };
+    });
     ```
     Under `basePath`, `<Link>` and `ctx.redirect` add the base; rules are relative
     to it. With `i18n`, non-default locales get a prefix (`/ja/about`; `detect`
@@ -202,7 +206,8 @@ session.ts   ctx.session options (optional)
     `<Link href="/about">` keeps the current locale; `<Link locale="ja">` switches
     it. For URLs `<Link>` doesn't build (form actions, `fetch`), use `href("/x")`
     from `@nowaki-dev/runtime/navigation`, which adds the locale and base the same
-    way. Don't concatenate `import.meta.env.BASE_URL` by hand. `nowaki dev`
+    way; `routePath(url)` (same module) and `ctx.routePath` go the other way, the
+    app path without base and locale. Don't concatenate `import.meta.env.BASE_URL` by hand. `nowaki dev`
     reads nowaki.config at startup: restart it after a change.
 15. **Sessions** — `ctx.session` (and `getContext().session`) is an encrypted
     cookie: `await ctx.session.get("userId")`, `set`, `delete`. Call

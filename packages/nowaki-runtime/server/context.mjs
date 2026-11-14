@@ -10,7 +10,7 @@ export function makeContext(info) {
   const { url, params = {}, method = "GET", req } = info;
   // Callers may inject headers / readBody (Node: from req; Edge: from the Web Request).
   const reqHeaders = info.headers ?? req?.headers ?? {};
-  const readBodyFn = info.readBody ?? (() => readBodyNode(req, FORM_BODY_LIMIT));
+  const readBodyFn = info.readBody ?? ((limit = FORM_BODY_LIMIT) => readBodyNode(req, limit));
   const resHeaders = new Map();
   const setCookies = [];
 
@@ -51,12 +51,32 @@ export function makeContext(info) {
   let cookiesCache;
   let session;
 
+  // The request body, at most `limit` bytes (FORM_BODY_LIMIT for formData / bodyText / bodyJson,
+  // an endpoint's own cap for `__bodyText`): a Content-Length over it is refused (413) before
+  // anything is read, and a longer body while streaming. It is read once (a second formData() /
+  // bodyText() reuses it instead of waiting on an ended stream), capped while streaming at the
+  // first reader's limit; each reader then checks its own cap on the bytes. Touching it makes the
+  // render depend on the body, so no shared ISR cache (prevents per-user mixups).
+  let bodyPromise = null;
+  const readBody = async (limit = FORM_BODY_LIMIT) => {
+    reqAccessed = true;
+    if (contentLengthOverLimit(reqHeaders, limit)) {
+      discardUnreadBody(req);
+      throw new RequestBodyError(`request body exceeds ${limit} byte limit`, { status: 413 });
+    }
+    // Started synchronously, so the Node stream listeners are attached before any data event.
+    bodyPromise ??= (async () => readBodyFn(limit))();
+    return assertBufferedBodySize(await bodyPromise, limit);
+  };
+
   const ctx = {
     url: urlProxy,
     params,
     method,
     // The request's locale with i18n configured (handler.mjs `localizedRequest`), else undefined.
     locale: info.locale,
+    // The path routing used (handler.mjs passes it): without basePath and the locale prefix.
+    routePath: info.routePath ?? url.pathname,
     // Header/query access through raw req (Node IncomingMessage) can't be tracked, so
     // touching it counts as "depends on everything" and disables the ISR cache (prevents per-user leaks).
     get req() {
@@ -98,31 +118,19 @@ export function makeContext(info) {
       return reqHeaders[String(name).toLowerCase()];
     },
     async formData() {
-      reqAccessed = true; // depends on body/Content-Type → no shared ISR cache (prevents per-user mixups)
-      const ct = reqHeaders["content-type"] ?? "";
-      if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
-        discardUnreadBody(req);
-        throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
-      }
-      const buf = assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT);
-      return await parseFormBody(buf, ct);
+      return await parseFormBody(await readBody(), reqHeaders["content-type"] ?? "");
     },
     async bodyText() {
-      reqAccessed = true;
-      if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
-        discardUnreadBody(req);
-        throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
-      }
-      return decodeBody(assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT));
+      return decodeBody(await readBody());
     },
     async bodyJson() {
-      reqAccessed = true;
-      if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
-        discardUnreadBody(req);
-        throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
-      }
-      const s = decodeBody(assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT));
+      const s = decodeBody(await readBody());
       return s ? JSON.parse(s) : null;
+    },
+    // Internal: the body as text under an endpoint's own byte cap, enforced while streaming
+    // (server functions, live events, the revalidate endpoint). Throws a 413 RequestBodyError.
+    async __bodyText(limit) {
+      return decodeBody(await readBody(limit));
     },
 
     status(code) {
@@ -173,7 +181,8 @@ function result(status, contentType, body, extra) {
 }
 
 function parseCookies(header) {
-  const out = {};
+  // No prototype: `ctx.cookies.constructor` / `__proto__` are not cookies the request sent.
+  const out = Object.create(null);
   for (const part of String(header).split(";")) {
     const i = part.indexOf("=");
     if (i < 0) continue;

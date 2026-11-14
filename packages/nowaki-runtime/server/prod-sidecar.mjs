@@ -13,10 +13,13 @@ import { contextReads, runWithContext } from "./functions.mjs";
 import { pageMeta } from "./document.mjs";
 import { persistRooms } from "./live-rooms-file.mjs";
 import { isrUrls } from "./isr-urls.mjs";
-import { requestOrigin } from "./origin.mjs";
+import { requestOrigin, requestUrl, trustSidecarHop } from "./origin.mjs";
 import { flushDetached, setRevalidateEnv } from "./revalidate.mjs";
 import { logError } from "./log.mjs";
 import { HEALTH_BODY, HEALTH_HEADERS, HEALTH_PATH } from "./health.mjs";
+
+// Spawned by `nowaki start`: a loopback Host is the Rust hop (see origin.mjs).
+trustSidecarHop();
 
 const appRoot = process.cwd();
 persistRooms(appRoot);
@@ -105,7 +108,7 @@ const server = createServer(async (req, res) => {
     return;
   }
   try {
-    const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
+    const url = requestUrl(req.url, requestOrigin((name) => req.headers[name]));
     // The Rust front sets x-nowaki-route-path for a rewrite or basePath (and drops a client's own).
     const routePath = req.headers["x-nowaki-route-path"];
     const result = await handleRequest(env, { method: req.method, url, version: "prod", req, routePath });

@@ -93,6 +93,9 @@ async function serverFnHardening(b, m) {
     check("dev: unexpected server function error keeps its message",
       broken.status === 500 && /hunter2/.test(broken.data?.error ?? ""));
   }
+  for (const id of ["__proto__", "constructor", "toString"]) {
+    check(`server function id ${id} is not in the allowlist (404)`, (await rpc({ id, args: [] })).status === 404);
+  }
   check("server function argument count limit (400)",
     (await rpc({ id: "6c90d7dc921a9a3f", args: Array(17).fill(0) })).status === 400);
   check("server function body size limit (413)",
@@ -212,6 +215,30 @@ async function sessionGuards(b) {
   check("session: a tampered cookie reads as empty", tampered.user === null);
   const forged = await (await fetch(`${b}/api/session`, { headers: { cookie: "hello_session=v1.eyJkIjp7InVzZXIiOiJhZG1pbiJ9fQ" } })).json();
   check("session: a forged cookie reads as empty", forged.user === null);
+}
+
+// POST /__nowaki/revalidate: 404 while NOWAKI_REVALIDATE_SECRET is unset (or blank), then only the
+// exact bearer secret, JSON only, no-store. `setSecret(value | undefined)` sets it for the server.
+async function revalidateGate(b, setSecret) {
+  const post = (auth, ct = "application/json") =>
+    fetch(`${b}/__nowaki/revalidate`, {
+      method: "POST",
+      headers: { "content-type": ct, ...(auth ? { authorization: `Bearer ${auth}` } : {}) },
+      body: JSON.stringify({ paths: ["/isr"] }),
+    });
+  const secret = "e2e-revalidate-secret-0123456789abcdef";
+  setSecret(undefined);
+  check("revalidate: 404 while NOWAKI_REVALIDATE_SECRET is unset", (await post(secret)).status === 404);
+  setSecret("  ");
+  check("revalidate: 404 with a blank secret", (await post("")).status === 404);
+  setSecret(secret);
+  check("revalidate: wrong secret 401", (await post("x" + secret.slice(1))).status === 401);
+  check("revalidate: a prefix of the secret 401", (await post(secret.slice(0, -1))).status === 401);
+  check("revalidate: no Authorization 401", (await post(null)).status === 401);
+  check("revalidate: text/plain 415", (await post(secret, "text/plain")).status === 415);
+  const ok = await post(secret);
+  check("revalidate: the secret purges (200, no-store)", ok.status === 200 && /no-store/.test(ok.headers.get("cache-control") || ""));
+  setSecret(undefined);
 }
 
 // Default security headers on pages, 404s, and static assets (both modes) and on ISR hits (prod).
@@ -368,6 +395,24 @@ if (mode === "dev") {
     (await statusOf(fsUrl(outside))) === 403);
   check("@fs .env blocked (403)",
     (await statusOf(fsUrl(`${appRoot}/.env`))) === 403);
+  // Credential files under the app root (Wrangler's .dev.vars, registry tokens): never served.
+  {
+    const fs = await import("node:fs");
+    const nodePath = await import("node:path");
+    for (const name of [".dev.vars", ".npmrc"]) {
+      const file = nodePath.join(appRoot, name);
+      if (fs.existsSync(file)) continue;
+      fs.writeFileSync(file, "TOKEN=security-e2e-credential\n");
+      try {
+        const viaFs = await fetch(fsUrl(file));
+        const viaRoot = await fetch(`${base}/${name}`);
+        check(`@fs ${name} blocked (403)`, viaFs.status === 403);
+        check(`${name} not served by the dev fallback`, !(await viaRoot.text()).includes("security-e2e-credential"));
+      } finally {
+        fs.rmSync(file, { force: true });
+      }
+    }
+  }
   check(`ssr-module arbitrary read blocked (${outside} → 403)`,
     (await statusOf(`${base}/__nowaki/ssr-module?path=${enc(outside)}`)) === 403);
   check("ssr-module .env blocked (403)",
@@ -384,6 +429,103 @@ if (mode === "dev") {
   // HMR is dev-only.
   check("CSWSH /__nowaki/hmr cross-origin upgrade rejected (403)",
     (await wsUpgrade(base, "/__nowaki/hmr", "http://evil.test")) === 403);
+}
+
+// Internal headers never reach a client, on every server: no `x-nowaki-*` response header except
+// the documented `x-nowaki-cache` (and the two client ones below), and no `Set-Cookie` next to a shared-cacheable `Cache-Control`
+// (`public` / `s-maxage`). `req(path, init)` returns a Response (fetch against a server, or a
+// Worker's fetch handler called in-process). Requests also send forged internal headers, which
+// must not be echoed back or change the answer into a shared one.
+// Allowed: the documented x-nowaki-cache, x-nowaki-slot (the intercepting-route fragment the client
+// router reads; private, no-store), and x-nowaki-mw (examples/hello's own _middleware sets it).
+const CLIENT_HEADERS = new Set(["x-nowaki-cache", "x-nowaki-slot", "x-nowaki-mw"]);
+async function internalHeaderSweep(req, label, origin) {
+  const forged = { "x-nowaki-vary": "cookie", "x-nowaki-purge": "/", "x-nowaki-tags": "t", "x-nowaki-route": "/admin", "x-nowaki-route-path": "/secret" };
+  const form = { "content-type": "application/x-www-form-urlencoded", origin };
+  const json = { "content-type": "application/json", origin };
+  const cases = [
+    ["/"], ["/"], ["/about"], ["/isr"], ["/isr"], ["/isr?cb=1"], ["/isr-tagged"], ["/isr-tagged"],
+    ["/vary", { headers: { "accept-language": "de" } }], ["/vary", { headers: { "accept-language": "de" } }],
+    ["/isr-cookie", { headers: { cookie: "user=alice" } }], ["/isr-sets-cookie"], ["/isr-sets-cookie"],
+    ["/stream"], ["/stream-early"], ["/live"], ["/env"], ["/feed.xml"], ["/og/intro.png"], ["/robots.txt"],
+    ["/nope"], ["/boom?boom=1"], ["/old-docs/intro"], ["/p/hello"], ["/photos/1"],
+    ["/photos/1", { headers: { "x-nowaki-intercept": "/photos/@modal" } }],
+    ["/api/hello"], ["/api/echo", { method: "POST", headers: json, body: "{}" }],
+    ["/api/session"], ["/api/session", { method: "POST", headers: form, body: "op=login&user=sweep" }],
+    ["/api/session", { method: "POST", headers: { ...form, origin: "http://evil.test" }, body: "op=inc" }],
+    ["/todos", { method: "POST", headers: { ...form, origin: "http://evil.test" }, body: "text=x" }],
+    ["/__nowaki/health"], ["/__nowaki/boundaries"],
+    ["/__nowaki/fn", { method: "POST", headers: { ...json, "x-nowaki-rpc": "1" }, body: '{"id":"nope","args":[]}' }],
+    ["/__nowaki/revalidate", { method: "POST", headers: { ...json, authorization: "Bearer wrong" }, body: '{"paths":["/"]}' }],
+    ["/__nowaki/live-event", { method: "POST", headers: { ...json, "x-nowaki-live": "1" }, body: "{}" }],
+  ];
+  const home = await (await req("/")).text();
+  const asset = home.match(/\/_nowaki\/[A-Za-z0-9_.-]+\.js/)?.[0];
+  if (asset) cases.push([asset]);
+  let leaks = [];
+  let shared = [];
+  for (const [p, init = {}] of cases) {
+    for (const extra of [{}, forged]) {
+      const r = await req(p, { redirect: "manual", ...init, headers: { ...(init.headers || {}), ...extra } });
+      await r.arrayBuffer().catch(() => {});
+      for (const [k] of r.headers) {
+        if (k.toLowerCase().startsWith("x-nowaki-") && !CLIENT_HEADERS.has(k.toLowerCase())) leaks.push(`${p} ${k}`);
+      }
+      const cc = r.headers.get("cache-control") || "";
+      if (r.headers.get("set-cookie") && /public|s-maxage/i.test(cc)) shared.push(`${p} (${cc})`);
+    }
+  }
+  leaks = [...new Set(leaks)];
+  shared = [...new Set(shared)];
+  check(`${label}: no internal x-nowaki-* response header (${cases.length} requests x2)${leaks.length ? ` leaked: ${leaks.join(", ")}` : ""}`, leaks.length === 0);
+  check(`${label}: no Set-Cookie on a shared-cacheable response${shared.length ? ` (${shared.join(", ")})` : ""}`, shared.length === 0);
+}
+
+// `headers <base> [label]`: only the sweep, against any HTTP server (nowaki start, node / vercel
+// adapters, bun, deno). `headers-worker <workerDir>`: against the Cloudflare Worker's fetch handler.
+if (mode === "headers" || mode === "headers-worker") {
+  if (mode === "headers") {
+    await internalHeaderSweep((p, init) => fetch(`${base}${p}`, init), appRoot || "server", base);
+  } else {
+    const { pathToFileURL } = await import("node:url");
+    const nodePath = await import("node:path");
+    const worker = (await import(pathToFileURL(nodePath.resolve(base, "index.js")).href)).default;
+    const ORIGIN = "https://app.example";
+    const store = new Map();
+    // A stand-in Cache API, so the Worker's ISR store and hit paths run too.
+    const cache = {
+      match: async (k) => store.get(typeof k === "string" ? k : k.url)?.clone(),
+      put: async (k, r) => { store.set(typeof k === "string" ? k : k.url, r.clone()); },
+      delete: async (k) => store.delete(typeof k === "string" ? k : k.url),
+    };
+    globalThis.caches ??= { default: cache, open: async () => cache };
+    const env = {
+      ASSETS: { fetch: async () => new Response("asset", { headers: { "content-type": "text/javascript" } }) },
+      NOWAKI_SESSION_SECRET: "sweep-session-secret-0123456789abcdef",
+      NOWAKI_REVALIDATE_SECRET: "sweep-revalidate-secret-0123456789abcdef",
+    };
+    const ctx = { waitUntil: () => {}, passThroughOnException: () => {} };
+    await internalHeaderSweep((p, init) => worker.fetch(new Request(ORIGIN + p, init), env, ctx), "cloudflare worker", ORIGIN);
+    // The session and revalidate checks of the server modes, against the Worker: fetch() to
+    // ORIGIN goes to its fetch handler.
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (u, init) => (new URL(String(u)).origin === new URL(ORIGIN).origin ? worker.fetch(new Request(u, init), env, ctx) : realFetch(u, init));
+    await sessionGuards(ORIGIN);
+    const login = await fetch(`${ORIGIN}/api/session`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: ORIGIN },
+      body: "op=login&user=w",
+    });
+    check("worker: the session cookie is Secure over https", /;\s*Secure/i.test(login.headers.get("set-cookie") || ""));
+    await revalidateGate(ORIGIN, (v) => {
+      if (v === undefined) delete process.env.NOWAKI_REVALIDATE_SECRET;
+      else process.env.NOWAKI_REVALIDATE_SECRET = v;
+    });
+    globalThis.fetch = realFetch;
+  }
+  console.log(fails ? `\nSECURITY-E2E FAILED (${fails})` : "\nSECURITY-E2E PASSED");
+  await sleep(50);
+  process.exit(fails ? 1 : 0);
 }
 
 // Checks that hold in both modes (dev and prod share the RPC gate, WS origin checks, live
@@ -429,7 +571,10 @@ if (mode === "prod") {
   // nor the built-in fallback used when _500 itself throws.
   const stackLike = /\n\s+at |\(file:\/\/|node:internal/;
   const err500 = await fetch(`${base}/boom?boom=1`);
-  check("prod _500 page has no stack trace", err500.status === 500 && !stackLike.test(await err500.text()));
+  const err500Body = await err500.text();
+  check("prod _500 page has no stack trace", err500.status === 500 && !stackLike.test(err500Body));
+  // The loader threw "Intentional error (_500.tsx demo)": the custom page gets no error text either.
+  check("prod _500 page gets no error message", err500Body.includes("A server error occurred") && !err500Body.includes("Intentional error"));
   const nested = await fetch(`${base}/boom?boom=nested`);
   const nestedBody = await nested.text();
   check(`prod fallback 500 is generic (${JSON.stringify(nestedBody.slice(0, 40))})`,

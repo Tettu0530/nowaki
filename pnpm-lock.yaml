@@ -74,6 +74,9 @@ importers:
         specifier: 0.5.11
         version: 0.5.11
     devDependencies:
+      '@nowaki-dev/runtime':
+        specifier: workspace:*
+        version: link:../nowaki-runtime
       preact:
         specifier: ^11.2.0
         version: 11.2.0(preact-render-to-string@6.8.2)

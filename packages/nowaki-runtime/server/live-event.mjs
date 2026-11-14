@@ -26,10 +26,16 @@ export async function dispatchLiveEvent(ctx, info, live) {
   if (isCrossSite((n) => ctx.get(n))) return errBody(403, "Forbidden");
   if (Number(ctx.get("content-length")) > BODY_LIMIT) return errBody(413, "Payload Too Large");
 
+  let text = "";
+  try {
+    // Capped while streaming (a chunked body has no Content-Length to check above).
+    text = await ctx.__bodyText(BODY_LIMIT);
+  } catch (err) {
+    // Over the body limit while reading: 413, not 400.
+    if (err?.name === "RequestBodyError") return errBody(err.status, err.status === 413 ? "Payload Too Large" : "Bad Request");
+  }
   let body = null;
   try {
-    const text = await ctx.bodyText();
-    if (text.length > BODY_LIMIT) return errBody(413, "Payload Too Large");
     body = JSON.parse(text);
   } catch {}
   const name = typeof body?.name === "string" ? body.name : "";

@@ -11,7 +11,104 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Upgrade notes
+- **Breaking: `nowaki dev` and `nowaki start` read `PORT`.** Without `--port` they listen on
+  `PORT` (as the node / bun / deno adapters already did), else 3000. If `PORT` is set in
+  your environment for something else, pass `--port`. An invalid `PORT` is an error.
+- **Breaking: `--host` takes an optional address** on `nowaki dev` and `nowaki start`:
+  `--host` alone still listens on all interfaces (`0.0.0.0`), `--host 10.0.0.5` on one
+  address. The flag wins over `NOWAKI_HOST`, which `nowaki dev` now reads too (default
+  `127.0.0.1`). A word right after `--host` is read as the address, so write
+  `nowaki dev my-app --host` (directory first) instead of `nowaki dev --host my-app`; the
+  CLI stops with that hint when the value is a directory.
+- **Breaking: the CLI refuses a `@nowaki-dev/runtime` of another major**, not only an older
+  one (on 0.x a minor counts as a major, so CLI 0.20.x refuses runtime 0.21.0). Prereleases
+  are ordered as SemVer says (`1.0.0-rc.1` < `1.0.0-rc.2` < `1.0.0`), so CLI 1.0.0 refuses a
+  1.0.0-rc runtime. Install the same version of `nowaki` and `@nowaki-dev/runtime`; the error
+  names both versions and the command to fix it.
+- **Breaking: `ctx.formData()` always returns `FormData`.** Urlencoded bodies used to return
+  `URLSearchParams`. Both media types now return `FormData`, as the platform `Request.formData()`
+  does. `form.get()` is `string | File | null`. Read text with `String(form.get("x") ?? "")`.
+  Methods that exist only on `URLSearchParams` (`toString()`, `sort()`) need rewriting. This is
+  not a patch-level change.
+- **`NOWAKI_FORM_BODY_LIMIT` (default 10 MiB)** now applies to **`bodyText()` and `bodyJson()`** on
+  every runtime (not only multipart). JSON API routes must stay under the form limit when handlers
+  read the body through these helpers, or read the raw stream another way. Server functions
+  (`NOWAKI_FN_BODY_LIMIT`), live events and the revalidate endpoint use their own caps.
+- **Breaking: unknown top-level `nowaki.config` keys are an error.** They used to be ignored, so a
+  typo (`basepath: "/app"`) did nothing. `nowaki dev` / `build` / `prerender` now stop with
+  `unknown top-level key "basepath". Did you mean "basePath"?` and the list of keys (`site`,
+  `fonts`, `basePath`, `trailingSlash`, `redirects`, `rewrites`, `headers`, `i18n`, `images`,
+  `plugins`). Nested keys already threw; they get the same hint. Who: apps whose config has any
+  other key (a leftover, or app settings kept in the same object). How: fix the typo, or move
+  your own settings out of the default export (a named export is fine, it isn't read). `plugins`
+  must now be an array.
+- **Breaking: `fonts` entries are validated, with one shape per kind.** A Google font is
+  `{ family, provider: "google", weights?, styles?, subsets? }`; a local font is
+  `{ family, src: "<file>", weight?, style? }` or `{ family, src: [{ path, weight?, style? }] }`;
+  both take `fallback`, `variable`, `display` and `preload`. Unknown keys, and keys of the other
+  kind (`weights` on a local font, `weight` on a Google one, `subsets` on a local one, `weight` /
+  `style` beside an `src` array), are an error naming the right key, as are invalid values
+  (`style` other than `"normal"` / `"italic"`, `display` outside the CSS keywords, a `variable`
+  that isn't `--name`). Before, such keys were silently ignored. Who: apps with `fonts` using a
+  key of the other kind. How: use the key the error names (a local font with several weights
+  becomes an `src` array, one entry per file).
+- **Breaking: `routes/_error.tsx` is no longer the server error page.** It was an undocumented
+  alias of `_500.tsx`, easy to confuse with `error.tsx` (the client navigation boundary). A file
+  named `_error.*` under `routes/` now fails `nowaki build` and every request in `nowaki dev` with
+  "rename it to `_500`". How: rename `routes/_error.tsx` to `routes/_500.tsx`.
+- **Breaking: `export const middleware` in `_middleware` is no longer read.** Use
+  `export default`. A `_middleware` module with only the named export now fails the requests it
+  covers with an error saying so (it used to run).
+- **Breaking: `export const config` in nowaki.config is no longer read.** Use `export default`
+  (or `export default defineConfig({...})`). A config module with only the named export fails
+  `nowaki dev` / `build` with an error saying so.
+- **Breaking: API method exports are uppercase only.** `export function get` (or `post`, `put`,
+  `patch`, `delete`, `head`, `options`) used to answer like `GET`. A route module with a lowercase
+  method export now fails every request with an error naming the uppercase export, instead of
+  answering 405 or falling through to `default`. How: rename `get` to `GET` and so on.
+- **Types: the root i18n helpers have the `/navigation` types.** `getLocale`, `href`,
+  `localePath` and `setLocale` from `@nowaki-dev/runtime` are now typed by `navigation.d.ts`
+  (they were always the same functions): `href(route(...))` and `localePath(route(...))` return
+  `Href`, so they can be passed to `<Link href>`. Code that assigned the result to `string`
+  still compiles.
+- **`setServerEnv` is no longer exported from `@nowaki-dev/runtime/env/server`.** It was an
+  undeclared internal (startup calls it to fill `env`); it moved to an internal module. Apps never
+  needed it: `env` is filled before app code runs.
+- **`@nowaki-dev/markdoc` takes `@nowaki-dev/runtime` as a peer** (`>=0.20.0 <2`) for the shared
+  `NowakiPlugin` type, which it re-exports.
+- **Production `_500` pages get an empty `error.message`.** It used to carry the thrown error's
+  message, which can name files, queries or secrets. The error is still logged (and passed to
+  `onError`); dev keeps the stack. A `_500` page that branches on the message should read
+  `url` (also passed to the page) or log instead.
+- **The node, bun and deno adapters no longer trust `x-forwarded-host` / `x-forwarded-proto` when
+  `Host` is a loopback name.** Behind a reverse proxy on the same machine (nginx
+  `proxy_pass http://localhost:3000`) that forwards the public host in `x-forwarded-host`, set
+  `NOWAKI_TRUST_PROXY=1` (as SECURITY.md already advised), or forward `Host` itself; otherwise
+  `ctx.url` names the loopback host and same-origin POSTs from the public site are rejected.
+  `nowaki start` and `nowaki dev` are unaffected (their sidecars still trust the Rust hop).
+- **`nowaki dev --host` refuses public host names.** It answers IP addresses, `localhost`,
+  `*.localhost` and `*.local` names; to open the dev server through another name (a tunnel, a
+  `/etc/hosts` alias), list it in `NOWAKI_DEV_ALLOWED_HOSTS` (comma-separated, `*` for any).
+- **`/@fs/` refuses more credential files** (`.npmrc`, `.dev.vars`, `.netrc`, `.ssh/`, `.aws/`,
+  `id_rsa`, `*.p12`, …), and its workspace root is never the home directory or `/`: an app whose
+  nearest `.git` was a dotfiles repository in `$HOME` now gets only its own directory (add a
+  `pnpm-workspace.yaml` to share a monorepo's `node_modules`).
+
 ### Added
+- **`nowaki upgrade --to <version>` readiness report.** For a version on a newer major (or
+  0.x minor) from 0.20.0 on, `nowaki upgrade` first prints what in the app must change,
+  with `file:line` and the fix: `_error.*` route files, `export const middleware` in
+  `_middleware`, `export const config` in `nowaki.config`, lowercase method exports in API
+  routes, unknown top-level `nowaki.config` keys, `--host <dir>` in package.json scripts, a
+  CLI / runtime version mismatch and a Node older than 22. It also lists heuristics to
+  review: `ctx.formData()` results used as `URLSearchParams`, API routes with a write
+  handler that may need `export const csrf = false` (apps from before 0.19.3), `PORT` in the
+  shell or a `.env` file, `engines.node`, and a rustc older than the MSRV. It installs
+  nothing while something must change. The new `--check` flag only prints the report (exit
+  code 1 when something must change). The report never writes to the app.
+- `nowaki upgrade --to` accepts an npm dist-tag (`--to next`), strips a leading `v`, and says
+  when the target is a release candidate.
 - **`multipart/form-data` in `ctx.formData()`.** Actions, API routes, and middleware can read file
   uploads from a `FormData` body (`File` parts keep `name`, `type`, and bytes). The whole body is
   buffered (same as urlencoded today) with a default cap of 10 MiB (`NOWAKI_FORM_BODY_LIMIT`) on
@@ -20,26 +117,39 @@ milestone's worth of work; the codename is noted per entry.
   multipart maps to **400** instead of a generic 500. `filename*` in multipart follows the platform
   parser (Node 22 rejects the whole body with **400**; newer runtimes may decode RFC 5987 names).
   Treat `File.name` as untrusted either way.
+- **Route module types.** `PageModule`, `LayoutModule`, `ApiModule`, `MiddlewareModule` and
+  `IslandModule` in `@nowaki-dev/runtime` type every export the runtime reads from a route
+  (`revalidate`, `tags`, `streaming`, `csrf`, `budget`, `viewTransition`, `staticPaths`, `meta`,
+  `title`, `head`, `lang`, `htmlAttrs`, `bodyAttrs`, `prerender`, `sitemap`, `scripts`, the method
+  handlers, `live`, ...), with the new `Revalidate` and `PageScripts` types:
+  `export const revalidate: PageModule["revalidate"] = 60`, or `mod satisfies PageModule` from
+  another file.
+- **`@nowaki-dev/runtime/config`**: `defineConfig()` (an identity function) and the
+  `NowakiConfig`, `NowakiPlugin`, `FontConfig` (`GoogleFont` / `LocalFont`), `RedirectRule`,
+  `RewriteRule`, `HeaderRule`, `I18nConfig` and `ImagesConfig` types for nowaki.config.
+- **`ctx.routePath`** (loaders, actions, middleware, API routes): the path routing used, without
+  basePath and the locale prefix (`/gallery/ja/photo/1` → `/photo/1`). **`routePath(url)`** in
+  `@nowaki-dev/runtime/navigation` does the same for a browser URL in components and islands.
+  `examples/gallery` uses it instead of its own helper.
+- Public API surface snapshots in `api/` (runtime and Markdoc `.d.ts` exports per
+  subpath, template types, route exports, file conventions, `nowaki.config` keys, CLI
+  commands and flags, `create-nowaki` flags, env vars, `/__nowaki/*` endpoints, headers
+  and cookies, client events and attributes), generated by `scripts/api-surface.mjs`.
+  CI fails when a snapshot is out of date or a new name is unclassified, and from 0.20.0
+  when a PR removes or changes a stable entry without the `breaking` label.
+  `api/cli.txt` is checked by `cargo test`. See CONTRIBUTING.md § API snapshots.
 
-### Upgrade notes
-- **Breaking: `ctx.formData()` always returns `FormData`.** Urlencoded bodies used to return
-  `URLSearchParams`. Both media types now return `FormData`, as the platform `Request.formData()`
-  does. `form.get()` is `string | File | null`. Read text with `String(form.get("x") ?? "")`.
-  Methods that exist only on `URLSearchParams` (`toString()`, `sort()`) need rewriting. This is
-  not a patch-level change.
-- **`NOWAKI_FORM_BODY_LIMIT` (default 10 MiB)** now applies to **`bodyText()` and `bodyJson()`** on
-  every runtime (not only multipart). JSON API routes and larger `NOWAKI_FN_BODY_LIMIT` / live-event
-  payloads must stay under the form limit when handlers read the body through these helpers, or read
-  the raw stream another way.
-### Docs
-
-- Stability, support and governance policies for 1.0: `docs/STABILITY.md` (the frozen
-  surface, what counts as breaking, deprecation, versioning, Node / Rust / browser support),
-  `SUPPORT.md`, SECURITY.md "Supported versions", `GOVERNANCE.md`, `MAINTAINERS.md`, the RFC
-  process (`rfcs/`), CONTRIBUTING.md sections on RFCs, breaking changes and releases, and
-  refreshed issue and PR templates. The API-route CSRF default is documented as "since 0.19.3"
-  (it said 0.19.0, a version the runtime skipped).
 ### Changed
+- **`nowaki-core` is on its own 0.x version line** (a literal `version` in its Cargo.toml),
+  documented as the CLI's engine and not a supported API, and the `nowaki` crate pins it
+  exactly (`=0.19.3`), so `cargo install nowaki` cannot pick a newer, incompatible
+  nowaki-core. `scripts/release-check.mjs` now fails on a caret pin instead of warning.
+- `nowaki dev` and `nowaki start` bind their port before starting Node, so a taken port fails
+  right away with the fix (`--port` / `PORT`). Whether `nowaki dev` is exposed (the `--host`
+  Host allowlist applies, the Network URL shown) is read from the bound address: `--host 127.0.0.1`, or
+  a `NOWAKI_HOST` that resolves to loopback, keeps the loopback-only Host check. With an
+  address that doesn't cover 127.0.0.1, dev also listens on 127.0.0.1 (the renderer calls
+  back there, and the MCP endpoint stays loopback-only). The banner shows the bound address.
 - **Releases are published by one workflow.** Pushing a `vX.Y.Z` or `vX.Y.Z-rc.N` tag runs
   `release.yml`: a version gate (`scripts/release-check.mjs`: every shared-version file,
   the scaffold template pins, the CHANGELOG section, the `nowaki-core` pin, the lockfiles),
@@ -53,15 +163,61 @@ milestone's worth of work; the codename is noted per entry.
   publishing (OIDC); crates support crates.io trusted publishing; the GitHub Release carries
   the binaries with `SHA256SUMS` and GitHub artifact attestations. Tokens keep working until
   the trusted publishers are configured (docs/RELEASING.md, "One-time setup").
-### Added
 
-- Public API surface snapshots in `api/` (runtime and Markdoc `.d.ts` exports per
-  subpath, template types, route exports, file conventions, `nowaki.config` keys, CLI
-  commands and flags, `create-nowaki` flags, env vars, `/__nowaki/*` endpoints, headers
-  and cookies, client events and attributes), generated by `scripts/api-surface.mjs`.
-  CI fails when a snapshot is out of date or a new name is unclassified, and from 0.20.0
-  when a PR removes or changes a stable entry without the `breaking` label.
-  `api/cli.txt` is checked by `cargo test`. See CONTRIBUTING.md § API snapshots.
+### Fixed
+- Server functions and `POST /__nowaki/live-event` answer **413** when the body goes over the
+  limit while it is read (a chunked body has no `Content-Length`); they answered 400.
+- The `publish()` docs and its warning state what it does on the deploy adapters: nothing (it
+  reaches the live connections of the same `nowaki dev` / `nowaki start` process).
+- **Node 26:** `module.register()` is deprecated there (DEP0205); the production React alias
+  hook (`server/app.mjs`) uses `module.registerHooks()` on Node 26, so `nowaki start` and the
+  node adapter print no deprecation warning (which also broke `NOWAKI_LOG=json` output). The
+  dev sidecar's loader hooks still use `register()` and print the warning once in `nowaki dev`.
+- The Rust front (`nowaki dev` / `nowaki start`) answered a request body that failed to read
+  for a reason other than its size (a client that went away, a malformed chunked body) with
+  400 "request body too large."; it is now 400 "Bad Request". A non-multipart body over the
+  proxy limit (16 MiB, or `NOWAKI_FORM_BODY_LIMIT` when larger) is 413 "Payload Too Large"
+  instead of 400, also when `Content-Length` announces it before the body is read.
+
+### Security
+- **Server function, live-event and revalidate bodies are capped while streaming.** A chunked
+  request with no `Content-Length` was read up to the 10 MiB form limit before the endpoint's own
+  cap (1 MiB / 64 KiB / 64 KiB) was checked; now the read stops at that cap (413). The body is
+  read once, so a second `formData()` / `bodyText()` no longer hangs on Node.
+- **Production `_500` pages no longer receive the error message** (see Upgrade notes).
+- **Redirects after an early streaming shell only follow `http(s)` URLs.** A loader redirect to a
+  `javascript:` or `data:` URL (an app's `?next=` open redirect) was written into
+  `location.replace(...)` and ran; it now goes to the site root.
+- **`ctx.url` can't be pointed at another origin by the request.** On the node / bun / deno
+  adapters (and the sidecars) a request target like `//evil.test/reset` or
+  `http://evil.test/reset` replaced `ctx.url.origin`, and a client's `x-forwarded-host` was
+  trusted whenever `Host` was loopback (see Upgrade notes); links built from `ctx.url` (password
+  reset mails, canonical URLs without `site`) could name the attacker's host.
+- **`nowaki dev --host` blocks DNS rebinding** to the machine's addresses (see Upgrade notes),
+  and **`/@fs/` denies more credential files** and never widens to the home directory.
+- **Page actions don't run for `OPTIONS`** (a CORS preflight any site can send, which skips the
+  same-origin check).
+- Hardening: the server function allowlist ignores inherited names (`__proto__`, `toString`);
+  `ctx.cookies` has no prototype; a blank or whitespace-padded `NOWAKI_REVALIDATE_SECRET` is
+  trimmed (blank leaves the endpoint off).
+- **Checks**: `scripts/security-e2e.mjs` sweeps `nowaki start`, the node adapter, the Vercel
+  function and the Cloudflare Worker for internal `x-nowaki-*` response headers and for
+  `Set-Cookie` on shared-cacheable responses, and runs the session and revalidate checks
+  against the Worker. CI runs `cargo deny check` with advisories (allowed unmaintained crates
+  listed in `deny.toml` with reasons), audits the `create-nowaki` template's dependencies weekly,
+  adds Node 26 to the e2e matrix, and runs the dev toolbar browser test and the lazy hydration,
+  live and locale browser tests on Windows. Still Linux / macOS only: the router,
+  intercepting-route and gallery tests (they drive Chrome over a CDP pipe, which Chrome on
+  Windows doesn't read) and the HMR test (on Windows an edit to a module an island imports
+  reloads the page instead of updating the island in place; open).
+
+### Docs
+- Stability, support and governance policies for 1.0: `docs/STABILITY.md` (the frozen
+  surface, what counts as breaking, deprecation, versioning, Node / Rust / browser support),
+  `SUPPORT.md`, SECURITY.md "Supported versions", `GOVERNANCE.md`, `MAINTAINERS.md`, the RFC
+  process (`rfcs/`), CONTRIBUTING.md sections on RFCs, breaking changes and releases, and
+  refreshed issue and PR templates. The API-route CSRF default is documented as "since 0.19.3"
+  (it said 0.19.0, a version the runtime skipped).
 
 ## [0.19.3] — 2026-11-12 · "Bora": production and dev experience
 

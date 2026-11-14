@@ -1,5 +1,5 @@
 // The validated environment behind `@nowaki-dev/runtime/env/server`. Startup (app.mjs, web.mjs,
-// the dev sidecar) validates env.ts once and calls setServerEnv; app code reads `env.X`. The values
+// the dev sidecar) validates env.ts once and stores it (server/env-store.mjs); app code reads `env.X`. The values
 // live on globalThis so every copy of this module (a bundled runtime, a workspace symlink) shares
 // them. No Node imports: the edge adapters use this too.
 
@@ -34,7 +34,3 @@ export const env = new Proxy(
   },
 );
 
-/// `{ server, public }` from validateEnv (null: no env.ts). Called once per process or isolate.
-export function setServerEnv(validated) {
-  globalThis[KEY] = Object.freeze({ ...(validated?.public ?? {}), ...(validated?.server ?? {}) });
-}

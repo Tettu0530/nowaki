@@ -67,7 +67,8 @@ async function routeRequest(env, info, localized) {
   let match = matchRoute(table.routes, path);
   // With prefixDefaultLocale, an unprefixed page is a 404 (API and file routes still answer).
   if (match && localized && !localized.prefixed && localized.i18n.prefixDefault && !match.isApi) match = null;
-  const ctx = makeContext({ ...info, params: match?.params ?? {} });
+  // `ctx.routePath` is the path routing used: no basePath, no locale prefix.
+  const ctx = makeContext({ ...info, params: match?.params ?? {}, routePath: path });
   if (env.trace) {
     const tr = (ctx.__trace = env.trace.start(method, rawHeader(info), url.pathname));
     if (match) tr.setRoute(routeName(table, match.file));
@@ -158,7 +159,8 @@ async function routeRequest(env, info, localized) {
 
     if (crossSite && typeof mod.action === "function") return finalize(ctx, FORBIDDEN, env, table, version);
 
-    if (method !== "GET" && method !== "HEAD" && typeof mod.action === "function") {
+    // OPTIONS (a CORS preflight any site can send) never runs the action; it renders the page.
+    if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && typeof mod.action === "function") {
       const tok = ctx.__trace?.begin("action", "action");
       let out;
       try {
@@ -393,8 +395,14 @@ async function runMiddleware(env, table, ctx, version, path, match) {
   for (const entry of table.middleware ?? []) {
     if (entry.group ? !(match && groupMiddleware(table, match.file).has(entry)) : !underPrefix(path, entry.prefix)) continue;
     const mod = await env.importModule(entry.file, version);
-    const fn = mod.default ?? mod.middleware;
-    if (typeof fn !== "function") continue;
+    const fn = mod.default;
+    if (typeof fn !== "function") {
+      // The old alias, removed in 0.20.0: an error, not a middleware that silently stops running.
+      if (mod.middleware !== undefined) {
+        throw new Error(`${entry.file}: \`export const middleware\` is no longer read (removed in 0.20.0). Use \`export default\`.`);
+      }
+      continue;
+    }
     const tok = ctx.__trace?.begin("mw", `middleware ${entry.prefix || "/"}`);
     let out;
     try {
@@ -450,8 +458,21 @@ function contentTypeForExt(ext) {
   return EXT_TYPES[ext.slice(1).toLowerCase()] ?? "application/octet-stream";
 }
 
+// The request's method export (`GET`, `POST`, ...), else the default export. Lowercase method
+// exports (`export function get`) were an undocumented alias, removed in 0.20.0: a module with one
+// fails every request with an error naming the export, instead of answering 405 or falling
+// through to `default`. Checked once per module.
+const API_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+const checkedApiModules = new WeakSet();
 function pickMethodHandler(mod, method) {
-  const named = mod[method] ?? mod[method?.toLowerCase?.()];
+  if (!checkedApiModules.has(mod)) {
+    const lower = API_METHODS.find((m) => typeof mod[m.toLowerCase()] === "function");
+    if (lower) {
+      throw new Error(`API route exports \`${lower.toLowerCase()}\`: method exports are uppercase (\`${lower}\`). The lowercase alias was removed in 0.20.0.`);
+    }
+    checkedApiModules.add(mod);
+  }
+  const named = mod[method];
   if (typeof named === "function") return named;
   if (typeof mod.default === "function") return mod.default;
   return null;
@@ -954,7 +975,15 @@ function slotOwners(table, file) {
 async function earlyError(env, table, ctx, version, err, file) {
   const to = ctx._redirect?.headers?.location;
   if (to) {
-    const url = JSON.stringify(String(to)).replace(/</g, "\\u003c");
+    // A `Location: javascript:…` header is inert, but `location.replace("javascript:…")` runs it:
+    // only http(s) targets are followed (anything else goes to the site root).
+    let target = `${basePath()}/`;
+    try {
+      if (/^https?:$/.test(new URL(String(to), ctx.url).protocol)) target = String(to);
+    } catch {
+      // unparsable: the root
+    }
+    const url = JSON.stringify(target).replace(/</g, "\\u003c");
     return `<script>location.replace(${url})</script>`;
   }
   logError("", err, { trace: ctx.__trace });
@@ -1038,7 +1067,9 @@ async function render500(env, table, ctx, version, err) {
       const mod = await env.importModule(table.errorRoute, version);
       if (typeof mod.default === "function") {
         await env.ensureIslands(version);
-        const message = env.dev ? String(err?.stack ?? err) : String(err?.message ?? err);
+        // Production pages get no error text: a message can name files, queries or secrets (it is
+        // logged above). Dev keeps the stack.
+        const message = env.dev ? String(err?.stack ?? err) : "";
         const body = await renderToStringAsync(h(mod.default, { error: { message }, url: ctx.url }));
         const meta = withFonts(env, await withScripts(env, table, table.errorRoute, mod, version, await withSeo(env, table, table.errorRoute, mod, version, ctx, await withRouteCss(env, table.errorRoute, mod, version))));
         return { status: 500, headers: HTML, body: env.renderDocument({ mod, body, meta }) };

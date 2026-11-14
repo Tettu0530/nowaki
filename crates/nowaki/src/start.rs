@@ -315,7 +315,7 @@ fn purge_from(isr: &IsrCache, h: &reqwest::header::HeaderMap) {
     }
 }
 
-pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
+pub async fn run(root: PathBuf, bind: crate::listen::Bind) -> Result<()> {
     let started = std::time::Instant::now();
     let client_dir = root.join("dist/client");
     if !client_dir.join("manifest.json").exists() {
@@ -331,6 +331,9 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
             entry.display()
         );
     }
+    // Bound before the sidecar starts, so a taken port fails right away.
+    let listener = crate::listen::bind(&bind).await?;
+    let local = listener.local_addr()?;
 
     // Read the observability settings now (the OTLP exporter task starts on this runtime).
     let obs = crate::obs::get();
@@ -390,11 +393,6 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
         None => "/_nowaki/".to_string(),
     };
 
-    let host = if expose {
-        "0.0.0.0".to_string()
-    } else {
-        std::env::var("NOWAKI_HOST").unwrap_or_else(|_| "127.0.0.1".to_string())
-    };
     let assets = load_assets(&client_dir);
     let public = load_public(&client_dir.with_file_name("public"));
     let state = Arc::new(ProdState {
@@ -429,8 +427,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
     let app = app
         .layer(axum::middleware::from_fn(crate::csp::layer))
         .layer(axum::middleware::map_response(crate::security_headers::add));
-    let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
-    let actual = listener.local_addr()?.port();
+    let actual = local.port();
     // Also report the actual port when PORT=0 (a marker grepped by prerender / adapters / bench; keep it).
     println!("NOWAKI_START_READY {actual}");
     if obs.json {
@@ -438,7 +435,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
             "info",
             "listening",
             &[
-                ("host", host.as_str().into()),
+                ("host", local.ip().to_string().into()),
                 ("port", actual.into()),
                 ("ready_ms", (started.elapsed().as_millis() as u64).into()),
             ],
@@ -450,7 +447,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool) -> Result<()> {
             actual,
             started.elapsed().as_millis(),
             &["Rust front", "Node renderer"],
-            expose || host == "0.0.0.0",
+            local.ip(),
             None,
         );
     }
@@ -1287,9 +1284,8 @@ async fn proxy(
     let method = req.method().clone();
     let headers = req.headers().clone();
 
-    if crate::form_body::multipart_content_length_over_limit(&headers) {
-        let (status, body) = crate::form_body::multipart_payload_too_large();
-        return (status, body).into_response();
+    if let Some(rejected) = crate::form_body::reject_before_read(&headers) {
+        return rejected.into_response();
     }
 
     // Only set by `observed` (tracing on): the CLIENT span of the sidecar hop goes under it.
@@ -1306,7 +1302,7 @@ async fn proxy(
     let body = match axum::body::to_bytes(req.into_body(), proxy_limit).await {
         Ok(b) => b,
         Err(err) => {
-            let (status, body) = crate::form_body::proxy_body_to_bytes_error(&headers, &err);
+            let (status, body) = crate::form_body::proxy_body_to_bytes_error(&err);
             return (status, body).into_response();
         }
     };

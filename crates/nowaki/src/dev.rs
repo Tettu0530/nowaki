@@ -28,10 +28,13 @@ pub struct DevState {
     /// Recent build / SSR / live / HMR errors for the MCP `recent_errors` tool.
     pub(crate) errors: Arc<crate::mcp::ErrorLog>,
     pub(crate) port: u16,
+    /// The address the dev server listens on (`--host` / `NOWAKI_HOST`), for `dev_config`.
+    pub(crate) bind_ip: std::net::IpAddr,
     pub(crate) plugins: bool,
     /// Roots /@fs/ may serve from (canonical paths). Anything else is rejected.
     fs_allow: Vec<PathBuf>,
-    /// Whether --host exposes all interfaces. Used for WS Origin/Host checks.
+    /// Whether the bind is reachable from other machines (`--host`, `--host <addr>` or a
+    /// non-loopback `NOWAKI_HOST`). Used for the Host and WS Origin checks.
     pub(crate) expose: bool,
     /// nowaki.config routing from `.nowaki/routing.json` (read at startup; a change needs a restart,
     /// which `apply_changes` says).
@@ -51,8 +54,36 @@ impl DevState {
     }
 }
 
-pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<()> {
+pub async fn run(root: PathBuf, bind: crate::listen::Bind, open: bool) -> Result<()> {
     let started = Instant::now();
+    // Bound first: a taken port fails before any child process starts. What the bind exposes is
+    // read from the socket, so a name that resolves to loopback keeps the loopback-only checks.
+    let listener = crate::listen::bind(&bind).await?;
+    let local = listener.local_addr()?;
+    let port = local.port();
+    let expose = crate::listen::is_exposed(local.ip());
+    // The renderer (server/sidecar.mjs) calls back on 127.0.0.1:<port>, and the MCP endpoint is
+    // loopback-only: a bind that doesn't cover 127.0.0.1 (`--host 10.0.0.5`, `--host ::1`) also
+    // listens there.
+    let loopback = if crate::listen::covers_loopback_v4(local.ip()) {
+        None
+    } else {
+        let lo = crate::listen::Bind {
+            host: crate::listen::DEFAULT_HOST.to_string(),
+            port,
+        };
+        match crate::listen::bind(&lo).await {
+            Ok(l) => Some(l),
+            // `::` on a dual-stack system already answers on 127.0.0.1.
+            Err(_) if local.ip().is_unspecified() => None,
+            Err(e) => {
+                return Err(e.context(format!(
+                    "the dev renderer also needs 127.0.0.1:{port} next to {}:{port}",
+                    bind.host
+                )))
+            }
+        }
+    };
 
     // The plugin host imports nowaki.config (plugins, and the build-time config site-config.mjs
     // normalizes) while typegen runs and the sidecar starts; it's waited for before serving:
@@ -116,6 +147,7 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         live_hub,
         errors,
         port,
+        bind_ip: local.ip(),
         plugins: plugin_host.is_some(),
         fs_allow: compute_fs_allow(&root),
         expose,
@@ -152,9 +184,6 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         .layer(axum::middleware::from_fn(crate::csp::layer))
         .layer(axum::middleware::map_response(crate::security_headers::add));
 
-    let bind_host = if expose { "0.0.0.0" } else { "127.0.0.1" };
-    let listener = tokio::net::TcpListener::bind((bind_host, port)).await?;
-
     let mut features: Vec<&str> = Vec::new();
     if plugin_host.is_some() {
         features.push("plugins");
@@ -165,17 +194,27 @@ pub async fn run(root: PathBuf, port: u16, expose: bool, open: bool) -> Result<(
         port,
         started.elapsed().as_millis(),
         &features,
-        expose,
+        local.ip(),
         Some(&crate::mcp::url(port)),
     );
 
     if open {
-        crate::ui::open_browser(&format!("http://localhost:{port}/"));
+        crate::ui::open_browser(&crate::ui::browser_url(local.ip(), port));
     }
 
     // Don't wait for open HMR/live sockets on shutdown; just stop serving and drop the children.
+    let also_loopback = {
+        let (app, base) = (app.clone(), base.clone());
+        async move {
+            match loopback {
+                Some(l) => serve(l, app, base).await,
+                None => std::future::pending().await,
+            }
+        }
+    };
     tokio::select! {
         r = serve(listener, app, base) => r?,
+        r = also_loopback => r?,
         _ = crate::shutdown::signal() => {}
     }
     drop(plugin_host);
@@ -1130,16 +1169,15 @@ async fn proxy_to_sidecar(
     let log_path = req.uri().path().to_string();
     let headers = req.headers().clone();
 
-    if crate::form_body::multipart_content_length_over_limit(&headers) {
-        let (status, body) = crate::form_body::multipart_payload_too_large();
-        return (status, body).into_response();
+    if let Some(rejected) = crate::form_body::reject_before_read(&headers) {
+        return rejected.into_response();
     }
 
     let proxy_limit = crate::form_body::proxy_body_limit();
     let body = match axum::body::to_bytes(req.into_body(), proxy_limit).await {
         Ok(b) => b,
         Err(err) => {
-            let (status, body) = crate::form_body::proxy_body_to_bytes_error(&headers, &err);
+            let (status, body) = crate::form_body::proxy_body_to_bytes_error(&err);
             return (status, body).into_response();
         }
     };
@@ -1208,10 +1246,24 @@ fn compute_fs_allow(root: &Path) -> Vec<PathBuf> {
     allow
 }
 
-/// Nearest workspace boundary (`pnpm-workspace.yaml` or `.git`).
+/// Nearest workspace boundary (`pnpm-workspace.yaml` or `.git`). Never the home directory or the
+/// filesystem root (a dotfiles repository in `$HOME` would otherwise put all of it under `/@fs/`).
 fn workspace_root(root: &Path) -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .and_then(|h| dunce::canonicalize(h).ok());
+    workspace_root_below(root, home.as_deref())
+}
+
+fn workspace_root_below(root: &Path, home: Option<&Path>) -> Option<PathBuf> {
     let mut dir = Some(root);
     while let Some(d) = dir {
+        let too_wide = d.parent().is_none()
+            || home.is_some_and(|h| dunce::canonicalize(d).is_ok_and(|c| c == h) || d == h);
+        if too_wide {
+            return None;
+        }
         if d.join("pnpm-workspace.yaml").is_file() || d.join(".git").exists() {
             return Some(d.to_path_buf());
         }
@@ -1220,12 +1272,35 @@ fn workspace_root(root: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Sensitive paths refused even under allowed roots (inside `.git`, `.env*`, private keys).
+/// Directory or file names refused anywhere under the allowed roots: VCS data, env files, and
+/// credential stores (SSH, cloud CLIs, package registry tokens, Wrangler's `.dev.vars`).
+const DENIED_NAMES: [&str; 14] = [
+    ".git",
+    ".env",
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".docker",
+    ".npmrc",
+    ".yarnrc.yml",
+    ".netrc",
+    ".pypirc",
+    ".dev.vars",
+    "id_rsa",
+    "id_ed25519",
+    "id_ecdsa",
+];
+
+/// Sensitive paths refused even under allowed roots (see `DENIED_NAMES`, `.env.*`, `.dev.vars.*`,
+/// private keys and keystores by extension).
 pub(crate) fn is_denied_fs_path(p: &Path) -> bool {
     p.components().any(|c| {
         let s = c.as_os_str().to_string_lossy();
-        s == ".git" || s == ".env" || s.starts_with(".env.")
-    }) || matches!(p.extension().and_then(|e| e.to_str()), Some("pem" | "key"))
+        DENIED_NAMES.contains(&s.as_ref()) || s.starts_with(".env.") || s.starts_with(".dev.vars.")
+    }) || matches!(
+        p.extension().and_then(|e| e.to_str()),
+        Some("pem" | "key" | "p12" | "pfx" | "jks" | "keystore")
+    )
 }
 
 fn fs_path_allowed(canon: &Path, allow: &[PathBuf]) -> bool {
@@ -1244,19 +1319,56 @@ pub(crate) fn is_loopback_host(host: &str) -> bool {
     matches!(h, "localhost" | "127.0.0.1" | "::1")
 }
 
-/// DNS-rebinding guard for every dev route. On the default bind (127.0.0.1) a page on another
-/// domain can rebind its name to 127.0.0.1 and read dev responses same-origin: server-only source
-/// with its source map, `/@fs/` files, `.npmrc`. The browser still sends the attacker's name as
-/// `Host`, so only `localhost` / `127.0.0.1` / `[::1]` are accepted. `--host` exposes the server on
-/// purpose and accepts any Host. A request without Host (no browser sends one) is let through.
+/// DNS-rebinding guard for every dev route. On a loopback bind (the default 127.0.0.1) a page on
+/// another domain can rebind its name to 127.0.0.1 and read dev responses same-origin: server-only
+/// source with its source map, `/@fs/` files, `.npmrc`. The browser still sends the attacker's
+/// name as `Host`, so only `localhost` / `127.0.0.1` / `[::1]` are accepted. A non-loopback bind
+/// (`--host`, `--host <addr>`, `NOWAKI_HOST`; `expose`, read from the socket, so `--host 127.0.0.1`
+/// stays loopback-only) exposes the server on purpose; it accepts IP literals (what a LAN device
+/// types), `localhost` / `*.localhost`, mDNS `*.local` names, and the names in
+/// `NOWAKI_DEV_ALLOWED_HOSTS` (comma-separated, `*` for any): a public name the attacker controls
+/// could otherwise be rebound to the developer's machine and read through their browser. MCP and
+/// devtools check the peer address on top of this and stay loopback-only. A request without Host
+/// (no browser sends one) is let through.
 pub(crate) fn dev_host_allowed(headers: &axum::http::HeaderMap, expose: bool) -> bool {
-    if expose {
-        return true;
-    }
     match headers.get(header::HOST) {
         None => true,
-        Some(v) => v.to_str().is_ok_and(is_loopback_host),
+        Some(v) => v.to_str().is_ok_and(|h| {
+            is_loopback_host(h) || (expose && exposed_host_allowed(h, dev_allowed_hosts()))
+        }),
     }
+}
+
+/// `NOWAKI_DEV_ALLOWED_HOSTS`, read once: lowercased names without ports.
+fn dev_allowed_hosts() -> &'static [String] {
+    static HOSTS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    HOSTS.get_or_init(|| {
+        std::env::var("NOWAKI_DEV_ALLOWED_HOSTS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().trim_end_matches('.').to_ascii_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect()
+    })
+}
+
+/// Whether `nowaki dev --host` answers a `Host` (see `dev_host_allowed`).
+fn exposed_host_allowed(host: &str, extra: &[String]) -> bool {
+    let name = if let Some(rest) = host.strip_prefix('[') {
+        // A bracketed IPv6 literal.
+        return rest
+            .split(']')
+            .next()
+            .is_some_and(|ip| ip.parse::<std::net::Ipv6Addr>().is_ok());
+    } else {
+        host.rsplit_once(':').map(|(h, _)| h).unwrap_or(host)
+    };
+    let name = name.trim_end_matches('.').to_ascii_lowercase();
+    name.parse::<std::net::Ipv4Addr>().is_ok()
+        || name == "localhost"
+        || name.ends_with(".localhost")
+        || name.ends_with(".local")
+        || extra.iter().any(|e| e == "*" || *e == name)
 }
 
 async fn host_guard(
@@ -1276,7 +1388,8 @@ async fn host_guard(
         StatusCode::FORBIDDEN,
         format!(
             "Blocked request: Host \"{host}\" is not allowed by the dev server. \
-             Open it at localhost, or start `nowaki dev --host` to accept other hosts.\n"
+             Open it at localhost; `nowaki dev --host` also accepts IP addresses and *.local \
+             names, and the names listed in NOWAKI_DEV_ALLOWED_HOSTS.\n"
         ),
     )
         .into_response()
@@ -1453,10 +1566,113 @@ mod tests {
             "localhost.evil.com",
         ] {
             assert!(!dev_host_allowed(&hdrs(&[("host", bad)]), false), "{bad}");
-            // --host exposes the server on purpose (LAN IPs, custom names).
-            assert!(dev_host_allowed(&hdrs(&[("host", bad)]), true), "{bad}");
         }
         assert!(dev_host_allowed(&hdrs(&[]), false));
+        // --host: LAN addresses and local names, but not a public name that could be rebound.
+        for ok in [
+            "192.168.1.10:3000",
+            "[fe80::1]:3000",
+            "my-mac.local:3000",
+            "app.localhost",
+        ] {
+            assert!(dev_host_allowed(&hdrs(&[("host", ok)]), true), "{ok}");
+        }
+        for bad in ["attacker.test:3000", "localhost.evil.com", "[evil.com]:80"] {
+            assert!(!dev_host_allowed(&hdrs(&[("host", bad)]), true), "{bad}");
+        }
+    }
+
+    #[test]
+    fn exposed_host_allow_list() {
+        let extra = vec!["devbox.example.com".to_string()];
+        assert!(exposed_host_allowed("devbox.example.com:3000", &extra));
+        assert!(exposed_host_allowed("DevBox.Example.com.", &extra));
+        assert!(!exposed_host_allowed("other.example.com", &extra));
+        assert!(exposed_host_allowed("anything.test", &["*".to_string()]));
+        assert!(exposed_host_allowed("10.0.0.2", &[]));
+    }
+
+    /// Exposure comes from the bound socket (`listen::is_exposed`), the accepted `Host`s from the
+    /// `--host` allowlist, and MCP / devtools check the peer on top: an exposed bind answers an
+    /// allowlisted Host, refuses a foreign one, and never lets a LAN peer reach MCP.
+    #[tokio::test]
+    async fn exposed_bind_uses_the_allowlist_and_mcp_stays_loopback() {
+        use tower_layer::Layer;
+        use tower_service::Service;
+        let status = |expose: bool, host: &'static str| async move {
+            let router = axum::Router::new().fallback(|| async { "ok" });
+            let mut svc = axum::middleware::from_fn_with_state(expose, host_guard).layer(router);
+            let req = Request::builder()
+                .uri("/")
+                .header(header::HOST, host)
+                .body(axum::body::Body::empty())
+                .unwrap();
+            svc.call(req).await.unwrap().status()
+        };
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+
+        // `--host 127.0.0.1` (or a name resolving to loopback) stays loopback-only.
+        let loopback = crate::listen::is_exposed(ip("127.0.0.1"));
+        assert_eq!(status(loopback, "localhost:3000").await, StatusCode::OK);
+        assert_eq!(
+            status(loopback, "192.168.1.10:3000").await,
+            StatusCode::FORBIDDEN
+        );
+
+        // `--host` (0.0.0.0): LAN addresses and local names pass, a public name is refused.
+        let exposed = crate::listen::is_exposed(ip("0.0.0.0"));
+        assert!(exposed);
+        for ok in ["192.168.1.10:3000", "my-mac.local:3000", "localhost:3000"] {
+            assert_eq!(status(exposed, ok).await, StatusCode::OK, "{ok}");
+        }
+        assert_eq!(
+            status(exposed, "attacker.test:3000").await,
+            StatusCode::FORBIDDEN
+        );
+
+        // MCP / devtools: an allowlisted Host from a LAN peer is still refused (403 in `mcp.rs`).
+        let lan = hdrs(&[("host", "192.168.1.10:3000")]);
+        assert!(dev_host_allowed(&lan, exposed));
+        assert!(!crate::mcp::request_allowed(ip("192.168.1.20"), &lan));
+        let local = hdrs(&[("host", "127.0.0.1:3000")]);
+        assert!(crate::mcp::request_allowed(ip("127.0.0.1"), &local));
+    }
+
+    #[test]
+    fn denied_fs_paths_cover_credential_stores() {
+        for p in [
+            "/home/u/.ssh/id_ed25519",
+            "/home/u/.aws/credentials",
+            "/proj/.npmrc",
+            "/proj/.dev.vars",
+            "/proj/.dev.vars.staging",
+            "/proj/certs/site.p12",
+            "/home/u/id_rsa",
+        ] {
+            assert!(is_denied_fs_path(Path::new(p)), "{p}");
+        }
+        assert!(!is_denied_fs_path(Path::new("/proj/src/id_token.ts")));
+        assert!(!is_denied_fs_path(Path::new(
+            "/proj/node_modules/ssh/index.js"
+        )));
+    }
+
+    #[test]
+    fn workspace_root_stops_below_home_and_root() {
+        let tmp = std::env::temp_dir().join(format!("nowaki-ws-{}", std::process::id()));
+        let app = tmp.join("home/projects/app");
+        std::fs::create_dir_all(&app).unwrap();
+        // A dotfiles repository in the home directory is not a workspace.
+        std::fs::create_dir_all(tmp.join("home/.git")).unwrap();
+        let home = tmp.join("home");
+        assert_eq!(workspace_root_below(&app, Some(&home)), None);
+        // A real workspace below home still counts.
+        std::fs::write(tmp.join("home/projects/pnpm-workspace.yaml"), "").unwrap();
+        assert_eq!(
+            workspace_root_below(&app, Some(&home)),
+            Some(tmp.join("home/projects"))
+        );
+        std::fs::remove_dir_all(&tmp).unwrap();
     }
 
     /// The guard is a layer, so it covers the fallback (app files) and every `/__nowaki/*` route.

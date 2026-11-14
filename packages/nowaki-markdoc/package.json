@@ -27,9 +27,11 @@
     "@markdoc/markdoc": "0.5.11"
   },
   "peerDependencies": {
+    "@nowaki-dev/runtime": ">=0.20.0 <2",
     "preact": "^10.25.0 || ^11.1.0"
   },
   "devDependencies": {
+    "@nowaki-dev/runtime": "workspace:*",
     "preact": "^11.2.0",
     "preact-render-to-string": "^6.8.2"
   },

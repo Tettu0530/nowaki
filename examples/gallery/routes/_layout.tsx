@@ -2,9 +2,9 @@
 // @modal/(.)photo/[id].tsx fills `slots.modal` over the gallery; otherwise it's @modal/default.tsx.
 import "../styles/site.css";
 import type { LayoutProps } from "@nowaki-dev/runtime";
-import { Link } from "@nowaki-dev/runtime/navigation";
+import { Link, routePath } from "@nowaki-dev/runtime/navigation";
 import LanguageSwitcher from "../islands/LanguageSwitcher.tsx";
-import { routePath, t } from "../lib/i18n.ts";
+import { t } from "../lib/i18n.ts";
 
 export default function Layout({ children, slots, url }: LayoutProps) {
   return (
@@ -20,6 +20,7 @@ export default function Layout({ children, slots, url }: LayoutProps) {
           <Link id="account-link" href="/account">
             {t("account")}
           </Link>
+          {/* The page's app path (no basePath, no locale prefix), so each link switches only the locale. */}
           <LanguageSwitcher path={routePath(url)} />
         </nav>
       </header>

@@ -4,9 +4,9 @@
 //
 //   node scripts/release-check.mjs [check] [<vX.Y.Z | X.Y.Z>] [--new-tag] [--json] [--root <dir>]
 //       Every shared-version file agrees with the version (default: the Cargo.toml workspace
-//       version), CHANGELOG.md has its section, nowaki-core's version matches the `nowaki`
-//       crate's pin, Cargo.lock and pnpm-lock.yaml are in sync, and the api/ snapshots are current
-//       (when scripts/api-surface.mjs exists). --new-tag also fails when the tag
+//       version), CHANGELOG.md has its section, nowaki-core's own version matches the `nowaki`
+//       crate's exact `=` pin, Cargo.lock and pnpm-lock.yaml are in sync, and the api/ snapshots
+//       are current (when scripts/api-surface.mjs exists). --new-tag also fails when the tag
 //       already exists locally (for the release PR). --json prints the release metadata.
 //   node scripts/release-check.mjs notes <version> [--root <dir>]
 //       Prints the CHANGELOG.md section for <version> (the GitHub Release body).
@@ -209,7 +209,7 @@ export function check(root, version, { newTag = false } = {}) {
   const nowakiToml = read("crates/nowaki/Cargo.toml");
   same(crateVersion(nowakiToml, ws), "crates/nowaki/Cargo.toml version");
 
-  // nowaki-core may be on its own line; what matters is that the pin names it exactly.
+  // nowaki-core is on its own line; what matters is that the pin names it exactly.
   const core = crateVersion(read("crates/nowaki-core/Cargo.toml"), ws);
   const pin = corePin(nowakiToml);
   if (!core || !parseVersion(core)) errors.push(`crates/nowaki-core/Cargo.toml version "${core}" is not SemVer`);
@@ -218,7 +218,9 @@ export function check(root, version, { newTag = false } = {}) {
   } else if (pin.replace(/^[=^~]/, "") !== core) {
     errors.push(`crates/nowaki/Cargo.toml pins nowaki-core "${pin}", but nowaki-core is ${core}`);
   } else if (!pin.startsWith("=")) {
-    warnings.push(
+    // nowaki-core is internal and may break in a minor: a caret would let `cargo install nowaki`
+    // (which ignores Cargo.lock without --locked) pick a newer, incompatible nowaki-core.
+    errors.push(
       `crates/nowaki/Cargo.toml pins nowaki-core "${pin}"; use "=${core}" so \`cargo install nowaki\` ` +
         "cannot pick a newer nowaki-core",
     );

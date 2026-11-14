@@ -273,6 +273,13 @@ eq(stripRouteGroups("/(.)/x"), "/(.)/x", "(.) stays literal");
   eq((await clash(["about.js", "(b)/about.js"])) !== null, true, "a group and an ungrouped file serving one URL is an error");
   eq((await clash(["(a)/blog/[slug].js", "blog/[id].js"])) !== null, true, "param names don't avoid a collision");
   eq(await clash(["(a)/blog/[slug].js", "(b)/blog/new.js"]), null, "a literal beside a param is not a collision");
+  const removed = await clash(["index.js", "_error.js"]);
+  eq(
+    /routes\/_error\.js: `_error` is no longer a file convention.*Rename it to `_500`/.test(removed ?? ""),
+    true,
+    `_error (the removed alias of _500) is an error naming _500 (${removed})`,
+  );
+  eq(await clash(["index.js", "_500.js", "error.js"]), null, "_500 and error are fine");
   eq(await clash(["about.js", "about/index.js"]), null, "duplicates without a group are left as they were");
   eq(await clash(["(a)/_layout.js", "(b)/_layout.js", "(a)/loading.js", "loading.js"]), null, "convention files never collide");
   eq(await clash(["photo/[id].js", "@modal/photo/[id].js", "@m/(g)/photo/[x].js"]), null, "slot files serve no URL of their own");

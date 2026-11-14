@@ -1,7 +1,7 @@
 // A tiny dictionary keyed by getLocale(). It runs on the server and in islands (getLocale from
 // /navigation reads the request's locale on the server and <html> in the browser). The Japanese
 // strings are \u escapes because this repo is English-only; an app would write them as is.
-import { getLocale, localePath, type Href } from "@nowaki-dev/runtime/navigation";
+import { getLocale } from "@nowaki-dev/runtime/navigation";
 
 const en = {
   gallery: "Gallery",
@@ -52,14 +52,4 @@ export const locales: { code: Locale; label: string }[] = [
 
 export function t(key: keyof typeof en): string {
   return (dictionaries[getLocale() ?? "en"] ?? en)[key];
-}
-
-// The basePath ("/gallery"). <Link>, ctx.redirect and href() from /navigation add it; reading a
-// browser URL back (below) takes it off.
-const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-
-/// The route path of a browser URL: no base, no locale prefix ("/gallery/ja/photo/1" → "/photo/1").
-export function routePath(url: URL): Href {
-  const path = url.pathname.startsWith(base) ? url.pathname.slice(base.length) || "/" : url.pathname;
-  return localePath(path, "en") as Href;
 }

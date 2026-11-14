@@ -21,13 +21,17 @@ does not. 0.20.0 is the last release that may break the public surface (see
 - The packages on the shared line always have the same version and are released together.
   Use the same version of the CLI and `@nowaki-dev/runtime` in an app.
 - The CLI refuses to run against a `@nowaki-dev/runtime` that is older than itself or of
-  another major. (0.19.3 checks only "older than itself"; the major check is planned for 0.20.0.)
+  another major (on 0.x, another minor), since 0.20.0. Prereleases order as SemVer says
+  (`1.0.0-rc.1` < `1.0.0-rc.2` < `1.0.0`), so a 1.0.0 CLI refuses a 1.0.0-rc runtime.
 - `@nowaki-dev/markdoc` follows semver on its own line: a breaking change to it is a markdoc
   major, independent of Nowaki's.
 - `nowaki-core` is the CLI's engine. It is published so that `cargo install nowaki` works, it
-  is not a supported Rust API, and it stays on its own 0.x version line from 1.0 on. From
-  0.20.0 the `nowaki` crate pins it to an exact version (0.19.3 uses a caret requirement). Do
-  not depend on it directly.
+  is not a supported Rust API, and it has its own 0.x version line (`version` in
+  `crates/nowaki-core/Cargo.toml`, no longer the workspace version): it was 0.19.3 with the
+  shared 0.19.3, moves to 0.20.0 with Nowaki 0.20.0, and stays on 0.x when Nowaki goes to 1.0
+  (a patch when its code changes, a minor when its API breaks). The `nowaki` crate pins it
+  exactly (`version = "=X.Y.Z"`), so `cargo install nowaki` (which ignores Cargo.lock without
+  `--locked`) always gets the nowaki-core it was built with. Do not depend on it directly.
 
 ## What is frozen
 
@@ -36,12 +40,14 @@ either covered by semver or listed below as not covered. Frozen and covered by s
 
 - **`@nowaki-dev/runtime` exports**: every name and type in the `.d.ts` files of the
   documented subpaths (`.`, `./navigation`, `./content`, `./image`, `./env`, `./env/server`,
-  `./session`, and any subpath added before 1.0). This includes Jetstream (`live`,
+  `./session`, `./config`, and any subpath added before 1.0). This includes Jetstream (`live`,
   `publish()`, rooms, `shared`, presence) and the plugin API.
 - **Route and island module exports**: `default`, `loader`, `action`, the HTTP method exports
   of API routes, `meta`, `title`, `head`, `lang`, `htmlAttrs`, `bodyAttrs`, `revalidate`,
   `tags`, `streaming`, `csrf`, `budget`, `viewTransition`, `staticPaths`, `prerender`,
-  `sitemap`, `scripts`, `live`, the `client:*` island directives, and the layout `slots` prop.
+  `sitemap`, `scripts`, `live`, the `client:*` island directives, and the layout `slots` prop,
+  with the types `PageModule`, `LayoutModule`, `ApiModule`, `MiddlewareModule` and `IslandModule`
+  give them. API method exports are uppercase.
 - **File conventions**: `routes/` file routing (`index`, `[param]`, `[...rest]`, extension
   file routes such as `feed.xml.ts`), `_layout`, `_middleware`, `_404`, `_500`, `loading`,
   `error`, `(group)`, `@slot` with `default`, the `(.)` / `(..)` / `(...)` intercepts,
@@ -49,10 +55,16 @@ either covered by semver or listed below as not covered. Frozen and covered by s
   `nowaki.config.mjs` / `.js`, `.tsrx` files, and the `.nowaki/types.d.ts` path. Other `_*`
   names under `routes/` are reserved.
 - **`nowaki.config` keys**: `site`, `fonts`, `basePath`, `trailingSlash`, `redirects`,
-  `rewrites`, `headers`, `i18n`, `images`, `plugins`, and their documented nested keys.
+  `rewrites`, `headers`, `i18n`, `images`, `plugins`, and their documented nested keys (any
+  other key is an error, at every level), and the plugin hooks `name`, `transform`, `resolveId`
+  and `load`.
 - **CLI**: the commands `dev`, `build`, `start`, `prerender`, `upgrade`, `typegen`, their
   flags and defaults, `--version`, `--help`, and the exit code of a failed build (including a
   route over its `budget`).
+- **Listen address**: every server (`nowaki dev`, `nowaki start`, the node / bun / deno
+  adapters) listens on `PORT`, else 3000. `nowaki dev` and `nowaki start` take `--port`
+  (wins over `PORT`) and `--host [addr]` (`--host` alone: all interfaces, `0.0.0.0`; wins over
+  `NOWAKI_HOST`; default `127.0.0.1`).
 - **Environment variables** that users set: `PORT`, `NOWAKI_HOST`, `NOWAKI_SITE`,
   `NOWAKI_TRUST_PROXY`, `NOWAKI_CSP`, `NOWAKI_CSP_REPORT_URI`, `NOWAKI_SECURITY_HEADERS`,
   `NOWAKI_SESSION_SECRET`, the `NOWAKI_LIVE_*` settings, `NOWAKI_REVALIDATE_SECRET`,
@@ -172,13 +184,20 @@ Every release has a `vX.Y.Z` tag and a CHANGELOG entry.
 ## Platforms
 
 - **Node.js**: every package declares `engines.node >=22`. Nowaki supports the Node LTS lines
-  that are not end-of-life. CI runs Node 22 and 24 on Linux and Node 22 on macOS and Windows.
+  that are not end-of-life. CI runs Node 22, 24 and 26 on Linux and Node 22 on macOS and Windows.
   A Node line may be dropped in a minor once it reaches end-of-life (Node 22: 2027-04-30),
   announced in the CHANGELOG of the minor before.
 - **Bun and Deno**: supported for the `bun` and `deno` adapters, at the current stable release
   CI installs.
 - **Operating systems**: macOS (arm64, x64), Linux (x64, arm64, glibc) and Windows (x64), the
-  five prebuilt CLI binaries.
+  five prebuilt CLI binaries. musl (Alpine) and Windows arm64 have no prebuilt binary
+  (`cargo install nowaki` works there); adding one is an additive change. On Windows there is no
+  SIGTERM for the sidecar, so Jetstream rooms (`NOWAKI_LIVE_ROOMS_FILE`) rely on the periodic
+  write (every 2 s) rather than a final write at shutdown. CI runs the dev toolbar and most
+  browser tests on Windows too; not the ones that drive Chrome over a CDP pipe (router,
+  intercepting routes, the gallery), which Chrome on Windows doesn't read, nor the HMR test (on
+  Windows an edit to a module an island imports reloads the page instead of updating the
+  island).
 - **Rust** (only for building from source or `cargo install nowaki`; npm users do not need
   Rust): the MSRV is 1.97, set in `Cargo.toml` (`rust-version`) and checked in CI. It may rise
   in a minor (the oxc upgrade usually drives it), never in a patch, and every rise is noted in

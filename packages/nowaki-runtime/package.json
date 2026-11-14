@@ -35,7 +35,9 @@
     "env.d.ts",
     "env-server.d.ts",
     "session.js",
-    "session.d.ts"
+    "session.d.ts",
+    "config.js",
+    "config.d.ts"
   ],
   "exports": {
     ".": {
@@ -65,6 +67,10 @@
     "./session": {
       "types": "./session.d.ts",
       "default": "./session.js"
+    },
+    "./config": {
+      "types": "./config.d.ts",
+      "default": "./config.js"
     },
     "./client/*": "./client/*",
     "./server/*": "./server/*"

@@ -270,6 +270,9 @@ fn build_route_scripts(
         else {
             continue;
         };
+        if let Some(msg) = crate::routes::removed_convention(&rel) {
+            anyhow::bail!(msg);
+        }
         let Some(stem) = crate::routes::stem_from_rel(&rel) else {
             continue;
         };

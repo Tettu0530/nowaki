@@ -24,7 +24,9 @@ dunce = "1.0.5"
 futures-util = "0.3.31"
 getrandom = "0.4.3"
 http-body-util = "0.1.3"
-nowaki-core = { path = "../nowaki-core", version = "0.19.3" }
+# Exact: nowaki-core is internal and may break in any release, and `cargo install nowaki`
+# ignores Cargo.lock unless --locked (docs/STABILITY.md).
+nowaki-core = { path = "../nowaki-core", version = "=0.19.3" }
 notify = "8.2.0"
 # Content entries are read and rendered in parallel.
 rayon = "1.11.0"

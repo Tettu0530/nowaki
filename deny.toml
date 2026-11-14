@@ -1,6 +1,20 @@
-# cargo-deny: licenses, bans, and sources. Advisories are covered by `cargo audit`.
+# cargo-deny: advisories, licenses, bans, and sources (CI runs `cargo deny check` next to
+# `cargo audit`).
 [graph]
 all-features = true
+
+[advisories]
+# Each allowed advisory says why. All three are "unmaintained" notices (no known vulnerability),
+# reached only through build-time content features; revisit when upstream replaces them.
+ignore = [
+  # bincode 1.3.3 via syntect (comrak's code highlighting, `nowaki-core` highlight.rs): syntect
+  # loads its bundled syntax and theme dumps with it, never data from a request.
+  { id = "RUSTSEC-2025-0141", reason = "syntect's bundled dumps only; no untrusted input" },
+  # paste 1.0.15: a proc-macro used by rav1e (the AVIF encoder behind `?image`) at compile time.
+  { id = "RUSTSEC-2024-0436", reason = "compile-time proc-macro in rav1e; nothing runs at runtime" },
+  # yaml-rust 0.4.5 via syntect: parses syntect's own syntax definitions, not app or request YAML.
+  { id = "RUSTSEC-2024-0320", reason = "syntect's bundled syntax definitions only" },
+]
 
 [licenses]
 allow = [

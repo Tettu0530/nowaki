@@ -56,8 +56,15 @@ export interface NowakiResult {
  * response writers (status, header, cookie, redirect, json, ...).
  */
 export interface LoaderContext {
-  /** The request URL. */
+  /** The request URL, as the browser sent it (basePath and locale prefix included). */
   readonly url: URL;
+  /**
+   * The app path routing used: `url.pathname` without nowaki.config `basePath` and without the
+   * locale prefix (`/gallery/ja/photo/1` → `/photo/1`), the form `<Link href>`, `href()` and
+   * `revalidatePath()` take. After a config rewrite, it is the rewritten path. In components, use
+   * `routePath(url)` from `@nowaki-dev/runtime/navigation`.
+   */
+  readonly routePath: string;
   /**
    * The site's URL (`NOWAKI_SITE`, or `site` in nowaki.config), for absolute links in feeds and
    * the like. Undefined when neither is set; `url.origin` is the request's own origin.
@@ -342,8 +349,9 @@ export interface Live<S = any> {
 /**
  * Refreshes every live island subscribed to `topic` (`live.subscribe`) by running its `live.load`
  * and pushing the patch. Call it from actions, server functions, or API routes after data changes.
- * Reaches connections in the same process under `nowaki dev` / `nowaki start`; a no-op on the
- * deploy adapters for now.
+ * It reaches the live connections of the same `nowaki dev` / `nowaki start` process. On the deploy
+ * adapters (node, bun, deno, cloudflare, vercel) it does nothing and warns once. A topic is 1 to
+ * 128 characters without whitespace (else a TypeError).
  */
 export function publish(topic: string): void;
 
@@ -416,36 +424,8 @@ export function revalidateTag(tag: string): void;
  */
 export function getContext(): LoaderContext | null;
 
-/**
- * The current locale with `i18n` in nowaki.config (`ctx.locale` of the request being rendered,
- * usable in components, layouts and islands). In the browser it is the page's locale. Undefined
- * without i18n, outside a page request, and in server functions.
- */
-export function getLocale(): string | undefined;
-
-/**
- * `path` in `locale` (default: the current locale): `localePath("/about", "ja")` → `"/ja/about"`,
- * `localePath("/ja/about", "en")` → `"/about"` when `en` is the default locale. The query and
- * fragment are kept. Returns `path` unchanged without i18n.
- */
-export function localePath(path: string, locale?: string): string;
-
-/**
- * `path` as the browser requests it, built the way `<Link>` builds its href: in the current locale
- * (with `i18n`; a path that already has a locale prefix keeps it) and under nowaki.config
- * `basePath`. For URLs `<Link>` doesn't build: `<form action={href("/logout")}>`, `fetch`,
- * `location`. `locale` picks another locale (`false`: no prefix); `basePath: false` leaves the base
- * out. Works on the server and in islands; without i18n and basePath, returns `path` as it is.
- */
-export function href(path: string, options?: { locale?: string | false; basePath?: boolean }): string;
-
-/**
- * Remembers `locale` as the visitor's choice when nowaki.config has `i18n.detect`: sets the
- * `nowaki_locale` cookie (Path = basePath, one year, SameSite=Lax), which the site's root follows
- * instead of `Accept-Language`. Call it from an island (a language switcher) before navigating;
- * a `<Link locale>` used inside an island does it on click. Does nothing on the server.
- */
-export function setLocale(locale: string): void;
+// The i18n helpers, the same functions (and types) as `@nowaki-dev/runtime/navigation`.
+export { getLocale, href, localePath, setLocale } from "./navigation.js";
 
 /** A [Standard Schema](https://standardschema.dev) (zod, valibot, arktype, ...). */
 export interface StandardSchemaV1<Input = unknown, Output = Input> {
@@ -516,3 +496,103 @@ export declare class ServerFnError extends Error {
  * @example export const viewTransition = true;
  */
 export type ViewTransition = boolean;
+
+/**
+ * `export const revalidate` on a page route: ISR. A render is cached for this many seconds (a
+ * positive number) and re-rendered in the background once stale (`stale-while-revalidate`). Don't
+ * put per-user data on such a page: Nowaki varies the cache by what the render read (cookies,
+ * headers, the query), and a page that reads the session or cookies is never shared.
+ * @example export const revalidate = 60;
+ */
+export type Revalidate = number;
+
+/**
+ * `export const scripts` on a page route or layout: modules shipped to the browser as
+ * `<script type="module">`, bundled like an island but with no component and no hydration.
+ * Read from the source at build time, so it must be an array of string literals: relative paths
+ * (from the file that lists them) or package specifiers.
+ * @example export const scripts = ["./hero.ts"];
+ */
+export type PageScripts = readonly string[];
+
+/**
+ * The exports a page route module (`routes/**\/*.tsx`, also `_404` / `_500`) may have, with their
+ * types. Check one export with an indexed type, or the whole module from another file:
+ * @example
+ * export const revalidate: PageModule["revalidate"] = 60;
+ * export const meta = { title: "Blog" } satisfies PageModule["meta"];
+ * // routes.check.ts
+ * import * as blog from "./routes/blog.tsx";
+ * blog satisfies PageModule;
+ */
+export interface PageModule<D = any> {
+  /** The page component. */
+  default: (props: RouteProps<D>) => unknown;
+  loader?: Loader<D>;
+  action?: Action;
+  meta?: Meta | MetaFn<D>;
+  /** `<title>`. `meta.title` wins over it. */
+  title?: string;
+  /** Raw HTML put in `<head>` as written (no escaping: never build it from user input). */
+  head?: string;
+  /** `<html lang>`. With i18n it defaults to the request's locale. */
+  lang?: string;
+  htmlAttrs?: DocumentAttrs;
+  bodyAttrs?: DocumentAttrs;
+  revalidate?: Revalidate;
+  tags?: RouteTags;
+  streaming?: Streaming;
+  csrf?: Csrf;
+  budget?: RouteBudget;
+  viewTransition?: ViewTransition;
+  staticPaths?: StaticPaths;
+  /** `false` leaves the page out of `nowaki prerender` / the static adapter. */
+  prerender?: boolean;
+  /** `false` leaves the page out of the generated sitemap.xml. */
+  sitemap?: boolean;
+  scripts?: PageScripts;
+}
+
+/** The exports a `_layout` module may have (a layout's `meta` applies to every page under it). */
+export interface LayoutModule<D = any> {
+  default: (props: LayoutProps<D>) => unknown;
+  loader?: Loader<D>;
+  meta?: Meta | MetaFn<D>;
+  title?: string;
+  head?: string;
+  lang?: string;
+  htmlAttrs?: DocumentAttrs;
+  bodyAttrs?: DocumentAttrs;
+  scripts?: PageScripts;
+}
+
+/**
+ * The exports an API route (`routes/api/**`) or a file route (`feed.xml.ts`, `og/[card].png.ts`)
+ * may have: one handler per request method (uppercase; a method without one gets 405 unless there
+ * is a `default`), `csrf`, and for prerendered file routes `staticPaths` / `prerender`.
+ */
+export interface ApiModule {
+  GET?: ApiHandler;
+  POST?: ApiHandler;
+  PUT?: ApiHandler;
+  PATCH?: ApiHandler;
+  DELETE?: ApiHandler;
+  HEAD?: ApiHandler;
+  OPTIONS?: ApiHandler;
+  /** Handles every method without its own export. */
+  default?: ApiHandler;
+  csrf?: Csrf;
+  staticPaths?: StaticPaths;
+  prerender?: boolean;
+}
+
+/** A `_middleware` module: its default export runs before the routes under its directory. */
+export interface MiddlewareModule {
+  default: Middleware;
+}
+
+/** An island module (`islands/*.tsx`): the component, and `live` for a Jetstream island. */
+export interface IslandModule<S = any> {
+  default: (props: any) => unknown;
+  live?: Live<S>;
+}

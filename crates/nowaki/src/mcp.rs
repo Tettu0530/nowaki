@@ -473,7 +473,7 @@ fn tool_list() -> Value {
         {
             "name": "dev_config",
             "title": "Dev config",
-            "description": "Dev server settings (port, --host, plugins), NOWAKI_* env flags, current Jetstream connections and rooms, and the recent revalidatePath / revalidateTag calls.",
+            "description": "Dev server settings (port, listen address, plugins), NOWAKI_* env flags, current Jetstream connections and rooms, and the recent revalidatePath / revalidateTag calls.",
             "inputSchema": { "type": "object", "properties": {} },
             "annotations": ro,
         },
@@ -651,7 +651,8 @@ async fn dev_config(state: &DevState) -> Value {
         "version": env!("CARGO_PKG_VERSION"),
         "root": state.core.root.display().to_string(),
         "port": state.port,
-        "host": if state.expose { "0.0.0.0 (--host)" } else { "127.0.0.1" },
+        "host": state.bind_ip.to_string(),
+        "exposed": state.expose,
         "plugins": state.plugins,
         "mcp": url(state.port),
         "env": {
