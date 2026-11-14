@@ -1,8 +1,15 @@
-//! Production build: walks the client module graph, transforms + minifies, and
-//! writes content-hashed ESM to dist/client/.
-//! Per island, app modules used only by that island are concatenated into one scope
-//! (scope hoisting, chunk.rs). node_modules/shared/css/asset become separate chunks,
-//! shared and deduped. Modules that can't be concatenated fall back to unbundled emit.
+//! Production build.
+//!
+//! The client build walks the client module graph from its entries (the islands runtime, the
+//! lazy SPA router, every island, the live runtime when there are live islands, and page
+//! scripts), transforms and minifies each module, and writes content-hashed ESM, route CSS,
+//! `manifest.json`, and precompressed siblings to `dist/client/`. Per island, app modules used
+//! only by that island are concatenated into one scope (scope hoisting, `chunk.rs`); package,
+//! shared, CSS, and asset modules become separate chunks, shared and deduped. Modules that can't
+//! be concatenated fall back to unbundled emit.
+//!
+//! The server build transforms the app's server graph for SSR (not minified) into
+//! `dist/server/`, with `functions.json` for server functions.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -22,27 +29,36 @@ use crate::NowakiCore;
 /// What `manifest.json` says, kept in memory for the route JS report (`budget.rs`).
 #[derive(Debug, Default, Clone)]
 pub struct ClientInfo {
+    /// The islands runtime chunk, when `@nowaki-dev/runtime` is installed.
     pub runtime: Option<String>,
-    /// island name → chunk file
+    /// Island name → chunk file.
     pub islands: HashMap<String, String>,
+    /// Names of the live islands (they have no client chunk).
     pub live_islands: Vec<String>,
+    /// The live runtime chunk, when there are live islands.
     pub live_runtime: Option<String>,
-    /// chunk → the chunks it preloads
+    /// Entry chunk (runtime or island) → the chunks it preloads.
     pub preload: HashMap<String, Vec<String>>,
 }
 
+/// What a build wrote, for the CLI's summary.
 pub struct BuildReport {
+    /// Client modules emitted (chunks, asset modules, style modules).
     pub modules: usize,
+    /// Client islands (live islands excluded).
     pub islands: usize,
+    /// Server modules written (0 until [`build_server`] runs).
     pub server_modules: usize,
+    /// The client output directory (`dist/client`).
     pub out_dir: PathBuf,
-    /// Total input/output bytes of image optimization (for reporting savings).
+    /// Total input bytes of the images the client build optimized or resized.
     pub asset_in: u64,
+    /// Total output bytes of those images (for reporting savings).
     pub asset_out: u64,
 }
 
-/// Walks the graph from the entries (islands runtime + islands/),
-/// writes to dist/client/, and writes manifest.json.
+/// Walks the graph from the client entries (islands runtime, SPA router, islands, live runtime,
+/// page scripts), writes to dist/client/, and writes manifest.json.
 /// Also returns an "asset absolute path → served URL" map (shared with the server build).
 pub fn build_client(
     core: &NowakiCore,
@@ -65,8 +81,9 @@ pub fn build_client_with_info(
 
     let mut ctx = EmitCtx::default();
 
-    // Entry 1: the eager client runtime (islands.js = hydration only).
-    // Only pages with islands load it. The SPA router is excluded to keep first-load minimal.
+    // The eager client runtime (islands.js: hydration only). Pages with client islands load it
+    // (so do streaming pages and pages with an intercepting slot). The SPA router is a separate
+    // chunk to keep the first load small.
     let runtime = core
         .root
         .join("node_modules/@nowaki-dev/runtime/client/islands.js");
@@ -87,7 +104,7 @@ pub fn build_client_with_info(
         None
     };
 
-    // Entries 2..: each component under islands/.
+    // Each component under islands/.
     let mut islands: Vec<(String, String)> = Vec::new();
     let mut live_islands: Vec<String> = Vec::new();
     let islands_dir = core.root.join("islands");
@@ -115,7 +132,7 @@ pub fn build_client_with_info(
             }
         }
 
-        // Compute each island's reachable app set and count sharing (reached from multiple islands).
+        // Each island's reachable app modules, and how many islands reach each module.
         let reach: Vec<(PathBuf, HashSet<PathBuf>)> = entries
             .iter()
             .map(|e| (e.clone(), crate::chunk::collect_app_modules(core, e)))
@@ -230,8 +247,6 @@ pub fn build_client_with_info(
     ))
 }
 
-/// Server build: transforms routes/ and islands/ in SSR mode and
-/// writes them to dist/server/ as ESM that Node can run directly.
 /// Empties `dir`, keeping the directory itself. Windows can't remove a directory that is some
 /// process's working directory (e.g. a server started from dist/server), but its files are fine.
 pub fn clear_dir(dir: &Path) -> Result<()> {
@@ -306,8 +321,11 @@ fn build_route_scripts(
     Ok(out)
 }
 
-/// Rewrites .tsx/.ts/.jsx in relative imports to .js (bare imports are left to Node resolution).
-/// Returns the number of output modules.
+/// Server build: transforms the app's server graph (routes/, islands/, components/, lib/,
+/// actions/, content/, env.ts, session.ts, and every app module they import) in SSR mode and
+/// writes it to dist/server/ as ESM that Node can run directly. Relative imports of TS and other
+/// compiled extensions become `.js`; bare imports are left to Node resolution. `assets` is the
+/// client build's asset map. Returns the number of output modules.
 pub fn build_server(
     core: &NowakiCore,
     dist: &Path,
@@ -381,7 +399,8 @@ pub fn build_server(
         asset_base: core.asset_base(),
         urls: Mutex::new(assets.clone()),
     };
-    // Server modules are independent (no naming dependencies), so transform them in parallel with rayon.
+    // Server modules are independent (no naming dependencies), so they are transformed in
+    // parallel.
     let results: Vec<Result<(PathBuf, String)>> = files
         .par_iter()
         .map(|path| {
@@ -435,7 +454,8 @@ fn is_app_json(core: &NowakiCore, abs: &Path) -> bool {
         && !abs.components().any(|c| c.as_os_str() == "node_modules")
 }
 
-/// Generates dist/server/functions.json. module is a .js path relative to serverDir.
+/// Writes dist/server/functions.json: server function id → `module` (a `.js` path relative to
+/// dist/server) and `export`.
 fn write_server_functions(core: &NowakiCore, server_dir: &Path) -> Result<()> {
     let found =
         crate::server_fn::discover(core, &["routes", "islands", "components", "lib", "actions"]);
@@ -460,8 +480,6 @@ fn with_js_suffix(rel: &str) -> String {
     }
 }
 
-/// SSR transform: TS stripping + JSX (automatic, preact) + relative imports to .js.
-/// Not minified (keeps SSR stack traces readable).
 /// Asset URLs for the server build: the client build's, plus assets that only server modules
 /// import, which are emitted to dist/client on first use (rayon threads share this).
 struct ServerAssets {
@@ -504,6 +522,7 @@ impl ServerAssets {
         Ok(code)
     }
 
+    /// The served URL of asset `abs`, emitting it into dist/client on first use.
     fn url_for(&self, abs: &Path) -> Result<String> {
         let mut urls = self.urls.lock().unwrap();
         if let Some(url) = urls.get(abs) {
@@ -516,6 +535,9 @@ impl ServerAssets {
     }
 }
 
+/// SSR transform: TS stripping, JSX (automatic runtime, Preact), client defines, and import
+/// rewrites (virtual modules, CSS, assets, `?image`, relative imports to `.js`). Not minified, so
+/// the inline source map is exact and SSR stack traces stay readable.
 fn transform_for_server(
     path: &Path,
     out_path: &Path,
@@ -558,7 +580,7 @@ fn transform_for_server(
             lit.raw = None;
             spec = aliased;
         }
-        // Inline virtual modules as data: (assumed self-contained ESM).
+        // Inline virtual modules as `data:` URLs (assumed self-contained ESM).
         if !spec.starts_with('.') && !spec.starts_with('/') && !spec.contains("://") {
             if let Some(data) = core.virtual_ssr_module(dir, spec) {
                 lit.value = allocator.alloc_str(&data).into();
@@ -696,7 +718,7 @@ fn rewrite_server_spec(spec: &str) -> Option<String> {
         return None;
     }
     if spec.ends_with(".css") {
-        // CSS is client-only
+        // Reached only by `import()`: static CSS imports are handled in `transform_for_server`.
         return Some(crate::css::CSS_NOOP_SPECIFIER.to_string());
     }
     for ext in [".tsx", ".jsx", ".ts", ".tsrx", ".mdx", ".mdoc", ".mjs"] {
@@ -728,14 +750,15 @@ fn walk_files(dir: &Path) -> Result<Vec<PathBuf>> {
 #[derive(Default)]
 struct EmitCtx {
     emitted: HashMap<PathBuf, String>,
-    /// Modules currently on the DFS stack (for cycle detection)
+    /// Modules currently on the DFS stack (for cycle detection).
     visiting: HashSet<PathBuf>,
+    /// Asset path → served URL (for `?image`, the module code), shared with the server build.
     assets: HashMap<PathBuf, String>,
-    /// Provisional pre-rewrite file names used for cycles
+    /// Provisional pre-rewrite file names used for cycles.
     provisional: HashMap<PathBuf, String>,
-    /// Modules found to be part of a cycle (their provisional name becomes final)
+    /// Modules found to be part of a cycle (their provisional name becomes final).
     cyclic: HashSet<PathBuf>,
-    /// Output file name → output file names of direct deps (for computing preload chains)
+    /// Output file name → output file names of direct deps (for computing preload chains).
     deps: HashMap<String, Vec<String>>,
     asset_in: u64,
     asset_out: u64,
@@ -779,8 +802,9 @@ fn client_source_name(root: &Path, path: &Path) -> PathBuf {
 }
 
 /// Emits one module (after processing its deps) and returns the output file name.
-/// Acyclic modules are named by the hash of their final content (correct for immutable caching). Cycles
-/// fall back to a provisional name from the pre-rewrite hash (still post-order DFS).
+/// Acyclic modules are named by the hash of their final content (correct for immutable
+/// caching). Cycles fall back to a provisional name from the pre-rewrite hash (still post-order
+/// DFS).
 fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Result<String> {
     if let Some(name) = ctx.emitted.get(abs) {
         return Ok(name.clone());
@@ -836,7 +860,8 @@ fn emit(core: &NowakiCore, abs: &Path, out_dir: &Path, ctx: &mut EmitCtx) -> Res
         ctx.emitted.insert(abs.to_path_buf(), mod_name.clone());
         return Ok(mod_name);
     }
-    // .css becomes a <style>-injecting JS shim; *.module.css is scoped + exports a class name map (no deps).
+    // .css becomes a <style>-injecting JS shim; *.module.css is scoped and exports a class name
+    // map (no deps).
     if crate::css::is_css(abs) {
         let css = core.read_css(abs)?;
         let id = crate::css::css_scope_id(&core.root, abs);
@@ -954,9 +979,10 @@ fn client_import_chain(core: &NowakiCore, from: &Path, target: &Path) -> Vec<Pat
     vec![from.to_path_buf(), target.to_path_buf()]
 }
 
-/// Scope-hoists an island into one chunk. Concatenated: the island itself + concatenable
-/// app modules used only by that island. External deps (node_modules/shared/css/asset) become
-/// separate chunks via emit(), linked by ESM imports. Falls back to unbundled emit if concatenation fails.
+/// Scope-hoists an island into one chunk: the island itself and the concatenable app modules
+/// used only by that island. External deps (packages, shared app modules, CSS, assets) become
+/// separate chunks through `emit`, linked by ESM imports. Falls back to unbundled emit if
+/// concatenation fails.
 fn emit_island(
     core: &NowakiCore,
     island: &Path,
@@ -965,7 +991,8 @@ fn emit_island(
     out_dir: &Path,
     ctx: &mut EmitCtx,
 ) -> Result<String> {
-    // Hoisting would drop what it can't concatenate (e.g. `import * as`), so such islands stay unbundled.
+    // Hoisting would drop what it can't concatenate (e.g. `import * as`), so such islands stay
+    // unbundled.
     if crate::chunk::needs_fallback(core, island) {
         return emit(core, island, out_dir, ctx);
     }
@@ -1008,7 +1035,7 @@ fn emit_island(
                 code.push_str(&format!("\n//# sourceMappingURL={map_name}\n"));
             }
             fs::write(out_dir.join(&filename), &code)?;
-            // Record direct deps only (render_manifest walks the transitive ones)
+            // Record direct deps only (render_manifest walks the transitive ones).
             let mut deps: Vec<String> = external_name.values().cloned().collect();
             deps.sort();
             ctx.deps.insert(filename.clone(), deps);
@@ -1052,7 +1079,8 @@ pub fn sanitize_name(stem: &str) -> String {
     out
 }
 
-/// Optimizes an asset and writes it under a content-hashed name. Returns (name, bytes in, bytes out).
+/// Optimizes an asset and writes it under a content-hashed name. Returns (name, bytes in, bytes
+/// out).
 fn write_asset(abs: &Path, out_dir: &Path) -> Result<(String, u64, u64)> {
     let raw = fs::read(abs).with_context(|| format!("failed to read: {}", abs.display()))?;
     let ext = abs.extension().and_then(|e| e.to_str()).unwrap_or("bin");
@@ -1065,7 +1093,7 @@ fn write_asset(abs: &Path, out_dir: &Path) -> Result<(String, u64, u64)> {
     Ok((name, raw.len() as u64, bytes.len() as u64))
 }
 
-/// Returns a chunk's transitive deps (excluding itself, deduped). For preload chains.
+/// A chunk's transitive deps (excluding itself, deduped, sorted), for preload chains.
 fn transitive_deps(entry: &str, deps: &HashMap<String, Vec<String>>) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
@@ -1083,6 +1111,7 @@ fn transitive_deps(entry: &str, deps: &HashMap<String, Vec<String>>) -> Vec<Stri
     out
 }
 
+/// A client module after `transform_for_bundle`, before its deps are named.
 struct BundleModule {
     code: String,
     deps: Vec<DepRef>,
@@ -1090,14 +1119,15 @@ struct BundleModule {
     map: Option<String>,
 }
 
+/// An import whose specifier was replaced by `placeholder`.
 struct DepRef {
     placeholder: String,
     abs_path: PathBuf,
 }
 
-/// TS type stripping + JSX (automatic, preact) + minify codegen.
-/// Import specifiers are replaced with unique placeholders; resolved absolute paths go into deps.
-/// (The caller later replaces placeholders with the deps' hashed names.)
+/// TS type stripping, JSX (automatic runtime, Preact), client defines, and minified codegen.
+/// Import specifiers are replaced with unique placeholders and the resolved absolute paths go into
+/// `deps`; the caller later replaces the placeholders with the deps' hashed names.
 fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<BundleModule> {
     let allocator = Allocator::default();
     let mut program = crate::transform::parse_program(
@@ -1164,7 +1194,8 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
         });
     }
 
-    // Make sources root-relative; never expose absolute paths, including out-of-root deps (pnpm store).
+    // Make sources root-relative; never expose absolute paths, including out-of-root deps (pnpm
+    // store).
     let rel = client_source_name(&core.root, path);
     // Only import sources were rewritten since minifying, so the scoping still matches.
     let ret = Codegen::new()
@@ -1180,16 +1211,18 @@ fn transform_for_bundle(path: &Path, source: &str, core: &NowakiCore) -> Result<
     })
 }
 
-/// Whether it exports `live` (read from the AST, after read_source, so .tsrx is already compiled).
+/// Whether the island exports `live` (read from the AST after `read_source`, so `.tsrx` is
+/// already compiled).
 fn is_live_island(core: &NowakiCore, abs: &Path) -> bool {
     core.read_source(abs)
         .map(|s| crate::live_hint::exports_live(abs, &s))
         .unwrap_or(false)
 }
 
-/// Generates manifest.json by hand (no serde, to avoid extra deps; file names are ascii only).
-/// `preload`: each entry chunk → its transitive dep chunks. To avoid request waterfalls,
-/// pages `<link rel=modulepreload>` the island chunk and all its deps at once.
+/// Generates the first fields of manifest.json as text (the caller appends `routeCss`,
+/// `routeScripts`, and `scriptPreload`). Chunk file names are sanitized ASCII; island names are
+/// written unescaped. `preload`: each entry chunk → its transitive dep chunks. To avoid request
+/// waterfalls, pages `<link rel=modulepreload>` the island chunk and all its deps at once.
 fn render_manifest(
     runtime: Option<&str>,
     router_runtime: Option<&str>,
@@ -1202,7 +1235,7 @@ fn render_manifest(
         Some(r) => format!("\"{r}\""),
         None => "null".to_string(),
     };
-    // routerRuntime is a lazy chunk. Not in preload (keeps first-load minimal).
+    // routerRuntime is a lazy chunk: pages don't preload it (keeps the first load small).
     let router_runtime_field = match router_runtime {
         Some(r) => format!("\"{r}\""),
         None => "null".to_string(),
@@ -1223,7 +1256,7 @@ fn render_manifest(
 
     // Write the transitive deps of entry chunks (runtime + each island + lazy router) to preload.
     // Router deps are recorded too, but the HTML doesn't preload the router (it's lazy-loaded).
-    // Benchmarks use this dep list to exclude "lazy chunks" from first-load.
+    // Benchmarks use this dep list to exclude lazy chunks from the first load.
     let mut entries: Vec<&str> = Vec::new();
     let mut seen = HashSet::new();
     if let Some(r) = runtime {

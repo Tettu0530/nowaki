@@ -41,14 +41,15 @@ use xxhash_rust::xxh3::xxh3_64;
 pub use cache::Mode;
 pub use remote_image::{RemoteFetch, RemoteImages, RemotePattern};
 
-/// Synthetic directory name for plugin virtual modules (doesn't exist on disk).
+/// Synthetic directory name for plugin virtual modules (it never exists on disk).
 /// A virtual id returned by `resolveId` maps to `<root>/__nowaki_virtual__/<hash>.js`;
-/// `read_source` looks up the original id in the registry and gets the source from the `load` hook.
+/// [`NowakiCore::read_source`] looks the original id up and gets the source from the `load`
+/// hook.
 pub const VIRTUAL_DIR: &str = "__nowaki_virtual__";
 
-/// Bridge for calling plugin transform hooks from Rust. The CLI implements it by delegating
-/// over HTTP to the Node plugin host (which loads `nowaki.config`).
-/// nowaki-core itself runs no JS, so this trait keeps them loosely coupled.
+/// Bridge for calling plugin hooks from Rust. The CLI implements it by delegating over HTTP to
+/// the Node plugin host (which loads `nowaki.config`). nowaki-core itself runs no JavaScript;
+/// this trait is its only way to reach plugins.
 ///
 /// `transform` / `compile_tsrx` / `load` return `Err` when the hook could not run (the host is
 /// down, a plugin threw, the compiler reported errors). `Ok(None)` means "no change", so a failure
@@ -63,20 +64,21 @@ pub trait PluginBridge: Send + Sync {
     fn compile_tsrx(&self, id: &str, code: &str) -> Result<Option<String>>;
 
     /// `resolveId(source, importer)` for virtual modules. If a plugin claims the specifier, returns
-    /// the resolved id (a real path or a virtual id string). None if no plugin claims it.
-    /// Called only when normal resolution fails (= never touches on-disk modules).
+    /// the resolved id (a real path or a virtual id string); None if no plugin claims it.
+    /// Called only when normal resolution fails, so it never sees specifiers that resolve on disk.
     fn resolve_id(&self, _source: &str, _importer: &str) -> Option<String> {
         None
     }
 
-    /// `load(id)` for virtual modules. Returns the source for a virtual id from `resolveId`.
-    /// `Ok(None)` if unsupported.
+    /// `load(id)` for virtual modules: the source for a virtual id from `resolveId`.
+    /// `Ok(None)` if no plugin loads it.
     fn load(&self, _id: &str) -> Result<Option<String>> {
         Ok(None)
     }
 }
 
-/// Extensions to transform. Anything else (css, images, etc.) is served as is.
+/// Whether `path` has an extension Nowaki transforms into a JS module. Anything else (CSS,
+/// images, etc.) is served as is.
 /// `.tsrx` is compiled to JSX by `@tsrx/preact` in the plugin host, then run through oxc.
 /// `.mdoc` (Markdoc) has no built-in compiler: a plugin (`@nowaki-dev/markdoc`) must turn it into
 /// a module.
@@ -95,8 +97,8 @@ fn no_markdoc_plugin(abs: &Path) -> anyhow::Error {
     )
 }
 
-/// Assets treated as URL strings on import (images, fonts, media).
-/// In `import logo from "./logo.png"`, logo is the served URL.
+/// Whether `path` is an asset that imports as its URL string (images, fonts, media, PDF), case
+/// insensitively: in `import logo from "./logo.png"`, `logo` is the served URL.
 pub fn is_asset(path: &Path) -> bool {
     matches!(
         path.extension()
@@ -129,16 +131,19 @@ pub fn is_asset(path: &Path) -> bool {
     )
 }
 
-/// Bundler core. Used by both the dev server and build.
+/// The bundler core for one app: resolver, module caches, and settings. `nowaki dev` serves
+/// modules from it, and `nowaki build` builds with it.
 pub struct NowakiCore {
+    /// The app root, canonicalized when it exists (see [`NowakiCore::new`]).
     pub root: PathBuf,
     resolver: Resolver,
     cache: cache::ModuleCache,
     /// The files each cached module inlines (see `remember`).
     inputs: cache::InputsCache,
-    /// Persistent cache that survives restarts
+    /// Persistent cache that survives restarts.
     disk_cache: cache::DiskCache,
-    /// Client constant-replacement pairs for import.meta.env.PUBLIC_* / MODE (from .env)
+    /// Client constant-replacement pairs for `import.meta.env` (`PUBLIC_*` from `.env` or
+    /// `env.ts`, `MODE`, `BASE_URL`, ...).
     pub(crate) client_defines: Vec<(String, String)>,
     /// Plugin transform hooks (optional). If unset, files are read as is.
     plugins: Option<Arc<dyn PluginBridge>>,
@@ -150,7 +155,7 @@ pub struct NowakiCore {
     /// MDX and plugins). The graph, chunking, budgets, and the transform all read the same modules
     /// several times per build; plugins run once per version of a file.
     source_cache: dashmap::DashMap<PathBuf, (u64, String)>,
-    /// Virtual module synthetic path → original id (as returned by `resolveId`). Kept for lookup in `load`.
+    /// Virtual module synthetic path → original id (as returned by `resolveId`), for `load`.
     virtual_ids: Mutex<HashMap<PathBuf, String>>,
     /// Remote `?image` imports (`images.remotePatterns`); None refuses every remote image.
     remote: Option<Arc<RemoteImages>>,
@@ -167,6 +172,8 @@ pub struct NowakiCore {
 }
 
 impl NowakiCore {
+    /// A core for the app at `root`, with the client defines from its `.env` files and no
+    /// plugins, base path, or remote images.
     pub fn new(root: PathBuf) -> Self {
         // Resolved module paths are canonical, so the root must be too, or `root.starts_with`
         // checks (which modules are the app's, and get hoisted) miss through a symlinked path
@@ -342,9 +349,10 @@ impl NowakiCore {
         Ok(())
     }
 
-    /// Resolves a specifier to an absolute path. Tries the plugin `resolveId` only when normal oxc
-    /// resolution fails; virtual ids map to a synthetic path registered for `read_source`.
-    /// Without plugins this is identical to plain resolution (zero overhead).
+    /// Resolves a specifier to an absolute path. Remote image specifiers go to
+    /// [`Self::resolve_remote_image`] (an error is printed and gives None). Otherwise tries the
+    /// plugin `resolveId` only when oxc resolution fails; virtual ids map to a synthetic path
+    /// registered for `read_source`. Without plugins this is plain oxc resolution.
     pub fn resolve_spec(&self, dir: &Path, spec: &str) -> Option<PathBuf> {
         if let Some(r) = self.resolve_remote_image(spec) {
             return r.map_err(|e| eprintln!("[nowaki] {e:#}")).ok();
@@ -391,7 +399,7 @@ impl NowakiCore {
         Ok(())
     }
 
-    /// Sets the plugin transform bridge (called by the CLI when it detects nowaki.config).
+    /// Sets the plugin bridge (called by the CLI when it detects nowaki.config).
     pub fn set_plugins(&mut self, bridge: Arc<dyn PluginBridge>) {
         self.plugins = Some(bridge);
         // Plugins are assumed to depend on the file and on nowaki.config (and the code it imports
@@ -410,14 +418,15 @@ impl NowakiCore {
         self.source_cache.clear();
     }
 
-    /// The hash cache keys use for a file's own text (with the plugin salt).
+    /// The hash cache keys use for a file's own text (with the plugin and remote image salts).
     fn raw_hash(&self, text: &str) -> u64 {
         xxh3_64(text.as_bytes()) ^ self.plugin_salt ^ self.remote_salt
     }
 
-    /// Gets a module's source (file read + plugin transform hook).
-    /// Without plugins this is identical to a plain file read (= unchanged behavior). All source
-    /// reads in dev/build/chunk go through here so transform hooks apply consistently.
+    /// A module's source: the file (or a virtual module's `load` output), after MDX and the
+    /// plugin hooks, cached by content. Without plugins and outside MDX this is the file's text.
+    /// Every source read in dev, build, and chunking goes through here so the hooks apply
+    /// consistently.
     pub fn read_source(&self, abs: &Path) -> Result<String> {
         if let Some(vid) = self.virtual_id_of(abs) {
             let bridge = self
@@ -594,6 +603,7 @@ impl NowakiCore {
             .is_none_or(|e| cache::inputs_hash(&e.0) == e.1)
     }
 
+    /// Caches `code` in memory under `key`, with the files it inlines and their current hash.
     fn remember(&self, key: (PathBuf, Mode), hash: u64, code: &str, inputs: Vec<PathBuf>) {
         if inputs.is_empty() {
             self.inputs.remove(&key);
@@ -610,8 +620,8 @@ impl NowakiCore {
         );
     }
 
-    /// Production build: writes the client graph to dist/client/ and server modules
-    /// to dist/server/.
+    /// Production build: writes the client build to `dist/client/`, server modules to
+    /// `dist/server/`, and copies `public/` to `dist/public/`.
     pub fn build(&self, dist: &Path) -> Result<build::BuildReport> {
         Ok(self.build_with_client(dist)?.0)
     }
@@ -630,8 +640,8 @@ impl NowakiCore {
         Ok((report, client))
     }
 
-    /// For a virtual module, returns it as a data: module Node can import directly (for SSR).
-    /// None for a real module (normally resolvable). Also used by build_server.
+    /// For a virtual module, returns it as a `data:` module Node can import directly (for SSR).
+    /// None for a real module. Used by the SSR transform and by `build::build_server`.
     pub(crate) fn virtual_ssr_module(&self, dir: &Path, spec: &str) -> Option<String> {
         let p = self.resolve_spec(dir, spec)?;
         self.virtual_id_of(&p)?;
@@ -640,7 +650,7 @@ impl NowakiCore {
     }
 }
 
-/// Disk cache salt: the nowaki version + the client defines, so upgrades and env changes
+/// Disk cache salt: the nowaki-core version and the client defines, so upgrades and env changes
 /// invalidate it.
 fn defines_salt(defines: &[(String, String)]) -> u64 {
     let mut buf = env!("CARGO_PKG_VERSION").as_bytes().to_vec();
@@ -686,7 +696,7 @@ mod tests {
         assert!(!is_asset(Path::new("style.css"))); // css is not an asset
     }
 
-    // Mock bridge for testing virtual modules (resolveId/load) without the Node host.
+    /// Mock bridge for testing virtual modules (`resolveId` / `load`) without the Node host.
     struct MockBridge;
     impl PluginBridge for MockBridge {
         fn transform(&self, _id: &str, _code: &str) -> Result<Option<String>> {

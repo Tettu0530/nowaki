@@ -1,7 +1,9 @@
-//! Import edges between app modules, for dev tooling (`nowaki dev`'s MCP endpoint).
+//! Import edges between app modules: the server build's module graph, the remote image prefetch,
+//! and dev tooling (`nowaki dev`'s MCP endpoint).
 //!
-//! The dev server transforms modules one request at a time and keeps no graph, so edges come from
-//! parsing each source (through `read_source`) and resolving its specifiers the way the transforms do.
+//! The dev server transforms modules one request at a time and keeps no graph, so edges come
+//! from parsing each source (through `read_source`) and resolving its specifiers the way the
+//! transforms do.
 
 use std::path::{Path, PathBuf};
 
@@ -64,6 +66,8 @@ pub fn importers(core: &NowakiCore, target: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The import specifiers of `source` as `(specifier, dynamic)`, in [`module_imports`]' order:
+/// static imports and re-exports first, then string-literal `import()`.
 pub(crate) fn import_specifiers(abs: &Path, source: &str) -> Result<Vec<(String, bool)>> {
     let allocator = Allocator::default();
     let source_type = crate::transform::source_type_for_path(abs);
@@ -108,6 +112,8 @@ impl<'a> Visit<'a> for DynamicImports {
     }
 }
 
+/// Resolves a specifier like the transforms (React aliases, plugins); None for absolute paths,
+/// URLs, and `data:`.
 fn resolve(core: &NowakiCore, dir: &Path, spec: &str) -> Option<PathBuf> {
     if spec.starts_with('/') || spec.contains("://") || spec.starts_with("data:") {
         return None;
