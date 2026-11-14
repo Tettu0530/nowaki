@@ -1903,6 +1903,18 @@ mod tests {
         assert_eq!(purge_line(&format!("[app] NOWAKI_PURGE {token} t:x")), None);
     }
 
+    /// A 2000-character non-ASCII path is a ~30 KB line (its browser path's `%` escapes are
+    /// escaped again): the stdout channel carries what the 8 KB header can't.
+    #[test]
+    fn a_long_purge_line_decodes() {
+        let token = crate::live::publish_token();
+        let path = format!("/{}", "%E6%97%A5".repeat(1999));
+        let line = format!("NOWAKI_PURGE {token} p:{}", path.replace('%', "%25"));
+        assert!(line.len() > 24 * 1024);
+        let purge = purge_line(&line).unwrap();
+        assert_eq!(purge.paths, vec![path]);
+    }
+
     #[test]
     fn internal_response_headers_never_pass_through() {
         assert!(is_internal_response_header("x-nowaki-purge"));

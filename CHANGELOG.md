@@ -214,6 +214,10 @@ milestone's worth of work; the codename is noted per entry.
   queries; `asset::optimize` takes no transform. No app-facing change.
 
 ### Fixed
+- `revalidatePath` with a long non-ASCII path under `nowaki start`: a valid path of 2000
+  characters encodes to ~30 KB, and it was put in the `x-nowaki-purge` response header anyway,
+  past its 8 KB cap. An entry that doesn't fit the header now goes through the token-guarded
+  stdout channel, and the header keeps the entries that fit.
 - Server functions exported by destructuring (`export const { a, b } = makeFns()`) are found
   like other exports (the client got no proxy for them while the build's chunking saw them),
   and the build's "unvalidated input" warning lists them, since their validation can't be seen.
