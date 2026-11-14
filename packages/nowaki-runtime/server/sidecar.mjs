@@ -30,6 +30,8 @@ const { loadIslandRegistry, renderDocument, renderShell, errorPage } = await imp
 const { handleRequest, sendResult } = await import("./handler.mjs");
 const { liveRender, liveContext, liveShareable, liveSigStatus, LiveForbiddenError } = await import("./live.mjs");
 const { runWithContext, contextReads } = await import("./functions.mjs");
+const { cspOn, markResult, runWithMarker } = await import("./nonce.mjs");
+const { newNonce } = await import("./csp.mjs");
 const { recentRevalidations, setRevalidateEnv } = await import("./revalidate.mjs");
 const { pathToFileURL } = await import("node:url");
 const { configOf } = await import("./site-config.mjs");
@@ -463,8 +465,13 @@ const server = createServer(async (req, res) => {
   } catch (err) {
     console.error("[nowaki ssr]", err);
     reportError("ssr", err, req.url.split("?")[0]);
-    res.writeHead(500, { "content-type": "text/html; charset=utf-8" });
-    res.end(errorPage(String(err?.stack ?? err)));
+    // Outside handleRequest, so its hmr.js tag gets a marker here (NOWAKI_CSP).
+    const message = String(err?.stack ?? err);
+    const marker = cspOn() ? newNonce() : null;
+    const page = { status: 500, headers: { "content-type": "text/html; charset=utf-8" } };
+    const { headers } = marker ? markResult(page, marker) : page;
+    res.writeHead(500, headers);
+    res.end(marker ? runWithMarker(marker, () => errorPage(message)) : errorPage(message));
   }
 });
 

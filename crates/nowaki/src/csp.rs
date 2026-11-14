@@ -1,9 +1,13 @@
 //! Opt-in Content Security Policy with a per-response nonce (`NOWAKI_CSP=report-only|enforce`).
 //!
-//! Every `<script>` / `<style>` in an HTML response gets `nonce="…"`, injected while the body
-//! streams, so streaming SSR stays streaming. The layer wraps the ISR cache too: cached HTML is
-//! stored without a nonce and each response (HIT included) gets a fresh one. A response that
-//! already sets its own CSP is left alone. Mirrors `packages/nowaki-runtime/server/csp.mjs`.
+//! The nonce goes only on the tags Nowaki rendered. The renderer writes `nonce="<marker>"` on
+//! them, with a random marker per render that it names in `x-nowaki-csp-marker`; this layer turns
+//! exactly those attributes into the response's nonce while the body streams, so streaming SSR
+//! stays streaming. A `<script>` / `<style>` that reached the page as raw HTML can't know the
+//! marker and gets no nonce. The layer wraps the ISR cache too: an entry keeps its render's marker
+//! (never sent to a browser) and each response, HIT included, gets a fresh nonce. A response that
+//! already sets its own CSP is left alone, minus the markers. Mirrors
+//! `packages/nowaki-runtime/server/csp.mjs` and `server/nonce.mjs`.
 
 use std::sync::OnceLock;
 
@@ -68,18 +72,31 @@ object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
     p
 }
 
-const TAGS: [&[u8]; 2] = [b"script", b"style"];
+/// The response header a render names its marker in (`server/nonce.mjs`). Internal: the layer
+/// removes it from every response.
+pub const MARKER_HEADER: &str = "x-nowaki-csp-marker";
 
-/// Inserts ` nonce="…"` after `<script` / `<style` (any case) across chunk boundaries.
-pub struct Injector {
-    attr: Vec<u8>,
+/// A marker as the runtime makes them (32 lowercase hex digits, like a nonce). Anything else is
+/// ignored, so an empty or short value can never match attributes the app wrote.
+pub fn valid_marker(v: &str) -> bool {
+    v.len() == 32
+        && v.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// Replaces `nonce="<marker>"` with `to` (the response's `nonce="…"`, or nothing) across chunk
+/// boundaries. Only the tags Nowaki rendered carry the marker, so nothing else gets the nonce.
+pub struct Stamper {
+    needle: Vec<u8>,
+    to: Vec<u8>,
     carry: Vec<u8>,
 }
 
-impl Injector {
-    pub fn new(nonce: &str) -> Self {
+impl Stamper {
+    pub fn new(marker: &str, to: &str) -> Self {
         Self {
-            attr: format!(" nonce=\"{nonce}\"").into_bytes(),
+            needle: format!("nonce=\"{marker}\"").into_bytes(),
+            to: to.as_bytes().to_vec(),
             carry: Vec::new(),
         }
     }
@@ -87,31 +104,22 @@ impl Injector {
     pub fn push(&mut self, chunk: &[u8]) -> Vec<u8> {
         let mut data = std::mem::take(&mut self.carry);
         data.extend_from_slice(chunk);
-        let mut out = Vec::with_capacity(data.len() + 64);
+        let n = self.needle.len();
+        let mut out = Vec::with_capacity(data.len() + 16);
         let mut i = 0;
-        while i < data.len() {
-            if data[i] != b'<' {
-                out.push(data[i]);
-                i += 1;
-                continue;
-            }
-            match tag_at(&data[i..]) {
-                Match::Tag(len) => {
-                    out.extend_from_slice(&data[i..i + 1 + len]);
-                    out.extend_from_slice(&self.attr);
-                    i += 1 + len;
-                }
-                Match::Partial => {
-                    // Could still become `<script` with the next chunk.
-                    self.carry = data[i..].to_vec();
-                    return out;
-                }
-                Match::No => {
-                    out.push(b'<');
-                    i += 1;
-                }
-            }
+        while let Some(p) = find(&data[i..], &self.needle) {
+            out.extend_from_slice(&data[i..i + p]);
+            out.extend_from_slice(&self.to);
+            i += p + n;
         }
+        // A tail that could still become the marker with the next chunk waits for it.
+        let rest = &data[i..];
+        let keep = (1..n.min(rest.len() + 1))
+            .rev()
+            .find(|&k| self.needle.starts_with(&rest[rest.len() - k..]))
+            .unwrap_or(0);
+        out.extend_from_slice(&rest[..rest.len() - keep]);
+        self.carry = rest[rest.len() - keep..].to_vec();
         out
     }
 
@@ -120,38 +128,33 @@ impl Injector {
     }
 }
 
-enum Match {
-    Tag(usize),
-    Partial,
-    No,
-}
-
-/// `s` starts with `<`. Tag(name length) when it opens a script/style element.
-fn tag_at(s: &[u8]) -> Match {
-    let rest = &s[1..];
-    for tag in TAGS {
-        let n = tag.len().min(rest.len());
-        if !rest[..n].eq_ignore_ascii_case(&tag[..n]) {
-            continue;
+fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    let first = *needle.first()?;
+    let mut i = 0;
+    while i + needle.len() <= hay.len() {
+        let p = hay[i..=hay.len() - needle.len()]
+            .iter()
+            .position(|&b| b == first)?;
+        if hay[i + p..].starts_with(needle) {
+            return Some(i + p);
         }
-        if rest.len() <= tag.len() {
-            return Match::Partial;
-        }
-        let next = rest[tag.len()];
-        if next.is_ascii_whitespace() || next == b'>' || next == b'/' {
-            return Match::Tag(tag.len());
-        }
+        i += p + 1;
     }
-    Match::No
+    None
 }
 
 /// `axum::middleware::from_fn` layer for dev and start.
 pub async fn layer(req: Request, next: Next) -> Response {
     let mode = mode();
-    let resp = next.run(req).await;
+    let mut resp = next.run(req).await;
     if mode == Mode::Off {
         return resp;
     }
+    let marker = resp
+        .headers_mut()
+        .remove(MARKER_HEADER)
+        .and_then(|v| v.to_str().ok().map(str::to_string))
+        .filter(|m| valid_marker(m));
     let is_html = resp
         .headers()
         .get(header::CONTENT_TYPE)
@@ -161,20 +164,30 @@ pub async fn layer(req: Request, next: Next) -> Response {
         || resp
             .headers()
             .contains_key(header::CONTENT_SECURITY_POLICY_REPORT_ONLY);
-    if !is_html || has_csp {
+    if !is_html || (has_csp && marker.is_none()) {
         return resp;
     }
-    let nonce = new_nonce();
     let (mut parts, body) = resp.into_parts();
-    let name: HeaderName = match mode {
-        Mode::Enforce => header::CONTENT_SECURITY_POLICY,
-        _ => header::CONTENT_SECURITY_POLICY_REPORT_ONLY,
+    // With the app's own CSP there is no nonce of ours: the marked tags just lose the marker.
+    let to = if has_csp {
+        String::new()
+    } else {
+        let nonce = new_nonce();
+        let name: HeaderName = match mode {
+            Mode::Enforce => header::CONTENT_SECURITY_POLICY,
+            _ => header::CONTENT_SECURITY_POLICY_REPORT_ONLY,
+        };
+        if let Ok(v) = HeaderValue::from_str(&policy(&nonce, report_uri())) {
+            parts.headers.insert(name, v);
+        }
+        format!("nonce=\"{nonce}\"")
     };
-    if let Ok(v) = HeaderValue::from_str(&policy(&nonce, report_uri())) {
-        parts.headers.insert(name, v);
-    }
+    // Without a marker nothing in the body gets the nonce, and the body goes out as it is.
+    let Some(marker) = marker else {
+        return Response::from_parts(parts, body);
+    };
     parts.headers.remove(header::CONTENT_LENGTH);
-    let mut inj = Injector::new(&nonce);
+    let mut st = Stamper::new(&marker, &to);
     let mut done = false;
     let stream = body
         .into_data_stream()
@@ -182,11 +195,11 @@ pub async fn layer(req: Request, next: Next) -> Response {
         .chain(futures_util::stream::once(async { None }));
     let mapped = stream.filter_map(move |item| {
         let out = match item {
-            Some(Ok(chunk)) => Some(Ok::<Bytes, axum::Error>(Bytes::from(inj.push(&chunk)))),
+            Some(Ok(chunk)) => Some(Ok::<Bytes, axum::Error>(Bytes::from(st.push(&chunk)))),
             Some(Err(e)) => Some(Err(e)),
             None if !done => {
                 done = true;
-                Some(Ok(Bytes::from(inj.finish())))
+                Some(Ok(Bytes::from(st.finish())))
             }
             None => None,
         };
@@ -199,42 +212,72 @@ pub async fn layer(req: Request, next: Next) -> Response {
 mod tests {
     use super::*;
 
-    /// Runs the injector with a fresh nonce; expectations use `{n}` for it.
-    fn inject(chunks: &[&str], expected: &str) {
+    const M: &str = "0123456789abcdef0123456789abcdef";
+
+    /// Runs the stamper for marker `M` with a fresh nonce; expectations use `{n}` for it.
+    fn stamp(chunks: &[&str], expected: &str) {
         let n = new_nonce();
-        let mut inj = Injector::new(&n);
+        let mut st = Stamper::new(M, &format!("nonce=\"{n}\""));
         let mut out = Vec::new();
         for c in chunks {
-            out.extend(inj.push(c.as_bytes()));
+            out.extend(st.push(c.as_bytes()));
         }
-        out.extend(inj.finish());
-        assert_eq!(String::from_utf8(out).unwrap(), expected.replace("{n}", &n));
-    }
-
-    #[test]
-    fn adds_nonce_to_script_and_style_tags() {
-        inject(
-            &[
-                r#"<head><style>a{}</style><script type="module" src="/x.js"></script><SCRIPT>1</SCRIPT></head>"#,
-            ],
-            r#"<head><style nonce="{n}">a{}</style><script nonce="{n}" type="module" src="/x.js"></script><SCRIPT nonce="{n}">1</SCRIPT></head>"#,
+        out.extend(st.finish());
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            expected.replace("{n}", &n).replace("{m}", M)
         );
     }
 
     #[test]
-    fn leaves_other_tags_alone() {
-        let html = "<scripts></scripts><styled-x></styled-x><p>&lt;script&gt;</p><s>x</s>";
-        inject(&[html], html);
+    fn only_marked_tags_get_the_nonce() {
+        stamp(
+            &[&format!(
+                r#"<head><style nonce="{M}">a{{}}</style><style>raw{{}}</style><script nonce="{M}" type="module" src="/x.js"></script><SCRIPT>1</SCRIPT><script nonce="guess">2</script></head>"#
+            )],
+            r#"<head><style nonce="{n}">a{}</style><style>raw{}</style><script nonce="{n}" type="module" src="/x.js"></script><SCRIPT>1</SCRIPT><script nonce="guess">2</script></head>"#,
+        );
+    }
+
+    #[test]
+    fn a_body_without_the_marker_is_unchanged() {
+        let html = r#"<script>1</script><style nonce="">a{}</style><p>nonce="x"</p>"#;
+        stamp(&[html], html);
     }
 
     #[test]
     fn works_across_chunk_boundaries() {
-        inject(
-            &["<p>a</p><scr", "ipt>1</script><sty", "le", ">b</style>"],
-            r#"<p>a</p><script nonce="{n}">1</script><style nonce="{n}">b</style>"#,
+        let marked =
+            format!(r#"<p>a</p><script nonce="{M}">1</script><style nonce="{M}">b</style>"#);
+        // Every split point, including inside the marker.
+        for at in 1..marked.len() {
+            stamp(
+                &[&marked[..at], &marked[at..]],
+                r#"<p>a</p><script nonce="{n}">1</script><style nonce="{n}">b</style>"#,
+            );
+        }
+        stamp(&["end nonce=\"0123", "x\""], "end nonce=\"0123x\"");
+        stamp(&["tail nonce=\"0123"], "tail nonce=\"0123");
+    }
+
+    #[test]
+    fn stripping_leaves_no_marker() {
+        let mut st = Stamper::new(M, "");
+        let mut out = st.push(format!(r#"<script nonce="{M}" src="/a.js"></script>"#).as_bytes());
+        out.extend(st.finish());
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            r#"<script  src="/a.js"></script>"#
         );
-        inject(&["end <", "scrap"], "end <scrap");
-        inject(&["tail <scri"], "tail <scri");
+    }
+
+    #[test]
+    fn markers_are_validated() {
+        assert!(valid_marker(M));
+        assert!(valid_marker(&new_nonce()));
+        assert!(!valid_marker(""));
+        assert!(!valid_marker("0123456789ABCDEF0123456789ABCDEF"));
+        assert!(!valid_marker("0123456789abcdef0123456789abcde\""));
     }
 
     #[test]

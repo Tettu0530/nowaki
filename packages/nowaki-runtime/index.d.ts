@@ -424,6 +424,24 @@ export function revalidateTag(tag: string): void;
  */
 export function getContext(): LoaderContext | null;
 
+/**
+ * The CSP nonce for an inline `<script>` or `<style>` the app renders on the server, under
+ * `NOWAKI_CSP=report-only` / `enforce`. Put it in the tag's `nonce` attribute: the response's
+ * nonce replaces it as the page is sent. Nowaki gives the nonce only to the tags it emits and to
+ * tags carrying this value, so inline scripts and styles that reach the page as raw HTML
+ * (`dangerouslySetInnerHTML`, Markdown, a `head` string) don't run under `enforce`.
+ *
+ * Call it while a request renders: in a page, layout, `meta()`, loader, action, middleware or
+ * API route (including `ctx.html()`). Returns "" with `NOWAKI_CSP` off and outside a request.
+ * A static `export const head` is evaluated once, so use `meta()` for a nonced tag there.
+ * Static output (`nowaki prerender`) has no per-response nonce: "" there too.
+ *
+ * Server-only (like `getContext`): don't import it in an island.
+ * @example <style nonce={nonce()}>{css}</style>
+ * @example export const meta = () => ({ head: `<style nonce="${nonce()}">${css}</style>` });
+ */
+export function nonce(): string;
+
 // The i18n helpers, the same functions (and types) as `@nowaki-dev/runtime/navigation`.
 export { getLocale, href, localePath, setLocale } from "./navigation.js";
 

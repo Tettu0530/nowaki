@@ -1,7 +1,7 @@
 // ISR cache and CDN purge for the Cloudflare Workers adapter: the `env.purge` /
 // `env.cacheTagHeader` seams of handler.mjs, plus a page cache on the Workers Cache API
 // (`caches.default`), which web.mjs consults in front of the handler. Runtime-neutral, no imports
-// beyond the tag encoding (cdn-tag.mjs).
+// beyond the tag encoding (cdn-tag.mjs) and the CSP marker header name (csp.mjs).
 //
 // Cloudflare does not cache what a Worker returns, so without this nothing is cached. What the
 // Cache API gives (developers.cloudflare.com/workers/runtime-apis/cache/):
@@ -25,6 +25,7 @@
 // the colo, whichever isolate stored them.
 
 import { cdnTag } from "./cdn-tag.mjs";
+import { CSP_MARKER_HEADER } from "./csp.mjs";
 
 export const CF_TAG_HEADER = "cache-tag";
 // Cloudflare: printable ASCII, no spaces, comma-separated, case-insensitive, up to 1024 characters
@@ -137,7 +138,8 @@ export function cloudflareCdn({
     const headers = {};
     for (const [k, v] of res.headers) {
       // Cache-Tag: production strips it from a match, local workerd (wrangler dev) does not.
-      if (k.startsWith("x-nowaki-") || k === "cache-control" || k === "vary" || k === "age" || k === "content-length" || k === CF_TAG_HEADER) continue;
+      // The render's CSP marker stays: applyCsp gives each hit its own nonce.
+      if ((k.startsWith("x-nowaki-") && k !== CSP_MARKER_HEADER) || k === "cache-control" || k === "vary" || k === "age" || k === "content-length" || k === CF_TAG_HEADER) continue;
       headers[k] = v;
     }
     const cc = res.headers.get("x-nowaki-cc");

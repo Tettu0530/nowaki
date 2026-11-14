@@ -386,6 +386,9 @@ async fn start_prod_server(root: &Path, entry: &Path) -> Result<ProdServer> {
         .env("PORT", "0")
         // Static pages: live islands render their first HTML without live.js (see app.mjs).
         .env("NOWAKI_PRERENDER", "1")
+        // A static file has no per-response nonce: pages are written without one (a nonce baked
+        // into the file would be the same for every visitor).
+        .env_remove("NOWAKI_CSP")
         // Exits with this process, however it ends (server/exit-with-parent.mjs).
         .env("NOWAKI_EXIT_WITH_PARENT", "1")
         .stdin(Stdio::piped())

@@ -155,6 +155,13 @@ const nonce = /'nonce-([0-9a-f]{32})'/.exec(csp.headers.get("content-security-po
 const tags = (await csp.text()).match(/<(script|style)\b[^>]*>/gi) ?? [];
 check("NOWAKI_CSP=enforce: every script/style carries the response nonce",
   Boolean(nonce) && tags.length > 0 && tags.every((t) => t.includes(`nonce="${nonce}"`)));
+const raw = await req("/raw-html");
+const rawNonce = /'nonce-([0-9a-f]{32})'/.exec(raw.headers.get("content-security-policy") ?? "")?.[1];
+const rawTags = (await raw.text()).match(/<(script|style)\b[^>]*>/gi) ?? [];
+const nonced = rawTags.filter((t) => t.includes(`nonce="${rawNonce}"`));
+check("NOWAKI_CSP=enforce: raw HTML gets no nonce, Nowaki's runtime and the nonce() style do",
+  Boolean(rawNonce) && nonced.length === 2 && nonced.some((t) => t.includes('id="helper-style"')) && nonced.some((t) => t.includes("/_nowaki/islands.")) &&
+    rawTags.some((t) => t.includes('id="raw-script"') && !t.includes("nonce=")) && !raw.headers.has("x-nowaki-csp-marker"));
 delete process.env.NOWAKI_CSP;
 
 // nowaki.config redirects / rewrites (examples/hello), applied before the Assets binding.

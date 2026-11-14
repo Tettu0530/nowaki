@@ -105,6 +105,7 @@ export type RouteTags = string[] | ((info: { params: RouteParams; data: any; }) 
 export function revalidatePath(path: string): void;
 export function revalidateTag(tag: string): void;
 export function getContext(): LoaderContext | null;
+export function nonce(): string;
 export { getLocale, href, localePath, setLocale } from "./navigation.js";
 export interface StandardSchemaV1<Input = unknown, Output = Input> {}
 StandardSchemaV1.readonly "~standard": { readonly version: 1; readonly vendor: string; readonly validate: (value: unknown) => StandardSchemaResult<Output> | Promise<StandardSchemaResult<Output>>; readonly types?: { readonly input: Input; readonly output: Output; }; };

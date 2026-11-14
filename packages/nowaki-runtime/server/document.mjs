@@ -1,4 +1,8 @@
-// Production document assembly. Pure string processing with no node deps, so it works on Edge too.
+// Production document assembly. String processing that works on Edge too. Under NOWAKI_CSP the
+// tags emitted here carry the render's marker (server/nonce.mjs `nonceAttr`), which the CSP layer
+// turns into the response's nonce; `head` / body HTML from the app doesn't.
+
+import { nonceAttr } from "./nonce.mjs";
 
 // Prefers meta resolved after the loader, falling back to the route's static export.
 // `htmlAttrs` / `bodyAttrs` come back as attribute strings (with a leading space, escaped) for the
@@ -11,7 +15,7 @@ export function pageMeta(meta, mod) {
   const head = str(meta?.head) ?? str(mod?.head) ?? "";
   return {
     title: str(meta?.title) ?? str(mod?.title) ?? "Nowaki App",
-    head: mod?.viewTransition === true ? (head ? `${head}\n${VIEW_TRANSITION}` : VIEW_TRANSITION) : head,
+    head: mod?.viewTransition === true ? (head ? `${head}\n${viewTransition()}` : viewTransition()) : head,
     // `export const lang` / meta().lang win; htmlAttrs.lang (say, from a layout) is the fallback.
     lang: str(meta?.lang) ?? str(mod?.lang) ?? attrValue(html.lang) ?? "en",
     htmlAttrs: Object.isFrozen(html) ? frozenHtmlAttrs(html) : attrString(html, ["lang"]),
@@ -22,9 +26,9 @@ export function pageMeta(meta, mod) {
 // `export const viewTransition = true`: the client router reads the <meta> (a navigation to or
 // from the page runs as a View Transition), and the style gives full page loads between such pages
 // a cross-document one, also with no JS. Both are in the page's head region, so the router swaps
-// them with the page. The style is nonced like any other under NOWAKI_CSP (csp.rs / csp.mjs).
-const VIEW_TRANSITION =
-  '<meta name="nowaki-view-transition" content="1" />\n<style>@media (prefers-reduced-motion:no-preference){@view-transition{navigation:auto}}</style>';
+// them with the page. The style gets the response's nonce under NOWAKI_CSP.
+const viewTransition = () =>
+  `<meta name="nowaki-view-transition" content="1" />\n<style${nonceAttr()}>@media (prefers-reduced-motion:no-preference){@view-transition{navigation:auto}}</style>`;
 
 // A frozen htmlAttrs object (handler.mjs gives every page of a locale the same one) can't change,
 // so its attribute string is built once.
@@ -109,13 +113,13 @@ export function prodDocument(manifest, { mod, body, meta }, opts = {}) {
     .map((f) => `<link rel="modulepreload" href="${a}${f}" />`)
     .join("\n");
   const runtime = hasIslands
-    ? `<script id="nowaki-runtime" type="module" src="${a}${manifest.runtime}"${dataRouter(manifest, a)}></script>`
+    ? `<script${nonceAttr()} id="nowaki-runtime" type="module" src="${a}${manifest.runtime}"${dataRouter(manifest, a)}></script>`
     : "";
   // Only `nowaki dev` / `nowaki start` terminate the /__nowaki/live WebSocket, and they assemble
   // their own documents, so this one tells live.js to go straight to POST /__nowaki/live-event.
   const live =
     opts.live !== false && manifest.liveRuntime && body.includes("<nowaki-live")
-      ? `<script id="nowaki-live" type="module" src="${a}${manifest.liveRuntime}" data-live-transport="post"></script>`
+      ? `<script${nonceAttr()} id="nowaki-live" type="module" src="${a}${manifest.liveRuntime}" data-live-transport="post"></script>`
       : "";
 
   return `<!DOCTYPE html>
@@ -147,7 +151,7 @@ export function prodShell(manifest, mod, meta, opts = {}) {
     ? `<link rel="modulepreload" href="${a}${runtimeChunk}" />\n`
     : "";
   const runtimeScript = runtimeChunk
-    ? `<script id="nowaki-runtime" type="module" src="${a}${runtimeChunk}"${dataRouter(manifest, a)}></script>`
+    ? `<script${nonceAttr()} id="nowaki-runtime" type="module" src="${a}${runtimeChunk}"${dataRouter(manifest, a)}></script>`
     : "";
   const head = `<!DOCTYPE html>
 <html lang="${escapeHtml(m.lang)}"${m.htmlAttrs}>

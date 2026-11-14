@@ -124,13 +124,23 @@ code locations and CI coverage.
   dev/start, `server/security-headers.mjs` for the adapters, `_headers` for
   static output). Add new defaults to both lists, and never overwrite a header
   the response already set.
-- **The CSP nonce covers everything Nowaki inserts.** `csp.rs` / `server/csp.mjs`
-  stamp `<script>` / `<style>` in HTML responses; client code that inserts a
-  `<style>` (CSS shims, router head/body swaps, boundaries) must set
-  `window.__nowakiNonce` on it. Fetched HTML goes through `router-core.js` `nonceStyles`
-  before `DOMParser` (its document shares this one's CSP, so another response's nonce is a
-  violation as it parses). Re-run the browser tests with
-  `NOWAKI_CSP=enforce` when touching those paths.
+- **The CSP nonce goes only on what Nowaki emits, never on raw HTML** (since 0.20.0). Under
+  `NOWAKI_CSP`, `handler.mjs` `handleRequest` renders inside `server/nonce.mjs`
+  `withCspMarker`: a random marker per render, written by `nonceAttr()` on every `<script>` /
+  `<style>` Nowaki emits (`document.mjs`, `render.mjs`, page scripts, the early-stream redirect)
+  and returned by the public `nonce()`, and named in the internal `x-nowaki-csp-marker` header.
+  `csp.rs` / `server/csp.mjs` replace only `nonce="<marker>"` with the response's nonce and drop
+  the header; a response without a marker keeps its body byte for byte. Never stamp by tag name,
+  never emit a tag of ours without `nonceAttr()` (a new emitter in Rust takes the marker, as
+  `start.rs::assemble` does), and never let the marker reach a browser (ISR entries keep it
+  server-side; `assemble`, `cached_response` and the Cloudflare cache pass it to the layer).
+  Client code that inserts a `<script>` / `<style>` (CSS shims, the toolbar, HMR) sets
+  `window.__nowakiNonce`; tags from fetched HTML get it only through `router-core.js`
+  `carryNonces` (they carried that response's nonce, read from its CSP header) and `hasNonce`,
+  never by tag name. `islands.js` imports only URLs under its own directory (`/islands/` too in
+  dev) and reads its own `#nowaki-runtime` tag (the last one loading `import.meta.url`), not the
+  first match. Re-run `csp-test`, `csp-e2e` and the browser tests with `NOWAKI_CSP=enforce` when
+  touching those paths.
 - **Live handlers see only allowlisted request headers.** `live::context_headers`
   picks cookie / authorization / accept-language / user-agent and the public
   host from the upgrade; `live.authorize` runs after the signature check and
@@ -208,7 +218,7 @@ and `scripts/gallery-e2e.mjs` / `gallery-browser-test.mjs` check the exit criter
   `dist/route-js.json` as the last build figure) and `live` (`LiveHub::stats`).
 - **Dev toolbar** — `packages/nowaki-runtime/client/toolbar.js` (plain DOM in an open Shadow DOM
   root appended to `<html>`, outside `<body>`; a constructed stylesheet, or a nonced `<style>`),
-  imported on idle by `client/hmr.js` unless `data-toolbar="0"` (`render.mjs` `HMR_SCRIPT`, from
+  imported on idle by `client/hmr.js` unless `data-toolbar="0"` (`render.mjs` `hmrScript`, from
   `--no-toolbar` / `NOWAKI_TOOLBAR=0`, set in `main.rs`) or `localStorage["nowaki:toolbar"]`
   is `"off"`. Data: `GET /__nowaki/devtools?url=` (`mcp.rs` `devtools`, the same functions as the
   MCP tools, the same `request_allowed` gate; listed in `forward::is_internal_path`). Timings come
@@ -484,7 +494,8 @@ and `scripts/gallery-e2e.mjs` / `gallery-browser-test.mjs` check the exit criter
   `<meta name="nowaki-view-transition">` and a `@view-transition { navigation: auto }` style
   (cross-document, inside `prefers-reduced-motion: no-preference`) to the head region, so it
   reaches every front that uses `pageMeta` (dev `render.mjs`, `prodDocument` / `prodShell`,
-  `prod-sidecar.mjs` → `start.rs::assemble`) and is nonced like any other `<style>`. Without the
+  `prod-sidecar.mjs` → `start.rs::assemble`) and carries the render's CSP marker (`nonceAttr`), so
+  it gets the response's nonce under `NOWAKI_CSP`. Without the
   export the HTML is byte-identical. Client: `client/router.js` `apply` → `swap` wraps the DOM
   swap (title, `syncHead`, body or slot) in `document.startViewTransition` when
   `router-core.js` `shouldTransition` agrees (opted in, API present, no reduced motion); hydration,

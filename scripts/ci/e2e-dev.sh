@@ -209,7 +209,7 @@ curl -sf $B/.well-known/security.txt | grep -q 'Contact:'
 ! curl -sf $B/.private/secret.txt | grep -q 'never served' || exit 1
 ! curl -sf $B/public/robots.txt | grep -q 'User-agent' || exit 1
 curl -sf $B/styled | grep -q '<link rel="stylesheet" href="/__nowaki/css?f=routes/styled.css"'
-curl -sf $B/styled | grep -q '<style>#styled-probe{color:rgb(1, 2, 3)}</style>'
+curl -sf $B/styled | grep -q '<style nonce="">#styled-probe{color:rgb(1, 2, 3)}</style>'
 curl -s -D - "$B/__nowaki/css?f=routes/styled.css" | grep -qi '^content-type: text/css'
 test "$(curl -s -o /dev/null -w '%{http_code}' "$B/__nowaki/css?f=routes/styled.tsx")" = 403
 # outside routes/: 403, or 404 where the path doesn't exist (Windows has no /etc/hosts)
@@ -329,6 +329,14 @@ node scripts/i18n-e2e.mjs dev --port "$((PORT + 10))"
 node scripts/gallery-e2e.mjs dev --port "$((PORT + 13))"
 # Dev SSR stack traces name the real routes/ files (source maps), on PORT+14
 node scripts/sourcemap-e2e.mjs dev --port "$((PORT + 14))"
+# NOWAKI_CSP=enforce in dev, on PORT+9: the nonce on Nowaki's tags (hmr.js included) and nonce()
+# tags only, none on raw HTML.
+NOWAKI_CSP=enforce ./target/debug/nowaki dev examples/hello --port "$((PORT + 9))" &
+CSP_PID=$!
+for i in $(seq 1 30); do curl -sf "http://127.0.0.1:$((PORT + 9))/" >/dev/null && break; sleep 1; done
+node scripts/csp-e2e.mjs "http://127.0.0.1:$((PORT + 9))"
+kill $CSP_PID
+bash scripts/ci/assert-no-orphans.sh $CSP_PID
 # HMR in headless Chrome (Fast Refresh keeps island state, CSS without a reload, NOWAKI_CSP=enforce),
 # on PORT+15 with CDP on PORT+16 (HMR_PORT / HMR_CDP_PORT override them). Needs Chrome: CHROME, or
 # the usual Linux / macOS / Windows location.

@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { createFetchHandler } from "../packages/nowaki-runtime/server/web.mjs";
 import { CF_TAG_HEADER, cfTag, cloudflareCdn, shareable } from "../packages/nowaki-runtime/server/purge-cloudflare.mjs";
 import * as R from "../packages/nowaki-runtime/server/revalidate.mjs";
+import { nonce as cspNonce } from "../packages/nowaki-runtime/server/nonce.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const { h } = createRequire(path.join(root, "packages/nowaki-runtime/server/handler.mjs"))("preact");
@@ -353,18 +354,21 @@ const clean = (res) => INTERNAL.every((n) => !res.headers.has(n));
   check("cacheTagHeader of nothing is null", dev.cacheTagHeader([]) === null);
 }
 
-// --- CSP: a cached page gets a fresh nonce per response -----------------------------------------
+// --- CSP: a cached page gets a fresh nonce per response, on its nonce() tag only ---------------
 {
   bindings = {};
   zoneImpl = async () => new Response('{"success":true}');
-  modules["routes/isr.tsx"].head = "<style>.x{}</style>";
+  // The page's own nonce() style, and a raw one (as if from content): the cache keeps the render's
+  // marker, and each hit turns it into that response's nonce.
+  modules["routes/isr.tsx"].meta = () => ({ head: `<style id="own" nonce="${cspNonce()}">.x{}</style><style id="raw">.y{}</style>` });
   process.env.NOWAKI_CSP = "enforce";
   await get("/isr");
   await flush();
   const a = await get("/isr");
   const b = await get("/isr");
   const nonce = (r) => /'nonce-([0-9a-f]{32})'/.exec(r.res.headers.get("content-security-policy") ?? "")?.[1];
-  check("NOWAKI_CSP: two HITs carry different nonces, each in its own body", a.status === "HIT" && b.status === "HIT" && nonce(a) && nonce(a) !== nonce(b) && a.text.includes(`nonce="${nonce(a)}"`) && b.text.includes(`nonce="${nonce(b)}"`));
+  check("NOWAKI_CSP: two HITs carry different nonces, each in its own body", a.status === "HIT" && b.status === "HIT" && nonce(a) && nonce(a) !== nonce(b) && a.text.includes(`<style id="own" nonce="${nonce(a)}">`) && b.text.includes(`<style id="own" nonce="${nonce(b)}">`));
+  check("NOWAKI_CSP: a raw <style> gets no nonce, and no marker reaches the response", [a, b].every((r) => r.text.includes('<style id="raw">') && (r.text.match(/nonce="/g) ?? []).length === 1 && !r.res.headers.has("x-nowaki-csp-marker")));
   delete process.env.NOWAKI_CSP;
 }
 

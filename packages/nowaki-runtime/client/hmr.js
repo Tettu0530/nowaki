@@ -10,14 +10,18 @@
 //   reload anything else (config, env, session, content, removed files).
 
 import { h, render } from "preact";
-import { matchPattern, nonceStyles } from "./router-core.js";
+import { carryNonces, hasNonce, matchPattern, responseNonce } from "./router-core.js";
 
 const OVERLAY_ID = "__nowaki_error_overlay";
 const REFRESH_URL = "/node_modules/@nowaki-dev/runtime/client/refresh.js";
 
-// This response's CSP nonce (NOWAKI_CSP), read as islands.js does: a page without islands, or the
-// dev error page, doesn't load islands.js.
-if (!window.__nowakiNonce) window.__nowakiNonce = document.querySelector("script[nonce]")?.nonce || undefined;
+// This response's CSP nonce (NOWAKI_CSP), read as islands.js does, from this module's own tag (the
+// last one: it comes after the page's HTML): a page without islands, or the dev error page,
+// doesn't load islands.js.
+if (!window.__nowakiNonce) {
+  const own = [...document.querySelectorAll("script[src]")].filter((s) => s.src === import.meta.url).pop();
+  if (own?.nonce) window.__nowakiNonce = own.nonce;
+}
 
 async function hot(msg) {
   const refresh = await import(REFRESH_URL);
@@ -144,8 +148,9 @@ async function page() {
     timing = res.headers.get("server-timing") || "";
     const html = /html/.test(res.headers.get("content-type") || "") && !res.redirected && res.status === 200 ? await res.text() : null;
     if (html === null || (slot && !res.headers.has("x-nowaki-slot"))) return reload();
-    // A <style> carrying another response's nonce would be a CSP violation as it parses.
-    doc = new DOMParser().parseFromString(nonceStyles(html, window.__nowakiNonce), "text/html");
+    // A tag carrying another response's nonce would be a CSP violation as it parses: the ones the
+    // server nonced get this document's, and no other keeps one (router-core.js carryNonces).
+    doc = new DOMParser().parseFromString(carryNonces(html, window.__nowakiNonce, responseNonce(res)), "text/html");
   } catch {
     return reload();
   }
@@ -287,24 +292,34 @@ function syncAllAttrs(cur, next) {
   }
 }
 
+// Parsed <script> / <style> keep this document's nonce only where carryNonces gave it to them.
 function stampNonce(root) {
   const nonce = window.__nowakiNonce;
-  if (!nonce) return;
-  if (root.localName === "style") root.nonce = nonce;
-  for (const el of root.querySelectorAll("style")) el.nonce = nonce;
+  if (!nonce) return root;
+  for (const el of [root, ...root.querySelectorAll("script,style")]) {
+    if (el.localName !== "script" && el.localName !== "style") continue;
+    if (hasNonce(el, nonce)) {
+      el.nonce = nonce;
+    } else {
+      el.removeAttribute("nonce");
+      el.nonce = "";
+    }
+  }
+  return root;
 }
 
 // The islands runtime, when the page had no islands before (so nothing loaded it).
 function startRuntime(doc) {
   if (window.__nowakiHydrateIslands) return;
-  const old = doc.getElementById("nowaki-runtime");
+  // The server's own tag is the last one (after the page's HTML).
+  const old = [...doc.querySelectorAll("script#nowaki-runtime")].pop();
   if (!old?.getAttribute("src")) return;
   const el = document.createElement("script");
   el.type = "module";
   el.src = old.getAttribute("src");
   const router = old.getAttribute("data-router");
   if (router) el.setAttribute("data-router", router);
-  if (window.__nowakiNonce) el.nonce = window.__nowakiNonce;
+  if (hasNonce(old, window.__nowakiNonce)) el.nonce = window.__nowakiNonce;
   document.getElementById("nowaki-runtime")?.removeAttribute("id");
   el.id = "nowaki-runtime";
   document.body.appendChild(el);
@@ -313,14 +328,14 @@ function startRuntime(doc) {
 // Live islands: join the new ones (loading live.js when no page before had any).
 function syncLive(doc) {
   if (window.__nowakiLive) return window.__nowakiLive.sync();
-  const old = doc.getElementById("nowaki-live");
+  const old = [...doc.querySelectorAll("script#nowaki-live")].pop();
   if (!old?.getAttribute("src") || !document.querySelector("nowaki-live")) return;
   const el = document.createElement("script");
   el.type = "module";
   el.src = old.getAttribute("src");
   const transport = old.getAttribute("data-live-transport");
   if (transport !== null) el.setAttribute("data-live-transport", transport);
-  if (window.__nowakiNonce) el.nonce = window.__nowakiNonce;
+  if (hasNonce(old, window.__nowakiNonce)) el.nonce = window.__nowakiNonce;
   document.getElementById("nowaki-live")?.removeAttribute("id");
   el.id = "nowaki-live";
   document.body.appendChild(el);
@@ -368,10 +383,7 @@ function syncHead(doc) {
     if (!keep.has(n) && n.tagName !== "SCRIPT") n.remove();
     n = after;
   }
-  for (const el of nodes) {
-    if (window.__nowakiNonce && el.tagName === "STYLE") el.nonce = window.__nowakiNonce;
-    end.before(el);
-  }
+  for (const el of nodes) end.before(stampNonce(el));
 }
 
 // A slot fragment's stylesheets, into the head region (as the router adds them).
@@ -403,7 +415,7 @@ function loadPageScripts(root) {
     el.type = "module";
     el.src = src;
     el.setAttribute("data-nowaki-script", "");
-    if (window.__nowakiNonce) el.nonce = window.__nowakiNonce;
+    if (hasNonce(s, window.__nowakiNonce)) el.nonce = window.__nowakiNonce;
     document.head.appendChild(el);
   }
 }

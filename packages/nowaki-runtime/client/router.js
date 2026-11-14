@@ -1,7 +1,7 @@
 // Client router. Intercepts internal <a> clicks, fetches the target HTML,
 // swaps the body, and re-hydrates only the new islands (zero-JS pages do full navigations).
 
-import { matchBoundary, matchPattern, createPageCache, shouldTransition, nonceStyles } from "./router-core.js";
+import { matchBoundary, matchPattern, createPageCache, shouldTransition, carryNonces, hasNonce, responseNonce } from "./router-core.js";
 
 // The eager runtime (islands.js) exposes hydrate on window.
 // Not importing islands.js here keeps the router a separate lazy chunk.
@@ -90,7 +90,7 @@ async function fetchPage(url, slot) {
   if (!page || (res.url && new URL(res.url).origin !== location.origin)) return null;
   const html = await res.text();
   return {
-    doc: parse(html),
+    doc: parse(html, responseNonce(res)),
     finalUrl: res.redirected ? res.url : url.href.split("#")[0],
     status: res.status,
     slot: slot && res.headers.has("x-nowaki-slot"),
@@ -99,15 +99,20 @@ async function fetchPage(url, slot) {
   };
 }
 
-// DOMParser's document shares this one's CSP: a <style> with another response's nonce (or none)
-// is a violation as it parses, so each gets this document's nonce first.
-const parse = (html) => new DOMParser().parseFromString(nonceStyles(html, window.__nowakiNonce), "text/html");
+// DOMParser's document shares this one's CSP: a tag with another response's nonce is a violation
+// as it parses, so the ones that response's server nonced (`from`) get this document's first.
+const parse = (html, from) => new DOMParser().parseFromString(carryNonces(html, window.__nowakiNonce, from), "text/html");
 
 // Fetch the SSR HTML for loading/error boundaries once and reuse it.
 function loadBoundaries() {
   if (!boundariesPromise) {
     boundariesPromise = fetch(import.meta.env.BASE_URL + "__nowaki/boundaries", { headers: { "x-nowaki-nav": "1" } })
       .then((r) => (r.ok ? r.json() : { loading: [], error: [] }))
+      // Each boundary keeps the response's CSP marker (NOWAKI_CSP), for parse.
+      .then((b) => {
+        for (const x of [...b.loading, ...b.error]) x.nonce = b.nonce;
+        return b;
+      })
       .catch(() => ({ loading: [], error: [] }));
   }
   return boundariesPromise;
@@ -290,7 +295,7 @@ function loadPageScripts(root) {
     el.type = "module";
     el.src = src;
     el.setAttribute("data-nowaki-script", "");
-    if (window.__nowakiNonce) el.nonce = window.__nowakiNonce;
+    if (hasNonce(s, window.__nowakiNonce)) el.nonce = window.__nowakiNonce;
     document.head.appendChild(el);
   }
 }
@@ -322,16 +327,24 @@ function syncLive() {
   if (transport !== null) el.setAttribute("data-live-transport", transport);
   // Under NOWAKI_CSP the server nonced it (its nonce slot survives the clone). It carries this
   // document's nonce only then: a script never gains a nonce it didn't have.
-  if (window.__nowakiNonce && (old.nonce || old.getAttribute("nonce"))) el.nonce = window.__nowakiNonce;
+  if (hasNonce(old, window.__nowakiNonce)) el.nonce = window.__nowakiNonce;
   old.replaceWith(el);
 }
 
-// Under a CSP nonce, <style> from another response carries that response's nonce; re-stamp it with
-// this document's (captured by islands.js at startup, since <head> swaps may drop the nonced script).
+// Under a CSP nonce, parsed <script> / <style> (`root` and inside it) keep this document's nonce
+// (captured by islands.js at startup) only where carryNonces gave it to them; any other is cleared.
 function stampNonce(root) {
   const nonce = window.__nowakiNonce;
   if (!nonce) return root;
-  for (const el of root.querySelectorAll("style")) el.nonce = nonce;
+  for (const el of [root, ...root.querySelectorAll("script,style")]) {
+    if (el.localName !== "script" && el.localName !== "style") continue;
+    if (hasNonce(el, nonce)) {
+      el.nonce = nonce;
+    } else {
+      el.removeAttribute("nonce");
+      el.nonce = "";
+    }
+  }
   return root;
 }
 
@@ -339,7 +352,7 @@ function stampNonce(root) {
 function showLoading(boundary) {
   if (boundary) {
     curDoc = null;
-    const tmp = parse(`<body>${boundary.html}</body>`);
+    const tmp = parse(`<body>${boundary.html}</body>`, boundary.nonce);
     document.body.replaceWith(stampNonce(tmp.body));
   } else {
     showProgressBar();
@@ -352,7 +365,7 @@ async function showError(url, message) {
   const { error } = await loadBoundaries();
   const boundary = matchBoundary(error, import.meta.env.BASE_URL === "/" ? url.pathname : routePath(url.pathname));
   if (boundary) {
-    const tmp = parse(`<body>${boundary.html}</body>`);
+    const tmp = parse(`<body>${boundary.html}</body>`, boundary.nonce);
     for (const slot of tmp.body.querySelectorAll("[data-nowaki-error]")) slot.textContent = message;
     document.body.replaceWith(stampNonce(tmp.body));
   } else {
@@ -423,8 +436,7 @@ function syncHead(doc) {
     for (let n = next[0].nextSibling; n && n !== next[1]; n = n.nextSibling) {
       if (n.nodeType !== 1 || n.tagName === "SCRIPT") continue;
       const el = n.cloneNode(true);
-      if (window.__nowakiNonce && el.tagName === "STYLE") el.nonce = window.__nowakiNonce;
-      cur[1].before(el);
+      cur[1].before(stampNonce(el));
     }
   } else {
     // Older servers without markers: sync meta/link only, as before.

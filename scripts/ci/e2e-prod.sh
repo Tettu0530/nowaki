@@ -315,7 +315,7 @@ test "$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $PUB_ETAG" htt
 test "$(curl -s -o /dev/null -w '%{http_code}' -I http://127.0.0.1:3300/robots.txt)" = 200
 STYLED=$(curl -sf http://127.0.0.1:3300/styled)
 echo "$STYLED" | grep -qE '<link rel="stylesheet" href="/_nowaki/styled\.[0-9a-f]+\.css"'
-echo "$STYLED" | grep -q '<style>#styled-probe{color:rgb(1, 2, 3)}</style>'
+echo "$STYLED" | grep -q '<style nonce="">#styled-probe{color:rgb(1, 2, 3)}</style>'
 SHEET=$(echo "$STYLED" | grep -oE '/_nowaki/styled\.[0-9a-f]+\.css' | head -1)
 curl -s -D - -o /dev/null "http://127.0.0.1:3300$SHEET" | grep -qi '^content-type: text/css'
 curl -sf "http://127.0.0.1:3300$SHEET" | grep -q 'rgb(4, 5, 6)'
@@ -364,11 +364,13 @@ test -f "$ROOMS"
 VOTES_A=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(String(d.rooms["poll:demo"].a))' "$ROOMS")
 test "$VOTES_A" -ge 1
 
-# CSP (opt-in): every script/style gets the response's nonce, ISR hits included.
+# CSP (opt-in): Nowaki's scripts/styles and nonce() tags get the response's nonce, ISR hits
+# included; raw HTML in a page (/raw-html) gets none, and the render's marker stays internal.
 NOWAKI_CSP=enforce ./target/debug/nowaki start examples/hello --port 3302 &
 CSP_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3302/ >/dev/null && break; sleep 1; done
 node scripts/csp-e2e.mjs http://127.0.0.1:3302
+node scripts/security-e2e.mjs headers http://127.0.0.1:3302 "nowaki start, NOWAKI_CSP"
 # (the restarted server renders the saved votes)
 curl -sf http://127.0.0.1:3302/poll | grep -q "a: $VOTES_A "
 kill $CSP_PID

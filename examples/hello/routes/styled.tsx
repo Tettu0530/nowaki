@@ -9,8 +9,11 @@ export const bodyAttrs = { class: "styled-page", onload: "alert(1)", "data-quote
 // A plain .css import's default export is its text, so it can be inlined as well as linked.
 import inline from "./styled-inline.css";
 import "./styled.css";
+import { nonce } from "@nowaki-dev/runtime";
 
-export const head = `<style>${inline.trim()}</style>`;
+// An inline <style> needs the response's CSP nonce under NOWAKI_CSP: nonce() in meta(), which runs
+// per request (a static `head` string gets no nonce).
+export const meta = () => ({ head: `<style nonce="${nonce()}">${inline.trim()}</style>` });
 
 export default function Styled() {
   return (

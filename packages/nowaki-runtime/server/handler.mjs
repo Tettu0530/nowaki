@@ -19,6 +19,7 @@ import { isCrossSite } from "./origin.mjs";
 import { dispatchLiveEvent, LIVE_EVENT_PATH } from "./live-event.mjs";
 import { encodeEntries, encodeTags, flushPurge, REVALIDATE_PATH, revalidateEndpoint, revalidateEndpointEnabled, TAGS_HEADER } from "./revalidate.mjs";
 import { logError } from "./log.mjs";
+import { cspOn, nonce, nonceAttr, withCspMarker } from "./nonce.mjs";
 
 // Internal path the client router fetches loading/error boundary HTML from, once.
 export const BOUNDARIES_PATH = "/__nowaki/boundaries";
@@ -51,9 +52,11 @@ const JSON_CT = { "content-type": "application/json; charset=utf-8" };
 ///     `entries` are the page's `t:<tag>` plus `p:<browser path>` (the form `purge` receives)
 ///   trace (optional) -> server/trace.mjs `createTrace`: Server-Timing phases and spans. Null when
 ///     both are off, so a request pays one check per phase.
-// Not async itself: the request's promise is routeRequest's, so an app without i18n pays this one
-// check and no extra async frame.
+// Not async itself: the request's promise is routeRequest's, so an app without i18n (and without
+// NOWAKI_CSP) pays these checks and no extra async frame. Under a CSP the request renders with a
+// fresh marker on the tags Nowaki emits (server/nonce.mjs).
 export function handleRequest(env, info) {
+  if (cspOn()) return withCspMarker(() => (env.i18n ? localizedRequest(env, info) : routeRequest(env, info)));
   return env.i18n ? localizedRequest(env, info) : routeRequest(env, info);
 }
 
@@ -654,7 +657,11 @@ async function renderBoundaries(env, table, version) {
       ),
     )
   ).filter(Boolean);
-  return { status: 200, headers: JSON_CT, body: JSON.stringify({ loading, error }) };
+  // Under NOWAKI_CSP the router shows this HTML in its own document, so the render's marker goes
+  // along: the router gives the tags carrying it (nonce() in a boundary) that document's nonce.
+  // It only names this response's tags; no other render ever uses it.
+  const marker = nonce();
+  return { status: 200, headers: JSON_CT, body: JSON.stringify(marker ? { loading, error, nonce: marker } : { loading, error }) };
 }
 
 // Which URLs a route group's boundary (in directory `prefix`) is for, as the client router reads
@@ -770,7 +777,7 @@ async function withScripts(env, table, file, mod, version, meta, slotFiles) {
         seen.add(p);
         tags.push(`<link rel="modulepreload" href="${esc(p)}" />`);
       }
-      tags.push(`<script type="module" src="${esc(s.src)}" data-nowaki-script></script>`);
+      tags.push(`<script${nonceAttr()} type="module" src="${esc(s.src)}" data-nowaki-script></script>`);
     }
   }
   if (tags.length === 0) return meta;
@@ -918,7 +925,7 @@ async function renderIntercept(env, slot, ctx, version, path) {
   for (const s of (typeof env.routeScripts === "function" ? await env.routeScripts(hit.file, mod, version) : null) ?? []) {
     if (!s?.src) continue;
     for (const p of s.preload ?? []) tags.push(`<link rel="modulepreload" href="${esc(p)}" />`);
-    tags.push(`<script type="module" src="${esc(s.src)}" data-nowaki-script></script>`);
+    tags.push(`<script${nonceAttr()} type="module" src="${esc(s.src)}" data-nowaki-script></script>`);
   }
   return {
     status: 200,
@@ -984,7 +991,7 @@ async function earlyError(env, table, ctx, version, err, file) {
       // unparsable: the root
     }
     const url = JSON.stringify(target).replace(/</g, "\\u003c");
-    return `<script>location.replace(${url})</script>`;
+    return `<script${nonceAttr()}>location.replace(${url})</script>`;
   }
   logError("", err, { trace: ctx.__trace });
   const route = routeOf(table, file);

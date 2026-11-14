@@ -92,12 +92,27 @@ export function createPageCache({ ttlMs = 30000, max = 32, now = () => Date.now(
   };
 }
 
-// A fetched page's HTML with every <style> carrying `nonce` (this document's, under NOWAKI_CSP).
-// The document DOMParser makes shares this one's CSP, so a <style> with the nonce of the response
-// it came from is a style-src-elem violation the moment it parses. The tags the server nonced
-// (server/csp.mjs injectNonce: `<style nonce="…"`) get this document's nonce instead.
-export function nonceStyles(html, nonce) {
-  return nonce ? html.replace(/<style(?=[\s>/])(\s+nonce="[^"]*")?/gi, `<style nonce="${nonce}"`) : html;
+// The nonce a fetched page's response was sent with (its CSP header), or undefined.
+export function responseNonce(res) {
+  const h = res.headers;
+  return /'nonce-([^']+)'/.exec(h.get("content-security-policy") || h.get("content-security-policy-report-only") || "")?.[1];
+}
+
+// A fetched page's HTML for DOMParser, under NOWAKI_CSP (`nonce`: this document's). Its document
+// shares this one's CSP, so a tag with another response's nonce is a violation the moment it
+// parses. The tags the server nonced, which carry `from` (that response's nonce, responseNonce),
+// get this document's nonce instead. Any other nonce attribute of a <script> / <style> is dropped:
+// only Nowaki's own tags ever get one, so raw HTML in the page can't pass for them.
+export function carryNonces(html, nonce, from) {
+  if (!nonce) return html;
+  return html.replace(/(<(?:script|style)(?=[\s>/])[^>]*?)\s+nonce="([^"]*)"/gi, (_, tag, n) =>
+    from && n === from ? `${tag} nonce="${nonce}"` : tag,
+  );
+}
+
+// Whether a parsed <script> / <style> is one carryNonces gave this document's nonce.
+export function hasNonce(el, nonce) {
+  return !!nonce && (el.nonce || el.getAttribute("nonce")) === nonce;
 }
 
 // Whether a client navigation runs as a View Transition: something opted in (the link, the page
