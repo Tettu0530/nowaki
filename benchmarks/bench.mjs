@@ -2,8 +2,8 @@
 // Usage: node benchmarks/bench.mjs [appDir] [nowakiBin]
 //   appDir    default examples/hello
 //   nowakiBin default ./target/release/nowaki (falls back to ./target/debug/nowaki)
-// Note: examples/hello includes everything (.tsrx, plugins, live islands),
-// so numbers lean toward the upper bound, including plugin host startup etc.
+// examples/hello uses every feature (.tsrx, plugins, live islands), so its numbers are an upper
+// bound and include plugin host startup. The weekly workflow also runs it on nowaki-site.
 
 import { spawn, spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, existsSync, rmSync } from "node:fs";
@@ -88,7 +88,7 @@ async function ttfb() {
   const { child } = await timeUntil(["start", appDir, "--port", "8799"], "NOWAKI_START_READY").catch(
     () => ({ child: null }),
   );
-  // start keeps running after ready, so after timeUntil kills it, launch it again separately to measure
+  // timeUntil kills the server once it is ready, so a second server answers the measured request.
   const server = spawn(bin, ["start", appDir, "--port", "8799"], { cwd: ROOT });
   let ready = false;
   server.stdout.on("data", (b) => {

@@ -8,7 +8,7 @@
 //
 //   dev     readyMs  spawn → the dev server's own ready line
 //           firstMs  spawn → GET / answers 200 with the page's marker (polled; connection errors
-//                    and 503s are retried), i.e. the first page actually rendered
+//                    and any other response are retried), i.e. the first page actually rendered
 //           postMs   then GET a post page for the first time (another route compiled on demand)
 //   static  ms       the build that writes every page as HTML (Nowaki: `nowaki prerender`)
 //           then, once, the output is served by lib/serve.mjs and opened in Chromium (lib/browser.mjs)

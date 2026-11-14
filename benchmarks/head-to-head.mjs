@@ -3,12 +3,12 @@
 // To measure Next/Astro:
 //   pnpm -C benchmarks/apps/next-counter  install
 //   pnpm -C benchmarks/apps/astro-counter install
-// Usage: node benchmarks/head-to-head.mjs [--json]
+// Usage: node benchmarks/head-to-head.mjs [--json]   (needs a built nowaki binary; weekly CI runs it)
 // Metrics:
 //   dev ready (cold)  — wall time from dev server start to the ready line
 //   build            — wall time of the production build
-//   first-load JS    — the JS `/` fetches on load (raw and gzip; lazy chunks such as Nowaki's
-//                      idle-loaded SPA router are excluded)
+//   first-load JS    — the JS `/` fetches on load (raw and gzip; Nowaki's SPA router, which loads
+//                      on link intent, is excluded)
 
 import { spawn, spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, existsSync, rmSync } from "node:fs";
@@ -110,7 +110,7 @@ async function benchNowaki() {
   const dev = await timeUntil(nowakiBin, ["dev", dir, "--port", "0"], { cwd: ROOT }, "ready in");
   clean(dir, ["dist", "node_modules/.cache/nowaki"]);
   const build = timeRun(nowakiBin, ["build", dir], { cwd: ROOT });
-  // Same rule as check-regression.mjs: the SPA router and its deps load on idle, not on first load.
+  // Same rule as check-regression.mjs: the SPA router and its deps load on link intent, not on first load.
   const clientDir = path.join(dir, "dist/client");
   const manifest = JSON.parse(readFileSync(path.join(clientDir, "manifest.json"), "utf8"));
   const lazy = new Set([manifest.routerRuntime, ...(manifest.preload?.[manifest.routerRuntime] ?? [])]);

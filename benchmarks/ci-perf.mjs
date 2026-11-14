@@ -157,7 +157,7 @@ async function measureServer(side, app, routes) {
   let out = "";
   child.stdout.on("data", (d) => (out = (out + d).slice(-8000)));
   child.stderr.on("data", (d) => (out = (out + d).slice(-8000)));
-  // On a timeout, also show what the build left in dist/server, and the source tree, side by side.
+  // On a timeout, also show dist/server now and right after the last build, plus the server's output.
   const tree = () =>
     `--- ${app}/dist/server now ---\n${ls(path.join(app, "dist/server"))}\n--- right after the last build ---\n${lastTree[app] ?? ""}\n--- server output (tail) ---\n${out.slice(-2500)}`;
   try {
