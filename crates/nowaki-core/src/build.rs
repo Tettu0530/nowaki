@@ -1320,13 +1320,12 @@ mod tests {
             super::island_name(Path::new("/app/islands/it's-ü.tsx")).unwrap(),
             "it's-ü"
         );
-        for bad in [
-            "Say\"Hi\".tsx",
-            "a&b.tsx",
-            "a<b.tsx",
-            "a\\b.tsx",
-            "a\nb.tsx",
-        ] {
+        // `\` is a path separator on Windows, so a file can't have it in its name there.
+        let backslash: &[&str] = if cfg!(windows) { &[] } else { &["a\\b.tsx"] };
+        for bad in ["Say\"Hi\".tsx", "a&b.tsx", "a<b.tsx", "a\nb.tsx"]
+            .iter()
+            .chain(backslash)
+        {
             let err = super::island_name(&Path::new("/app/islands").join(bad))
                 .unwrap_err()
                 .to_string();
