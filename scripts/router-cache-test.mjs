@@ -1,5 +1,6 @@
-// Unit tests for the client router's pure logic (router-core.js).
-// No DOM dependency, so it runs as-is in Node (matchBoundary / matchPattern / createPageCache).
+// Unit tests for the client router's pure logic in client/router-core.js (matchBoundary,
+// matchPattern, createPageCache). It has no DOM dependency, so it runs in Node.
+// Usage: node scripts/router-cache-test.mjs
 import assert from "node:assert/strict";
 import { matchBoundary, matchPattern, createPageCache } from "../packages/nowaki-runtime/client/router-core.js";
 
@@ -10,7 +11,7 @@ const ok = (label, cond) => {
   passed++;
 };
 
-// matchBoundary: longest prefix match
+// matchBoundary: the most specific matching prefix wins.
 const boundaries = [
   { prefix: "", html: "root" },
   { prefix: "/blog", html: "blog" },
@@ -69,7 +70,7 @@ ok("matchPattern: literals compared decoded", matchPattern("/caf\u00e9/[id]", "/
 ok("matchPattern: root", matchPattern("/", "/") && !matchPattern("/", "/a"));
 ok("matchPattern: malformed escape is no match", !matchPattern("/[id]", "/50%"));
 
-// createPageCache: advance time with a controllable now
+// createPageCache: time advances through the injected `now`.
 let t = 0;
 const now = () => t;
 const cache = createPageCache({ ttlMs: 1000, max: 2, now });

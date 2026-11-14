@@ -1,16 +1,18 @@
-// examples/gallery end to end: the v0.18 exit-criteria app (basePath "/gallery", i18n en/ja with
-// detection, a modal gallery through an intercepting route, a session behind a route group's
-// middleware, config redirects / headers, env.ts) over HTTP on each server, and the v0.19 one: a
-// signed-in caption edit on a cached (ISR, tagged) post calls revalidateTag, and the next GET is
-// fresh on `nowaki start`, on the Cloudflare worker's cache and behind Vercel's CDN, while the
-// other posts stay cached; one request is one OpenTelemetry trace. Builds the example in place.
+// examples/gallery end to end. Two sets of checks:
+// - the v0.18 app (`checks`): basePath "/gallery", i18n en/ja with detection, a modal gallery
+//   through an intercepting route, a session behind a route group's middleware, config redirects
+//   and headers, env.ts;
+// - the v0.19 posts (`postChecks`): a signed-in caption edit on a cached (ISR, tagged) post calls
+//   revalidateTag, and the next GET is fresh while the other posts stay cached.
+// Builds the example in place.
 //   node scripts/gallery-e2e.mjs <mode>... [--port 5130]
-// Modes: start (`nowaki start`), dev (`nowaki dev`), node (node adapter), cloudflare (the worker's
-// fetch, called in Node, then with a stand-in for caches.default and the zone purge API), vercel
-// (the generated function with a fake @vercel/functions, behind a stand-in for Vercel's CDN that
-// caches by s-maxage and deletes by Vercel-Cache-Tag), static (prerender output: what a static
-// host can serve; the session pages make the full app refuse it), env (a missing or invalid
-// variable stops `nowaki build` and `nowaki start`, named, its value never printed), otel
+// Modes: start (`nowaki start`: both sets), dev (`nowaki dev`: the v0.18 set), node (node adapter:
+// the v0.18 set and the post's Cache-Control), cloudflare (the worker's fetch, called in Node: the
+// v0.18 set, then the post set with a stand-in for caches.default and the zone purge API), vercel
+// (the post set on the generated function with a fake @vercel/functions, behind a stand-in for
+// Vercel's CDN that caches by s-maxage and deletes by Vercel-Cache-Tag), static (prerender output:
+// what a static host can serve; the session pages make the full app refuse it), env (a missing or
+// invalid variable stops `nowaki build` and `nowaki start`, named, its value never printed), otel
 // (`nowaki start` exporting to a local OTLP receiver on port+1: route, middleware, loader and
 // render of one request in one trace). NOWAKI_BIN overrides the binary (default
 // target/debug/nowaki). The browser half is scripts/gallery-browser-test.mjs.
@@ -359,7 +361,8 @@ async function postChecks(label, req, origin, { flush = async () => {} } = {}) {
   r = await req("/gallery/login", form(origin, `password=${PASSWORD}`));
   const session = cookieOf(r).split(";")[0];
   check(t("signed in for the edit"), r.status === 302 && session.startsWith("gallery_session="), `${r.status}`);
-  // Cross-site, with the cookie: the session reads as empty there, so it is refused the same way.
+  // Cross-site, with the cookie: the session reads as empty there, so the middleware sends it to
+  // sign in; the page action's own cross-site check (403) would refuse it otherwise.
   r = await req("/gallery/posts/1", form("http://evil.test", "caption=cross-site", session));
   check(t("a cross-site edit is refused"), (r.status === 303 && /\/login$/.test(r.headers.location ?? "")) || r.status === 403, `${r.status} ${r.headers.location}`);
   r = await req("/gallery/posts/1", edit("", { cookie: session }));

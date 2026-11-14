@@ -1,6 +1,6 @@
 // Writes 4 deterministic, photo-like 1600x1000 PNGs (gradients + soft noise + a few shapes) for
 // the docs-site benchmark. Convert them to JPEG with: sips -s format jpeg -s formatOptions 82
-// Usage: node make-photos.cjs <outDir>
+// Usage: node benchmarks/docs-site/lib/photos.cjs <outDir>
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");

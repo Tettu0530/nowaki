@@ -56,8 +56,8 @@ const extraEnv = Object.fromEntries(
 );
 
 // How each framework's production server is started (server-mode build output).
-// Nowaki's npm `nowaki` command is a Node shim that spawnSyncs the Rust binary and stays
-// resident (~45 MB); no other framework has such a launcher, so the binary is started directly.
+// Nowaki's binary is started directly, not through the npm `nowaki` command: before 0.18 that
+// command was a Node shim that spawnSync'd the binary and stayed resident (~45 MB of RSS).
 const nowakiBinary = () =>
   createRequire(path.join(APPS, "nowaki/node_modules/nowaki/package.json"))("./lib/resolve.js").resolveBinary();
 const SERVERS = {

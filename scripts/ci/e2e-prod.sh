@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# CI: Production build + scope hoisting + preload + serve
-# Run from the repo root after `cargo build -p nowaki` and `pnpm install`.
+# CI: `nowaki build examples/hello` (build output, scope hoisting, preloads, Jetstream, server
+# functions), then `nowaki start` on 3300 checked over HTTP: ISR and on-demand revalidation,
+# compression, content, images, fonts, SEO, public/, streaming, livetest.mjs, security-e2e.mjs and
+# route-js-e2e.mjs. Then otel-e2e, rules-e2e, i18n-e2e, gallery-e2e and sourcemap-e2e, and more
+# `nowaki start` runs on 3301-3305 (CSP enforce, live render timeout, ISR warm-up, stale live
+# signatures, SIGKILL), each followed by the orphan check.
+# Needs `cargo build -p nowaki` and `pnpm install`; run as `bash scripts/ci/e2e-prod.sh`.
 set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 # A failed step exits here: stop the servers this script started, or they keep the ports.
@@ -31,7 +36,7 @@ test "$(wc -c < "$PHOTO")" -lt 50000   # 256 KB → a few KB
 ! ls examples/hello/dist/client/cycle-a.*.js >/dev/null 2>&1 || exit 1
 CY=$(ls examples/hello/dist/client/Cycle.*.js | head -1)
 ! grep -q './cycle-' "$CY" || exit 1
-# v0.6 Jetstream build: the live island ships NO client component JS (only live.js),
+# Jetstream build: the live island ships no client component JS (only live.js),
 # is listed in the manifest, and is still built as a server module for rendering.
 grep -qE '"liveIslands": \[[^]]*"LiveCounter"' examples/hello/dist/client/manifest.json
 ! ls examples/hello/dist/client/LiveCounter.*.js >/dev/null 2>&1 || exit 1
@@ -82,7 +87,7 @@ if test -f /tmp/nowaki-css-module-badge-class; then
 fi
 ! curl -sf http://127.0.0.1:3300/ | grep -qE '/Users/|/home/[^/]+/' || exit 1
 # lazy SPA router: runtime script carries data-router, and the router chunk is
-# NOT eagerly preloaded (it loads on idle, keeping first-load JS small).
+# not eagerly preloaded (it loads on idle, keeping first-load JS small).
 curl -sf http://127.0.0.1:3300/ | grep -q 'id="nowaki-runtime"[^>]*data-router='
 ! curl -s http://127.0.0.1:3300/ | grep -qE 'modulepreload[^>]*/router\.[0-9a-f]+\.js' || exit 1
 # View Transitions are opt-in per route: `export const viewTransition` puts the router's <meta> and
@@ -94,7 +99,7 @@ curl -sf http://127.0.0.1:3300/vt | grep -q '<a id="vt-island-ssr" href="/about"
 ! curl -s http://127.0.0.1:3300/about | grep -qE 'nowaki-view-transition|@view-transition' || exit 1
 curl -sf http://127.0.0.1:3300/live | grep -q 'nowaki-live name="LiveCounter"'
 curl -sf http://127.0.0.1:3300/live | grep -q 'live\.'  # live.js script
-# v0.8 server functions in production: allowlist written, no impl leaked to
+# server functions in production: allowlist written, no impl leaked to
 # the client, and the Rust front proxies /__nowaki/fn to the renderer.
 test -f examples/hello/dist/server/functions.json
 grep -q '"export": "addTodo"' examples/hello/dist/server/functions.json
@@ -106,7 +111,7 @@ curl -sf http://127.0.0.1:3300/env | grep -q 'token length 15'
 curl -sf http://127.0.0.1:3300/env | grep -q 'id="env-badge">Hello from env.ts x4<'
 grep -q 'Hello from env.ts' examples/hello/dist/client/EnvBadge.*.js
 ! grep -rl 'hello-dev-token' examples/hello/dist/client >/dev/null 2>&1 || exit 1
-# v0.9 virtual modules: SSR inlines the plugin-generated module (data:)
+# virtual modules: SSR inlines the plugin-generated module (data:)
 curl -sf http://127.0.0.1:3300/virtual | grep -q 'VIRTUAL_OK · nowaki-plugin'
 # ISR (export const revalidate=2): the Rust front caches assembled HTML and
 # regenerates it in the background once stale. Cold hit MISSes & populates;
@@ -177,12 +182,12 @@ curl -s -D /tmp/rev.h -XPOST -H 'authorization: Bearer e2e-revalidate-secret-012
 T7=$(tnum); test "$(tcache)" = MISS; test "$T7" -gt "$T6"
 # loading/error boundaries are served through the Rust front too
 curl -sf http://127.0.0.1:3300/__nowaki/boundaries | grep -q 'data-nowaki-reset'
-# v0.9 Jetstream presence + connection scaling: WS join->presence,
-# event->patch round-trip, presence rises/falls across two connections.
+# Jetstream over WebSocket (livetest.mjs): join, presence, event -> patch, resume, live queries,
+# shared refreshes and rooms (the /poll votes are checked again after the restart below).
 node scripts/livetest.mjs http://127.0.0.1:3300
-# --- application-security regressions (prod): no absolute build-machine path
-# leaks into client assets (#9), and ISR keys isolate per-header (no cross-user
-# leak) and collapse unused-query floods (#6/#7).
+# application-security regressions (prod): no absolute build-machine path leaks into client
+# assets (#9); security-e2e.mjs prod covers the rest, including ISR keys isolated per header
+# (no cross-user leak) and unused-query floods collapsed (#6/#7).
 ! grep -rl "$HOME" examples/hello/dist/client || exit 1
 node scripts/security-e2e.mjs prod http://127.0.0.1:3300
 # no internal x-nowaki-* response header, no Set-Cookie on a shared-cacheable response
@@ -201,8 +206,7 @@ curl -sf http://127.0.0.1:3300/docs/toml | grep -q '<p>+++</p>'
 # fenced code is highlighted at build time (inline styles, no client JS)
 curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<pre style="background-color:#ffffff;">'
 curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<span style="font-weight:bold;color:#a71d5d;">export'
-# route / layout CSS (0.16.1): the layout's and the page's stylesheets are linked in the head and
-# served as text/css; a plain .css import's default export is its text (inlined by /styled's head)
+# route / layout CSS: the layout's stylesheet is linked in the head (/styled is checked below)
 curl -sf http://127.0.0.1:3300/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'
 # ?image + <Image> in the build: hashed AVIF / JPEG variants under /_nowaki/, served as images
 G=$(curl -sf http://127.0.0.1:3300/gallery)
@@ -221,8 +225,8 @@ curl -sf "http://127.0.0.1:3300$FCSS" | grep -q 'size-adjust: '
 curl -sf "http://127.0.0.1:3300$FCSS" | grep -q -- '--font-body: "Atkinson Hyperlegible", "Atkinson Hyperlegible Fallback", sans-serif;'
 FT=$(echo "$FH" | grep -oE '/_nowaki/atkinson-hyperlegible-400-normal\.[0-9a-f]+\.ttf' | head -1)
 curl -s -D - -o /dev/null "http://127.0.0.1:3300$FT" | grep -qi '^content-type: font/ttf'
-# from porting an Astro site: a layout's head, CSS @import inlined, modules outside the
-# conventional folders, and no SPA router on a page without islands (dev and prod alike)
+# a layout's head, CSS @import inlined, modules outside the conventional folders (data/), and no
+# SPA router on a page without islands (dev and prod alike)
 curl -sf http://127.0.0.1:3300/about | grep -q '<meta name="x-layout-head" content="root" />'
 curl -sf http://127.0.0.1:3300/about | grep -q '<p id="greeting">Hello from data/</p>'
 ! curl -sf http://127.0.0.1:3300/about | grep -q 'id="nowaki-runtime"' || exit 1
@@ -313,6 +317,8 @@ PUB_ETAG=$(curl -s -D - -o /dev/null http://127.0.0.1:3300/robots.txt | tr -d '\
 test -n "$PUB_ETAG"
 test "$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $PUB_ETAG" http://127.0.0.1:3300/robots.txt)" = 304
 test "$(curl -s -o /dev/null -w '%{http_code}' -I http://127.0.0.1:3300/robots.txt)" = 200
+# /styled: the page's stylesheet is linked and served as text/css; a plain .css import's default
+# export is its text, inlined in a <style> in the head
 STYLED=$(curl -sf http://127.0.0.1:3300/styled)
 echo "$STYLED" | grep -qE '<link rel="stylesheet" href="/_nowaki/styled\.[0-9a-f]+\.css"'
 echo "$STYLED" | grep -q '<style nonce="">#styled-probe{color:rgb(1, 2, 3)}</style>'
@@ -320,7 +326,7 @@ SHEET=$(echo "$STYLED" | grep -oE '/_nowaki/styled\.[0-9a-f]+\.css' | head -1)
 curl -s -D - -o /dev/null "http://127.0.0.1:3300$SHEET" | grep -qi '^content-type: text/css'
 curl -sf "http://127.0.0.1:3300$SHEET" | grep -q 'rgb(4, 5, 6)'
 # Streamed responses pass through as written: with 600 ms between two chunks, the first byte
-# arrives long before the last (it used to wait for the whole body).
+# arrives long before the last.
 FB=$(curl -s -N -o /dev/null -w '%{time_starttransfer}' "http://127.0.0.1:3300/api/stream?delay=600")
 awk -v t="$FB" 'BEGIN { exit !(t < 0.3) }'
 test "$(curl -s 'http://127.0.0.1:3300/api/stream?delay=50' | tr -d '\n')" = "chunk1chunk2"

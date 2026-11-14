@@ -1,7 +1,8 @@
-// E2E for the `nowaki dev` MCP endpoint (/__nowaki/mcp) against examples/hello.
+// The `nowaki dev` MCP endpoint (/__nowaki/mcp) end to end, against examples/hello under
+// `nowaki dev` (e2e-dev.sh runs it): initialize, tools/list, each tool, the loopback / Host /
+// Origin gate (also on the dev toolbar's GET /__nowaki/devtools), and that the sidecar's
+// /__nowaki/dev-info is not proxied.
 // Usage: node scripts/mcp-e2e.mjs http://127.0.0.1:<port>
-// Runs initialize → tools/list → each tool, and checks the loopback / Host / Origin gate, also on
-// the dev toolbar's GET /__nowaki/devtools.
 
 import http from "node:http";
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# CI: Typed routes — typegen writes .nowaki/types.d.ts
-# Run from the repo root after `cargo build -p nowaki` and `pnpm install`.
+# CI: `nowaki typegen examples/hello` writes .nowaki/types.d.ts with one entry per navigable page.
+# Needs `cargo build -p nowaki` and `pnpm install`; run as `bash scripts/ci/e2e-typegen.sh`.
 set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
 cd "$(dirname "$0")/../.."
@@ -15,6 +15,6 @@ grep -q '"/pricing": {}' examples/hello/.nowaki/types.d.ts
 # parallel-route slot files and intercepting routes are not pages
 grep -q '"/photos/\[id\]": { id: string }' examples/hello/.nowaki/types.d.ts
 ! grep -q '@modal\|(\.)' examples/hello/.nowaki/types.d.ts || exit 1
-# API routes and convention files are NOT navigable → excluded
+# API routes and convention files are not navigable, so they are left out
 ! grep -q '"/api/' examples/hello/.nowaki/types.d.ts || exit 1
 ! grep -q '_404\|_layout\|loading\|error' examples/hello/.nowaki/types.d.ts || exit 1

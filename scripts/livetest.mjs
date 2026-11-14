@@ -1,10 +1,16 @@
-// Jetstream WS e2e (join/presence/event->patch/disconnect). Uses Node 22+'s global WebSocket.
-// Usage: node scripts/livetest.mjs <baseUrl>   e.g. node scripts/livetest.mjs http://127.0.0.1:3300
+// Jetstream over WebSocket end to end, against a running examples/hello server (e2e-prod.sh runs it
+// on `nowaki start`): join, presence, event -> patch, disconnect, resuming with a patch's signed
+// state, a slow render off the session loop, the request context and live.authorize, live queries
+// (publish), shared refreshes, and rooms. Uses Node 22+'s global WebSocket.
+// Usage: node scripts/livetest.mjs <baseUrl> [--expect-stale <maxAgeSeconds> | --expect-timeout]
+//   e.g. node scripts/livetest.mjs http://127.0.0.1:3300
+// --expect-stale and --expect-timeout run only their own checks, against a server started with a
+// short NOWAKI_LIVE_MAX_AGE or NOWAKI_LIVE_RENDER_TIMEOUT_MS.
 
 const base = process.argv[2] ?? "http://127.0.0.1:3300";
 const wsUrl = base.replace(/^http/, "ws") + "/__nowaki/live";
 
-// sig is an HMAC signature the server verifies on join (rejected without it). Extracted regardless of attribute order.
+// LiveCounter's nid, state and sig (the HMAC signature the server verifies on join), in any attribute order.
 const html = await (await fetch(base + "/live")).text();
 const tag = html.match(/<nowaki-live\b[^>]*>/)?.[0];
 if (!tag || !/name="LiveCounter"/.test(tag)) {

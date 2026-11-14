@@ -1,7 +1,7 @@
 "use server";
 
-// "use server" module. Its exports become RPC endpoints that stay on the server.
-// The client only gets a tiny fetch proxy (SERVER_SECRET and store are not in the bundle).
+// A "use server" module: its exports are RPC endpoints whose code stays on the server. Client code
+// that imports them gets a small fetch proxy (SERVER_SECRET and store are not in the bundle).
 
 import { getContext, serverFn } from "@nowaki-dev/runtime";
 
@@ -30,8 +30,8 @@ export const addTodo = serverFn(todoText, async (text): Promise<string[]> => {
   return store.slice();
 });
 
-// Version to pass as a form action. Submitting `<form action={addTodoForm}>` turns FormData into
-// { text } and updates the store on the server.
+// For use as a form action: submitting `<form action={addTodoForm}>` sends the form's fields as a
+// plain object ({ text }), and the function updates the store on the server.
 export async function addTodoForm(form: { text?: string }): Promise<string[]> {
   const t = String(form?.text ?? "").trim();
   if (t) store.push(t);
@@ -43,7 +43,7 @@ export async function brokenTodo(): Promise<never> {
   throw new Error("db password is hunter2");
 }
 
-// getContext() is valid only during an RPC. It can read the session from cookies/headers (auth, etc.).
+// getContext() returns the calling request's context (cookies, headers, session), for auth checks.
 export async function whoami(): Promise<string> {
   const ctx = getContext();
   const user = ctx?.cookies?.user ?? "anonymous";

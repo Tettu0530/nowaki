@@ -1,4 +1,5 @@
-// The v0.18 "Sirocco" example: a photo gallery served under /gallery in English and Japanese.
+// A photo gallery served under /gallery in English and Japanese (the v0.18 "Sirocco" routing
+// example, with the v0.19 additions).
 export default {
   // Absolute canonical / hreflang links and the sitemap.
   site: "https://gallery.nowaki.dev",

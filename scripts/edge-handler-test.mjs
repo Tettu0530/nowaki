@@ -1,6 +1,9 @@
-// Edge path unit test: imports the Cloudflare worker that `nowaki build --adapter cloudflare` wrote
-// and calls its fetch handler directly in Node (no wrangler), covering web.mjs end to end.
+// The edge path: imports the Cloudflare worker that `nowaki build --adapter cloudflare` wrote and
+// calls its fetch handler directly in Node (no wrangler), covering web.mjs end to end: pages,
+// live events, CSRF, server functions, sessions from bindings, CSP, config rules, health, and the
+// ISR cache with a stand-in Cache API and zone purge.
 // Usage: node scripts/edge-handler-test.mjs [workerDir]   (default examples/hello/dist/worker)
+// Build first: nowaki build examples/hello --adapter cloudflare (e2e-adapters.sh does both).
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 

@@ -2,8 +2,9 @@
 // `createFetchHandler`), with a mocked `caches.default` and a mocked fetch for the zone purge API:
 // MISS → HIT, stale-while-revalidate through ctx.waitUntil, Vary / query variants, never storing
 // per-user pages (cookies, session, authorization, Set-Cookie, streamed), revalidatePath deleting
-// the local entries, the zone purge by tag (URL, token, body, batches), the 2 s cap, the warnings.
-// No network, no port.
+// the local entries, the zone purge by tag (URL, token, body, batches), the 2 s cap, the warnings,
+// a fresh CSP nonce per cache hit, and that the worker's imports never name @vercel/functions.
+// No network, no port. Usage: node scripts/cf-cache-test.mjs
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,7 +47,7 @@ function mockCache() {
       if (/\b(private|no-store|no-cache)\b/.test(res.headers.get("cache-control") ?? "")) throw new Error("413");
       const k = keyOf(r);
       const tags = (res.headers.get("cache-tag") ?? "").split(",").filter(Boolean).map((t) => t.toLowerCase());
-      // Kept on match, as local workerd (wrangler dev) does; production strips it.
+      // The stored headers keep Cache-Tag, as local workerd (wrangler dev) does; production strips it.
       store.set(k, { status: res.status, headers: [...res.headers], body: await res.text(), tags, cc: res.headers.get("cache-control") });
       log.push(`put ${k}`);
     },

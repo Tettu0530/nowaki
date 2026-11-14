@@ -1,4 +1,6 @@
-// Multipart smoke route for security-e2e (multipart/form-data via ctx.formData()).
+// A multipart/form-data upload: ctx.formData() returns FormData, and a file part is a File (name,
+// type, bytes; treat the name as untrusted). The body is capped by NOWAKI_FORM_BODY_LIMIT. Fixture
+// for scripts/security-e2e.mjs and scripts/form-data-test.mjs.
 import type { LoaderContext } from "@nowaki-dev/runtime";
 
 export async function POST(ctx: LoaderContext) {

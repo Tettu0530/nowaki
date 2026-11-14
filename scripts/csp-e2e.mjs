@@ -3,6 +3,7 @@
 // nonce(), never on a <script> / <style> that reached the page as raw HTML; ISR hits get a fresh
 // nonce, streamed pages are covered too, and the render's marker never reaches the browser.
 // Usage: node scripts/csp-e2e.mjs <baseUrl> [--report-only]   (nowaki start, dev, or an adapter)
+// e2e-dev.sh, e2e-prod.sh and e2e-adapters.sh run it against examples/hello.
 const base = process.argv[2] ?? "http://127.0.0.1:3302";
 const header = process.argv[3] === "--report-only" ? "content-security-policy-report-only" : "content-security-policy";
 
@@ -44,7 +45,8 @@ for (const path of ["/", "/styled", "/stream", "/stream-early", "/vt", "/scripte
   check("raw HTML: every other tag (Nowaki's, nonce()) is nonced", p.tags.filter((t) => !injected(t)).every(p.nonced) && p.tags.filter(p.nonced).length >= 2);
 }
 
-// `nowaki start` (the adapters leave caching to the CDN; `nowaki dev` has no ISR cache).
+// ISR hits: only where the server answers x-nowaki-cache, which is `nowaki start` (the adapters
+// leave caching to the CDN; `nowaki dev` has no ISR cache), and not under --report-only.
 const a = header === "content-security-policy" ? await page("/isr") : null;
 if (a?.r.headers.has("x-nowaki-cache")) {
   const b = await page("/isr");
@@ -66,7 +68,7 @@ if (a?.r.headers.has("x-nowaki-cache")) {
   }
 }
 
-// The default security headers still add `frame-ancestors` everywhere; only HTML gets the nonce policy.
+// Only HTML gets the nonce policy (other responses keep the default `frame-ancestors` header).
 const api = await fetch(`${base}/api/hello`);
 check("non-HTML responses get no nonce policy", !/nonce-/.test(api.headers.get(header) ?? ""));
 

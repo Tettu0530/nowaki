@@ -1,5 +1,6 @@
-// Unit tests for create-nowaki (template files). no network.
-// Usage: node scripts/create-nowaki-test.mjs
+// create-nowaki without installing: scaffolds each template (and into "."), then checks the files,
+// the type files and tsconfig, and that an unknown template is refused. No network.
+// Usage: node scripts/create-nowaki-test.mjs (e2e-scaffold.sh runs it first)
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

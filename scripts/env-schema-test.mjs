@@ -1,9 +1,10 @@
 // Typed env (env.ts): defineEnv / validateEnv / env/server units, then end to end with the nowaki
 // binary on a scratch app: the build fails on a missing or invalid variable and on client code
-// importing env/server, public values are inlined, the node server and the Cloudflare worker
-// refuse to start or serve with a variable gone.
+// importing env/server, public values are inlined, and the node server, `nowaki start` and the
+// Cloudflare worker refuse to start or serve with a variable gone.
 // Usage: node scripts/env-schema-test.mjs [path/to/nowaki]   (default target/debug/nowaki; the
-// end-to-end part is skipped when the binary doesn't exist)
+// end-to-end part is skipped when the binary doesn't exist, uses ports 4742-4744, and builds in
+// target/env-schema-e2e, kept when KEEP is set)
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";

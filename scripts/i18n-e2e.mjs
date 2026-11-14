@@ -9,7 +9,7 @@
 // A third app ("detect", on --port + 2) turns on `i18n.detect`: Accept-Language and the
 // nowaki_locale cookie on `/`, Vary / Cache-Control, and an ISR root never answering another
 // language.
-//   node scripts/i18n-e2e.mjs <mode>... [--port 4990]
+// Usage: node scripts/i18n-e2e.mjs <mode>... [--port 4990]
 // Modes: start (`nowaki start`), dev (`nowaki dev`), node (node adapter), cloudflare (the worker's
 // fetch, called in Node), static (prerender output). NOWAKI_BIN overrides the binary (default
 // target/debug/nowaki).

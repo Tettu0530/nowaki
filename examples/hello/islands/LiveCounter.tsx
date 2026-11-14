@@ -1,6 +1,6 @@
 // Server-reactive island (Jetstream). An island with `export const live` sends no component JS
-// to the client. State lives on the server (per connection); events re-render -> an HTML patch is pushed.
-// Buttons have no onClick. `data-live="handlerName"` points at a server handler.
+// to the client. State lives on the server (per connection); an event re-renders the island and the
+// server pushes an HTML patch. Buttons have no onClick: `data-live="handlerName"` names a handler in `on`.
 import { getContext } from "@nowaki-dev/runtime";
 
 export const live = {

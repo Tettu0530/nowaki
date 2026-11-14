@@ -1,4 +1,4 @@
-// The docs site in Nowaki and in Astro, each written the way its docs show. `files(n)` returns
+// The docs site in Nowaki and in Astro, each written the way its docs show. `TEMPLATES[fw](n)` returns
 // { relativePath: contents } for the generated sources; package.json, pnpm-workspace.yaml and
 // the lockfile are committed. Pages: / (home), /docs/ (every entry, by order), /docs/<slug>/
 // (a table of contents from the h2 headings, then the entry). The photos are copied from

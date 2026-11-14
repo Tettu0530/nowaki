@@ -1,5 +1,8 @@
-// multipart/form-data parsing for LoaderContext.formData(), and the body limit over real sockets
-// (a temporary production server on 127.0.0.1, ephemeral port).
+// LoaderContext.formData(): multipart/form-data parsing and urlencoded bodies (both a FormData),
+// the body limit (Content-Length, streamed reads, the 413 of API routes, server functions and live
+// events, Worker bodies), and the limit over real sockets (a temporary production server on
+// 127.0.0.1, ephemeral port).
+// Usage: node scripts/form-data-test.mjs
 import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";

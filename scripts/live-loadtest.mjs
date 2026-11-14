@@ -1,7 +1,9 @@
-// Measures N concurrent Jetstream connections. Uses Node 22+'s global WebSocket.
-// Measures: (1) time to open N connections, (2) server RSS growth while connected (= resident cost per connection),
-//           (3) event throughput (events/sec, from each connection sending inc to receiving its patch).
-//
+// Jetstream load test: opens N WebSocket connections to /__nowaki/live on a running examples/hello
+// server, joins /live's LiveCounter on each, and reports (1) the time to open them, (2) the RSS
+// growth of the given processes while connected (the resident cost per connection), and (3) event
+// throughput (each connection sends `inc` and waits for its patch). Exits 1 unless every
+// connection opens and gets its patch. Uses Node 22+'s global WebSocket. CI's jetstream-load job
+// runs it with N=1000 against `nowaki start`.
 // Usage: node scripts/live-loadtest.mjs <baseUrl> <N> <rustPid> <sidecarPid>
 //   e.g. node scripts/live-loadtest.mjs http://127.0.0.1:8200 1000 12345 12346
 
@@ -23,7 +25,7 @@ const rssKB = () => {
   return total;
 };
 
-// Extracts LiveCounter's nid / initial state / signature (sig) from /live (regardless of attribute order).
+// LiveCounter's nid, initial state and signature from /live, in any attribute order.
 const html = await (await fetch(base + "/live")).text();
 const tag = html.match(/<nowaki-live\b[^>]*>/)?.[0];
 if (!tag || !/name="LiveCounter"/.test(tag)) {
@@ -45,7 +47,7 @@ const open = (url) =>
 const baseRss = rssKB();
 console.log(`baseline RSS: ${(baseRss / 1024).toFixed(1)} MB  (pids ${pids.join(",")})`);
 
-// Connect in batches to limit momentary FD/accept peaks.
+// Connects in batches to limit file descriptor and accept peaks.
 const t0 = now();
 const conns = [];
 const BATCH = 100;
@@ -59,7 +61,7 @@ const connMs = now() - t0;
 for (const ws of conns) {
   ws.send(JSON.stringify({ type: "join", islands: [{ nid, name: "LiveCounter", state, sig }] }));
 }
-await new Promise((r) => setTimeout(r, 1500)); // wait to settle (presence broadcasts, etc.)
+await new Promise((r) => setTimeout(r, 1500)); // let presence broadcasts settle
 const afterRss = rssKB();
 
 console.log(`opened ${conns.length}/${N} connections in ${connMs} ms`);

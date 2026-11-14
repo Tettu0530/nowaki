@@ -35,7 +35,7 @@ const STATUS_JSX = (sent, error) => `{${sent} && <p class="notice">Thanks, your 
 export function nowakiFeatures({ mode }) {
   const server = mode === "server";
   const f = {};
-  // Imported by the root layout; since 0.16.1 the build links it as a hashed stylesheet.
+  // Imported by the root layout; the build links it as a hashed stylesheet.
   f["styles/global.css"] = GLOBAL_CSS;
   f["lib/search.ts"] = SEARCH_LIB;
   f["lib/contact.ts"] = CONTACT_SCHEMA;

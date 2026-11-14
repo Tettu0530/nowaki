@@ -2,6 +2,7 @@
 // from scanRoutes, for parity with nowaki-core::routes (page_url_patterns, slot_route_patterns).
 // Usage: node scripts/route-enumeration-parity.mjs [appRoot]
 // stdout: JSON { pages: string[], slots: string[] }
+// Run by crates/nowaki/tests/route_js_parity.rs, which compares it with the Rust lists.
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";

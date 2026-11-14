@@ -3,6 +3,7 @@
 // response, the 2 s timeout, the warn-once without @vercel/functions, and a generated Vercel
 // function (mocked @vercel/functions copied in with its dependency) answering real requests.
 // No network: the package is a local fake. Listens on 127.0.0.1:5540.
+// Usage: node scripts/purge-adapters-test.mjs
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";

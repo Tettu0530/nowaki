@@ -1,6 +1,8 @@
 // Unit checks for server/handler.mjs with an in-memory env: layout wrapping (plain and
-// `streaming = "early"`), the routePath seam, the finalize commit seam, parallel-route slots,
-// and the cross-site (CSRF) rule for actions and API / file routes. No server needed.
+// `streaming = "early"`), early redirects, the routePath seam and ctx.routePath, the finalize
+// commit seam, parallel-route slots, the cross-site (CSRF) rule for actions and API / file routes,
+// the aliases removed in 0.20.0, OPTIONS never running an action, and the endpoint body caps.
+// No server needed. Usage: node scripts/handler-test.mjs
 import { createRequire } from "node:module";
 import { handleRequest } from "../packages/nowaki-runtime/server/handler.mjs";
 
@@ -123,7 +125,7 @@ const text = async (res) => res.body ?? (await new Response(res.stream).text());
 }
 
 {
-  // Sessions will set ctx.__commit; the cookie it sets must reach the response.
+  // Sessions set ctx.__commit (session.mjs); the cookie it sets must reach the response.
   const commits = [];
   const commitEnv = {
     ...env,
@@ -212,7 +214,7 @@ const text = async (res) => res.body ?? (await new Response(res.stream).text());
   check("without slots a layout gets an empty slots object", (await text(res)).endsWith("|<div><p>page 5</p></div>"));
 }
 
-// CSRF (0.19): unsafe-method cross-site requests to API and file routes get the same 403 as page
+// CSRF: unsafe-method cross-site requests to API and file routes get the same 403 as page
 // actions (after middleware), unless the route exports `csrf = false`. GET / HEAD / OPTIONS pass.
 {
   let mwRuns = 0;

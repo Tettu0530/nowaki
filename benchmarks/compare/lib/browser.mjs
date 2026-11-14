@@ -5,9 +5,9 @@
 //   total   every response body (document, scripts, styles, fetch/xhr data, other), plus nothing
 //           else: inline scripts are already inside the document
 //   byType  `total` split by CDP resource type
-//   idle    JS whose path matches `idleJs` (e.g. Nowaki's idle-loaded router), part of `js`
+//   idle    JS whose path matches `idleJs` (Nowaki's SPA router, loaded on link intent), part of `js`
 //   hydrated  elements carrying data-hydrated (each island sets it once mounted)
-// Needs Chromium: CHROME=/path/to/chrome, or a Playwright-installed headless shell.
+// Needs Chromium: CHROME=/path/to/chrome, or (macOS arm64 only) a Playwright-installed headless shell.
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { gzipSync } from "node:zlib";

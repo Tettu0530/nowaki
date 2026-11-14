@@ -1,5 +1,6 @@
 // Tests for scripts/api-surface.mjs: the snapshot format, the removal check, and the generators
-// on small fixtures (a removed export, a changed signature, a new env var, a new endpoint).
+// on small fixtures (a removed export, a changed signature, a new env var, a new endpoint), then
+// that the repository's api/*.txt are up to date with no unclassified entries.
 // Usage: node scripts/api-surface-test.mjs
 
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";

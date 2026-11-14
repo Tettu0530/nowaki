@@ -1,4 +1,4 @@
-// loading boundary. If a client navigation takes over 150ms, this UI shows until the target arrives.
+// The loading boundary: when a client navigation takes over 150 ms, this shows until the page arrives.
 // A server component with zero islands. To nest, add routes/<dir>/loading.tsx.
 // Its inline <style> carries nonce(), so it applies under NOWAKI_CSP=enforce too.
 import { nonce } from "@nowaki-dev/runtime";
