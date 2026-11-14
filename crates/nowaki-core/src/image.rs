@@ -32,14 +32,16 @@ const DEFAULT_AVIF_QUALITY: u8 = 60;
 /// rav1e speed (1 slowest … 10 fastest). 9 was ~30% faster than 7 on photos at the same or a
 /// smaller size; 10 grew the files by ~60%.
 const AVIF_SPEED: u8 = 9;
-/// Alpha is encoded near-losslessly: at the colour quality, fully transparent or opaque edges
+/// Alpha is encoded near-losslessly: at the color quality, fully transparent or opaque edges
 /// came back off by up to 38 levels. Opaque images carry no alpha plane, so this costs them nothing.
 const AVIF_ALPHA_QUALITY: f32 = 100.0;
 
 /// `?image` and its options.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ImageQuery {
+    /// `w=` / `widths=`: the widths to produce instead of the defaults.
     pub widths: Option<Vec<u32>>,
+    /// `q=` / `quality=`: the AVIF quality, 1 to 100.
     pub quality: Option<u8>,
 }
 
@@ -122,15 +124,18 @@ pub fn widths_for(orig: u32, q: &ImageQuery) -> Vec<u32> {
 /// One `<source>` (or the `<img>`'s own srcset): a type and `(url, width)` candidates.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Source {
+    /// The MIME type of the candidates.
     pub mime: &'static str,
+    /// `(url, width)` pairs, narrowest first.
     pub candidates: Vec<(String, u32)>,
 }
 
-/// What `?image` imports: the module's default export (see `module`).
+/// What `?image` imports: the module's default export (see [`ImageSet::module`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageSet {
-    /// Intrinsic size; 0 when the format isn't decoded (SVG).
+    /// Intrinsic width, EXIF orientation applied; 0 when the format isn't decoded (SVG).
     pub width: u32,
+    /// Intrinsic height, as `width`.
     pub height: u32,
     /// The `<img src>`: the largest fallback.
     pub src: String,
@@ -454,6 +459,7 @@ fn oriented_size(raw: &[u8]) -> Result<(u32, u32)> {
     Ok(if swaps_axes(o) { (h, w) } else { (w, h) })
 }
 
+/// Whether the orientation turns the image by 90° or 270°.
 fn swaps_axes(o: Orientation) -> bool {
     matches!(
         o,
@@ -560,6 +566,7 @@ fn encode_avif(img: &DynamicImage, quality: u8) -> Result<Vec<u8>> {
     Ok(out.avif_file)
 }
 
+/// Percent-encodes `s` for a query value, keeping path characters readable.
 fn query_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {

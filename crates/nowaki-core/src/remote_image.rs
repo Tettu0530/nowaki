@@ -49,6 +49,7 @@ pub struct RemotePattern {
 /// One download for [`RemoteFetch`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RemoteRequest {
+    /// The URL to download (already allowed by the patterns).
     pub url: String,
     /// The directory to write into (created by the fetcher).
     pub dir: PathBuf,
@@ -64,17 +65,20 @@ pub struct RemoteRequest {
 /// that `patterns` don't allow, private / loopback / link-local addresses, bodies over
 /// [`MAX_BYTES`], and slow responses. Returns one result per request, in order.
 pub trait RemoteFetch: Send + Sync {
+    /// Downloads every request (see the trait docs); one result per request, in order.
     fn fetch(&self, patterns: &[RemotePattern], requests: &[RemoteRequest]) -> Vec<Result<()>>;
 }
 
 /// The parts of a remote URL the patterns look at.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteUrl<'a> {
+    /// `https` or `http`.
     pub protocol: &'a str,
     /// Lowercase.
     pub hostname: String,
     /// None for the scheme's default port.
     pub port: Option<u16>,
+    /// The path without the query; `/` when empty.
     pub pathname: &'a str,
 }
 
@@ -242,6 +246,7 @@ pub fn meta_path(root: &Path, url: &str) -> PathBuf {
     cache_dir(root, url).join("meta.json")
 }
 
+/// The fields of a cache entry's `meta.json` that are read back.
 #[derive(Deserialize)]
 struct Meta {
     url: String,
@@ -347,10 +352,12 @@ impl RemoteImages {
         }
     }
 
+    /// The `images.remotePatterns` entries.
     pub fn patterns(&self) -> &[RemotePattern] {
         &self.patterns
     }
 
+    /// Whether the patterns allow `url` (see [`is_allowed`]).
     pub fn allowed(&self, url: &str) -> bool {
         is_allowed(&self.patterns, url)
     }
@@ -362,6 +369,8 @@ impl RemoteImages {
         xxhash_rust::xxh3::xxh3_64(json.as_bytes())
     }
 
+    /// The cached file for `url`, unless `NOWAKI_IMAGES_REFRESH` asks for a fetch this process
+    /// hasn't made yet.
     fn hit(&self, url: &str, fetched: &HashSet<String>) -> Option<PathBuf> {
         if self.refresh && !fetched.contains(url) {
             return None;
@@ -548,7 +557,7 @@ mod tests {
                     match self.body {
                         Body::Png => image::RgbImage::new(8, 4).save(&path)?,
                         Body::Junk => std::fs::write(&path, b"<svg onload=alert(1)>")?,
-                        // 7072² > MAX_PIXELS, but a small file (one flat colour).
+                        // 7072² > MAX_PIXELS, but a small file (one flat color).
                         Body::Huge => image::GrayImage::new(7072, 7072).save(&path)?,
                     }
                     std::fs::write(

@@ -1,10 +1,14 @@
-//! Image asset optimization (pure Rust; no C-dependent codecs, so cross-compile safe).
+//! Image asset optimization (pure Rust, no C codecs, so it cross-compiles).
 //!
-//! - Automatic: re-encodes PNGs and keeps the result only if smaller (metadata is dropped too).
-//! - Opt-in: the import query `?w=&h=&format=webp|jpeg|png&quality=` resizes, converts format, and sets quality.
-//!   e.g. `import hero from "./hero.jpg?w=800&format=webp"`.
+//! The client build passes every imported PNG through [`optimize`] with the default
+//! [`Transform`]: it is re-encoded losslessly and kept only if smaller (metadata is dropped
+//! too). Other formats are copied as they are.
 //!
-//! WebP is encoded lossless (image-webp). SVG/ICO/video etc. are untouched.
+//! A non-default [`Transform`] (from [`parse_query`]) resizes, converts, and sets the quality,
+//! but no import query reaches it: responsive images use `?image` (`image.rs`), which
+//! encodes its fallback variants through `encode_as`.
+//!
+//! WebP is encoded lossless (image-webp). SVG, ICO, video, etc. are untouched.
 
 use anyhow::Result;
 use image::codecs::jpeg::JpegEncoder;
@@ -13,6 +17,7 @@ use image::codecs::webp::WebPEncoder;
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageEncoder, ImageFormat};
 
+/// A raster format this module decodes and encodes.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Fmt {
     Png,
@@ -45,17 +50,22 @@ impl Fmt {
     }
 }
 
-/// Transform spec derived from the import query.
+/// What [`optimize`] does beyond the automatic PNG re-encode. The default is nothing.
 #[derive(Default, Clone)]
 pub struct Transform {
+    /// Target width in pixels.
     pub width: Option<u32>,
+    /// Target height in pixels. With only one of width and height, the image fits within it and
+    /// keeps its aspect ratio; with both, it is resized to exactly that size.
     pub height: Option<u32>,
+    /// Output format (default: the input's).
     pub format: Option<Fmt>,
+    /// JPEG quality, 1 to 100 (default 80). WebP is always lossless.
     pub quality: Option<u8>,
 }
 
 impl Transform {
-    /// None of resize, format conversion, or quality is specified (= automatic optimization only).
+    /// Whether no resize, format, or quality is set (automatic optimization only).
     fn is_noop(&self) -> bool {
         self.width.is_none()
             && self.height.is_none()
@@ -64,7 +74,8 @@ impl Transform {
     }
 }
 
-/// Parses a query string ("w=800&format=webp&quality=80") into a Transform.
+/// Parses a query string (`w=800&format=webp&quality=80`; also `width`, `h` / `height`, `q`,
+/// `f`) into a [`Transform`]. Unknown keys and invalid values are ignored.
 pub fn parse_query(q: &str) -> Transform {
     let mut t = Transform::default();
     for pair in q.split('&').filter(|s| !s.is_empty()) {
@@ -87,8 +98,8 @@ pub fn parse_query(q: &str) -> Transform {
     t
 }
 
-/// Optimizes bytes. Returns (optimized bytes, output extension).
-/// Unsupported input, failure, or a size increase (in automatic mode) returns the original untouched (never breaks it).
+/// Optimizes image bytes. Returns (optimized bytes, output extension). Unsupported input, a
+/// failure, or (in automatic mode) a larger result returns the original bytes and extension.
 pub fn optimize(bytes: &[u8], ext: &str, t: &Transform) -> (Vec<u8>, String) {
     match try_optimize(bytes, ext, t) {
         Ok(Some(out)) => out,
@@ -133,7 +144,7 @@ pub(crate) fn encode_as(
     Ok(Some((encode(img, fmt, quality)?, fmt.ext())))
 }
 
-// One dimension: fit within, keeping aspect ratio. Both: exact resize.
+/// One dimension: fit within it, keeping the aspect ratio. Both: exact resize.
 fn resize(img: &DynamicImage, w: Option<u32>, h: Option<u32>) -> DynamicImage {
     match (w, h) {
         (Some(w), Some(h)) => img.resize_exact(w, h, FilterType::Lanczos3),
@@ -256,7 +267,8 @@ mod tests {
 
     #[test]
     fn auto_png_recompresses_smaller() {
-        // A weakly compressed PNG (CompressionType::Fast) shrinks under automatic optimization (Best).
+        // A weakly compressed PNG (CompressionType::Fast) shrinks under automatic optimization
+        // (Best).
         let img = ImageBuffer::from_fn(96, 96, |x, y| {
             Rgba([(x * 2) as u8, (y * 2) as u8, ((x + y) * 3) as u8, 255])
         });

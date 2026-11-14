@@ -2,11 +2,10 @@
 //! as inline `style` colors (no CSS or client JS; CSP allows style attributes). The syntax and
 //! theme sets load once per process. Pure-Rust regexes (no Oniguruma C library). Syntaxes come
 //! from two-face (bat's set): syntect's defaults have no TypeScript / TSX, Vue, or TOML.
-
 //!
 //! Highlighted output is cached on disk (`node_modules/.cache/nowaki/highlight`), keyed by the
-//! language, the code, the theme, and the nowaki version: compiling a large grammar (TypeScript
-//! takes ~150 ms) happens once, not on every build or dev reload.
+//! language, the code, the theme, and the nowaki-core version: compiling a large grammar
+//! (TypeScript takes ~150 ms) happens once, not on every build or dev reload.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -18,6 +17,7 @@ use comrak::adapters::SyntaxHighlighterAdapter;
 use comrak::plugins::syntect::{SyntectAdapter, SyntectAdapterBuilder};
 use xxhash_rust::xxh3::xxh3_64;
 
+/// The syntect theme code blocks are colored with.
 pub const CODE_THEME: &str = "InspiredGitHub";
 
 static CACHE_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
@@ -39,6 +39,7 @@ pub fn adapter() -> &'static CachedAdapter {
     &ADAPTER
 }
 
+/// A [`SyntaxHighlighterAdapter`] that wraps syntect's with the disk cache (see [`adapter`]).
 pub struct CachedAdapter {
     inner: OnceLock<SyntectAdapter>,
 }
@@ -76,6 +77,7 @@ impl CachedAdapter {
     }
 }
 
+/// A cache key part for tag attributes, independent of the map's order.
 fn attrs_key(attributes: &HashMap<&'static str, Cow<'_, str>>) -> String {
     let mut pairs: Vec<String> = attributes.iter().map(|(k, v)| format!("{k}={v}")).collect();
     pairs.sort();
