@@ -509,7 +509,7 @@ if (mode === "headers" || mode === "headers-worker") {
     // The session and revalidate checks of the server modes, against the Worker: fetch() to
     // ORIGIN goes to its fetch handler.
     const realFetch = globalThis.fetch;
-    globalThis.fetch = (u, init) => (String(u).startsWith(ORIGIN) ? worker.fetch(new Request(u, init), env, ctx) : realFetch(u, init));
+    globalThis.fetch = (u, init) => (new URL(String(u)).origin === new URL(ORIGIN).origin ? worker.fetch(new Request(u, init), env, ctx) : realFetch(u, init));
     await sessionGuards(ORIGIN);
     const login = await fetch(`${ORIGIN}/api/session`, {
       method: "POST",
