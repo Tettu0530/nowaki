@@ -53,8 +53,9 @@ pub fn emit_server(root: &Path, dist: &Path, adapter: Adapter) -> Result<()> {
     std::fs::create_dir_all(&server_dir)
         .with_context(|| format!("failed to create dist/server: {}", server_dir.display()))?;
 
-    let runtime_ver =
-        installed_version(root, "@nowaki-dev/runtime").unwrap_or_else(|| "0.6.0".into());
+    // runtime::check accepted the installed runtime; without one, the version this CLI needs.
+    let runtime_ver = installed_version(root, "@nowaki-dev/runtime")
+        .unwrap_or_else(|| crate::runtime::MIN_RUNTIME.into());
     let preact_ver = installed_version(root, "preact").unwrap_or_else(|| "10.25.0".into());
     let prts_ver =
         installed_version(root, "preact-render-to-string").unwrap_or_else(|| "6.5.0".into());
@@ -109,10 +110,7 @@ await startServer({{
 
 /// Generates `dist/worker/`. The work is done by the runtime's `server/edge-build.mjs`.
 pub fn emit_cloudflare(root: &Path, dist: &Path) -> Result<()> {
-    let script = root.join("node_modules/@nowaki-dev/runtime/server/edge-build.mjs");
-    if !script.exists() {
-        anyhow::bail!("@nowaki-dev/runtime not found: {}", script.display());
-    }
+    let script = crate::runtime::script(root, "edge-build.mjs", "the cloudflare adapter")?;
     let app_name = read_json_field(&root.join("package.json"), "name")
         .map(|n| sanitize_worker_name(&n))
         .unwrap_or_else(|| "nowaki-app".into());
@@ -136,10 +134,7 @@ pub fn emit_cloudflare(root: &Path, dist: &Path) -> Result<()> {
 
 /// Generates `.vercel/output/`. The work is done by the runtime's `server/vercel-build.mjs`.
 pub fn emit_vercel(root: &Path, dist: &Path) -> Result<()> {
-    let script = root.join("node_modules/@nowaki-dev/runtime/server/vercel-build.mjs");
-    if !script.exists() {
-        anyhow::bail!("@nowaki-dev/runtime not found: {}", script.display());
-    }
+    let script = crate::runtime::script(root, "vercel-build.mjs", "the vercel adapter")?;
     let output = root.join(".vercel/output");
     let status = std::process::Command::new("node")
         .arg(&script)

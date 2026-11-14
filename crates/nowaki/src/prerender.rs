@@ -105,13 +105,7 @@ pub async fn run(root: PathBuf, out: PathBuf, skip_build: bool) -> Result<()> {
         None => url.to_string(),
     };
 
-    let entry = root.join("node_modules/@nowaki-dev/runtime/server/start.mjs");
-    if !entry.exists() {
-        return Err(anyhow!(
-            "@nowaki-dev/runtime not found: {}",
-            entry.display()
-        ));
-    }
+    let entry = crate::runtime::script(&root, "start.mjs", "nowaki prerender")?;
 
     // static-paths and route enumeration only read dist/; one Node server can start alongside them.
     let routes_dir = root.join("dist/server/routes");

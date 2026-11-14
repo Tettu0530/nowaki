@@ -200,6 +200,12 @@ milestone's worth of work; the codename is noted per entry.
   the trusted publishers are configured (docs/RELEASING.md, "One-time setup").
 
 ### Fixed
+- A missing runtime file (the runtime isn't installed, or the install is broken) no longer asks
+  for "@nowaki-dev/runtime 0.16 or newer" (Google fonts, content collections) or 0.17 (env.ts,
+  remote images): the CLI already refuses a runtime of another version, so the error now says
+  which file is missing and the `npm install @nowaki-dev/runtime@<version>` that fixes it. The
+  node / bun / deno adapters' `dist/server/package.json` pins the CLI's runtime version when
+  none is installed, not `^0.6.0`.
 - Server functions and `POST /__nowaki/live-event` answer **413** when the body goes over the
   limit while it is read (a chunked body has no `Content-Length`); they answered 400.
 - The `publish()` docs and its warning state what it does on the deploy adapters: nothing (it
