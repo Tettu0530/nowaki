@@ -331,15 +331,13 @@ node scripts/gallery-e2e.mjs dev --port "$((PORT + 13))"
 node scripts/sourcemap-e2e.mjs dev --port "$((PORT + 14))"
 # HMR in headless Chrome (Fast Refresh keeps island state, CSS without a reload, NOWAKI_CSP=enforce),
 # on PORT+15 with CDP on PORT+16 (HMR_PORT / HMR_CDP_PORT override them). Needs Chrome: CHROME, or
-# the usual Linux / macOS location. Not run on Windows.
+# the usual Linux / macOS / Windows location.
 if [ -z "${CHROME:-}" ]; then
-  for c in /usr/bin/google-chrome /usr/bin/google-chrome-stable "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; do
+  for c in /usr/bin/google-chrome /usr/bin/google-chrome-stable "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" "C:/Program Files/Google/Chrome/Application/chrome.exe"; do
     if [ -x "$c" ]; then CHROME=$c; break; fi
   done
 fi
-if [ "${RUNNER_OS:-}" = Windows ]; then
-  echo "hmr-browser-test: skipped on Windows"
-elif [ -n "${CHROME:-}" ]; then
+if [ -n "${CHROME:-}" ]; then
   CHROME="$CHROME" PORT="${HMR_PORT:-$((PORT + 15))}" CDP_PORT="${HMR_CDP_PORT:-$((PORT + 16))}" node scripts/hmr-browser-test.mjs
   # The dev toolbar (route, islands, budget, errors, SPA / HMR updates, --no-toolbar, CSP enforce),
   # on PORT+17 with CDP on PORT+18 (TOOLBAR_PORT / TOOLBAR_CDP_PORT override them).

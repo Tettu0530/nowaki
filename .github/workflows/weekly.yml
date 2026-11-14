@@ -64,3 +64,23 @@ jobs:
         with:
           args: --no-progress './**/*.md' --exclude-path node_modules --exclude-path target
           fail: true
+
+  # What a new app installs: the create-nowaki template's dependencies, resolved fresh from the
+  # registry (the workspace's own lockfile is audited in ci.yml's security job).
+  template-audit:
+    name: Template dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          install: "false"
+      - run: |
+          mkdir -p "$RUNNER_TEMP/template"
+          cp packages/create-nowaki/templates/_shared/package.json "$RUNNER_TEMP/template/"
+          cd "$RUNNER_TEMP/template"
+          pnpm install --lockfile-only --ignore-scripts
+          pnpm audit --prod --audit-level=high

@@ -33,12 +33,24 @@ const modules = {
     loader: () => (order.push("page"), "E"),
     default: ({ data }) => h("p", null, `early ${data}`),
   },
+  // An app-level open redirect after an early shell (`?next=` straight into ctx.redirect).
+  "routes/blog/go.tsx": {
+    streaming: "early",
+    loader: (ctx) => ctx.redirect(ctx.url.searchParams.get("next")),
+    default: () => h("p", null, "go"),
+  },
+  "routes/blog/act.tsx": {
+    action: () => (order.push("action"), new Response(null, { status: 303, headers: { location: "/" } })),
+    default: () => h("p", null, "act"),
+  },
   "routes/_middleware.ts": { default: (ctx) => void seenUrls.push(`mw ${ctx.url.pathname}`) },
   "routes/admin/_middleware.ts": { default: () => new Response("blocked", { status: 401 }) },
 };
 const table = {
   routes: [
     { file: "routes/blog/early.tsx", segments: [{ lit: "blog" }, { lit: "early" }], dir: "/blog", isApi: false },
+    { file: "routes/blog/go.tsx", segments: [{ lit: "blog" }, { lit: "go" }], dir: "/blog", isApi: false },
+    { file: "routes/blog/act.tsx", segments: [{ lit: "blog" }, { lit: "act" }], dir: "/blog", isApi: false },
     { file: "routes/blog/[slug].tsx", segments: [{ lit: "blog" }, { param: "slug" }], dir: "/blog", isApi: false },
   ],
   layouts: [
@@ -78,6 +90,17 @@ const text = async (res) => res.body ?? (await new Response(res.stream).text());
   const body = await text(res);
   check("early streaming wraps the same layouts", body === '<head><div id="root" data-d="R"><section id="blog" data-d="B"><p>early E</p></section></div></tail>');
   check("early streaming runs loaders page, then layouts leaf → root", order.join(",") === "page,blog,root");
+}
+
+{
+  // After an early shell a redirect is `location.replace(...)`: only http(s) targets.
+  const go = async (next) => text(await req(`/blog/go?next=${encodeURIComponent(next)}`));
+  check("early redirect follows a path", (await go("/about")).includes('location.replace("/about")'));
+  check("early redirect follows an https URL", (await go("https://ok.test/x")).includes('location.replace("https://ok.test/x")'));
+  for (const bad of ["javascript:alert(1)", "JavaScript:alert(1)", " javascript:alert(1)", "data:text/html,<script>alert(1)</script>"]) {
+    const body = await go(bad);
+    check(`early redirect refuses ${JSON.stringify(bad)} (goes to /)`, body.includes('location.replace("/")') && !/javascript:|data:/i.test(body));
+  }
 }
 
 {
@@ -245,6 +268,48 @@ const text = async (res) => res.body ?? (await new Response(res.stream).text());
   mwRuns = 0;
   await send("POST", "/api/plain", evil);
   check("csrf: middleware runs before the check, as for actions", mwRuns === 1);
+}
+
+{
+  // A CORS preflight (OPTIONS, from any site, unchecked for CSRF) never runs a page action.
+  order.length = 0;
+  const pre = await req("/blog/act", { method: "OPTIONS", headers: { origin: "http://evil.test", host: "x.test" } });
+  check("OPTIONS does not run the action", !order.includes("action") && pre.status !== 303);
+  const post = await req("/blog/act", { method: "POST", headers: { origin: "http://x.test", host: "x.test" } });
+  check("same-origin POST still runs the action", order.includes("action") && post.status === 303);
+}
+
+{
+  // Endpoint body caps hold for a streamed body with no Content-Length (a chunked POST on the
+  // node adapter), not only against the header: server functions 1 MiB, live events and the
+  // revalidate endpoint 64 KiB (the general 10 MiB form cap would otherwise apply).
+  const { Readable } = await import("node:stream");
+  let pulled = 0;
+  const stream = (bytes) => {
+    pulled = 0;
+    const chunk = Buffer.alloc(16 * 1024, 0x61);
+    let left = bytes;
+    return Readable.from((function* () {
+      while (left > 0) {
+        left -= chunk.length;
+        pulled += chunk.length;
+        yield chunk;
+      }
+    })());
+  };
+  const json = { "content-type": "application/json", "x-nowaki-rpc": "1", "x-nowaki-live": "1", authorization: "Bearer s3cret-for-handler-test" };
+  const post = (path, bytes, extraEnv = {}) =>
+    handleRequest({ ...env, ...extraEnv }, { method: "POST", url: new URL(`http://x.test${path}`), headers: { ...json, host: "x.test" }, req: stream(bytes), version: 1 });
+  const fn = await post("/__nowaki/fn", 3 * 1024 * 1024, { serverFunctions: { lookup: async () => null, importModule: async () => ({}) } });
+  check(`server function: a streamed 3 MiB body is refused at 1 MiB (413, read ${pulled >> 10} KiB)`, fn.status === 413 && pulled <= 1024 * 1024 + 64 * 1024);
+  const live = await post("/__nowaki/live-event", 1024 * 1024, { live: { lookup: async () => null } });
+  check(`live-event: a streamed 1 MiB body is refused at 64 KiB (413, read ${pulled >> 10} KiB)`, live.status === 413 && pulled <= 128 * 1024);
+  process.env.NOWAKI_REVALIDATE_SECRET = "s3cret-for-handler-test  ";
+  const rv = await post("/__nowaki/revalidate", 1024 * 1024);
+  check(`revalidate: a streamed 1 MiB body is refused at 64 KiB (413; secret with trailing spaces still matches)`, rv.status === 413 && pulled <= 128 * 1024);
+  process.env.NOWAKI_REVALIDATE_SECRET = "   ";
+  check("revalidate: a blank secret leaves the endpoint off (404)", (await post("/__nowaki/revalidate", 10)).status === 404);
+  delete process.env.NOWAKI_REVALIDATE_SECRET;
 }
 
 if (failures) {

@@ -28,10 +28,11 @@ export async function dispatchLiveEvent(ctx, info, live) {
 
   let body = null;
   try {
-    const text = await ctx.bodyText();
-    if (text.length > BODY_LIMIT) return errBody(413, "Payload Too Large");
-    body = JSON.parse(text);
-  } catch {}
+    // Capped while streaming (a chunked body has no Content-Length to check above).
+    body = JSON.parse(await ctx.__bodyText(BODY_LIMIT));
+  } catch (err) {
+    if (err?.status === 413) return errBody(413, "Payload Too Large");
+  }
   const name = typeof body?.name === "string" ? body.name : "";
   if (!name) return errBody(400, "Bad Request");
   const mod = await live.lookup(name, info.version);

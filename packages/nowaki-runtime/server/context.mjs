@@ -10,7 +10,20 @@ export function makeContext(info) {
   const { url, params = {}, method = "GET", req } = info;
   // Callers may inject headers / readBody (Node: from req; Edge: from the Web Request).
   const reqHeaders = info.headers ?? req?.headers ?? {};
-  const readBodyFn = info.readBody ?? (() => readBodyNode(req, FORM_BODY_LIMIT));
+  const readBodyFn = info.readBody ?? ((limit = FORM_BODY_LIMIT) => readBodyNode(req, limit));
+  // The body is read once (a second formData() / bodyText() reuses it instead of waiting on an
+  // ended stream), capped while streaming at the first reader's limit; each reader then checks its
+  // own cap on the bytes.
+  let bodyPromise = null;
+  const readCapped = async (limit) => {
+    if (contentLengthOverLimit(reqHeaders, limit)) {
+      discardUnreadBody(req);
+      throw new RequestBodyError(`request body exceeds ${limit} byte limit`, { status: 413 });
+    }
+    // Started synchronously, so the Node stream listeners are attached before any data event.
+    bodyPromise ??= (async () => readBodyFn(limit))();
+    return assertBufferedBodySize(await bodyPromise, limit);
+  };
   const resHeaders = new Map();
   const setCookies = [];
 
@@ -100,29 +113,22 @@ export function makeContext(info) {
     async formData() {
       reqAccessed = true; // depends on body/Content-Type → no shared ISR cache (prevents per-user mixups)
       const ct = reqHeaders["content-type"] ?? "";
-      if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
-        discardUnreadBody(req);
-        throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
-      }
-      const buf = assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT);
-      return await parseFormBody(buf, ct);
+      return await parseFormBody(await readCapped(FORM_BODY_LIMIT), ct);
     },
     async bodyText() {
       reqAccessed = true;
-      if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
-        discardUnreadBody(req);
-        throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
-      }
-      return decodeBody(assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT));
+      return decodeBody(await readCapped(FORM_BODY_LIMIT));
     },
     async bodyJson() {
       reqAccessed = true;
-      if (contentLengthOverLimit(reqHeaders, FORM_BODY_LIMIT)) {
-        discardUnreadBody(req);
-        throw new RequestBodyError(`request body exceeds ${FORM_BODY_LIMIT} byte limit`, { status: 413 });
-      }
-      const s = decodeBody(assertBufferedBodySize(await readBodyFn(), FORM_BODY_LIMIT));
+      const s = decodeBody(await readCapped(FORM_BODY_LIMIT));
       return s ? JSON.parse(s) : null;
+    },
+    // Internal: the body as text under an endpoint's own byte cap, enforced while streaming
+    // (server functions, live events, the revalidate endpoint). Throws a 413 RequestBodyError.
+    async __bodyText(limit) {
+      reqAccessed = true;
+      return decodeBody(await readCapped(limit));
     },
 
     status(code) {
@@ -173,7 +179,8 @@ function result(status, contentType, body, extra) {
 }
 
 function parseCookies(header) {
-  const out = {};
+  // No prototype: `ctx.cookies.constructor` / `__proto__` are not cookies the request sent.
+  const out = Object.create(null);
   for (const part of String(header).split(";")) {
     const i = part.indexOf("=");
     if (i < 0) continue;

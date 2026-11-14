@@ -158,7 +158,8 @@ async function routeRequest(env, info, localized) {
 
     if (crossSite && typeof mod.action === "function") return finalize(ctx, FORBIDDEN, env, table, version);
 
-    if (method !== "GET" && method !== "HEAD" && typeof mod.action === "function") {
+    // OPTIONS (a CORS preflight any site can send) never runs the action; it renders the page.
+    if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && typeof mod.action === "function") {
       const tok = ctx.__trace?.begin("action", "action");
       let out;
       try {
@@ -954,7 +955,15 @@ function slotOwners(table, file) {
 async function earlyError(env, table, ctx, version, err, file) {
   const to = ctx._redirect?.headers?.location;
   if (to) {
-    const url = JSON.stringify(String(to)).replace(/</g, "\\u003c");
+    // A `Location: javascript:…` header is inert, but `location.replace("javascript:…")` runs it:
+    // only http(s) targets are followed (anything else goes to the site root).
+    let target = `${basePath()}/`;
+    try {
+      if (/^https?:$/.test(new URL(String(to), ctx.url).protocol)) target = String(to);
+    } catch {
+      // unparsable: the root
+    }
+    const url = JSON.stringify(target).replace(/</g, "\\u003c");
     return `<script>location.replace(${url})</script>`;
   }
   logError("", err, { trace: ctx.__trace });
@@ -1038,7 +1047,9 @@ async function render500(env, table, ctx, version, err) {
       const mod = await env.importModule(table.errorRoute, version);
       if (typeof mod.default === "function") {
         await env.ensureIslands(version);
-        const message = env.dev ? String(err?.stack ?? err) : String(err?.message ?? err);
+        // Production pages get no error text: a message can name files, queries or secrets (it is
+        // logged above). Dev keeps the stack.
+        const message = env.dev ? String(err?.stack ?? err) : "";
         const body = await renderToStringAsync(h(mod.default, { error: { message }, url: ctx.url }));
         const meta = withFonts(env, await withScripts(env, table, table.errorRoute, mod, version, await withSeo(env, table, table.errorRoute, mod, version, ctx, await withRouteCss(env, table.errorRoute, mod, version))));
         return { status: 500, headers: HTML, body: env.renderDocument({ mod, body, meta }) };

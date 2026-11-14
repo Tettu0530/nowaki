@@ -78,10 +78,11 @@ export async function dispatchServerFn(ctx, info, sf, { dev = false } = {}) {
   }
   let payload = null;
   try {
-    const text = await ctx.bodyText();
-    if (text.length > BODY_LIMIT) return errBody(413, "Payload Too Large");
+    // Capped while streaming (a chunked body has no Content-Length to check above).
+    const text = await ctx.__bodyText(BODY_LIMIT);
     payload = text ? JSON.parse(text) : null;
-  } catch {
+  } catch (err) {
+    if (err?.status === 413) return errBody(413, "Payload Too Large");
     payload = null;
   }
   const id = payload && typeof payload.id === "string" ? payload.id : null;

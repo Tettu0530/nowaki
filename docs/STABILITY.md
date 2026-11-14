@@ -172,7 +172,7 @@ Every release has a `vX.Y.Z` tag and a CHANGELOG entry.
 ## Platforms
 
 - **Node.js**: every package declares `engines.node >=22`. Nowaki supports the Node LTS lines
-  that are not end-of-life. CI runs Node 22 and 24 on Linux and Node 22 on macOS and Windows.
+  that are not end-of-life. CI runs Node 22, 24 and 26 on Linux and Node 22 on macOS and Windows.
   A Node line may be dropped in a minor once it reaches end-of-life (Node 22: 2027-04-30),
   announced in the CHANGELOG of the minor before.
 - **Bun and Deno**: supported for the `bun` and `deno` adapters, at the current stable release

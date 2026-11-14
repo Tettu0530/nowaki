@@ -53,6 +53,8 @@ grep -q "Couldn't display this page" /tmp/nowaki-early-fail.html
 ! grep -q 'the data source is down' /tmp/nowaki-early-fail.html || exit 1  # no message in production
 curl -s 'http://127.0.0.1:3310/stream-early?go=1' | grep -q 'location.replace("/about")'
 curl -sf http://127.0.0.1:3310/api/hello | grep -q '"hello":"nowaki"'
+# no internal x-nowaki-* response header, no Set-Cookie on a shared-cacheable response (node)
+node scripts/security-e2e.mjs headers http://127.0.0.1:3310 "node adapter"
 # /__nowaki/health is answered before routing, never cached; no Server-Timing unless asked for
 test "$(curl -sf http://127.0.0.1:3310/__nowaki/health)" = '{"status":"ok"}'
 curl -s -D - -o /dev/null http://127.0.0.1:3310/__nowaki/health | grep -qi '^cache-control: no-store'
@@ -223,6 +225,8 @@ test -f examples/hello/dist/static/.well-known/security.txt
 ./target/debug/nowaki build examples/hello --adapter cloudflare
 # the worker's fetch handler, called directly in Node (web.mjs end to end, no wrangler)
 node scripts/edge-handler-test.mjs examples/hello/dist/worker
+# no internal x-nowaki-* response header, no Set-Cookie on a shared-cacheable response (worker)
+node scripts/security-e2e.mjs headers-worker examples/hello/dist/worker
 # no HMR or dev toolbar in the worker's pages
 node -e 'import(require("url").pathToFileURL(process.argv[1]).href).then(async ({ default: w }) => {
   const env = { ASSETS: { fetch: async () => new Response("", { status: 404 }) } };
@@ -263,6 +267,7 @@ VERCEL_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3320/ >/dev/null && break; sleep 1; done
 curl -sf http://127.0.0.1:3320/ | grep -q "nowaki-island"
 curl -sf http://127.0.0.1:3320/api/hello | grep -q '"hello":"nowaki"'
+node scripts/security-e2e.mjs headers http://127.0.0.1:3320 "vercel function"
 # API CSRF default on the vercel function: cross-site POST 403, same-origin 200, `csrf = false` 200
 test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://evil.test' -H 'content-type: application/json' -d '{}' http://127.0.0.1:3320/api/echo)" = 403
 test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://127.0.0.1:3320' -H 'content-type: application/json' -d '{}' http://127.0.0.1:3320/api/echo)" = 200

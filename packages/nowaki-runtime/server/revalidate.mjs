@@ -264,8 +264,10 @@ export function encodeTags(list, file) {
 }
 
 // Read on each request to the endpoint's path only (.env is loaded after this module).
+// Surrounding whitespace is dropped (a trailing space in an env file would otherwise never match
+// the trimmed bearer token); a blank value leaves the endpoint off.
 function revalidateSecret() {
-  return globalThis.process?.env?.NOWAKI_REVALIDATE_SECRET || null;
+  return String(globalThis.process?.env?.NOWAKI_REVALIDATE_SECRET ?? "").trim() || null;
 }
 
 /// Whether `POST /__nowaki/revalidate` is on (NOWAKI_REVALIDATE_SECRET set).
@@ -290,10 +292,10 @@ export async function revalidateEndpoint(ctx) {
   if (Number(ctx.get("content-length")) > BODY_LIMIT) return reply(413, { error: "Payload Too Large" });
   let body;
   try {
-    const text = await ctx.bodyText();
-    if (text.length > BODY_LIMIT) return reply(413, { error: "Payload Too Large" });
-    body = JSON.parse(text);
-  } catch {
+    // Capped while streaming (a chunked body has no Content-Length to check above).
+    body = JSON.parse(await ctx.__bodyText(BODY_LIMIT));
+  } catch (err) {
+    if (err?.status === 413) return reply(413, { error: "Payload Too Large" });
     return reply(400, { error: "Bad Request: invalid JSON" });
   }
   const paths = body?.paths ?? [];

@@ -306,7 +306,9 @@ useSessions();
   failSet = true;
   lastError = null;
   const failed = await post("/count", { cookie: `sid=${fresh}` });
-  check("a failing session commit renders the 500 page", failed.status === 500 && /500: store down/.test(await text(failed)), failed.status);
+  // Production: the error reaches onError, the page gets no error text.
+  const failedBody = await text(failed);
+  check("a failing session commit renders the 500 page", failed.status === 500 && failedBody.includes('id="e500">500: <') && /store down/.test(lastError?.message ?? ""), failed.status);
   check("…and sends no session cookie", sessionCookie(failed, "sid") === undefined);
   failSet = false;
 }

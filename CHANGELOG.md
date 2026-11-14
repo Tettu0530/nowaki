@@ -28,9 +28,56 @@ milestone's worth of work; the codename is noted per entry.
   Methods that exist only on `URLSearchParams` (`toString()`, `sort()`) need rewriting. This is
   not a patch-level change.
 - **`NOWAKI_FORM_BODY_LIMIT` (default 10 MiB)** now applies to **`bodyText()` and `bodyJson()`** on
-  every runtime (not only multipart). JSON API routes and larger `NOWAKI_FN_BODY_LIMIT` / live-event
-  payloads must stay under the form limit when handlers read the body through these helpers, or read
-  the raw stream another way.
+  every runtime (not only multipart). JSON API routes must stay under the form limit when handlers
+  read the body through these helpers, or read the raw stream another way. Server functions
+  (`NOWAKI_FN_BODY_LIMIT`), live events and the revalidate endpoint use their own caps.
+- **Production `_500` pages get an empty `error.message`.** It used to carry the thrown error's
+  message, which can name files, queries or secrets. The error is still logged (and passed to
+  `onError`); dev keeps the stack. A `_500` page that branches on the message should read
+  `url` (also passed to the page) or log instead.
+- **The node, bun and deno adapters no longer trust `x-forwarded-host` / `x-forwarded-proto` when
+  `Host` is a loopback name.** Behind a reverse proxy on the same machine (nginx
+  `proxy_pass http://localhost:3000`) that forwards the public host in `x-forwarded-host`, set
+  `NOWAKI_TRUST_PROXY=1` (as SECURITY.md already advised), or forward `Host` itself; otherwise
+  `ctx.url` names the loopback host and same-origin POSTs from the public site are rejected.
+  `nowaki start` and `nowaki dev` are unaffected (their sidecars still trust the Rust hop).
+- **`nowaki dev --host` refuses public host names.** It answers IP addresses, `localhost`,
+  `*.localhost` and `*.local` names; to open the dev server through another name (a tunnel, a
+  `/etc/hosts` alias), list it in `NOWAKI_DEV_ALLOWED_HOSTS` (comma-separated, `*` for any).
+- **`/@fs/` refuses more credential files** (`.npmrc`, `.dev.vars`, `.netrc`, `.ssh/`, `.aws/`,
+  `id_rsa`, `*.p12`, …), and its workspace root is never the home directory or `/`: an app whose
+  nearest `.git` was a dotfiles repository in `$HOME` now gets only its own directory (add a
+  `pnpm-workspace.yaml` to share a monorepo's `node_modules`).
+
+### Security
+- **Server function, live-event and revalidate bodies are capped while streaming.** A chunked
+  request with no `Content-Length` was read up to the 10 MiB form limit before the endpoint's own
+  cap (1 MiB / 64 KiB / 64 KiB) was checked; now the read stops at that cap (413). The body is
+  read once, so a second `formData()` / `bodyText()` no longer hangs on Node.
+- **Production `_500` pages no longer receive the error message** (see Upgrade notes).
+- **Redirects after an early streaming shell only follow `http(s)` URLs.** A loader redirect to a
+  `javascript:` or `data:` URL (an app's `?next=` open redirect) was written into
+  `location.replace(...)` and ran; it now goes to the site root.
+- **`ctx.url` can't be pointed at another origin by the request.** On the node / bun / deno
+  adapters (and the sidecars) a request target like `//evil.test/reset` or
+  `http://evil.test/reset` replaced `ctx.url.origin`, and a client's `x-forwarded-host` was
+  trusted whenever `Host` was loopback (see Upgrade notes); links built from `ctx.url` (password
+  reset mails, canonical URLs without `site`) could name the attacker's host.
+- **`nowaki dev --host` blocks DNS rebinding** to the machine's addresses (see Upgrade notes),
+  and **`/@fs/` denies more credential files** and never widens to the home directory.
+- **Page actions don't run for `OPTIONS`** (a CORS preflight any site can send, which skips the
+  same-origin check).
+- Hardening: the server function allowlist ignores inherited names (`__proto__`, `toString`);
+  `ctx.cookies` has no prototype; a blank or whitespace-padded `NOWAKI_REVALIDATE_SECRET` is
+  trimmed (blank leaves the endpoint off).
+- **Checks**: `scripts/security-e2e.mjs` sweeps `nowaki start`, the node adapter, the Vercel
+  function and the Cloudflare Worker for internal `x-nowaki-*` response headers and for
+  `Set-Cookie` on shared-cacheable responses, and runs the session and revalidate checks
+  against the Worker. CI runs `cargo deny check` with advisories (allowed unmaintained crates
+  listed in `deny.toml` with reasons), audits the `create-nowaki` template's dependencies weekly,
+  adds Node 26 to the e2e matrix, and runs the browser tests (router, live, slots, gallery) and
+  the HMR / dev toolbar browser tests on Windows.
+
 ### Docs
 
 - Stability, support and governance policies for 1.0: `docs/STABILITY.md` (the frozen

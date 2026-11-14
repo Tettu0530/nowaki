@@ -21,7 +21,7 @@ import { configureSessions, sessionConfigOf } from "./session.mjs";
 import { liveProps, warnIfEphemeralLiveKey } from "./live-sign.mjs";
 import { indexPublic, lookupPublic } from "./public-files.mjs";
 import { resolveSite } from "./seo.mjs";
-import { requestOrigin } from "./origin.mjs";
+import { requestOrigin, requestUrl } from "./origin.mjs";
 import { compileRules } from "./rules.mjs";
 import { compileI18n } from "./i18n.mjs";
 import { LOCALE_VARY, frontHeaders, frontLocale, frontStep, withVaryHeaders } from "./front.mjs";
@@ -209,7 +209,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
   const moduleKey = (file) => path.relative(serverDir, file).split(path.sep).join("/");
   const serverFunctions = Object.keys(serverFnTable).length
     ? {
-        lookup: (id) => serverFnTable[id] ?? null,
+        lookup: (id) => (Object.hasOwn(serverFnTable, id) ? serverFnTable[id] : null),
         importModule: (m) => importOnce(pathToFileURL(path.join(serverDir, m)).href),
       }
     : null;
@@ -287,7 +287,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
     // Set before the response's own headers, which override any of these by name.
     for (const [k, v] of missingSecurityHeaders(() => false)) res.setHeader(k, v);
     try {
-      const url = new URL(req.url, requestOrigin((name) => req.headers[name]));
+      const url = requestUrl(req.url, requestOrigin((name) => req.headers[name]));
       let pathname = url.pathname;
       let routePath;
       let localeVary = false;
