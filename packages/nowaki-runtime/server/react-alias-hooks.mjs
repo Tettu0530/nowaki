@@ -15,7 +15,13 @@ const ALIAS = {
 };
 
 export async function resolve(specifier, context, nextResolve) {
-  const target = ALIAS[specifier];
+  return resolveSync(specifier, context, nextResolve);
+}
+
+/// The same hook for `module.registerHooks()` (in-thread, synchronous), which Node 26 uses
+/// because `module.register()` is deprecated there (DEP0205).
+export function resolveSync(specifier, context, nextResolve) {
+  const target = Object.hasOwn(ALIAS, specifier) ? ALIAS[specifier] : undefined;
   if (target) {
     // Resolve from the runtime package so SSR and the renderer share one preact instance.
     return nextResolve(target, { ...context, parentURL: import.meta.url });

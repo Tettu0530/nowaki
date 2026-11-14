@@ -2,7 +2,7 @@
 // clientDir / serverDir are passed in, so it's tied to neither cwd nor import.meta's location.
 
 import { createServer } from "node:http";
-import { register } from "node:module";
+import * as nodeModule from "node:module";
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -34,8 +34,15 @@ import { HEALTH_BODY, HEALTH_HEADERS, isHealth } from "./health.mjs";
 
 // Route modules are imported later, so libraries in them resolve React through this hook.
 // Bun and Deno don't implement Node's module.register; their SSR keeps the old behavior.
+// Node 26 deprecates module.register() (a warning on stderr at every start, which also breaks
+// NOWAKI_LOG=json output); it takes the in-thread module.registerHooks() instead.
 try {
-  register(new URL("./react-alias-hooks.mjs", import.meta.url));
+  if (Number(process.versions.node?.split(".")[0]) >= 26 && typeof nodeModule.registerHooks === "function") {
+    const { resolveSync } = await import("./react-alias-hooks.mjs");
+    nodeModule.registerHooks({ resolve: resolveSync });
+  } else {
+    nodeModule.register(new URL("./react-alias-hooks.mjs", import.meta.url));
+  }
 } catch {}
 
 const CONTENT_TYPE = {

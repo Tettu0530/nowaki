@@ -6,6 +6,8 @@
 // and expect HMR to reload the page.
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const BASE = process.env.BASE || "http://127.0.0.1:8243";
 const EXPECT = process.env.EXPECT || "post";
@@ -66,7 +68,7 @@ try {
     `--remote-debugging-port=${PORT}`,
     "--no-first-run",
     "--no-default-browser-check",
-    `--user-data-dir=/tmp/nwk-chrome-live-test-${PORT}`,
+    `--user-data-dir=${path.join(os.tmpdir(), `nwk-chrome-live-test-${PORT}`)}`,
     "about:blank",
   ]);
   let page;

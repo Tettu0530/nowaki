@@ -390,8 +390,16 @@ impl HmrGraph {
                 .get(&src)
                 .is_some_and(|(t, len, _)| (*t, *len) == stamp);
             if !fresh {
+                // Canonical form, as the lookup in `plan_changes`: on Windows the resolver and
+                // the file watcher can spell one file differently (`\\?\`, case, separators).
                 let resolved = nowaki_core::graph::module_imports(core, &src)
-                    .map(|imports| imports.into_iter().filter_map(|i| i.resolved).collect())
+                    .map(|imports| {
+                        imports
+                            .into_iter()
+                            .filter_map(|i| i.resolved)
+                            .map(|p| canonical_or_same(&p))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 self.imports
                     .insert(src.clone(), (stamp.0, stamp.1, resolved));
@@ -507,7 +515,7 @@ pub(crate) fn plan_changes(
             plan.page = true;
             continue;
         }
-        match importers.get(&p) {
+        match importers.get(&canonical_or_same(&p)) {
             Some(by) if !by.is_empty() => {
                 plan.modules.insert(p);
                 walk.extend(by.iter().cloned());
@@ -520,6 +528,11 @@ pub(crate) fn plan_changes(
         }
     }
     plan
+}
+
+/// `p` canonicalized (without the Windows `\\?\` prefix), or `p` when that fails (a removed file).
+fn canonical_or_same(p: &Path) -> PathBuf {
+    dunce::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
 /// Server files the framework imports itself, outside `routes/` (no app module imports them).

@@ -237,18 +237,21 @@ jobs:
           set -e
           # Stop the servers started below when the step ends (the Windows runner waits for them).
           trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
+          # router, slot and gallery tests drive Chrome over --remote-debugging-pipe (file
+          # descriptors 3 / 4), which Chrome on Windows doesn't read: they run on Linux only.
+          pipe() { if [ "$RUNNER_OS" != Windows ]; then "$@"; else echo "skipped on Windows (CDP pipe): $*"; fi; }
           ./target/debug/nowaki build examples/hello
           ./target/debug/nowaki start examples/hello --port 8241 &
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8241/ >/dev/null && break; sleep 1; done
           BASE=http://127.0.0.1:8241 node scripts/lazy-hydration-test.mjs
-          BASE=http://127.0.0.1:8241 node scripts/router-browser-test.mjs
+          BASE=http://127.0.0.1:8241 pipe node scripts/router-browser-test.mjs
           BASE=http://127.0.0.1:8241 EXPECT=ws node scripts/live-browser-test.mjs
           BASE=http://127.0.0.1:8241 EXPECT=post PAGE=/live-post node scripts/live-browser-test.mjs
           # Same pages under an enforced CSP: hydration, island CSS, and client navigation still work.
           NOWAKI_CSP=enforce ./target/debug/nowaki start examples/hello --port 8242 &
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8242/ >/dev/null && break; sleep 1; done
           BASE=http://127.0.0.1:8242 node scripts/lazy-hydration-test.mjs
-          BASE=http://127.0.0.1:8242 node scripts/router-browser-test.mjs
+          BASE=http://127.0.0.1:8242 pipe node scripts/router-browser-test.mjs
           BASE=http://127.0.0.1:8242 EXPECT=ws node scripts/live-browser-test.mjs
           # The node adapter has no WS endpoint: live islands run over POST /__nowaki/live-event.
           ./target/debug/nowaki build examples/hello --adapter node
@@ -256,7 +259,7 @@ jobs:
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8243/ >/dev/null && break; sleep 1; done
           BASE=http://127.0.0.1:8243 EXPECT=post node scripts/live-browser-test.mjs
           # Intercepting routes (a modal gallery): start, dev, an enforced CSP, basePath + locale.
-          node scripts/slot-browser-test.mjs start dev csp combo --port 8250
+          pipe node scripts/slot-browser-test.mjs start dev csp combo --port 8250
           # i18n.detect: a click on <Link locale> in an island sets the nowaki_locale cookie, and
           # the next / follows it (a generated app on 8251).
           PORT=8251 node scripts/locale-browser-test.mjs
@@ -264,7 +267,7 @@ jobs:
           # under /gallery in ja, the language switcher's cookie, sign-in and sign-out (8252); and
           # v0.19's: the post list's View Transition and its fallbacks, then in `nowaki dev` (8253)
           # an island edit that keeps its state and the toolbar's islands and JS budget.
-          node scripts/gallery-browser-test.mjs --port 8252
+          pipe node scripts/gallery-browser-test.mjs --port 8252
 
   jetstream-load:
     name: Jetstream load (1000 connections)
