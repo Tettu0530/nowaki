@@ -1,7 +1,7 @@
-//! Deploy adapters. Turn the build output `dist/` into a deployable artifact for each target.
+//! Deploy adapters: turn the build output `dist/` into a deployable artifact for each target.
 //!
-//! node/bun/deno output runs on `@nowaki-dev/runtime`'s app.mjs alone; no nowaki binary needed.
-//! `static` is delegated to prerender in main.
+//! node / bun / deno output runs on `@nowaki-dev/runtime`'s `server/app.mjs` alone, without the
+//! nowaki binary. `main.rs` hands `static` to prerender.
 
 use std::path::Path;
 
@@ -47,7 +47,7 @@ impl Adapter {
     }
 }
 
-/// Write the server-entry adapters' (node/bun/deno) artifact to `dist/server/`.
+/// Writes the server-entry adapters' (node/bun/deno) artifact to `dist/server/`.
 pub fn emit_server(root: &Path, dist: &Path, adapter: Adapter) -> Result<()> {
     let server_dir = dist.join("server");
     std::fs::create_dir_all(&server_dir)
@@ -107,7 +107,7 @@ await startServer({{
     Ok(())
 }
 
-/// Generate `dist/worker/`. The work is done by the runtime's `server/edge-build.mjs`.
+/// Generates `dist/worker/`. The work is done by the runtime's `server/edge-build.mjs`.
 pub fn emit_cloudflare(root: &Path, dist: &Path) -> Result<()> {
     let script = root.join("node_modules/@nowaki-dev/runtime/server/edge-build.mjs");
     if !script.exists() {
@@ -134,7 +134,7 @@ pub fn emit_cloudflare(root: &Path, dist: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Generate `.vercel/output/`. The work is done by the runtime's `server/vercel-build.mjs`.
+/// Generates `.vercel/output/`. The work is done by the runtime's `server/vercel-build.mjs`.
 pub fn emit_vercel(root: &Path, dist: &Path) -> Result<()> {
     let script = root.join("node_modules/@nowaki-dev/runtime/server/vercel-build.mjs");
     if !script.exists() {
@@ -174,7 +174,7 @@ fn sanitize_worker_name(name: &str) -> String {
     }
 }
 
-/// Read the actually installed version from the app's node_modules (for the `^x.y.z` pin).
+/// The version installed in the app's `node_modules` (for the `^x.y.z` range).
 fn installed_version(root: &Path, pkg: &str) -> Option<String> {
     read_json_field(
         &root.join("node_modules").join(pkg).join("package.json"),
@@ -182,7 +182,8 @@ fn installed_version(root: &Path, pkg: &str) -> Option<String> {
     )
 }
 
-/// Naively pick `"<field>": "..."` out of package.json (avoids adding serde).
+/// The first `"<field>": "..."` in a package.json, found by a plain text search (not a JSON
+/// parse, so a nested key of the same name can match first).
 fn read_json_field(pj: &Path, field: &str) -> Option<String> {
     let text = std::fs::read_to_string(pj).ok()?;
     let key = format!("\"{field}\"");

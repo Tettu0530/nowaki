@@ -1,12 +1,13 @@
-//! Content collections: `content/<name>/*.md` (and `*.json` / `*.yaml` data entries), compiled at
-//! build time into one JSON file per app that the runtime serves through `getCollection` /
-//! `getEntry`. Markdown is rendered here, in Rust; frontmatter (YAML between `---` lines, or TOML
+//! Content collections: `content/<name>/*.md` (also `.mdx` / `.mdoc`, and `*.json` / `*.yaml`
+//! data entries), compiled at build time into one JSON file per app that the runtime serves
+//! through `getCollection` / `getEntry`. Markdown is rendered here, in Rust; MDX and Markdoc
+//! entries point at a compiled module instead. Frontmatter (YAML between `---` lines, or TOML
 //! between `+++` lines) is parsed here and validated in Node against the schemas in
-//! `content/config.ts` (the runtime's content-check.mjs).
+//! `content/config.ts` (the runtime's `server/content-check.mjs`).
 //!
-//! Output (`<out>/index.json`):
-//! `{ "<name>": [ { "slug", "file", "data", "body"?, "html"?, "headings"? } ] }`, entries sorted
-//! by slug so builds are reproducible.
+//! Output (`<out>/index.json`): `{ "<name>": [ { "slug", "locale"?, "file", "data", "body"?,
+//! "html"?, "headings"?, "module"? } ] }`, entries sorted by slug (then locale) so builds are
+//! reproducible.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -18,6 +19,7 @@ use nowaki_core::remote_image::RemoteImages;
 use serde::Serialize;
 use serde_json::Value;
 
+/// A heading of a Markdown / MDX entry, with the id of its anchor in the HTML.
 #[derive(Debug, Serialize, PartialEq)]
 pub struct Heading {
     pub depth: u8,
@@ -25,6 +27,7 @@ pub struct Heading {
     pub id: String,
 }
 
+/// One entry of a collection, as written to `index.json`.
 #[derive(Debug, Serialize)]
 pub struct Entry {
     /// File path under the collection, without extension (`posts/hello` for `posts/hello.md`).
@@ -38,18 +41,21 @@ pub struct Entry {
     pub file: String,
     /// Frontmatter (Markdown) or the file's contents (data entries), not yet validated.
     pub data: Value,
+    /// Markdown / MDX / Markdoc entries: the source after the frontmatter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
+    /// Markdown entries: the rendered HTML.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub html: Option<String>,
+    /// Markdown and MDX entries: the headings, in document order.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub headings: Option<Vec<Heading>>,
-    /// MDX entries: the compiled module under dist/server (`content/docs/guide.js`), which the
-    /// runtime imports for `entry.render()`.
+    /// MDX and Markdoc entries: the compiled module under dist/server (`content/docs/guide.js`),
+    /// which the runtime imports for `entry.render()`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub module: Option<String>,
-    /// Local images the HTML references through placeholders (`IMAGE_REF`), filled in by
-    /// `collect` once every image is built.
+    /// Images the HTML references through placeholders (`image_ref_placeholder`), filled in by
+    /// `fill_images` once every image is built.
     #[serde(skip)]
     pub image_refs: Vec<ImageRef>,
 }
@@ -87,8 +93,8 @@ pub enum Images {
 }
 
 /// Reads every collection under `content/`. Each sub-directory is a collection; files directly in
-/// `content/` (the config) are not entries. With i18n `locales`, a collection's first-level directory named after one is the entries'
-/// `locale`, and not part of their slugs.
+/// `content/` (the config) are not entries. With i18n `locales`, a collection's first-level
+/// directory named after one is the entries' `locale`, and not part of their slugs.
 pub fn collect(
     root: &Path,
     images: &Images,
@@ -387,7 +393,7 @@ fn read_entry(
     Ok(Some(entry))
 }
 
-/// A Markdown / MDX entry's frontmatter, by its fence.
+/// A Markdown / MDX / Markdoc entry's frontmatter, by its fence.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Frontmatter<'a> {
     /// `---` … `---`
@@ -684,8 +690,8 @@ fn percent_decode(s: &str) -> String {
 }
 
 /// Renders Markdown to HTML and lists its headings (with the same ids as the anchors comrak adds).
-/// Images stay `<img>`; entries go through `render_markdown_with`, which turns local ones into
-/// responsive `<picture>`s.
+/// Images stay `<img>`; entries go through `render_markdown_with`, which turns local and allowed
+/// remote ones into responsive `<picture>`s.
 #[cfg(test)]
 fn render_markdown(md: &str) -> (String, Vec<Heading>) {
     render_markdown_with(md, &mut |_, _, _| Ok(None)).expect("no image callback errors")

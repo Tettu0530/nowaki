@@ -14,7 +14,9 @@
 //!   (`font-display: swap` by default).
 //! - A fallback face per family (`"<Family> Fallback"`, a local Arial / Times New Roman / Courier
 //!   New) gets `size-adjust` and ascent / descent / line-gap overrides computed from the font's
-//!   own metrics, so text doesn't shift when the font arrives.
+//!   own metrics, so text doesn't shift when the font arrives. The metrics come from a local
+//!   `.ttf` / `.otf` or from Google's TrueType file; a family with only woff / woff2 files gets
+//!   no fallback face.
 //! - `--font-<family>` (or `variable`) holds the stack: `"Inter", "Inter Fallback", sans-serif`.
 //! - Pages get the stylesheet and `<link rel="preload">` for the latin, upright faces of the
 //!   families with `preload` (the default). Google's CJK families come as ~120 numbered
@@ -59,7 +61,8 @@ struct Family {
     latin: bool,
 }
 
-/// `nowaki build` / `prerender`: faces and stylesheet into `dist/client`, `dist/server/fonts.json`.
+/// `nowaki build` / `prerender`: writes the faces and the stylesheet into `dist/client` and
+/// `dist/server/fonts.json`, or removes a stale `fonts.json` when the config has no fonts.
 pub fn build_dist(root: &Path, dist: &Path, config: &Value) -> Result<()> {
     let json_out = dist.join("server/fonts.json");
     let _ = std::fs::remove_file(&json_out);
@@ -87,7 +90,7 @@ pub fn build_dev(root: &Path, config: &Value) {
     }
 }
 
-/// `{ css, preload: [href], variables: { name: stack } }`, or None without `fonts`.
+/// `{ css, preload: [{ href, type }], variables: { name: stack } }`, or `None` without `fonts`.
 fn build(root: &Path, config: &Value, out_dir: &Path, prefix: &str) -> Result<Option<Value>> {
     let Some(specs) = config.get("fonts").and_then(Value::as_array) else {
         return Ok(None);

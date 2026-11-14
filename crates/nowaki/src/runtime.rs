@@ -68,6 +68,7 @@ pub struct Version {
     pub pre: Vec<Ident>,
 }
 
+/// A prerelease identifier: numeric or alphanumeric.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ident {
     Num(u64),
@@ -75,6 +76,7 @@ pub enum Ident {
 }
 
 impl Version {
+    /// Parses `1.2.3`, `v1.2.3`, `1.2.3-rc.1` or `1.2.3+build`; `None` for anything else.
     pub fn parse(v: &str) -> Option<Version> {
         let v = v.trim();
         let v = v.strip_prefix('v').unwrap_or(v);
@@ -130,6 +132,7 @@ impl Version {
         }
     }
 
+    /// Whether the version has prerelease identifiers (`1.0.0-rc.1`).
     pub fn is_prerelease(&self) -> bool {
         !self.pre.is_empty()
     }

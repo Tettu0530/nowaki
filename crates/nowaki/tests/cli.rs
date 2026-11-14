@@ -1,6 +1,7 @@
-//! CLI integration test. Runs `nowaki build examples/hello` with the built binary and
-//! checks output invariants (manifest, scope hoisting, zero JS for live islands).
-//! Skipped when examples/hello has no node_modules.
+//! CLI integration tests. They run the built binary: `nowaki build` on `examples/hello` and on
+//! small apps next to it (output invariants, budgets, hints, content, routing config, Markdoc),
+//! `nowaki prerender`, the runtime version check, `PORT` / `--host` handling and `nowaki upgrade`.
+//! Tests that build need `examples/hello/node_modules` and are skipped without it.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -59,7 +60,7 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
         !names.iter().any(|n| n.starts_with("LiveCounter.")),
         "live island must not ship a client chunk"
     );
-    // Scope hoisting: the cyclic lib (cycle-a) doesn't become its own chunk (concatenated into Cycle).
+    // Scope hoisting: the cyclic lib (cycle-a) is concatenated into Cycle, not its own chunk.
     assert!(
         !names.iter().any(|n| n.starts_with("cycle-a.")),
         "cyclic lib should be hoisted, not a separate chunk"
@@ -95,7 +96,8 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
         }
     }
 
-    // The island chunk imports a proxy in a separate chunk (todos.*.js), not the server function body.
+    // The island chunk imports a proxy in a separate chunk (todos.*.js), not the server function
+    // body.
     let todos_proxy = names
         .iter()
         .find(|n| n.starts_with("todos.") && n.ends_with(".js"))
@@ -105,13 +107,14 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
         proxy.contains("__nowakiCall(") && proxy.contains("/__nowaki/fn"),
         "proxy chunk should be the fetch shim, not the impl"
     );
-    // The proxy's id matches the id in functions.json (computed independently on client and server).
+    // The proxy's ids match functions.json (computed independently for client and server).
     for id in ["675f80133a1699f8", "6c90d7dc921a9a3f", "781de5a7f5ba2469"] {
         assert!(functions.contains(id), "functions.json missing id {id}");
         assert!(proxy.contains(id), "proxy missing id {id}");
     }
 
-    // `<form action={fn}>`: the proxy's toString returns "__nowaki_action:<id>" for form interception to pick up.
+    // `<form action={fn}>`: the proxy's toString returns "__nowaki_action:<id>" for form
+    // interception to pick up.
     assert!(
         functions.contains("\"export\": \"addTodoForm\""),
         "addTodoForm (form-action server fn) should be in functions.json"
@@ -132,8 +135,8 @@ fn build_produces_expected_manifest_and_zero_js_live_island() {
         "islands runtime should ship the <form action> interceptor"
     );
 
-    // Virtual modules (plugin resolveId/load):
-    // on the client the generated source is concatenated into the island chunk; no bare `virtual:` specifier remains.
+    // Virtual modules (plugin resolveId / load): on the client the generated source is
+    // concatenated into the island chunk, and no bare `virtual:` specifier remains.
     let vbadge = names
         .iter()
         .find(|n| n.starts_with("VirtualBadge.") && n.ends_with(".js"))
@@ -660,7 +663,7 @@ fn prerender_multi_page_app(extra_routes: usize) -> tempfile::TempDir {
     app
 }
 
-/// Walk `dir` and collect relative path → file contents (directories only as path keys for files).
+/// Every file under `dir`, keyed by its path relative to `dir`, with its contents.
 fn dir_snapshot(dir: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
     let mut out = std::collections::BTreeMap::new();
     fn walk(
@@ -690,7 +693,8 @@ fn dir_snapshot(dir: &std::path::Path) -> std::collections::BTreeMap<String, Vec
     out
 }
 
-/// With `NOWAKI_PRERENDER_POOL_THRESHOLD=1`, several workers split the same pages as a single worker.
+/// With `NOWAKI_PRERENDER_POOL_THRESHOLD=1`, a pool of workers writes the same files as a single
+/// worker.
 #[test]
 fn prerender_worker_pool_matches_single_worker_output() {
     let root = example_root();
@@ -699,7 +703,8 @@ fn prerender_worker_pool_matches_single_worker_output() {
         return;
     }
     let bin = env!("CARGO_BIN_EXE_nowaki");
-    // index, about, and p0..p2 → pool (threshold 1) with NOWAKI_PRERENDER_WORKERS=2 uses 2 workers.
+    // index, about and p0..p2: with threshold 1 and NOWAKI_PRERENDER_WORKERS=2 the pool uses 2
+    // workers.
     let app = prerender_multi_page_app(3);
     let single_out = app.path().join("dist/static-single");
     let pool_out = app.path().join("dist/static-pool");
@@ -774,7 +779,7 @@ fn every_server_command_refuses_a_runtime_older_than_the_cli_supports() {
         r#"{"name":"@nowaki-dev/runtime","version":"0.16.3"}"#,
     )
     .unwrap();
-    // Ports in case a command got past the check (it must not).
+    // The ports matter only if a command got past the check (it must not).
     for args in [
         &["dev", "--port", "5420"][..],
         &["build"],

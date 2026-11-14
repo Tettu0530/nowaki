@@ -1,7 +1,7 @@
 //! Plugin host integration. nowaki-core runs no JS, so hooks are delegated to a Node host over HTTP.
 //!
-//! Transport is plain HTTP/1.1 over a hand-rolled TcpStream. reqwest::blocking isn't used because it
-//! conflicts with the dev tokio runtime.
+//! The transport is plain HTTP/1.1 over a hand-rolled `TcpStream`. `reqwest::blocking` isn't used
+//! because it conflicts with the dev tokio runtime.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -12,7 +12,8 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use nowaki_core::PluginBridge;
 
-/// PluginBridge that delegates `transform` / `.tsrx` / `resolveId` / `load` to the Node plugin host.
+/// A [`PluginBridge`] that delegates `transform` / `.tsrx` / `resolveId` / `load` to the Node plugin
+/// host.
 struct HttpPluginBridge {
     port: u16,
     has_resolve_id: bool,
@@ -87,7 +88,8 @@ impl Drop for PluginHost {
     }
 }
 
-/// None if the config, hooks, or runtime is missing (no host is started, zero overhead).
+/// Starts the host and waits for it; `None` when there is nothing for it to do (no config or
+/// `@tsrx/preact`, no runtime, or no hooks).
 #[cfg(test)]
 pub fn start(root: &Path) -> Result<Option<PluginHost>> {
     Ok(spawn(root, false)?.finish()?.0)
@@ -102,7 +104,7 @@ pub struct Spawned {
 
 /// Starts the plugin host without waiting for it, so Node starts and imports nowaki.config while
 /// the CLI does other work. With `with_config` the same process also normalizes the build-time
-/// config (see crate::site; [`Spawned::finish`] returns it).
+/// config (see `crate::site`; [`Spawned::finish`] returns it).
 pub fn spawn(root: &Path, with_config: bool) -> Result<Spawned> {
     let has_config = ["nowaki.config.mjs", "nowaki.config.js"]
         .iter()
@@ -151,7 +153,8 @@ impl Spawned {
     /// (`{ site?, fonts?, routing?, images? }`; `{}` when the config names none of them, an `Err`
     /// for an invalid config, already explained on stderr).
     pub fn finish(self) -> Result<(Option<PluginHost>, Result<serde_json::Value>)> {
-        // No host: no nowaki.config, or no runtime (so no site-config.mjs either).
+        // No host: neither nowaki.config nor @tsrx/preact, or no runtime (so no site-config.mjs
+        // either).
         let Some(child) = self.child else {
             return Ok((None, Ok(serde_json::Value::Object(Default::default()))));
         };
@@ -208,7 +211,8 @@ fn finish(
         ))
     };
 
-    // No transform hook and no tsrx means no bridge is needed (kill the host).
+    // No hook at all (transform, .tsrx, resolveId, load): no bridge is needed, so the host is
+    // killed.
     let cap = |k: &str| caps.get(k).and_then(|b| b.as_bool()).unwrap_or(false);
     let has_transform = cap("hasTransform");
     let has_tsrx = cap("hasTsrx");
@@ -239,8 +243,6 @@ fn finish(
     Ok((Some(PluginHost { child, bridge }), config))
 }
 
-// Connection: close, so reading the body to EOF is enough.
-
 fn http_post(port: u16, path: &str, body: &str) -> Result<(u16, String)> {
     request(port, "POST", path, Some(body))
 }
@@ -249,7 +251,8 @@ fn http_get(port: u16, path: &str) -> Result<(u16, String)> {
     request(port, "GET", path, None)
 }
 
-/// Returns the status code and the body.
+/// Returns the status code and the body. The request sends `Connection: close`, so reading the
+/// body to EOF is enough.
 fn request(port: u16, method: &str, path: &str, body: Option<&str>) -> Result<(u16, String)> {
     let mut stream = TcpStream::connect(("127.0.0.1", port))?;
     let body = body.unwrap_or("");
@@ -292,8 +295,8 @@ mod tests {
 
     #[test]
     fn a_plugin_that_logs_keeps_the_host_alive() {
-        // console.log and a raw stdout write in the hook: both used to land on a closed pipe
-        // (EPIPE), which killed the host after the first transform.
+        // console.log and a raw stdout write in the hook: both reach the host's stdout, which
+        // must stay open (EPIPE would kill the host after the first transform).
         let app = app_with_config(
             r#"export default { plugins: [{ name: "loud", transform(code, id) {
                 console.log("[loud] transform", id);

@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use crate::runtime::Version;
 
-/// Top-level `nowaki.config` keys (`server/site-config.mjs` and `server/plugin-host.mjs`).
+/// Top-level `nowaki.config` keys; the same list as `CONFIG_KEYS` in `server/site-config.mjs`.
 pub const CONFIG_KEYS: &[&str] = &[
     "site",
     "fonts",
@@ -37,6 +37,7 @@ const CODE_EXTS: &[&str] = &["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts
 const SKIP_DIRS: &[&str] = &["node_modules", "dist", "public", "target"];
 const MAX_FILE: u64 = 1024 * 1024;
 
+/// How sure a finding is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
     /// Fails or behaves differently after the upgrade.
@@ -45,13 +46,17 @@ pub enum Level {
     Check,
 }
 
+/// One thing to change or review before the upgrade.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
     pub level: Level,
     /// Relative to the app root, `/`-separated; `None` for the environment.
     pub file: Option<String>,
+    /// 1-based line in `file`; `None` for the environment.
     pub line: Option<usize>,
+    /// What changes in the new version.
     pub what: String,
+    /// How to change the app.
     pub fix: String,
 }
 
@@ -66,6 +71,7 @@ impl Finding {
         }
     }
 
+    /// `file:line`, the file alone, or `environment`.
     pub fn location(&self) -> String {
         match (&self.file, self.line) {
             (Some(f), Some(l)) => format!("{f}:{l}"),
@@ -85,14 +91,17 @@ pub struct Facts {
     pub rustc: Option<String>,
     /// `PORT` in this shell.
     pub port_env: Option<String>,
-    /// The `nowaki` / `@nowaki-dev/runtime` versions in node_modules.
+    /// The `nowaki` version in node_modules.
     pub cli_installed: Option<String>,
+    /// The `@nowaki-dev/runtime` version in node_modules.
     pub runtime_installed: Option<String>,
     /// The app's current version: the installed runtime, else its package.json range.
     pub current: Option<Version>,
 }
 
 impl Facts {
+    /// Reads the facts for the app at `root`; `runtime_range` is the app's package.json range
+    /// for `@nowaki-dev/runtime`, used when the runtime isn't installed.
     pub fn read(root: &Path, runtime_range: Option<&str>) -> Facts {
         let runtime_installed = crate::runtime::installed_version(root, "@nowaki-dev/runtime")
             .ok()
@@ -281,7 +290,8 @@ fn scan_source(rel: &str, text: &str, facts: &Facts, out: &mut Vec<Finding>) {
                 ));
             }
         }
-        // API routes reject cross-site writes since 0.19.3; an app from before that may rely on them.
+        // API routes reject cross-site writes since 0.19.3; an app from before that may rely on
+        // them.
         let before_csrf = facts
             .current
             .as_ref()

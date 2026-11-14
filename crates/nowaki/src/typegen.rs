@@ -1,5 +1,7 @@
-//! Typed route generation. Writes `.nowaki/types.d.ts` (augmenting `NowakiRoutes`) from `routes/`
-//! to make `route()` / `Link` type-safe. Also runs automatically on dev startup, routes changes, and build.
+//! Typed route generation: writes `.nowaki/types.d.ts` (`NowakiRoutes` from `routes/` for
+//! `route()` / `<Link>`, plus content collections and env.ts types). Besides `nowaki typegen`, every
+//! `nowaki build` (the static adapter too) runs it, and `nowaki dev` at startup and when routes or
+//! content change.
 
 use std::path::Path;
 
@@ -81,7 +83,8 @@ fn render_env(root: &Path) -> String {
     s
 }
 
-/// Skip the write if unchanged (avoids needlessly triggering the dev file watcher).
+/// Writes `.nowaki/types.d.ts` (nothing without `routes/`). An unchanged file is not rewritten, so
+/// the dev file watcher doesn't fire for it.
 pub fn write(root: &Path) -> Result<()> {
     let routes_dir = root.join("routes");
     if !routes_dir.is_dir() {
@@ -100,6 +103,7 @@ pub fn write(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// `nowaki typegen`: [`write()`], then a one-line summary; fails without `routes/`.
 pub fn run(root: std::path::PathBuf) -> Result<()> {
     let routes_dir = root.join("routes");
     if !routes_dir.is_dir() {

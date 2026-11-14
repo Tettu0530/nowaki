@@ -1,5 +1,5 @@
-//! Rust `page_url_patterns` / `slot_route_patterns` vs `scanRoutes` (router.mjs) on `examples/hello`.
-//! Lives in the CLI crate so `nowaki-core` stays JS-free in its test suite.
+//! Checks that Rust `page_url_patterns` / `slot_route_patterns` match `scanRoutes` (router.mjs) on
+//! `examples/hello`. Lives in the CLI crate so `nowaki-core` stays JS-free in its test suite.
 
 use std::path::PathBuf;
 use std::process::Command;
