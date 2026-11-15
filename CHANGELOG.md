@@ -12,6 +12,8 @@ milestone's worth of work; the codename is noted per entry.
 ## [Unreleased]
 
 ### Fixed
+- `nowaki upgrade` runs npm, pnpm and yarn on Windows: they are `.cmd` shims there, which the CLI
+  didn't find by their bare name, so every install failed with "failed to start npm".
 - **`nowaki upgrade --to <version>` no longer refuses an app from before 0.19.3.** The CLI and
   the runtime were released at different versions then, and the readiness report listed the
   mismatch (say `nowaki 0.18.2` and `@nowaki-dev/runtime 0.17.2`) as "must change", so

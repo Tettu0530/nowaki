@@ -329,15 +329,31 @@ fn run_pm(root: &Path, pm: &Pm, dev: bool, spec: &str) -> Result<()> {
     args.push(spec.to_string());
 
     println!("{} {} {}", ui::cyan("$"), prog, args.join(" "));
-    let status = Command::new(prog)
-        .args(&args)
-        .current_dir(root)
-        .status()
+    let status = pm_status(prog, &args, root)
         .with_context(|| format!("failed to start {prog} (is it installed?)"))?;
     if !status.success() {
         bail!("{prog} {spec} failed");
     }
     Ok(())
+}
+
+/// Runs a package manager. On Windows npm, pnpm and yarn are usually `.cmd` shims, which
+/// `Command` doesn't find by their bare name (it only appends `.exe`), so a missing program is
+/// tried again as `<prog>.cmd`.
+fn pm_status(
+    prog: &str,
+    args: &[String],
+    root: &Path,
+) -> std::io::Result<std::process::ExitStatus> {
+    match Command::new(prog).args(args).current_dir(root).status() {
+        Err(err) if cfg!(windows) && err.kind() == std::io::ErrorKind::NotFound => {
+            Command::new(format!("{prog}.cmd"))
+                .args(args)
+                .current_dir(root)
+                .status()
+        }
+        other => other,
+    }
 }
 
 #[cfg(test)]

@@ -29,6 +29,9 @@ rm -rf "$TMP"
 # target, the CLI staying in devDependencies. A fake npm on PATH records the installs (no network).
 TMP=$(mktemp -d); mkdir -p "$TMP/bin" "$TMP/app/node_modules/nowaki" "$TMP/app/node_modules/@nowaki-dev/runtime"
 printf '#!/bin/sh\necho "$*" >> "%s/npm.log"\n' "$TMP" > "$TMP/bin/npm"; chmod +x "$TMP/bin/npm"
+# Windows: the CLI runs npm as `npm.cmd` (the shim npm installs there), so add one that calls
+# the same script.
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) printf '@echo off\r\nbash "%%~dp0npm" %%*\r\n' > "$TMP/bin/npm.cmd" ;; esac
 echo '{"dependencies":{"@nowaki-dev/runtime":"^0.17.2"},"devDependencies":{"nowaki":"^0.18.2"}}' > "$TMP/app/package.json"
 echo '{"name":"nowaki","version":"0.18.2"}' > "$TMP/app/node_modules/nowaki/package.json"
 echo '{"name":"@nowaki-dev/runtime","version":"0.17.2"}' > "$TMP/app/node_modules/@nowaki-dev/runtime/package.json"
