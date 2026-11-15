@@ -40,9 +40,13 @@ export function route<P extends RoutePath>(
 export interface LinkProps {
   /** A route without params (type-checked), or an href built with `route()`. */
   href: StaticRoutePath | Href;
+  /** The `<a>`'s class. */
   class?: string;
+  /** The same as `class`. */
   className?: string;
+  /** The `<a>`'s `target`. */
   target?: string;
+  /** The `<a>`'s `rel`. */
   rel?: string;
   /** Turns off client navigation for this link: a click is a full page load. */
   "data-no-router"?: boolean;
@@ -65,6 +69,7 @@ export interface LinkProps {
    * `"forward"` (`"back"` for a back navigation) for `:active-view-transition-type()`.
    */
   viewTransition?: boolean;
+  /** The link's content. */
   children?: unknown;
   [key: string]: unknown;
 }

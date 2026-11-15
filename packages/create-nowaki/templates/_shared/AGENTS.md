@@ -13,7 +13,13 @@ npm run build      # nowaki build — production build (dist/client + dist/serve
 npm run start      # nowaki start — serve the production build
 npm run prerender  # nowaki prerender — static export
 npx nowaki upgrade # update nowaki (CLI) + @nowaki-dev/runtime to latest
+npx nowaki upgrade --check  # list what this app must change first (file:line); writes nothing
 ```
+
+Keep `nowaki` and `@nowaki-dev/runtime` at the same version: the CLI refuses a runtime of
+another version line. `nowaki dev` / `nowaki start` listen on `--port`, else `PORT`, else
+3000; `--host` alone listens on all interfaces, `--host <addr>` on one (put the app directory
+before the flag: `nowaki dev . --host`).
 
 While `npm run dev` runs, the dev server also serves a read-only MCP endpoint
 (loopback only) at `http://127.0.0.1:3000/__nowaki/mcp`, with the tools `routes`,
@@ -26,8 +32,9 @@ After an edit or a failing request, check `recent_errors` first.
 ## Project layout
 
 ```
-routes/      file-based routes (pages + API). _layout.tsx, _middleware.ts,
-             _404.tsx, _500.tsx, [slug].tsx, api/*.ts
+routes/      file-based routes (pages + API). _layout.tsx, _middleware.ts
+             (default export), _404.tsx, _500.tsx (the server error page;
+             `_error.tsx` is refused), [slug].tsx, api/*.ts
              (name)/ = route group: no URL segment, its own _layout /
              _middleware for the files inside it (group middleware skips 404s)
              @name/ = parallel route slot: the parent dir's _layout gets
@@ -42,7 +49,8 @@ lib/         shared server code
 actions/     "use server" RPC modules (optional)
 content/     content collections (optional), declared in content/config.ts
 public/      files served as-is at their own path (favicon.ico, robots.txt)
-nowaki.config.mjs   site, fonts, images, routing rules, i18n, plugins (optional)
+nowaki.config.mjs   site, fonts, images, routing rules, i18n, plugins (optional;
+             the default export, typed with defineConfig)
 env.ts       typed env schema (optional)
 session.ts   ctx.session options (optional)
 ```
@@ -76,10 +84,16 @@ session.ts   ctx.session options (optional)
    `params.path` is the array `["a","b","c"]`. Add `export const revalidate = 60`
    (seconds) to a route for ISR: the HTML is cached and regenerated in the
    background when stale (don't put per-user data on an ISR page).
+   `ctx.formData()` returns `FormData` for urlencoded and `multipart/form-data`
+   bodies (file inputs arrive as `File`; treat `File.name` as untrusted), capped
+   at 10 MiB (`NOWAKI_FORM_BODY_LIMIT`, also for `bodyText()` / `bodyJson()`).
+   `ctx.routePath` is the path without basePath and locale prefix.
 5. **API routes** are `routes/api/*.ts` with per-method exports (uppercase: `GET`,
    `POST`, ...); return a value (JSON-encoded) or a `Response`. `PageModule`,
-   `LayoutModule` and `ApiModule` from `@nowaki-dev/runtime` type every route
-   export (`export const revalidate: PageModule["revalidate"] = 60`):
+   `LayoutModule`, `ApiModule`, `MiddlewareModule` and `IslandModule` from
+   `@nowaki-dev/runtime` type every route export
+   (`export const revalidate: PageModule["revalidate"] = 60`). A lowercase method
+   export (`get`) is an error. Cross-site writes are rejected (see Security):
    ```ts
    export const GET = (ctx) => ctx.json({ ok: true });
    export const POST = async (ctx) => ctx.json({ got: await ctx.bodyJson() });
@@ -235,7 +249,7 @@ session.ts   ctx.session options (optional)
     `/__nowaki/health` answers `{"status":"ok"}` for load balancers.
 19. **Dev toolbar and HMR** — `nowaki dev` keeps island state across edits (Fast
     Refresh; adding or removing a hook remounts), updates CSS without a reload, and
-    re-renders the page in place on route / layout edits. Its toolbar (bottom right)
+    re-renders the page in place on route / layout edits. Its toolbar (bottom left)
     shows the route, layouts and timings, the page's islands, first-load JS against
     `budget`, ISR settings, live connections and errors. Turn it off with
     `nowaki dev --no-toolbar` or `NOWAKI_TOOLBAR=0`.
@@ -246,6 +260,7 @@ session.ts   ctx.session options (optional)
   Use `nowaki start` or a deploy adapter output in production.
 - **Secrets stay server-side.** Only `PUBLIC_*` (and `MODE`) reach the browser. Copy
   `.env.example` to `.env` and keep database URLs, API keys, and tokens unprefixed.
+  `.env.local` overrides `.env`, and the real environment overrides both.
   To validate them, declare them in `env.ts` at the app root with `defineEnv({ server,
   public })` from `@nowaki-dev/runtime/env` and a Standard Schema per variable; the
   build fails on a missing or invalid one. Read server values with

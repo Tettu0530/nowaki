@@ -15,7 +15,7 @@ A "structural answer to the slowness of Next.js", built on three pillars:
 
 ## Where we are
 
-**alpha (every package 0.19.x except `@nowaki-dev/markdoc`, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands: WebSocket on `nowaki dev` / `nowaki start`, per-event HTTP POST on every deploy adapter), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Content sites (content collections, Markdown / MDX / Markdoc, `<Image>`, SEO metadata and sitemaps, fonts) arrived in 0.17. 0.18 added routing for larger apps: route groups, parallel and intercepting routes, `redirects` / `rewrites` / `headers`, `basePath`, `trailingSlash`, i18n routing, sessions, and a typed `env.ts`. 0.19 added production and dev experience: on-demand revalidation with CDN purge (Vercel, Cloudflare), View Transitions, observability (Server-Timing, JSON logs, OpenTelemetry), HMR that keeps island state and updates pages in place, a dev toolbar, and API routes that reject cross-site writes by default. Production use is not yet recommended (the API is still stabilizing).
+**0.20.0, pre-1.0 with the public API frozen (every shared package at 0.20.0, `@nowaki-dev/markdoc` at 0.2.0, published on crates.io / npm)**. `npm create nowaki` scaffolds an app, and `nowaki dev / build / start / prerender` work end to end. Routing, loader/action, middleware, API routes, Islands, Jetstream (server-reactive islands: WebSocket on `nowaki dev` / `nowaki start`, per-event HTTP POST on every deploy adapter), server functions, 6 deploy adapters (node / static / bun / deno / cloudflare / vercel), and plugins/virtual modules are all in place. Content sites (content collections, Markdown / MDX / Markdoc, `<Image>`, SEO metadata and sitemaps, fonts) arrived in 0.17. 0.18 added routing for larger apps: route groups, parallel and intercepting routes, `redirects` / `rewrites` / `headers`, `basePath`, `trailingSlash`, i18n routing, sessions, and a typed `env.ts`. 0.19 added production and dev experience: on-demand revalidation with CDN purge (Vercel, Cloudflare), View Transitions, observability (Server-Timing, JSON logs, OpenTelemetry), HMR that keeps island state and updates pages in place, a dev toolbar, and API routes that reject cross-site writes by default. 0.20.0 (published 2026-11-14) made the last breaking cleanups and froze the public API listed in [docs/STABILITY.md](./docs/STABILITY.md) and `api/`; `nowaki upgrade --check` lists what an app has to change ([docs/upgrade-to-1.0.md](./docs/upgrade-to-1.0.md)). Next come `1.0.0-rc.N` release candidates on the npm `next` tag, the 1.0 benchmark run, then 1.0.0.
 
 ## Milestones
 
@@ -161,26 +161,34 @@ Control over what is cached, smooth navigation, visibility into a running app, a
 
   It is injected only in dev and can be turned off.
 
-**Deferred / candidates for later** (from earlier milestones; not scheduled):
-
-- Polish the Jetstream docs and demos (v0.16): nowaki.dev work, outside this repo
-- Jetstream live push on the deploy adapters (`publish()` is a no-op there, and `server/live-hub.mjs` is not wired into a server): a candidate for v0.20
-- Jetstream resume token (v0.15)
-- Jetstream rooms shared across instances, through a pluggable store (v0.15)
-- A lossy WebP encoder, after comparing the candidates (v0.17)
-- `.mdoc` files as page routes (v0.18; `.mdoc` works in content collections today)
-- Caching the evaluated nowaki.config, so a build whose config has not changed (and has no plugins) skips the Node start
-- Cloudflare [Workers Caching](https://developers.cloudflare.com/workers/cache/) as an alternative to the Worker's Cache API ISR cache (v0.19): it honors Vary and stale-while-revalidate, collapses concurrent requests, uses tiered cache and purges globally, but serves hits without running middleware or nowaki.config rules and bills static asset requests; measure before switching
-
 ### v1.0 "Nowaki": Stable release
 **Exit criteria**: Stability guarantees for the public API, complete documentation, established governance.
 
-**Status**: in progress. The policies are written: [docs/STABILITY.md](docs/STABILITY.md) (everything public is frozen at 1.0, with no experimental tier; what counts as breaking; deprecation; platforms), [SUPPORT.md](SUPPORT.md) (the latest 1.y gets fixes; 1.x gets security fixes for 6 months after 2.0), [GOVERNANCE.md](GOVERNANCE.md), [MAINTAINERS.md](MAINTAINERS.md) and [RFCs](rfcs/README.md). Next: 0.20.0, the last breaking release and the API freeze, then `1.0.0-rc.N` on npm `next` for at least 14 days with no API snapshot change before 1.0.0.
+**Status**: in progress. 0.20.0, the API freeze, was published on 2026-11-14 (the last release that may break the public surface). The policies are written: [docs/STABILITY.md](docs/STABILITY.md) (everything public is frozen at 1.0, with no experimental tier; what counts as breaking; deprecation; platforms), [SUPPORT.md](SUPPORT.md) (the latest 1.y gets fixes; 1.x gets security fixes for 6 months after 2.0), [GOVERNANCE.md](GOVERNANCE.md), [MAINTAINERS.md](MAINTAINERS.md) and [RFCs](rfcs/README.md). Next: `1.0.0-rc.N` on npm `next` for at least 14 days with no API snapshot change, the 1.0 benchmark run on the last release candidate (the success metrics above, reported in [BENCHMARKS.md](./BENCHMARKS.md)), then 1.0.0.
 
-- [ ] Stability guarantees for the public API + a breaking-change policy
-- [ ] Complete documentation and migration guides
-- [ ] Governance (maintainer structure, RFC process, release process)
-- [ ] LTS / support policy
+- [x] Stability guarantees for the public API + a breaking-change policy ([docs/STABILITY.md](docs/STABILITY.md), API snapshots in `api/` checked in CI)
+- [x] The last breaking cleanups, released as 0.20.0 (the API freeze), with `nowaki upgrade --check`
+- [ ] Complete documentation and migration guides (written: [upgrade to 1.0](docs/upgrade-to-1.0.md), [from Next.js](docs/migrate-from-nextjs.md), [from Astro](docs/migrate-from-astro.md); reference, guides and per-adapter deploy pages in progress)
+- [x] Governance (maintainer structure, RFC process, release process: [GOVERNANCE.md](GOVERNANCE.md), [rfcs/](rfcs/README.md), [docs/RELEASING.md](docs/RELEASING.md))
+- [x] LTS / support policy ([SUPPORT.md](SUPPORT.md))
+- [ ] Release candidates (`1.0.0-rc.N`) and the stability window
+- [ ] The 1.0 benchmark run (dev startup, HMR, client JS, adoption)
+- [ ] 1.0.0
+
+## 1.x candidates
+
+Not scheduled. Each one is additive (it adds a feature or an option and changes nothing an app
+relies on), so it can land in a 1.x minor, unless marked otherwise.
+
+- Polish the Jetstream docs and demos (v0.16): nowaki.dev work, outside this repo
+- Jetstream live push on the deploy adapters (`publish()` is a no-op there, and `server/live-hub.mjs` is not wired into a server)
+- Jetstream resume token (v0.15)
+- Jetstream rooms shared across instances, through a pluggable store (v0.15)
+- A lossy WebP encoder, after comparing the candidates (v0.17); additive only as an opt-in output format
+- `.mdoc` files as page routes (v0.18; `.mdoc` works in content collections today)
+- Caching the evaluated nowaki.config, so a build whose config has not changed (and has no plugins) skips the Node start (internal)
+- Cloudflare [Workers Caching](https://developers.cloudflare.com/workers/cache/) as an alternative to the Worker's Cache API ISR cache (v0.19): it honors Vary and stale-while-revalidate, collapses concurrent requests, uses tiered cache and purges globally, but serves hits without running middleware or nowaki.config rules and bills static asset requests; measure before switching (as an opt-in, since hits would skip middleware)
+- From the Next.js migration guide: a way for a loader to render `_404` (like `notFound()`), a public client navigation function for islands (like `router.push()`), and a `title` template in layout `meta`
 
 ## Ongoing work
 

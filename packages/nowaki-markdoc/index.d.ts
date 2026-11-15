@@ -7,10 +7,15 @@ import type { NowakiPlugin } from "@nowaki-dev/runtime/config";
  * `components` module (capitalized). See https://markdoc.dev/docs/tags.
  */
 export type Schema = {
+  /** The HTML element (lowercase) or `components` export (capitalized) to render. */
   render?: string;
+  /** The attributes the tag accepts, by name (Markdoc attribute schemas). */
   attributes?: Record<string, unknown>;
+  /** The node types allowed as children. */
   children?: string[];
+  /** The tag has no closing tag (`{% name /%}`). */
   selfClosing?: boolean;
+  /** The tag renders inline, inside a paragraph. */
   inline?: boolean;
   [key: string]: unknown;
 };

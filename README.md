@@ -26,28 +26,35 @@ Nowaki (野分, an archaic Japanese word for a typhoon) is a full-stack framewor
 | Page JS bloats | With Islands, there is zero client JS outside the islands you mark explicitly |
 | Builds are slow | oxc minifier plus a content-hash cache |
 
-> [!WARNING]
-> **Status: alpha.** The design is settling, but the API may change without notice. Production use is not yet recommended.
+> [!NOTE]
+> **Status: 0.20, pre-1.0.** The public API is frozen as of 0.20.0: what is covered, and what counts as a breaking change, is in [docs/STABILITY.md](./docs/STABILITY.md). Release candidates (`1.0.0-rc.N` on the npm `next` tag) come next, then 1.0.0, which adds no breaking change. Upgrading from an older 0.x: [docs/upgrade-to-1.0.md](./docs/upgrade-to-1.0.md).
 
 ## Features
 
 - An on-demand transform pipeline and bundler in Rust, built on oxc (parser / transformer / codegen / resolver).
 - Islands Architecture: zero client JS by default; only components under `islands/` are hydrated, with `client:*` directives for lazy hydration.
 - Jetstream islands: server-reactive islands that ship no component JS. State stays on the server, and patches arrive over WebSocket (`nowaki dev` / `nowaki start`) or per event over POST on the deploy adapters. Live queries (`publish`) and shared rooms are included.
-- File-based routing with nested layouts, middleware, Remix-style `loader` / `action`, API routes, route groups, and parallel and intercepting routes.
+- File-based routing with nested layouts, middleware, Remix-style `loader` / `action`, API routes, route groups, and parallel and intercepting routes. Actions and API routes read urlencoded and multipart bodies as `FormData`.
 - Server functions (`"use server"`) with Standard Schema validation.
+- Types for every route export (`PageModule`, `ApiModule`, ...), typed links from the route tree, and a typed `nowaki.config` (`defineConfig`) that rejects unknown keys.
 - Content sites: content collections, Markdown / MDX (and Markdoc via `@nowaki-dev/markdoc`), `<Image>` with AVIF and `srcset`, typed `meta`, a generated sitemap, self-hosted fonts, and per-route JS budgets.
 - Routing config in `nowaki.config.mjs`: `redirects`, `rewrites`, `headers`, `basePath`, `trailingSlash`, and i18n routing.
 - Sessions (`ctx.session`, an encrypted cookie) and a typed env schema (`env.ts`).
-- Secure defaults: origin checks, security headers, and an optional CSP nonce.
+- Secure defaults: cross-site write checks on actions and API routes, security headers, and an optional CSP nonce on the tags Nowaki emits (`nonce()` for your own inline tags).
 - Six deploy targets: node, static, bun, deno, cloudflare, vercel. ISR is served from Rust on `nowaki start`, and from the Cache API on the Cloudflare worker.
 - On-demand revalidation: `revalidatePath()` / `revalidateTag()` with route-level `tags` purge the `nowaki start` cache, Vercel's CDN, and the Cloudflare cache before the action's response.
 - View Transitions in the client router, opt-in per link (`<Link viewTransition>`) or route, with `transitionName()` and a fallback without the API or under reduced motion.
 - Observability: `Server-Timing`, JSON logs (`NOWAKI_LOG=json`), OpenTelemetry traces over OTLP that join the Rust front and the renderer, and `/__nowaki/health`.
 - Dev experience: HMR that keeps island state (Preact Fast Refresh), CSS without a reload, route and layout edits re-rendered in place, a dev toolbar (route, islands, JS budget, ISR, live connections, errors), and a dev MCP endpoint for coding agents.
 - Use the npm ecosystem as is. SSR is delegated to a Rust-managed Node sidecar (Preact).
+- Upgrades: `nowaki upgrade` updates the CLI and runtime together, and `nowaki upgrade --check` lists what an app has to change, with `file:line`.
 
-See <https://nowaki.dev/docs> for the full guide.
+## Documentation
+
+- [docs/README.md](./docs/README.md): the documentation index, with the reference, [guides](./docs/guides/), [per-adapter deployment](./docs/deploy/) and [troubleshooting](./docs/troubleshooting.md).
+- Migration: [upgrading to 1.0](./docs/upgrade-to-1.0.md), [from Next.js](./docs/migrate-from-nextjs.md), [from Astro](./docs/migrate-from-astro.md).
+- Policies: [STABILITY.md](./docs/STABILITY.md) (what is frozen, versioning, platforms), [SUPPORT.md](./SUPPORT.md) (which releases get fixes, where to ask), [SECURITY.md](./SECURITY.md).
+- The site: <https://nowaki.dev/docs>.
 
 ## Quick start
 
@@ -136,7 +143,7 @@ See [DESIGN.md](./DESIGN.md) for design details and architecture diagrams, and [
 
 ## Contributing
 
-Contributions are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md). While Nowaki is in alpha, it's best to discuss your approach in an issue before writing code.
+Contributions are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md); [GOVERNANCE.md](./GOVERNANCE.md) says how decisions are made. Discuss your approach in an issue before writing code, and changes to the public API go through an [RFC](./rfcs/README.md).
 
 ## License
 

@@ -41,6 +41,7 @@ export interface SessionOptions {
 
 /** The options with the defaults filled in, as `defineSession` returns them. */
 export interface SessionConfig extends Readonly<Required<Omit<SessionOptions, "store">>> {
+  /** The `store` option, or null for the cookie store. */
   readonly store: SessionStore | null;
 }
 
