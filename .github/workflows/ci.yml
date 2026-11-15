@@ -58,6 +58,9 @@ jobs:
       - run: node scripts/api-surface.mjs --check
         env:
           GH_TOKEN: ${{ github.token }}
+      # docs/reference/ is generated from the .d.ts files and api/ (CONTRIBUTING.md > API reference).
+      - if: ${{ !cancelled() }}
+        run: node scripts/gen-reference.mjs --check
 
   test:
     name: Rust test (${{ matrix.os }})

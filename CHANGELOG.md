@@ -11,6 +11,20 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Docs
+- **API reference in `docs/reference/`, generated from the source.** `scripts/gen-reference.mjs`
+  writes one page per `@nowaki-dev/runtime` subpath and `@nowaki-dev/markdoc` entry point
+  (every declaration with its signature and JSDoc, cross-linked), plus route and island module
+  exports, file conventions, `nowaki.config` keys, CLI commands and flags, environment
+  variables, endpoints, headers and cookies, and client events and attributes, from the
+  `.d.ts` files, the `api/` snapshots and `scripts/gen-reference-data.mjs`. CI fails when the
+  pages are out of date (`node scripts/gen-reference.mjs --check`).
+- JSDoc added for the type members that had none (`CookieOptions`, `ResponseInit`,
+  `LayoutProps`, `ServerFnError`, `LinkProps`, config rules, `GoogleFont`, `SessionConfig`,
+  the markdoc `Schema`). `LayoutModule` now says what a layout's `meta`, `title`, `head` and
+  `lang` exports do: only a `meta` object is read (a `meta` function is not called), and
+  `title` / `lang` are not read on a layout (use `meta.title` / `htmlAttrs.lang`).
+
 ## [0.20.0] — 2026-11-14 · API freeze (the last breaking release before 1.0)
 
 Packages: `nowaki` / `nowaki-core`, `@nowaki-dev/runtime`, `create-nowaki` /
