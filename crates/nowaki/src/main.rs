@@ -200,6 +200,19 @@ fn main() -> anyhow::Result<()> {
                     unvalidated.join(", ")
                 );
             }
+            // Without the secret each instance of these adapters would sign live state with its
+            // own random key, so they refuse live events then (live-event.mjs). A build can't see
+            // the deployment's secrets, so it only reminds.
+            let edge = match adapter {
+                Adapter::Cloudflare => Some("cloudflare"),
+                Adapter::Vercel => Some("vercel"),
+                _ => None,
+            };
+            if let Some(name) = edge.filter(|_| !client.live_islands.is_empty()) {
+                eprintln!(
+                    "[nowaki] warning: the app has live islands: set NOWAKI_LIVE_SECRET (a long random value) in the {name} deployment, or its live events are refused (503)."
+                );
+            }
             match adapter {
                 Adapter::Cloudflare => adapter::emit_cloudflare(&root, &dist)?,
                 Adapter::Vercel => adapter::emit_vercel(&root, &dist)?,

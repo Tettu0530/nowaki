@@ -866,6 +866,7 @@ function renderClient(root) {
   const noLink = (n) => code(n);
   const events = stable.filter((n) => n.startsWith("nowaki:"));
   const attrs = stable.filter((n) => n.startsWith("data-"));
+  const metas = stable.filter((n) => n.startsWith("meta["));
   const out = [
     NOTICE("`api/client.txt`, `packages/create-nowaki/templates/_shared/nowaki-jsx.d.ts` and `scripts/gen-reference-data.mjs`"),
     "",
@@ -886,6 +887,12 @@ function renderClient(root) {
     "## Attributes",
     "",
     table(["Attribute", "Description"], attrs.map((n) => [code(n), CLIENT[n]])),
+    "",
+    "## Meta tags",
+    "",
+    "Read from the page's `<head>` (put them in `head` or `meta().head`).",
+    "",
+    table(["Tag", "Description"], metas.map((n) => [code(n), CLIENT[n]])),
     "",
     "Slot elements: a layout's `slots.<name>` renders inside `<nowaki-slot name=\"<name>\">` (`display: contents`); the `name` attribute is stable, for styling. See [LayoutProps](runtime.md#layoutprops).",
     "",

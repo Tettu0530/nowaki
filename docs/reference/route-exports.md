@@ -36,7 +36,7 @@ Declared in [runtime.md](runtime.md#pagemodule).
 
 ## LayoutModule
 
-The exports a `_layout` module may have (a layout's `meta` applies to every page under it).
+The exports a `_layout` module may have.
 
 Declared in [runtime.md](runtime.md#layoutmodule).
 
@@ -44,10 +44,10 @@ Declared in [runtime.md](runtime.md#layoutmodule).
 | --- | --- | --- |
 | `default` (required) | `(props: LayoutProps<D>) => unknown` | The layout component. See [`LayoutProps`](runtime.md#layoutprops). |
 | `loader` | `Loader<D>` | A server-only loader. See [`Loader`](runtime.md#loader). |
-| `meta` | `Meta \| MetaFn<D>` | Defaults for every page under the layout: page values win, and `openGraph` and `twitter` merge one level deep. See [`Meta`](runtime.md#meta), [`MetaFn`](runtime.md#metafn). |
-| `title` | `string` | Not read on a layout: set `meta.title`, the title of pages that have none of their own. |
+| `meta` | `Meta \| MetaFn<D>` | Defaults for every page under the layout: the page's (and nearer layouts') values win, and `openGraph` and `twitter` merge one level deep. See [`Meta`](runtime.md#meta), [`MetaFn`](runtime.md#metafn). |
+| `title` | `string` | The `<title>` of pages under the layout that set none. |
 | `head` | `string` | Raw HTML added to the `<head>` of every page under the layout (root layout first, before the page's own `head`). |
-| `lang` | `string` | Not read on a layout: set `htmlAttrs.lang`, used by pages without their own `lang` (with i18n, the request's locale comes first). |
+| `lang` | `string` | `<html lang>` of pages under the layout that set none. |
 | `htmlAttrs` | `DocumentAttrs` | Attributes for `<html>` / `<body>` (`export const htmlAttrs` / `bodyAttrs` in a route or layout, or from `meta()`). See [`DocumentAttrs`](runtime.md#documentattrs). |
 | `bodyAttrs` | `DocumentAttrs` | Attributes for `<html>` / `<body>` (`export const htmlAttrs` / `bodyAttrs` in a route or layout, or from `meta()`). See [`DocumentAttrs`](runtime.md#documentattrs). |
 | `scripts` | `PageScripts` | `export const scripts` on a page route or layout: modules shipped to the browser as `<script type="module">`, bundled like an island but with no component and no hydration. See [`PageScripts`](runtime.md#pagescripts). |

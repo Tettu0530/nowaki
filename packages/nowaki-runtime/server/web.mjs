@@ -170,7 +170,8 @@ export function createFetchHandler({
     serverFunctions,
     live:
       live && liveByName.size
-        ? { lookup: (name) => liveByName.get(name) ?? null, render: live.render }
+        ? // Isolates come and go, each with its own random key: refuse events without the secret.
+          { lookup: (name) => liveByName.get(name) ?? null, render: live.render, requireSecret: true }
         : null,
     renderDocument: (args) => prodDocument(manifest, args, { assetBase }),
     renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta, { assetBase }),
@@ -229,6 +230,12 @@ export function createFetchHandler({
       return withSecurityHeaders(new Response(request.method === "HEAD" ? null : HEALTH_BODY, { headers: HEALTH_HEADERS }));
     }
     if (typeof bindings?.NOWAKI_SESSION_SECRET === "string") sessionSecret = bindings.NOWAKI_SESSION_SECRET;
+    // The live key (live-sign.mjs) and the refusal without it (live-event.mjs) read process.env:
+    // a NOWAKI_LIVE_SECRET binding counts too, also without populate_process_env.
+    const liveSecret = bindings?.NOWAKI_LIVE_SECRET;
+    if (typeof liveSecret === "string" && liveSecret && globalThis.process?.env && !globalThis.process.env.NOWAKI_LIVE_SECRET) {
+      globalThis.process.env.NOWAKI_LIVE_SECRET = liveSecret;
+    }
     if (cdn) latestBindings = bindings;
     if (envPending) {
       envReady ??= initServerEnv(envModule, envSource(bindings), envPublic).catch((err) => {

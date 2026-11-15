@@ -558,8 +558,8 @@ export const meta = ({ data }) => ({
 });
 ```
 
-A layout's `meta` object applies to every page under it; page values win, and `openGraph` /
-`twitter` merge one level deep. `canonical: true` links the page's own URL on `site`, `robots`
+A layout's `meta` (object or function) and its `title` / `lang` / `head` apply to every page
+under it; page values win, and `openGraph` / `twitter` merge one level deep. `canonical: true` links the page's own URL on `site`, `robots`
 and `jsonLd` are supported, and with `site` set, `sitemap.xml` and `robots.txt` are generated
 (`export const sitemap = false` leaves a page out). There is no `title.template`: set the full
 title per page, or build it in a helper.

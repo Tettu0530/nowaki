@@ -351,7 +351,14 @@ NOWAKI_LIVE_SECRET is not set: live islands are signed with a random per-process
 ```
 
 **Fix:** set `NOWAKI_LIVE_SECRET` to the same long random value on every instance. On the
-adapters (several function instances or Worker isolates), live events fail with 403 without it.
+node / bun / deno adapters with several instances, live events fail with 403 without it.
+
+### `live events are refused (503): NOWAKI_LIVE_SECRET is not set`
+
+The cloudflare and vercel adapters answer every `POST /__nowaki/live-event` with 503 while
+`NOWAKI_LIVE_SECRET` is unset (logged once per instance); pages and the first HTML of live
+islands still render. **Fix:** set it as a Worker secret (`npx wrangler secret put
+NOWAKI_LIVE_SECRET`) or a Vercel environment variable.
 
 ### `[nowaki live] event on ... not applied: <reason>`
 

@@ -33,8 +33,16 @@ export type Href = string & { readonly __nowaki: "href" };
  */
 export function route<P extends RoutePath>(
   pattern: P,
-  ...args: {} extends ParamsOf<P> ? [] : [params: ParamsOf<P>]
+  ...args: RouteArgs<P>
 ): Href;
+
+// Before `nowaki typegen` (no NowakiRoutes) any pattern takes optional params; after it, a route
+// with params requires them and one without takes none.
+type RouteArgs<P extends string> = [Keys] extends [never]
+  ? [params?: Record<string, string | string[]>]
+  : {} extends ParamsOf<P>
+    ? []
+    : [params: ParamsOf<P>];
 
 /** Props of {@link Link}. Other props pass through to the `<a>`. */
 export interface LinkProps {

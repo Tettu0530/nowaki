@@ -71,7 +71,7 @@ Used by: [`route`](#route), [`LinkProps`](#linkprops), [`href`](#href-1), [`loca
 Function. `import { route } from "@nowaki-dev/runtime/navigation";`
 
 ```ts
-export function route<P extends RoutePath>(pattern: P, ...args: {} extends ParamsOf<P> ? [] : [params: ParamsOf<P>]): Href;
+export function route<P extends RoutePath>(pattern: P, ...args: RouteArgs<P>): Href;
 ```
 
 Builds the route path of `pattern` with its params filled in. Each param is percent-encoded; a
@@ -84,7 +84,7 @@ route("/blog/[slug]", { slug: "hi" }) // required params
 route("/files/[...path]", { path: ["a", "b"] }) // catch-all takes an array
 ```
 
-Uses: [`RoutePath`](#routepath), [`ParamsOf`](#paramsof), [`Href`](#href).
+Uses: [`RoutePath`](#routepath), [`RouteArgs`](#routeargs), [`Href`](#href).
 
 ### LinkProps
 
@@ -295,7 +295,7 @@ type Keys = keyof NowakiRoutes & string;
 
 Uses: [`NowakiRoutes`](#nowakiroutes).
 
-Used by: [`RoutePath`](#routepath), [`StaticRoutePath`](#staticroutepath).
+Used by: [`RoutePath`](#routepath), [`StaticRoutePath`](#staticroutepath), [`RouteArgs`](#routeargs).
 
 ### ParamsOf
 
@@ -307,7 +307,7 @@ type ParamsOf<P extends string> = P extends keyof NowakiRoutes ? NowakiRoutes[P]
 
 Uses: [`NowakiRoutes`](#nowakiroutes).
 
-Used by: [`StaticRoutePath`](#staticroutepath), [`route`](#route).
+Used by: [`StaticRoutePath`](#staticroutepath), [`RouteArgs`](#routeargs).
 
 ### StaticRoutePath
 
@@ -324,3 +324,17 @@ Routes without params, usable as a `<Link href>` as written.
 Uses: [`Keys`](#keys), [`ParamsOf`](#paramsof).
 
 Used by: [`LinkProps`](#linkprops), [`href`](#href-1), [`localePath`](#localepath).
+
+### RouteArgs
+
+Type, not exported: listed because exported declarations use it.
+
+```ts
+type RouteArgs<P extends string> = [Keys] extends [never] ? [
+    params?: Record<string, string | string[]>
+] : {} extends ParamsOf<P> ? [] : [params: ParamsOf<P>];
+```
+
+Uses: [`Keys`](#keys), [`ParamsOf`](#paramsof).
+
+Used by: [`route`](#route).

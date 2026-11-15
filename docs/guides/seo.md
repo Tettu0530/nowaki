@@ -59,8 +59,15 @@ plain strings instead; `meta.title` wins over `title`.
 
 ### Defaults from layouts
 
-A layout's `meta` object applies to every page under it. The page's values win; `openGraph`
-and `twitter` merge one level deep.
+A layout's `meta` (an object, or a function of `{ data, params, url }` with the layout's own
+loader data) applies to every page under it, and so do its `title`, `lang` and `head` exports.
+Layouts combine root to leaf, then the page:
+
+- `title` and `lang`: the page's, else the nearest layout's that sets one. In each module
+  `meta.title` / `meta.lang` win over the `title` / `lang` exports. Any `lang` wins over the
+  i18n locale, which wins over `htmlAttrs.lang`.
+- `head`: each layout's (root first), then the page's.
+- The other fields: later values win; `openGraph` and `twitter` merge one level deep.
 
 ```tsx
 // routes/_layout.tsx

@@ -48,6 +48,7 @@ cargo test --workspace                               # unit + integration + CLI
 # JS / app-level
 pnpm install                                         # workspace deps (frozen in CI)
 node scripts/router-test.mjs                         # router snapshot/unit test
+node scripts/types-test.mjs                          # tsc over the runtime .d.ts (scripts/types-fixture)
 node benchmarks/check-regression.mjs                 # client-JS size gate
 
 # Run the example app end to end

@@ -202,7 +202,8 @@ import { Link, route } from "@nowaki-dev/runtime/navigation";
 ```
 
 An unknown path, a missing param or a wrong key is a type error. Until `.nowaki/types.d.ts`
-exists, `route()` with params doesn't type-check either: run `nowaki typegen` before `tsc` in CI. `<Link>` also adds the
+exists, any path and params are accepted (unchecked): run `nowaki typegen` before `tsc` in CI
+to check them. `<Link>` also adds the
 `basePath` and the current locale; for URLs it doesn't build (a form `action`, `fetch`), use
 `href()` from the same module. See [Routing config](./routing-config.md#links-under-a-base-path).
 

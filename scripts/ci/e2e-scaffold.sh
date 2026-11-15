@@ -20,9 +20,9 @@ TARBALL=$(ls "$WORK"/nowaki-dev-runtime-*.tgz)
 
 # Type-check the scaffolded app with skipLibCheck off, using the shipped tsconfig.json and
 # type files plus a probe that imports a `?image` asset, a plain asset, a CSS module, reads
-# import.meta.env, passes attributes to <Image>, and uses island `client:*` props; an unknown
-# <Image> attribute must be a type error. tsc comes from $TSC, else from `tsc` on
-# PATH; in CI (CI=true) a pinned typescript is installed into the app. Skipped otherwise.
+# import.meta.env, passes attributes to <Image>, uses island `client:*` props and a server
+# function as a form action; an unknown <Image> attribute must be a type error. tsc comes from
+# $TSC, else from `tsc` on PATH; in CI (CI=true) a pinned typescript is installed into the app. Skipped otherwise.
 typecheck() {
   local app=$1 tsc=${TSC:-}
   if [ -z "$tsc" ] && command -v tsc >/dev/null 2>&1; then tsc=tsc; fi
@@ -56,6 +56,10 @@ export function TypesProbe() {
 }
 
 export const island = <TypesProbe client:visible client:media="(min-width: 768px)" />;
+
+// A server function as a form action (the tsconfig's jsxImportSource types it).
+declare function saveForm(form: { text?: string }): Promise<string[]>;
+export const formAction = <form action={saveForm}><input name="text" /></form>;
 
 // @ts-expect-error: <Image> keeps the <img> attribute types, so an unknown one is rejected.
 export const bad = <Image src={hero} alt="" notAnAttribute="x" />;

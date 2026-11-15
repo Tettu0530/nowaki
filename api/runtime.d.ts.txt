@@ -81,7 +81,7 @@ RouteProps.data: D;
 RouteProps.actionData?: unknown;
 RouteProps.params: RouteParams;
 RouteProps.url: URL;
-export type PageProps<L extends Loader<any> = Loader<unknown>> = RouteProps<Awaited<ReturnType<L>>>;
+export type PageProps<L extends Loader<any> = Loader<unknown>> = RouteProps<Exclude<Awaited<ReturnType<L>>, NowakiResult | Response>>;
 export interface LayoutProps<D = unknown> {}
 LayoutProps.data: D;
 LayoutProps.params: RouteParams;
@@ -92,14 +92,15 @@ export type LoadingComponent = () => unknown;
 export interface ErrorPageProps {}
 ErrorPageProps.error: { message: string; };
 ErrorPageProps.reset: () => void;
-export interface Live<S = any> {}
-Live.state: (props?: any) => S;
-Live.on: Record<string, (state: S, payload?: any) => S | Promise<S>>;
-Live.authorize?: (event: { name: string; handler: string; state: S; payload?: any; }) => boolean | Promise<boolean>;
-Live.subscribe?: string[] | ((state: S) => string[]);
-Live.load?: (state: S, info: { topic: string; }) => S | Promise<S>;
-Live.room?: (props: any) => string;
-Live.shared?: (props?: any) => S;
+export type Live<S = any> = LiveOptions<S> & ({ state: (props?: any) => S; } | { room: (props: any) => string; } | { shared: (props?: any) => S; });
+export interface LiveOptions<S = any> {}
+LiveOptions.state?: (props?: any) => S;
+LiveOptions.on: Record<string, (state: S, payload?: any) => S | Promise<S>>;
+LiveOptions.authorize?: (event: { name: string; handler: string; state: S; payload?: any; }) => boolean | Promise<boolean>;
+LiveOptions.subscribe?: string[] | ((state: S) => string[]);
+LiveOptions.load?: (state: S, info: { topic: string; }) => S | Promise<S>;
+LiveOptions.room?: (props: any) => string;
+LiveOptions.shared?: (props?: any) => S;
 export function publish(topic: string): void;
 export type RouteTags = string[] | ((info: { params: RouteParams; data: any; }) => string[]);
 export function revalidatePath(path: string): void;
@@ -285,6 +286,24 @@ ImageSource.sources: { type: string; srcset: string; }[];
 export type ImageProps = Omit<JSX.IntrinsicElements["img"], "src" | "srcset" | "alt" | "sizes" | "width" | "height" | "loading" | "decoding"> & { src: ImageSource | string; alt: string; sizes?: string; width?: number; height?: number; loading?: "lazy" | "eager"; decoding?: "async" | "sync" | "auto"; };
 export function Image(props: ImageProps): JSX.Element;
 
+[stable ./jsx-dev-runtime]
+# packages/nowaki-runtime/jsx-runtime.d.ts
+export { Fragment, jsx, jsxDEV, jsxs } from "preact/jsx-runtime";
+export type ServerFormAction = (input: any) => unknown;
+type PreactForm = PreactJSX.IntrinsicElements["form"];
+export interface FormAttributes extends Omit<PreactForm, "action"> {}
+FormAttributes.action?: PreactForm["action"] | ServerFormAction;
+export namespace JSX { type LibraryManagedAttributes<Component, Props> = PreactJSX.LibraryManagedAttributes<Component, Props>; interface IntrinsicAttributes extends PreactJSX.IntrinsicAttributes {} type ElementType<P = any> = { [K in keyof IntrinsicElements]: P extends IntrinsicElements[K] ? K : never; }[keyof IntrinsicElements] | ComponentType<P>; interface Element extends PreactJSX.Element {} type ElementClass = PreactJSX.ElementClass; interface ElementAttributesProperty extends PreactJSX.ElementAttributesProperty {} interface ElementChildrenAttribute extends PreactJSX.ElementChildrenAttribute {} interface IntrinsicElements extends Omit<PreactJSX.IntrinsicElements, "form"> { form: FormAttributes; } }
+
+[stable ./jsx-runtime]
+# packages/nowaki-runtime/jsx-runtime.d.ts
+export { Fragment, jsx, jsxDEV, jsxs } from "preact/jsx-runtime";
+export type ServerFormAction = (input: any) => unknown;
+type PreactForm = PreactJSX.IntrinsicElements["form"];
+export interface FormAttributes extends Omit<PreactForm, "action"> {}
+FormAttributes.action?: PreactForm["action"] | ServerFormAction;
+export namespace JSX { type LibraryManagedAttributes<Component, Props> = PreactJSX.LibraryManagedAttributes<Component, Props>; interface IntrinsicAttributes extends PreactJSX.IntrinsicAttributes {} type ElementType<P = any> = { [K in keyof IntrinsicElements]: P extends IntrinsicElements[K] ? K : never; }[keyof IntrinsicElements] | ComponentType<P>; interface Element extends PreactJSX.Element {} type ElementClass = PreactJSX.ElementClass; interface ElementAttributesProperty extends PreactJSX.ElementAttributesProperty {} interface ElementChildrenAttribute extends PreactJSX.ElementChildrenAttribute {} interface IntrinsicElements extends Omit<PreactJSX.IntrinsicElements, "form"> { form: FormAttributes; } }
+
 [stable ./navigation]
 # packages/nowaki-runtime/navigation.d.ts
 export interface NowakiRoutes {}
@@ -293,7 +312,8 @@ export type RoutePath = [Keys] extends [never] ? string : Keys;
 type ParamsOf<P extends string> = P extends keyof NowakiRoutes ? NowakiRoutes[P] : Record<string, string | string[]>;
 type StaticRoutePath = [Keys] extends [never] ? string : { [P in Keys]: {} extends ParamsOf<P> ? P : never; }[Keys];
 export type Href = string & { readonly __nowaki: "href"; };
-export function route<P extends RoutePath>(pattern: P, ...args: {} extends ParamsOf<P> ? [] : [params: ParamsOf<P>]): Href;
+export function route<P extends RoutePath>(pattern: P, ...args: RouteArgs<P>): Href;
+type RouteArgs<P extends string> = [Keys] extends [never] ? [params?: Record<string, string | string[]>] : {} extends ParamsOf<P> ? [] : [params: ParamsOf<P>];
 export interface LinkProps {}
 LinkProps.href: StaticRoutePath | Href;
 LinkProps.class?: string;
