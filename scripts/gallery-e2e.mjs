@@ -188,7 +188,11 @@ async function vercelClient(port) {
   };
   // The function reads its variables from process.env; VERCEL=1 is what Vercel sets.
   Object.assign(process.env, { GALLERY_ADMIN_PASSWORD: PASSWORD, NOWAKI_SESSION_SECRET: SECRET, VERCEL: "1" });
-  const func = path.join(dir, ".vercel/output/functions/index.func/index.mjs");
+  // The function from a copy outside the app, as Vercel runs it: no node_modules above it, so
+  // zod (env.ts) and the fake @vercel/functions have to be inside it.
+  const funcDir = path.join(tmp, "vercel-function");
+  cpSync(path.join(dir, ".vercel/output/functions/index.func"), funcDir, { recursive: true });
+  const func = path.join(funcDir, "index.mjs");
   const { default: handle } = await import(pathToFileURL(func).href);
   const server = http.createServer(handle);
   await new Promise((r) => server.listen(port, "127.0.0.1", r));
