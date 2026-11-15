@@ -20,7 +20,7 @@ older minors. [SUPPORT.md](./SUPPORT.md#supported-versions) has the full policy.
 
 | Release line | Security fixes |
 | --- | --- |
-| Latest 0.x release (0.19.3 today), until 1.0.0 | Yes |
+| The latest 0.20.x release, until 1.0.0 | Yes |
 | Older 0.x releases | No |
 | From 1.0.0: the latest 1.y minor | Yes |
 | Older 1.y minors | No: upgrade to the latest 1.y |
