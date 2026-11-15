@@ -24,3 +24,24 @@ mv "$TMP/routes/_error.tsx" "$TMP/routes/_500.tsx"
 ./target/debug/nowaki upgrade "$TMP" --to 1.0.0 --check | grep -q 'nothing must change'
 ! test -e "$TMP/node_modules" || exit 1
 rm -rf "$TMP"
+# An app from before 0.19.3 (CLI and runtime released at different versions): the version
+# mismatch is "fixed by this upgrade", not a blocker, and both packages are installed at the
+# target, the CLI staying in devDependencies. A fake npm on PATH records the installs (no network).
+TMP=$(mktemp -d); mkdir -p "$TMP/bin" "$TMP/app/node_modules/nowaki" "$TMP/app/node_modules/@nowaki-dev/runtime"
+printf '#!/bin/sh\necho "$*" >> "%s/npm.log"\n' "$TMP" > "$TMP/bin/npm"; chmod +x "$TMP/bin/npm"
+echo '{"dependencies":{"@nowaki-dev/runtime":"^0.17.2"},"devDependencies":{"nowaki":"^0.18.2"}}' > "$TMP/app/package.json"
+echo '{"name":"nowaki","version":"0.18.2"}' > "$TMP/app/node_modules/nowaki/package.json"
+echo '{"name":"@nowaki-dev/runtime","version":"0.17.2"}' > "$TMP/app/node_modules/@nowaki-dev/runtime/package.json"
+NOWAKI=$PWD/target/debug/nowaki
+PATH="$TMP/bin:$PATH" "$NOWAKI" upgrade "$TMP/app" --to 0.20.0 --check > "$TMP/check.txt"
+grep -q 'Fixed by `nowaki upgrade --to 0.20.0`' "$TMP/check.txt"
+grep -q 'nothing must change' "$TMP/check.txt"
+! test -e "$TMP/npm.log" || exit 1
+for TO in 0.20.0 1.0.0-rc.1 next; do
+  rm -f "$TMP/npm.log"
+  PATH="$TMP/bin:$PATH" "$NOWAKI" upgrade "$TMP/app" --to "$TO" > "$TMP/out.txt"
+  [ "$TO" = next ] || grep -q 'Fixed by this upgrade' "$TMP/out.txt"
+  grep -qx "install @nowaki-dev/runtime@$TO" "$TMP/npm.log"
+  grep -qx "install -D nowaki@$TO" "$TMP/npm.log"
+done
+rm -rf "$TMP"

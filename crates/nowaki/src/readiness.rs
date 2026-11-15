@@ -6,7 +6,8 @@
 //! The checks follow the 0.20.0 / 1.0 Upgrade notes in CHANGELOG.md: the removed aliases
 //! (`_error.tsx`, `export const middleware`, `export const config`, lowercase API method
 //! exports), unknown top-level `nowaki.config` keys, `--host <dir>` in package.json scripts, and
-//! version / engine requirements are "must change"; `ctx.formData()` results used as
+//! version / engine requirements are "must change" (a CLI / runtime version mismatch is "fixed by
+//! the upgrade" instead when the upgrade installs both packages); `ctx.formData()` results used as
 //! `URLSearchParams`, API routes that may need `csrf = false`, and `PORT` in the environment are
 //! heuristics to review.
 
@@ -42,6 +43,9 @@ const MAX_FILE: u64 = 1024 * 1024;
 pub enum Level {
     /// Fails or behaves differently after the upgrade.
     Must,
+    /// Would be "must change", but installing the target version resolves it (`nowaki upgrade`
+    /// installs both packages at that version), so it needs no manual change.
+    Upgrade,
     /// A heuristic: review it.
     Check,
 }
@@ -97,6 +101,9 @@ pub struct Facts {
     pub runtime_installed: Option<String>,
     /// The app's current version: the installed runtime, else its package.json range.
     pub current: Option<Version>,
+    /// The version or dist-tag `nowaki upgrade` installs both `nowaki` and `@nowaki-dev/runtime`
+    /// at, when it installs both: findings that this install resolves are [`Level::Upgrade`].
+    pub upgrade_to: Option<String>,
 }
 
 impl Facts {
@@ -119,6 +126,7 @@ impl Facts {
                 .flatten(),
             runtime_installed,
             current,
+            upgrade_to: None,
         }
     }
 }
@@ -171,7 +179,11 @@ pub fn scan(root: &Path, pkg: &serde_json::Value, facts: &Facts) -> Vec<Finding>
     scan_env_files(root, &mut out);
     scan_facts(pkg, facts, &mut out);
     out.sort_by(|a, b| {
-        let level = |f: &Finding| f.level == Level::Check;
+        let level = |f: &Finding| match f.level {
+            Level::Must => 0,
+            Level::Upgrade => 1,
+            Level::Check => 2,
+        };
         (level(a), a.file.is_none(), &a.file, a.line).cmp(&(
             level(b),
             b.file.is_none(),
@@ -750,14 +762,37 @@ fn scan_facts(pkg: &serde_json::Value, facts: &Facts, out: &mut Vec<Finding>) {
             "Pass --port if PORT is meant for something else.".into(),
         ));
     }
-    if let (Some(cli), Some(rt)) = (&facts.cli_installed, &facts.runtime_installed) {
-        if cli != rt {
-            out.push(env(
+    // Before 0.19.3 the CLI and the runtime were released at different versions, so an app from
+    // then has two; installing the target version of both resolves it.
+    let declared = |name: &str| {
+        ["dependencies", "devDependencies"]
+            .iter()
+            .find_map(|g| pkg.get(g)?.get(name)?.as_str())
+            .and_then(range_version)
+    };
+    let pair = match (&facts.cli_installed, &facts.runtime_installed) {
+        (Some(cli), Some(rt)) => (cli != rt).then(|| (cli.clone(), rt.clone(), "are installed")),
+        _ => match (declared("nowaki"), declared("@nowaki-dev/runtime")) {
+            (Some(cli), Some(rt)) => {
+                (cli != rt).then(|| (cli.to_string(), rt.to_string(), "are in package.json"))
+            }
+            _ => None,
+        },
+    };
+    if let Some((cli, rt, source)) = pair {
+        let what = format!("nowaki {cli} and @nowaki-dev/runtime {rt} {source}; since 0.19.3 the two are released together and the CLI needs the runtime at its own version");
+        out.push(match &facts.upgrade_to {
+            Some(to) => env(
+                Level::Upgrade,
+                what,
+                format!("`nowaki upgrade` installs both at {to}."),
+            ),
+            None => env(
                 Level::Must,
-                format!("nowaki {cli} and @nowaki-dev/runtime {rt} are installed; the CLI refuses a runtime of another version line"),
+                what,
                 "Install the same version of both (`nowaki upgrade` does).".into(),
-            ));
-        }
+            ),
+        });
     }
     match facts.node.as_deref().and_then(Version::parse) {
         Some(v) if v.major < MIN_NODE => out.push(env(
@@ -1040,6 +1075,54 @@ export default {
         assert!(check.iter().any(|x| x.what.contains("PORT=4000")));
         assert!(check.iter().any(|x| x.what.contains("engines.node")));
         assert!(check.iter().any(|x| x.what.contains("rustc 1.80.0")));
+    }
+
+    #[test]
+    fn a_version_mismatch_is_fixed_by_an_upgrade_that_installs_both() {
+        // Before 0.19.3 the CLI and the runtime had different versions.
+        let pkg = r#"{"dependencies":{"@nowaki-dev/runtime":"^0.17.2"},"devDependencies":{"nowaki":"^0.18.2"}}"#;
+        let dir = app(&[("package.json", pkg)]);
+        let mut f = facts();
+        f.cli_installed = Some("0.18.2".into());
+        f.runtime_installed = Some("0.17.2".into());
+        let mismatch = |found: &[Finding]| {
+            found
+                .iter()
+                .filter(|x| {
+                    x.what
+                        .contains("nowaki 0.18.2 and @nowaki-dev/runtime 0.17.2")
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        // Nothing installs both: must change.
+        let m = mismatch(&run(&dir, &f));
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].level, Level::Must);
+        // The upgrade installs both at the target: no manual change.
+        for to in ["0.20.0", "1.0.0-rc.1", "next"] {
+            f.upgrade_to = Some(to.into());
+            let found = run(&dir, &f);
+            let m = mismatch(&found);
+            assert_eq!(m.len(), 1, "{found:#?}");
+            assert_eq!(m[0].level, Level::Upgrade);
+            assert!(
+                m[0].fix.contains(&format!("installs both at {to}")),
+                "{m:?}"
+            );
+            assert!(found.iter().all(|x| x.level != Level::Must), "{found:#?}");
+        }
+        // Not installed: the package.json ranges.
+        f.cli_installed = None;
+        f.runtime_installed = None;
+        let m = mismatch(&run(&dir, &f));
+        assert!(m[0].what.contains("are in package.json"), "{m:?}");
+        // The same version on both sides: nothing.
+        let dir = app(&[(
+            "package.json",
+            r#"{"dependencies":{"@nowaki-dev/runtime":"0.20.0"},"devDependencies":{"nowaki":"^0.20.0"}}"#,
+        )]);
+        assert!(run(&dir, &f).is_empty());
     }
 
     #[test]

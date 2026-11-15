@@ -11,6 +11,19 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Fixed
+- **`nowaki upgrade --to <version>` no longer refuses an app from before 0.19.3.** The CLI and
+  the runtime were released at different versions then, and the readiness report listed the
+  mismatch (say `nowaki 0.18.2` and `@nowaki-dev/runtime 0.17.2`) as "must change", so
+  nothing was installed, while its fix was to run `nowaki upgrade`. When the upgrade installs
+  both packages, the report now lists the mismatch under "Fixed by this upgrade" (with
+  `--check`: "Fixed by `nowaki upgrade --to <version>`") and it doesn't stop the install.
+  The mismatch is also found from the package.json ranges when nothing is installed.
+- `nowaki upgrade` installs both `nowaki` and `@nowaki-dev/runtime` at the target version
+  when the app has them in package.json or in node_modules, each in the section it is in
+  (the runtime is no longer skipped when it is in devDependencies), so the two end on the
+  same version.
+
 ## [0.20.0] — 2026-11-14 · API freeze (the last breaking release before 1.0)
 
 Packages: `nowaki` / `nowaki-core`, `@nowaki-dev/runtime`, `create-nowaki` /
