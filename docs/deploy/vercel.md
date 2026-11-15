@@ -77,10 +77,12 @@ suspends.
 
 ## Edge cases
 
-- **Packages in the function.** The function gets `@nowaki-dev/runtime`, `preact`,
-  `preact-render-to-string` and, when installed, `@vercel/functions` with its dependencies. Other
-  npm packages your server code imports (a database client, `zod` in `env.ts`) are not copied
-  into it; check that the deployed function starts.
+- **Packages in the function.** The function gets every npm package your server code imports (a
+  database client, `zod` in `env.ts`, a Markdoc plugin), with what they depend on, laid out as
+  npm would install them, plus `@nowaki-dev/runtime`, `preact`, `preact-render-to-string` and,
+  when installed, `@vercel/functions`. Packages loaded only through `require()`,
+  `createRequire` or an `import()` of a computed string aren't detected. A package with a native
+  addon (`.node`) must be built for Linux x64 to run there; the build warns when it copies one.
 - A rewrite to a `public/` file works for a fixed destination only; the build warns about a
   rewrite to a pattern that covers public files.
 - Vercel's limits on request size and function duration apply.
