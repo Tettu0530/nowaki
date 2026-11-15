@@ -77,7 +77,7 @@ const slug = (heading) =>
     .trim()
     .replace(/\s/g, "-");
 
-const cell = (s) => s.replace(/\|/g, "\\|").replace(/\n+/g, " ");
+const cell = (s) => s.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\n+/g, " ");
 const code = (s) => (s.includes("`") ? `\`\` ${s} \`\`` : `\`${s}\``);
 
 function table(head, rows) {
