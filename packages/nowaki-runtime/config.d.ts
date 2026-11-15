@@ -53,11 +53,13 @@ export type RuleList<R> = R[] | (() => R[] | Promise<R[]>);
  * locale prefix unless `locale: false`. The same holds for rewrites and header rules.
  */
 export interface RedirectRule {
+  /** The path pattern to match. */
   source: string;
   /** A path, or an absolute http(s) URL. */
   destination: string;
   /** `true`: 308, else 307 (unless `statusCode`). */
   permanent?: boolean;
+  /** The redirect status; wins over `permanent`. */
   statusCode?: 301 | 302 | 303 | 307 | 308;
   /** `false`: match `source` against the path with its locale prefix. */
   locale?: boolean;
@@ -65,6 +67,7 @@ export interface RedirectRule {
 
 /** A `rewrites` entry: a request matching `source` is routed as `destination`. */
 export interface RewriteRule {
+  /** The path pattern to match. */
   source: string;
   /** A path in this app (rewrites are internal; use a redirect for another site). */
   destination: string;
@@ -74,6 +77,7 @@ export interface RewriteRule {
 
 /** A `headers` entry: response headers for the paths matching `source`. */
 export interface HeaderRule {
+  /** The path pattern to match. */
   source: string;
   /** Header names to values, or `{ key, value }` pairs. */
   headers: Record<string, string | number> | { key: string; value: string }[];
@@ -130,6 +134,7 @@ interface FontCommon {
 
 /** Downloaded from Google Fonts at build time and served from the app (pages never call Google). */
 export interface GoogleFont extends FontCommon {
+  /** Marks a Google font. */
   provider: "google";
   /** The weights to download. Default `[400]`. */
   weights?: (number | string)[];
@@ -137,8 +142,11 @@ export interface GoogleFont extends FontCommon {
   styles?: ("normal" | "italic")[];
   /** Default `["latin"]`. Unnamed slices (CJK families) are always kept. */
   subsets?: string[];
+  /** Not allowed on a Google font (a local font's key). */
   src?: never;
+  /** Not allowed on a Google font: use `weights`. */
   weight?: never;
+  /** Not allowed on a Google font: use `styles`. */
   style?: never;
 }
 

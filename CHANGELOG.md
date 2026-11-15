@@ -11,6 +11,45 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Docs
+- **API reference in `docs/reference/`, generated from the source.** `scripts/gen-reference.mjs`
+  writes one page per `@nowaki-dev/runtime` subpath and `@nowaki-dev/markdoc` entry point
+  (every declaration with its signature and JSDoc, cross-linked), plus route and island module
+  exports, file conventions, `nowaki.config` keys, CLI commands and flags, environment
+  variables, endpoints, headers and cookies, and client events and attributes, from the
+  `.d.ts` files, the `api/` snapshots and `scripts/gen-reference-data.mjs`. CI fails when the
+  pages are out of date (`node scripts/gen-reference.mjs --check`).
+- JSDoc added for the type members that had none (`CookieOptions`, `ResponseInit`,
+  `LayoutProps`, `ServerFnError`, `LinkProps`, config rules, `GoogleFont`, `SessionConfig`,
+  the markdoc `Schema`). `LayoutModule` now says what a layout's `meta`, `title`, `head` and
+  `lang` exports do: only a `meta` object is read (a `meta` function is not called), and
+  `title` / `lang` are not read on a layout (use `meta.title` / `htmlAttrs.lang`).
+- Guides, deploy pages and troubleshooting in the repo, for 1.0: `docs/README.md` (an index of
+  the guides, deploy pages, reference, migration guides and policies); `docs/guides/` with one
+  task-oriented guide per feature area (routing, data, layouts and middleware, islands,
+  Jetstream, content, images and fonts, SEO, routing config, i18n, sessions and env, caching,
+  View Transitions, observability, security, dev experience, plugins), each with examples from
+  `examples/hello` and `examples/gallery`; `docs/deploy/` with a page per adapter (node, bun,
+  deno, cloudflare, vercel, static) and for `nowaki start` (Docker, a reverse proxy, several
+  instances), plus a table of what works on which target; and `docs/troubleshooting.md` with
+  the error messages users hit, their cause and the fix.
+- `docs/upgrade-to-1.0.md`: upgrading an app from any 0.x release to 1.0, by release (0.17
+  to 0.20 in detail), with code before and after and what `nowaki upgrade --check` reports for
+  each change; 1.0.0 adds no breaking change beyond 0.20.0, and the release-candidate phase.
+- `docs/migrate-from-nextjs.md`: moving a Next.js App Router app to Nowaki, written from the
+  Next.js and Nowaki versions of the `benchmarks/compare` blog: files, layouts, loaders,
+  `staticPaths`, ISR and `revalidatePath` / `revalidateTag`, islands, actions and server
+  functions, API routes, middleware, metadata, `<Link>`, `<Image>`, env vars, `next.config`,
+  deployment, what has no equivalent, and a Remix mapping.
+- `docs/migrate-from-astro.md` checked against 0.20: `defineConfig`, the CSP nonce rule for
+  inline scripts (`nonce()` in `meta()`), `ctx.formData()`, `ctx.routePath`, uppercase method
+  exports, `fonts` keys, and a new content collections section.
+- README: the 0.20 status (API frozen) and features, and links to `docs/`, STABILITY, SUPPORT and
+  the migration guides. ROADMAP: where 0.20.0 leaves 1.0, the done v1.0 items ticked, and the
+  deferred list moved to "1.x candidates". The scaffolded app's AGENTS.md covers
+  `nowaki upgrade --check`, `PORT` / `--host`, `_500`, default exports, `FormData` uploads and
+  `.env.local`. SUPPORT.md and SECURITY.md name the supported 0.x line as 0.20.x, and SUPPORT.md
+  lists the Node versions CI runs (22, 24 and 26).
 ### Fixed
 - `nowaki upgrade` runs npm, pnpm and yarn on Windows: they are `.cmd` shims there, which the CLI
   didn't find by their bare name, so every install failed with "failed to start npm".

@@ -9,12 +9,15 @@ export type RouteParams = Record<string, string | string[]>;
 export interface CookieOptions {
   /** Lifetime in seconds (`Max-Age`). */
   maxAge?: number;
+  /** `Expires`: a Date, or a string sent as written. */
   expires?: Date | string;
   /** Defaults to "/". */
   path?: string;
+  /** `Domain`. Not sent by default (the cookie stays on the request's host). */
   domain?: string;
   /** Defaults to true. Set to false explicitly to drop HttpOnly. */
   httpOnly?: boolean;
+  /** `Secure`. Defaults to false. */
   secure?: boolean;
   /** Defaults to "Lax". */
   sameSite?: "Lax" | "Strict" | "None" | "lax" | "strict" | "none";
@@ -22,7 +25,9 @@ export interface CookieOptions {
 
 /** The status (default 200) and extra headers of a `ctx.json` / `html` / `text` response. */
 export interface ResponseInit {
+  /** The status code. Defaults to 200. */
   status?: number;
+  /** Extra response headers, by name. */
   headers?: Record<string, string>;
 }
 
@@ -58,6 +63,7 @@ export interface Session {
 
 /** The result of `ctx.json` / `html` / `text` / `redirect`. Return it to send that response. */
 export interface NowakiResult {
+  /** Marks the object as a result. Internal: create results with the `ctx` methods. */
   readonly __nowakiResult: true;
 }
 
@@ -301,7 +307,9 @@ export type PageProps<L extends Loader<any> = Loader<unknown>> = RouteProps<Awai
 export interface LayoutProps<D = unknown> {
   /** The layout's loader return value. */
   data: D;
+  /** Route params of the page being rendered. */
   params: RouteParams;
+  /** The request URL. */
   url: URL;
   /** The page (or the next layout down). */
   children: ComponentChildren;
@@ -475,6 +483,7 @@ export { getLocale, href, localePath, setLocale } from "./navigation.js";
 
 /** A [Standard Schema](https://standardschema.dev) (zod, valibot, arktype, ...). */
 export interface StandardSchemaV1<Input = unknown, Output = Input> {
+  /** The Standard Schema interface: `validate`, plus the input and output types. */
   readonly "~standard": {
     readonly version: 1;
     readonly vendor: string;
@@ -528,8 +537,11 @@ export declare function serverFn<S extends StandardSchemaV1, R, Rest extends unk
  * other error becomes a generic 500 in production.
  */
 export declare class ServerFnError extends Error {
+  /** `message` is sent to the client as written, with `status` and `data`. */
   constructor(message: string, options?: { status?: number; data?: unknown });
+  /** The response status: `options.status` when it is 400-599, else 400. */
   readonly status: number;
+  /** Extra data for the client (`options.data`), sent as-is. */
   readonly data?: unknown;
 }
 
@@ -579,6 +591,7 @@ export interface PageModule<D = any> {
   loader?: Loader<D>;
   /** Runs on every method but GET, HEAD and OPTIONS. */
   action?: Action;
+  /** The page's metadata: an object, or a function of the loader data (see {@link MetaFn}). */
   meta?: Meta | MetaFn<D>;
   /** `<title>`. `meta.title` wins over it. */
   title?: string;
@@ -607,9 +620,22 @@ export interface LayoutModule<D = any> {
   /** The layout component. */
   default: (props: LayoutProps<D>) => unknown;
   loader?: Loader<D>;
+  /**
+   * Defaults for every page under the layout: page values win, and `openGraph` and `twitter` merge
+   * one level deep. Only an object is read on a layout; a function is not called.
+   */
   meta?: Meta | MetaFn<D>;
+  /** Not read on a layout: set `meta.title`, the title of pages that have none of their own. */
   title?: string;
+  /**
+   * Raw HTML added to the `<head>` of every page under the layout (root layout first, before the
+   * page's own `head`). No escaping: never build it from user input.
+   */
   head?: string;
+  /**
+   * Not read on a layout: set `htmlAttrs.lang`, used by pages without their own `lang` (with
+   * i18n, the request's locale comes first).
+   */
   lang?: string;
   htmlAttrs?: DocumentAttrs;
   bodyAttrs?: DocumentAttrs;
@@ -633,6 +659,7 @@ export interface ApiModule {
   default?: ApiHandler;
   csrf?: Csrf;
   staticPaths?: StaticPaths;
+  /** `false` leaves the file route out of `nowaki prerender` / the static adapter. */
   prerender?: boolean;
 }
 

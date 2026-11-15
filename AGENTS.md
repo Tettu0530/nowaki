@@ -559,6 +559,15 @@ conventions (`_error.tsx`, `export const middleware`, `export const config`, low
 method exports) fail with an error naming the replacement; don't bring back a silent alias.
 Details: [CONTRIBUTING.md § API snapshots](./CONTRIBUTING.md#api-snapshots).
 
+`docs/reference/` (the API reference) is generated, not written: `scripts/gen-reference.mjs`
+builds it from the `.d.ts` JSDoc, the `api/*.txt` snapshots and
+`scripts/gen-reference-data.mjs` (descriptions for env vars, endpoints, cookies, client
+events, file conventions, `create-nowaki` flags). After changing a `.d.ts` comment, a
+snapshot or the data file, run `node scripts/gen-reference.mjs` and commit the pages; CI
+runs `--check`. A new stable env var, endpoint, event or file convention needs a
+description in the data file, or the generator fails. Fix wording in the source, never in
+`docs/reference/`. Details: [CONTRIBUTING.md § API reference](./CONTRIBUTING.md#api-reference).
+
 ## Releasing (maintainers)
 
 Since 0.19.3 the CLI (`Cargo.toml` `[workspace.package]`, `packages/nowaki-cli`),

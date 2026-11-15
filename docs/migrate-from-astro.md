@@ -1,6 +1,7 @@
 # Migrating from Astro
 
-This guide moves a static Astro site to Nowaki. It was written while porting a real one: a
+This guide moves a static Astro site to Nowaki (checked against Nowaki 0.20). It was written
+while porting a real one: a
 personal portfolio with seven sections, GSAP and Lenis motion, an inline theme script,
 `<html>` attributes, self-hosted fonts, and OG images rendered with resvg. The port's static
 output matched the Astro build element by element. Its OG images were byte-identical.
@@ -21,10 +22,14 @@ The short version: pages and components become Preact TSX, `<script>` becomes
    `import.meta.env`, and the `client:*` directives.
 3. Scripts: `nowaki dev`, `nowaki build --adapter static` (without `--adapter`, the build
    targets the Node server), and `nowaki start` to preview a server build.
-4. Move `site` from `astro.config.mjs` to `nowaki.config.mjs`:
+4. Move `site` from `astro.config.mjs` to `nowaki.config.mjs`. `defineConfig` types it, and
+   an unknown key is an error with a "did you mean" hint:
    ```js
-   export default { site: "https://example.com" };
+   import { defineConfig } from "@nowaki-dev/runtime/config";
+   export default defineConfig({ site: "https://example.com" });
    ```
+   Keep the config as the default export (`export const config` is not read). Settings of your
+   own go in a named export or another module, not in the config object.
 
 ## 2. Move the files
 
@@ -36,6 +41,10 @@ The short version: pages and components become Preact TSX, `<script>` becomes
 | `src/components/*`, `src/sections/*`, `src/lib/*`, `src/data/*` | anywhere at the app root: `components/`, `lib/`, `data/`, … (what routes import is compiled) |
 | `src/scripts/*`, `src/motion/*` | anywhere; they're bundled for the browser through page scripts (step 6) |
 | `public/` | `public/` (served as-is, unchanged) |
+| `src/pages/404.astro` | `routes/_404.tsx` |
+| `src/pages/500.astro` | `routes/_500.tsx` (not `_error.tsx`: that name is refused) |
+| `src/content/config.ts` (or `src/content.config.ts`), `src/content/<name>/` | `content/config.ts`, `content/<name>/` (step 8) |
+| `src/middleware.ts` | `routes/_middleware.ts`, its default export (one per directory) |
 
 Add explicit extensions to relative imports (`import x from "./x.ts"`). Node runs the server
 build as plain ESM, which doesn't guess extensions.
@@ -96,9 +105,8 @@ import "../styles/base.css";
 
 export const htmlAttrs = { lang: "ja", "data-sheet-rev": "2026.08" }; // <html …>
 export const bodyAttrs = { class: "site" };                           // <body …>
-// Tags every page under this layout gets (favicon, theme-color, an inline boot script):
-export const head = `<link rel="icon" href="/favicon.png" />
-<script>document.documentElement.dataset.theme = localStorage.theme ?? "light"</script>`;
+// Tags every page under this layout gets (favicon, theme-color):
+export const head = `<link rel="icon" href="/favicon.png" />`;
 // Defaults for the pages' metadata:
 export const meta = { openGraph: { siteName: "My site" }, twitter: { site: "@me" } };
 
@@ -120,12 +128,25 @@ export const meta = {
 
 - With `site` set, `sitemap.xml` and `robots.txt` are generated unless `public/` or a route
   has them. `export const sitemap = false` leaves a page out.
-- `<script is:inline>` in the head → the layout's (or a route's) `head` string, as above.
-- `<script is:inline define:vars={{ data }}>` in the body → a script element with the values
-  serialized (escape `<`, so data can't close the element):
+- `<script is:inline>` in the head → a `head` string returned from `meta()`, with the CSP nonce,
+  so it still runs under `NOWAKI_CSP=enforce`:
   ```tsx
-  <script dangerouslySetInnerHTML={{ __html: `const data = ${JSON.stringify(data).replaceAll("<", "\\u003c")};` }} />
+  import { nonce } from "@nowaki-dev/runtime";
+  export const meta = () => ({
+    head: `<script nonce="${nonce()}">document.documentElement.dataset.theme = localStorage.theme ?? "light"</script>`,
+  });
   ```
+  Under `NOWAKI_CSP`, the nonce goes only on the tags Nowaki emits and on tags that carry
+  `nonce()`. An inline `<script>` / `<style>` in a static `head` string, in
+  `dangerouslySetInnerHTML` or in Markdown gets none and is blocked under `enforce`. Without
+  `NOWAKI_CSP`, a plain `head` string works too. Static output (`nowaki build --adapter static`)
+  has no per-response nonce: set its CSP in `_headers`.
+- `<script is:inline define:vars={{ data }}>` in the body → a script element with the values
+  serialized (escape `<`, so data can't close the element) and the nonce:
+  ```tsx
+  <script nonce={nonce()} dangerouslySetInnerHTML={{ __html: `const data = ${JSON.stringify(data).replaceAll("<", "\\u003c")};` }} />
+  ```
+  `nonce()` is server-only: use it in routes, layouts and components, not in islands.
 
 ## 6. Scripts
 
@@ -152,15 +173,16 @@ Interactive Preact components belong in `islands/` instead; they hydrate on thei
 
 ```ts
 // routes/og/[card].png.ts → /og/index.png, /og/about.png
+import type { ApiModule } from "@nowaki-dev/runtime";
 import { cards, renderCard } from "../../lib/og.ts";
 
 export const staticPaths = () => cards.map((c) => ({ card: c.slug }));
 
-export async function GET({ params, site, url }: { params: { card: string }; site?: URL; url: URL }) {
+export const GET: ApiModule["GET"] = async ({ params, site, url }) => {
   const card = cards.find((c) => c.slug === params.card);
   if (!card) return new Response("not found", { status: 404 });
   return renderCard(card, (site ?? url).host); // a Uint8Array → image/png (from the extension)
-}
+};
 ```
 
 - `getStaticPaths` returns `{ params, props }`; `staticPaths` returns params only, so look the
@@ -168,8 +190,67 @@ export async function GET({ params, site, url }: { params: { card: string }; sit
 - Return a string or bytes, typed by the route's extension (`.png`, `.xml`, `.json`, …), or a
   `Response`. `Astro.site` → `ctx.site`.
 - Native packages (resvg, harfbuzz) run unchanged: file routes run in Node at build time.
+- Method exports are uppercase (`GET`, `POST`); a lowercase `get` is an error.
+- On a server build, a `POST` endpoint reads the body with `ctx.formData()`, which returns
+  `FormData` for urlencoded and multipart bodies, like `Astro.request.formData()`. Read text with
+  `String(form.get("name") ?? "")`; file inputs arrive as `File`. A cross-site POST is rejected
+  with 403 unless the route exports `csrf = false`.
+- `Astro.url` → `ctx.url` (the browser's URL). `Astro.url.pathname` without `base` and the
+  locale prefix → `ctx.routePath` in loaders and endpoints, `routePath(url)` from
+  `@nowaki-dev/runtime/navigation` in components.
 
-## 8. Images and fonts
+## 8. Content collections
+
+| Astro | Nowaki |
+|---|---|
+| `src/content/blog/*.md` | `content/blog/*.md` (`.md`, `.mdx`; YAML or TOML frontmatter) |
+| `src/content.config.ts` / `src/content/config.ts` with `defineCollection({ loader, schema })` | `content/config.ts`, one named export per collection: `export const blog = defineCollection({ schema })` |
+| `type: "data"` / `file()` loader (`.json`, `.yaml`) | `defineCollection({ type: "data", schema })` |
+| `getCollection("blog", filter)` from `astro:content` | `getCollection("blog", filter)` from `@nowaki-dev/runtime/content` |
+| `getEntry("blog", id)` | `getEntry("blog", slug)` (the path under the collection, without the extension) |
+| `entry.id` / `entry.slug` | `entry.slug` |
+| `entry.data` | `entry.data` (validated against the schema at build and at server start) |
+| `const { Content, headings } = await render(entry)` | Markdown: `entry.html` and `entry.headings`; MDX: `const { Content, headings } = await entry.render()` |
+
+```ts
+// content/config.ts
+import { z } from "zod";
+import { defineCollection } from "@nowaki-dev/runtime/content";
+
+export const blog = defineCollection({
+  schema: z.object({ title: z.string(), date: z.coerce.date(), draft: z.boolean().default(false) }),
+});
+```
+
+```tsx
+// routes/blog/[slug].tsx
+import type { LoaderContext, PageProps } from "@nowaki-dev/runtime";
+import { getCollection, getEntry } from "@nowaki-dev/runtime/content";
+
+export const staticPaths = async () =>
+  (await getCollection("blog", (e) => !e.data.draft)).map((e) => ({ slug: e.slug }));
+
+export const loader = async (ctx: LoaderContext) => {
+  const post = await getEntry("blog", String(ctx.params.slug));
+  if (!post) ctx.status(404);
+  return { post };
+};
+
+export const meta = ({ data }) => ({ title: data.post?.data.title });
+
+export default function Post({ data }: PageProps<typeof loader>) {
+  if (!data.post) return <h1>Not found</h1>;
+  return <article dangerouslySetInnerHTML={{ __html: data.post.html ?? "" }} />;
+}
+```
+
+Any Standard Schema library works for `schema` (zod, valibot, arktype). Markdown is rendered at
+build time in Rust (GFM, footnotes, code highlighting), and every heading gets an anchor id.
+With `i18n`, put each locale's entries in `content/blog/<locale>/`; `getCollection` returns the
+current locale's. Schema-free collections and Astro's custom loaders (a CMS, a remote API) have
+no counterpart: load such data in a `loader` instead.
+
+## 9. Images and fonts
 
 - `<Image>` from `astro:assets` → `<Image>` from `@nowaki-dev/runtime/image`, with
   `import hero from "./hero.jpg?image"`. It renders AVIF plus the original format at several
@@ -188,7 +269,7 @@ export async function GET({ params, site, url }: { params: { card: string }; sit
   `preload` is on by default; turn it off for large CJK files. Local fonts aren't subset, so
   keep a subsetting step if the site has one.
 
-## 9. Config: redirects, base, trailing slash, i18n
+## 10. Config: redirects, base, trailing slash, i18n
 
 These `astro.config.mjs` keys move to `nowaki.config.mjs`. Nowaki applies them in `nowaki dev`,
 `nowaki start`, every adapter, and static output (as `_redirects` / `_headers`).
@@ -215,16 +296,23 @@ These `astro.config.mjs` keys move to `nowaki.config.mjs`. Nowaki applies them i
 
 ```js
 // nowaki.config.mjs
-export default {
+import { defineConfig } from "@nowaki-dev/runtime/config";
+
+export default defineConfig({
   site: "https://example.com",
   basePath: "/docs",
   trailingSlash: "always",
   redirects: [{ source: "/old-blog/[...slug]", destination: "/blog/[...slug]", permanent: true }],
   i18n: { locales: ["en", "ja"], defaultLocale: "en" },
-};
+});
 ```
 
-## 10. Build and compare
+The top-level keys are `site`, `fonts`, `basePath`, `trailingSlash`, `redirects`, `rewrites`,
+`headers`, `i18n`, `images` and `plugins`. `fonts` entries are checked per kind: a Google font
+takes `weights` / `styles` / `subsets`, a local font `src` with `weight` / `style` (or an `src`
+array, one entry per file), and a key of the other kind is an error.
+
+## 11. Build and compare
 
 ```sh
 nowaki build --adapter static   # → dist/static

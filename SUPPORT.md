@@ -17,7 +17,7 @@ support and no response-time guarantee beyond the security acknowledgement in SE
 
 | Release line | Bug fixes | Security fixes |
 | --- | --- | --- |
-| Latest 0.x release (0.19.3 today), until 1.0.0 | Yes | Yes |
+| The latest 0.20.x release, until 1.0.0 | Yes | Yes |
 | Older 0.x releases | No | No |
 | From 1.0.0: the latest 1.y minor | Yes | Yes |
 | Older 1.y minors | No: upgrade to the latest 1.y | No: upgrade to the latest 1.y |
@@ -35,7 +35,7 @@ support and no response-time guarantee beyond the security acknowledgement in SE
 
 Supported Node.js, Bun, Deno, Rust (MSRV), Preact, TypeScript and browser versions are listed
 in [docs/STABILITY.md § Platforms](./docs/STABILITY.md#platforms). In short: Node LTS lines
-that are not end-of-life (`>=22` today, tested on 22 and 24); an end-of-life Node line may be
+that are not end-of-life (`>=22` today; CI runs Node 22, 24 and 26 on Linux and Node 22 on macOS and Windows); an end-of-life Node line may be
 dropped in a minor, announced one minor ahead.
 
 ## Deploy adapters
