@@ -48,6 +48,7 @@ cargo test --workspace                               # unit + integration + CLI
 # JS / app-level
 pnpm install                                         # workspace deps (frozen in CI)
 node scripts/router-test.mjs                         # router snapshot/unit test
+node scripts/types-test.mjs                          # tsc over the runtime .d.ts (scripts/types-fixture)
 node benchmarks/check-regression.mjs                 # client-JS size gate
 
 # Run the example app end to end
@@ -265,7 +266,7 @@ and `scripts/gallery-e2e.mjs` / `gallery-browser-test.mjs` check the exit criter
   `p:<browser path>` through `cdnTag`: percent-encoded, `h:<hash>` past 256 bytes, the same on emit
   and purge); `purge` lazily imports `@vercel/functions` and calls `dangerouslyDeleteByTag` (16 tags
   per call, raced against a 2 s timeout), warning once when the package is missing.
-  `vercel-build.mjs` `copyWithDeps` copies the package and its dependencies into the function when
+  `vercel-build.mjs` `installPackages` copies the package and its dependencies into the function when
   the app has it. Behavior per server:
 
   | Server | Tag header | Purge |
@@ -348,7 +349,15 @@ and `scripts/gallery-e2e.mjs` / `gallery-browser-test.mjs` check the exit criter
   (both in `site-config.mjs`, listed by `api/config.txt`): a new key goes there, in
   `config.d.ts` (`NowakiConfig`, `@nowaki-dev/runtime/config`) and in the snapshot together.
 - **Scope hoisting / chunking** — `crates/nowaki-core/src/chunk.rs`.
-- **Deploy adapters** — `crates/nowaki/src/adapter.rs` (+ `server/edge-build.mjs`).
+- **Deploy adapters** — `crates/nowaki/src/adapter.rs` (+ `server/edge-build.mjs`,
+  `server/vercel-build.mjs`). The app's server packages: the server build (`build.rs`
+  `build_server`, `package_of`) lists the packages left as bare imports in `dist/server/` in
+  `server-deps.json` (Node built-ins out); `adapter.rs` `server_deps` adds them to
+  `dist/server/package.json` (installed version; `file:` / `link:` packages vendored to
+  `dist/server/vendor/`), and `vercel-build.mjs` `installPackages` copies them with their
+  dependency closure into the function (npm's layout, a conflicting version nested under its
+  dependent). The Cloudflare worker needs nothing: wrangler bundles it in place. Test:
+  `scripts/server-deps-e2e.mjs` (runs dist/ and the function outside the app).
 - **Images (`?image`, `<Image>`)** — `crates/nowaki-core/src/image.rs` (widths, AVIF via ravif
   + fallback, disk cache, `picture_html` for Markdown), emitted by `build.rs` `emit` (client) and
   `ServerAssets::image_module` (server); dev modules from `transform.rs` `dev_asset_module`,

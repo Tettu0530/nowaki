@@ -55,6 +55,8 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: node scripts/api-surface-test.mjs
+      - name: Runtime type tests (tsc over scripts/types-fixture)
+        run: node scripts/types-test.mjs
       - run: node scripts/api-surface.mjs --check
         env:
           GH_TOKEN: ${{ github.token }}

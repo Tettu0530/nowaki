@@ -29,6 +29,8 @@ const { env, liveRegistry } = await createApp({
   // The Rust front terminates /__nowaki/live, so streamed pages let live.js use the WebSocket
   // (start.rs `assemble` does the same for the others).
   liveTransport: "auto",
+  // One long-lived process: its per-process key works, so live never needs the secret here.
+  requireLiveSecret: false,
 });
 
 // Pages return body+meta markers instead of final HTML. Streaming bypasses the markers.

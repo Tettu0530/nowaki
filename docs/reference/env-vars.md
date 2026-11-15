@@ -37,7 +37,7 @@ The `nowaki` CLI also takes `NOWAKI_*` variables from the app's `.env` / `.env.l
 | `NOWAKI_LIVE_MAX_AGE` | `86400` (24 h) | Seconds a signed live state stays valid. An older page gets `nowaki:live-stale` and reloads. |
 | `NOWAKI_LIVE_RENDER_TIMEOUT_MS` | `10000` | Milliseconds one live island render may take before the event fails. |
 | `NOWAKI_LIVE_ROOMS_FILE` | `.nowaki/live-rooms.json` | File (relative to the app root) where `nowaki start` saves room state (`live.room` / `shared`) and loads it from on the next start; `off` disables it. |
-| `NOWAKI_LIVE_SECRET` | a random key per process (warned) | Key that signs live island state. Set it in production so signatures stay valid across processes, instances and restarts. |
+| `NOWAKI_LIVE_SECRET` | a random key per process (warned) | Key that signs live island state. Set it in production so signatures stay valid across processes, instances and restarts. The cloudflare and vercel adapters refuse live events (503) without it. |
 
 ## ISR cache and revalidation
 

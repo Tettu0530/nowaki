@@ -6,8 +6,9 @@ import { nonceAttr } from "./nonce.mjs";
 
 // Prefers meta resolved after the loader, falling back to the route's static export.
 // `htmlAttrs` / `bodyAttrs` come back as attribute strings (with a leading space, escaped) for the
-// <html> / <body> tags; meta carries them already merged across layouts (handler.mjs
-// `withDocAttrs`), and a page rendered without that (404 / 500) uses its own exports.
+// <html> / <body> tags; meta carries them, and title / lang, already combined with the layouts'
+// (handler.mjs `documentMeta`). The module's own exports are the fallback for a caller that
+// passes no meta.
 export function pageMeta(meta, mod) {
   const str = (v) => (typeof v === "string" ? v : undefined);
   const html = isAttrs(meta?.htmlAttrs) ? meta.htmlAttrs : isAttrs(mod?.htmlAttrs) ? mod.htmlAttrs : {};
@@ -16,7 +17,7 @@ export function pageMeta(meta, mod) {
   return {
     title: str(meta?.title) ?? str(mod?.title) ?? "Nowaki App",
     head: mod?.viewTransition === true ? (head ? `${head}\n${viewTransition()}` : viewTransition()) : head,
-    // `export const lang` / meta().lang win; htmlAttrs.lang (say, from a layout) is the fallback.
+    // `lang` / meta().lang (the page's or a layout's) win; htmlAttrs.lang is the fallback.
     lang: str(meta?.lang) ?? str(mod?.lang) ?? attrValue(html.lang) ?? "en",
     htmlAttrs: Object.isFrozen(html) ? frozenHtmlAttrs(html) : attrString(html, ["lang"]),
     bodyAttrs: attrString(body, []),

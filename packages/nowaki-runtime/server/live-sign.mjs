@@ -20,20 +20,29 @@ function positiveInt(v, fallback) {
 }
 
 // Created on first use, not at import (Workers can't generate random values at global scope).
+// The secret is read on each use, so a Worker var that reaches process.env later still counts;
+// `keyFrom` is the secret the key was made from ("" for the random one).
 let key = null;
+let keyFrom = null;
 function getKey() {
-  if (!key) {
-    key = env.NOWAKI_LIVE_SECRET ? Buffer.from(String(env.NOWAKI_LIVE_SECRET)) : randomBytes(32);
+  const secret = env.NOWAKI_LIVE_SECRET ? String(env.NOWAKI_LIVE_SECRET) : "";
+  if (keyFrom !== secret) {
+    key = secret ? Buffer.from(secret) : randomBytes(32);
+    keyFrom = secret;
   }
   return key;
 }
 
-/// Production servers call this once when the app has live islands.
-export function warnIfEphemeralLiveKey() {
+/// Production servers call this once when the app has live islands. `refused`: the server
+/// refuses live events without the secret (live-event.mjs `requireSecret`).
+export function warnIfEphemeralLiveKey({ refused = false } = {}) {
   if (env.NOWAKI_LIVE_SECRET) return;
   logWarn(
-    "NOWAKI_LIVE_SECRET is not set: live islands are signed with a random per-process key, " +
-      "so their state can't resume after a restart or on another instance. Set it to a long random value.",
+    refused
+      ? "NOWAKI_LIVE_SECRET is not set: live events are refused (503) on this adapter, where each " +
+          "instance would sign live state with its own key. Set it to a long random value."
+      : "NOWAKI_LIVE_SECRET is not set: live islands are signed with a random per-process key, " +
+          "so their state can't resume after a restart or on another instance. Set it to a long random value.",
   );
 }
 

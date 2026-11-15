@@ -15,7 +15,7 @@ export function trustProxy() {
   return v === "1" || v === "true" || v === "yes";
 }
 
-function vercelHosted() {
+export function vercelHosted() {
   const v = String(globalThis.process?.env?.VERCEL ?? "")
     .trim()
     .toLowerCase();

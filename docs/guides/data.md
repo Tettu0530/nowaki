@@ -35,8 +35,8 @@ export default function Post({ data }: PageProps<typeof loader>) {
 - The loader's code and imports stay on the server. Only the rendered HTML (and the props of
   the islands it renders) reach the browser.
 - Return `ctx.redirect("/login")` (or any `ctx.json` / `html` / `text` result, or a
-  `Response`) to answer with that instead of the page. `PageProps<typeof loader>` then includes
-  the result type in `data`; type the page's `data` yourself in that case.
+  `Response`) to answer with that instead of the page. `PageProps<typeof loader>` leaves those
+  results out of `data`: the page only ever gets the data.
 - `ctx.status(code)`, `ctx.setHeader(name, value)` and `ctx.setCookie(name, value, opts)` set
   the page response's status, headers and cookies.
 - A layout can have a loader too; its data goes to the layout's `data` prop (see
@@ -306,8 +306,7 @@ import { addTodoForm } from "../actions/todos.ts"; // "use server": (form: { tex
 export default function QuickAdd() {
   return (
     <form
-      // Preact types `action` as a string; the server function proxy is turned into one.
-      action={addTodoForm as unknown as string}
+      action={addTodoForm}
       ref={(f) => f?.addEventListener("nowaki:action", (e) => console.log((e as CustomEvent).detail.result))}
     >
       <input name="text" />
@@ -316,6 +315,10 @@ export default function QuickAdd() {
   );
 }
 ```
+
+This type-checks with `"jsxImportSource": "@nowaki-dev/runtime"` in tsconfig.json (scaffolded
+apps have it): Preact's JSX types with `<form action>` also taking a function. With
+`"jsxImportSource": "preact"`, write `action={addTodoForm as unknown as string}`.
 
 Working examples: `examples/hello/actions/todos.ts`, `examples/hello/islands/ServerTodos.tsx`,
 `examples/hello/routes/server-fn.tsx`.

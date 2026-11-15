@@ -108,6 +108,8 @@ export default function Kit() { return <main><Count /><Tick /><Link href="/about
 export default function Login() { return <main>{"LOGIN"}</main>; }\n`,
 };
 const SESSION_SECRET = "rules-e2e-session-secret-0123456789abcdef";
+// The cloudflare worker refuses live events without it (given as a Worker binding there).
+const LIVE_SECRET = "rules-e2e-live-secret-0123456789abcdef";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "nowaki-rules-e2e-"));
 const children = new Set();
@@ -395,7 +397,7 @@ try {
           },
         };
         const req = async (p, init = {}) => {
-          const res = await worker.fetch(new Request(`https://app.example${p}`, { redirect: "manual", ...init }), { ASSETS, NOWAKI_SESSION_SECRET: SESSION_SECRET });
+          const res = await worker.fetch(new Request(`https://app.example${p}`, { redirect: "manual", ...init }), { ASSETS, NOWAKI_SESSION_SECRET: SESSION_SECRET, NOWAKI_LIVE_SECRET: LIVE_SECRET });
           const headers = Object.fromEntries(res.headers);
           if (res.headers.getSetCookie().length) headers["set-cookie"] = res.headers.getSetCookie();
           return { status: res.status, headers, body: await res.text() };

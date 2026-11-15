@@ -11,6 +11,26 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Upgrade notes
+- **Live islands on the cloudflare and vercel adapters need `NOWAKI_LIVE_SECRET`.** Without it
+  `POST /__nowaki/live-event` now answers 503 (logged once per instance, naming the variable)
+  instead of signing with a random key per isolate or function instance, so events worked or
+  failed depending on which instance answered. Pages still render, live islands included (their
+  first HTML). Set it to a long random value in the deployment (`wrangler secret put
+  NOWAKI_LIVE_SECRET`, a Vercel environment variable); `nowaki build --adapter cloudflare|vercel`
+  reminds you when the app has live islands. `nowaki dev`, `nowaki start` and the node / bun /
+  deno adapters keep working without it (one long-lived process), with the startup warning.
+- **`<form action={serverFn}>` type-checks with `"jsxImportSource": "@nowaki-dev/runtime"`** in
+  tsconfig.json, which new apps get. In an existing app, change `"jsxImportSource": "preact"`
+  to it; nothing else changes (Nowaki's transform always uses `preact/jsx-runtime`).
+
+### Security
+- **The cloudflare and vercel adapters refuse live events without `NOWAKI_LIVE_SECRET`** (see
+  Upgrade notes). Earlier releases only warned at startup and then signed live state with a key
+  of each instance's own. A Worker binding named `NOWAKI_LIVE_SECRET` counts too, also without
+  `populate_process_env`. On Vercel this applies when `VERCEL=1` (createApp
+  `requireLiveSecret`).
+
 ### Docs
 - **API reference in `docs/reference/`, generated from the source.** `scripts/gen-reference.mjs`
   writes one page per `@nowaki-dev/runtime` subpath and `@nowaki-dev/markdoc` entry point
@@ -22,8 +42,7 @@ milestone's worth of work; the codename is noted per entry.
 - JSDoc added for the type members that had none (`CookieOptions`, `ResponseInit`,
   `LayoutProps`, `ServerFnError`, `LinkProps`, config rules, `GoogleFont`, `SessionConfig`,
   the markdoc `Schema`). `LayoutModule` now says what a layout's `meta`, `title`, `head` and
-  `lang` exports do: only a `meta` object is read (a `meta` function is not called), and
-  `title` / `lang` are not read on a layout (use `meta.title` / `htmlAttrs.lang`).
+  `lang` exports do (all of them apply since the layout fix under Fixed).
 - Guides, deploy pages and troubleshooting in the repo, for 1.0: `docs/README.md` (an index of
   the guides, deploy pages, reference, migration guides and policies); `docs/guides/` with one
   task-oriented guide per feature area (routing, data, layouts and middleware, islands,
@@ -50,6 +69,7 @@ milestone's worth of work; the codename is noted per entry.
   `nowaki upgrade --check`, `PORT` / `--host`, `_500`, default exports, `FormData` uploads and
   `.env.local`. SUPPORT.md and SECURITY.md name the supported 0.x line as 0.20.x, and SUPPORT.md
   lists the Node versions CI runs (22, 24 and 26).
+
 ### Fixed
 - `nowaki upgrade` runs npm, pnpm and yarn on Windows: they are `.cmd` shims there, which the CLI
   didn't find by their bare name, so every install failed with "failed to start npm".
@@ -64,12 +84,62 @@ milestone's worth of work; the codename is noted per entry.
   when the app has them in package.json or in node_modules, each in the section it is in
   (the runtime is no longer skipped when it is in devDependencies), so the two end on the
   same version.
+- **Layouts' `title`, `lang` and `meta()` apply**, as `LayoutModule` and `api/route-exports.txt`
+  say. A layout's `title` / `lang` exports were never read, and a layout's `meta` function never
+  ran (only a `meta` object did, for the SEO tags and a fallback title). Pages now combine root
+  layout → nested layouts → page on every server (dev, start, the adapters, prerender): `title`
+  and `lang` come from the page, else the nearest layout setting one (in each module `meta.*`
+  wins over the plain export; any `lang` wins over the i18n locale, which wins over
+  `htmlAttrs.lang`); each layout's `head` (its `meta.head` first) goes before the page's;
+  `htmlAttrs` / `bodyAttrs` and the SEO fields merge root → page, the page winning. A layout's
+  `meta()` gets `{ data, params, url }` with its own loader's data (undefined under
+  `streaming = "early"`). `meta` objects are read once per module; a `meta()` that throws is
+  now logged (and skipped, as before). `_404` / `_500` pages get their own `meta`, and their
+  `title` export now wins over a layout's meta title.
+- **The generated sitemap.xml honors a layout's `meta.robots`.** A noindex `robots` in a
+  layout's `meta` object now leaves the pages under it out of the sitemap, as it already marks
+  their documents noindex. The page's own `robots` wins, then the nearest layout's (root →
+  nested → page, like the document metadata); `meta` functions aren't run for the sitemap.
+- **Types:** `Live<S>` takes a room island (`room` / `shared`) without `state` (`state` is
+  optional now; plain live islands still set it); `PageProps<typeof loader>` leaves
+  `ctx.redirect()` / `json()` / `html()` / `text()` results and `Response`s out of `data`;
+  `route("/x/[id]", { id })` compiles before the first `nowaki typegen`; `<form action={fn}>`
+  with a server function compiles (the new `@nowaki-dev/runtime/jsx-runtime` types, see
+  Upgrade notes). `scripts/types-test.mjs` type-checks these cases in CI.
+- **Docs:** `ApiHandler` documents the `{ status, headers, body }` object a handler may return,
+  and that any returned object with a `status` or `body` key is read as one (wrap such data, or
+  use `ctx.json()`). `<meta name="nowaki-live" content="ws|post">` (pins the live transport) is
+  listed as stable in `api/client.txt`.
 - **`nowaki dev` on Windows:** editing a module an island imports (a `lib/` util) updates the
   island in place with its state kept, as on macOS and Linux, instead of reloading the page.
   Windows reports a directory as modified whenever a file in it is written, and the watcher
   passed that directory on as a changed path, which forced a full reload. A content or
   metadata change of a directory is now ignored (a directory created, renamed or removed still
   counts). CI runs the HMR browser test on Windows too.
+- **The app's own server packages in the deploy output.** The server build leaves npm imports
+  as bare specifiers, but the deploy output carried only the runtime packages: on Vercel an app
+  importing `zod` in `env.ts`, a database client in a loader, or `@markdoc/markdoc` through the
+  Markdoc plugin failed to start (CI ran the function inside the app, where the app's
+  node_modules resolved it), and `cd dist/server && npm install --omit=dev` left those packages
+  out on the node, bun and deno adapters. The server build now lists the packages its output
+  imports, statically or by a string-literal `import()`, in `dist/server/server-deps.json` (Node
+  built-ins, with or without `node:`, left out), and:
+  - **vercel** copies each of them into the function with the packages they need
+    (`dependencies`, plus installed `optionalDependencies` and non-optional
+    `peerDependencies`), resolved from each package's real directory so pnpm installs work, a
+    conflicting version nested under the package that needs it. Packages are copied as
+    installed: a native addon (`.node`) must have been built for Linux x64, and the build warns
+    when it copies one.
+  - **node / bun / deno** list them in `dist/server/package.json`: a registry package at its
+    installed version, a remote spec (`npm:`, git, a URL) as the app declares it, and a
+    `file:` / `link:` package copied to `dist/server/vendor/` and listed as `file:./vendor/...`.
+    A `workspace:` package is listed by its version, so it has to be published.
+  - **cloudflare** needed nothing: wrangler bundles the worker from `dist/worker`, inside the
+    app, so it already included them.
+  Builds whose server code imports no other package copy and list nothing more. CI now runs the
+  Vercel function from a copy outside the app (`e2e-adapters.sh`, `gallery-e2e.mjs`), and
+  `scripts/server-deps-e2e.mjs` checks a generated app with a `file:` package, `zod`, a dynamic
+  import and two versions of one package, on dist/ and the function copied out of the app.
 
 ## [0.20.0] — 2026-11-14 · API freeze (the last breaking release before 1.0)
 

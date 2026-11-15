@@ -43,13 +43,18 @@ node index.mjs        # or: npm start
 
 ### Your own dependencies
 
-The compiled server code imports npm packages by name, and `dist/server/package.json` lists only
-the runtime packages. Packages your server code imports (a database client, `zod` in `env.ts`)
-must resolve from `dist/server` too. Either:
+The compiled server code imports npm packages by name. The build records every package it
+imports (a database client, `zod` in `env.ts`, a Markdoc plugin) and lists them in
+`dist/server/package.json` next to the runtime packages, at the versions installed in the app,
+so `cd dist/server && npm install --omit=dev` installs everything the server needs.
 
-- run `dist/server/index.mjs` inside the app directory, after `npm ci --omit=dev` there (Node
-  finds the app's `node_modules` above `dist/server`), or
-- add those packages to `dist/server/package.json` before `npm install`.
+- A `file:` package (or a local package outside `node_modules`) is copied to
+  `dist/server/vendor/<name>` and listed as `file:./vendor/<name>`.
+- A `workspace:` package is listed by its version, so it must be published.
+- Packages loaded only through `require()`, `createRequire` or an `import()` of a computed
+  string aren't detected: add them to `dist/server/package.json` yourself.
+- Running `dist/server/index.mjs` inside the app directory, after `npm ci --omit=dev` there, also
+  works (Node finds the app's `node_modules` above `dist/server`).
 
 ## Environment variables
 

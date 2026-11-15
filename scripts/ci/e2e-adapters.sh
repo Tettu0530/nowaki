@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # CI: builds examples/hello with each deploy adapter and checks the output: the node adapter's
 # server over HTTP (ports 3310-3312), static output on disk, the cloudflare worker called in Node,
-# and the vercel function over HTTP (3320). Then runs rules-e2e.mjs, i18n-e2e.mjs and
-# gallery-e2e.mjs on the adapters.
+# and the vercel function over HTTP (3320, run from a copy outside the app). Then runs rules-e2e.mjs,
+# i18n-e2e.mjs, gallery-e2e.mjs and server-deps-e2e.mjs on the adapters.
 # Needs `cargo build -p nowaki` and `pnpm install`; run as `bash scripts/ci/e2e-adapters.sh`.
 set -e
 trap 'echo "::error file=${BASH_SOURCE[0]},line=$LINENO::failed: $BASH_COMMAND" >&2' ERR
@@ -267,8 +267,12 @@ grep -q 'User-agent' examples/hello/.vercel/output/static/robots.txt
 grep -q 'media/hello%20world' examples/hello/.vercel/output/config.json
 # the function must not carry a nested preact (a second instance breaks hooks)
 ! test -d examples/hello/.vercel/output/functions/index.func/node_modules/@nowaki-dev/runtime/node_modules || exit 1
+# The function runs from a copy outside the app, as on Vercel: no node_modules above it, so every
+# package its server code imports (zod for env.ts, @nowaki-dev/markdoc, ...) must be inside it.
 # `exec` makes $! the PID of node itself, so the kill below stops it.
-(cd examples/hello/.vercel/output/functions/index.func \
+VERCEL_FUNC="$(mktemp -d)/index.func"
+cp -R examples/hello/.vercel/output/functions/index.func "$VERCEL_FUNC"
+(cd "$VERCEL_FUNC" \
   && exec node -e 'import("./index.mjs").then(m=>require("http").createServer(m.default).listen(3320))') &
 VERCEL_PID=$!
 for i in $(seq 1 20); do curl -sf http://127.0.0.1:3320/ >/dev/null && break; sleep 1; done
@@ -280,6 +284,9 @@ test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://evil.te
 test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://127.0.0.1:3320' -H 'content-type: application/json' -d '{}' http://127.0.0.1:3320/api/echo)" = 200
 test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'origin: http://evil.test' -H 'content-type: application/json' -d '{}' http://127.0.0.1:3320/api/webhook)" = 200
 curl -sf http://127.0.0.1:3320/docs/intro | grep -q '<h2 id="why-content-collections"'   # content on vercel
+# env.ts (zod) and Markdoc (@nowaki-dev/markdoc, @markdoc/markdoc) from inside the function
+curl -sf http://127.0.0.1:3320/env | grep -q 'token length 15'
+curl -sf http://127.0.0.1:3320/markdoc | grep -q 'class="callout callout-tip"'
 curl -sf http://127.0.0.1:3320/nav | grep -q 'href="/blog/hello"'
 # CDN purge: ISR pages carry Vercel-Cache-Tag (their tags + their path), other pages none
 curl -s -D - -o /dev/null http://127.0.0.1:3320/isr-tagged | grep -qiE '^vercel-cache-tag: t:isr-demo,p:/isr-tagged[[:space:]]*$'
@@ -288,6 +295,24 @@ curl -s -D - -o /dev/null http://127.0.0.1:3320/isr | grep -qiE '^vercel-cache-t
 # revalidateTag in an action without @vercel/functions installed: a warned no-op, the redirect stands
 curl -s -o /dev/null -w '%{http_code}' -X POST -H 'origin: http://127.0.0.1:3320' -d kind=tag http://127.0.0.1:3320/isr-tagged | grep -q '^303$'
 kill $VERCEL_PID
+# live on Vercel (VERCEL=1): without NOWAKI_LIVE_SECRET the live page renders but its events are
+# refused (503, every instance would sign with its own key); with it they apply
+vercel_live() {
+  (cd examples/hello/.vercel/output/functions/index.func \
+    && exec env VERCEL=1 "$@" node -e 'import("./index.mjs").then(m=>require("http").createServer(m.default).listen(3320))') &
+  VERCEL_PID=$!
+  for i in $(seq 1 20); do curl -sf http://127.0.0.1:3320/live >/dev/null && break; sleep 1; done
+  curl -sf http://127.0.0.1:3320/live | grep -q 'nowaki-live name="LiveCounter"'
+  VSIG=$(curl -sf http://127.0.0.1:3320/live | grep -oE 'sig="v1\.[^"]+"' | head -1 | cut -d'"' -f2)
+  VEV="{\"name\":\"LiveCounter\",\"state\":{\"count\":0},\"sig\":\"$VSIG\",\"handler\":\"inc\"}"
+  VCODE=$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'content-type: application/json' -H 'x-nowaki-live: 1' -H 'origin: http://127.0.0.1:3320' -d "$VEV" http://127.0.0.1:3320/__nowaki/live-event)
+  kill $VERCEL_PID
+  wait $VERCEL_PID 2>/dev/null || true
+}
+vercel_live env -u NOWAKI_LIVE_SECRET
+test "$VCODE" = 503
+vercel_live NOWAKI_LIVE_SECRET=e2e-adapters-live-secret-0123456789
+test "$VCODE" = 200
 # nowaki.config redirects / rewrites / headers / basePath / trailingSlash on the node, cloudflare,
 # vercel and static adapters (a generated app; the servers listen on 3313 and 3314)
 node scripts/rules-e2e.mjs node cloudflare vercel static --port 3313
@@ -299,3 +324,6 @@ node scripts/i18n-e2e.mjs node cloudflare static --port 3315
 # stand-in CDN with a fake @vercel/functions (also 3331, after the node server stopped), and
 # what static output can serve of it
 node scripts/gallery-e2e.mjs node cloudflare vercel static --port 3331
+# the app's own server packages (a registry stand-in, a file: package, zod, a dynamic import) in
+# dist/server/package.json and in the vercel function, both run outside the app (3321)
+node scripts/server-deps-e2e.mjs node vercel cloudflare --port 3321

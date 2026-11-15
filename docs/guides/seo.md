@@ -59,8 +59,15 @@ plain strings instead; `meta.title` wins over `title`.
 
 ### Defaults from layouts
 
-A layout's `meta` object applies to every page under it. The page's values win; `openGraph`
-and `twitter` merge one level deep.
+A layout's `meta` (an object, or a function of `{ data, params, url }` with the layout's own
+loader data) applies to every page under it, and so do its `title`, `lang` and `head` exports.
+Layouts combine root to leaf, then the page:
+
+- `title` and `lang`: the page's, else the nearest layout's that sets one. In each module
+  `meta.title` / `meta.lang` win over the `title` / `lang` exports. Any `lang` wins over the
+  i18n locale, which wins over `htmlAttrs.lang`.
+- `head`: each layout's (root first), then the page's.
+- The other fields: later values win; `openGraph` and `twitter` merge one level deep.
 
 ```tsx
 // routes/_layout.tsx
@@ -94,8 +101,9 @@ file provides them. The static adapter writes both files.
 
 - The sitemap lists every page, including dynamic ones that have `staticPaths` (a dynamic page
   without it can't be enumerated).
-- `export const sitemap = false` leaves a page out, and so does a static `meta` with a noindex
-  `robots`.
+- `export const sitemap = false` leaves a page out, and so does a noindex `robots` in a static
+  `meta` object: the page's, else the nearest layout's (a `meta` function isn't run for the
+  sitemap).
 - With `i18n`, each page is listed in every locale with `xhtml:link` alternates.
 - URLs follow `basePath` and `trailingSlash`.
 - The generated robots.txt allows everything and points at the sitemap. For anything else, write

@@ -65,7 +65,7 @@ export const ENV = {
   NOWAKI_LIVE_SECRET: {
     group: "live",
     default: "a random key per process (warned)",
-    text: "Key that signs live island state. Set it in production so signatures stay valid across processes, instances and restarts.",
+    text: "Key that signs live island state. Set it in production so signatures stay valid across processes, instances and restarts. The cloudflare and vercel adapters refuse live events (503) without it.",
   },
   NOWAKI_LIVE_MAX_AGE: {
     group: "live",
@@ -256,6 +256,10 @@ export const CLIENT = {
   "data-nowaki-reset": "In `error.tsx`: a click on this element retries the failed navigation.",
   "data-nowaki-presence":
     "An element whose text the live runtime keeps set to the number of live connections: `\"\"` counts every connection, a room id counts that room's members.",
+  'meta[name="nowaki-live"]':
+    "`<meta name=\"nowaki-live\" content=\"ws\">` or `content=\"post\"` in the page's head pins the live transport: the WebSocket (`/__nowaki/live`, `nowaki dev` / `nowaki start` only) or one `POST /__nowaki/live-event` per event. It wins over the transport the server picks.",
+  'meta[name="nowaki-router-cache"]':
+    "`<meta name=\"nowaki-router-cache\" content=\"seconds\">` sets how many seconds the client router keeps a visited or prefetched page (the Router Cache) for the next navigation to it. Default `30`; `0` turns the cache off. Read from the page the router starts on.",
 };
 
 /** Stable entries of api/files.txt. */
