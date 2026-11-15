@@ -9,7 +9,8 @@
 //! be concatenated fall back to unbundled emit.
 //!
 //! The server build transforms the app's server graph for SSR (not minified) into
-//! `dist/server/`, with `functions.json` for server functions.
+//! `dist/server/`, with `functions.json` for server functions and `server-deps.json` for the npm
+//! packages that graph imports (the deploy adapters ship them).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -299,8 +300,9 @@ fn build_route_scripts(
 /// Server build: transforms the app's server graph (routes/, islands/, components/, lib/,
 /// actions/, content/, env.ts, session.ts, and every app module they import) in SSR mode and
 /// writes it to dist/server/ as ESM that Node can run directly. Relative imports of TS and other
-/// compiled extensions become `.js`; bare imports are left to Node resolution. `assets` is the
-/// client build's asset map. Returns the number of output modules.
+/// compiled extensions become `.js`; bare imports are left to Node resolution, and the packages
+/// they name are listed in `server-deps.json`. `assets` is the client build's asset map. Returns
+/// the number of output modules.
 pub fn build_server(
     core: &NowakiCore,
     dist: &Path,
@@ -376,7 +378,7 @@ pub fn build_server(
     };
     // Server modules are independent (no naming dependencies), so they are transformed in
     // parallel.
-    let results: Vec<Result<(PathBuf, String)>> = files
+    let results: Vec<Result<(PathBuf, String, Vec<String>)>> = files
         .par_iter()
         .map(|path| {
             let rel = path
@@ -384,14 +386,17 @@ pub fn build_server(
                 .with_context(|| format!("failed to relativize: {}", path.display()))?;
             let out_path = server_dir.join(with_js_ext(rel));
             let source = core.read_source(path)?;
-            let code = transform_for_server(path, &out_path, &source, core, &server_assets)?;
-            Ok((out_path, code))
+            let (code, packages) =
+                transform_for_server(path, &out_path, &source, core, &server_assets)?;
+            Ok((out_path, code, packages))
         })
         .collect();
 
     let mut count = 0;
+    let mut packages: BTreeSet<String> = BTreeSet::new();
     for r in results {
-        let (out_path, code) = r?;
+        let (out_path, code, imported) = r?;
+        packages.extend(imported);
         if let Some(parent) = out_path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -410,6 +415,13 @@ pub fn build_server(
     // The runtime dispatches via this id→{module,export} (the client can't call arbitrary exports).
     // Kept out of the client manifest (so the server's file layout isn't exposed).
     write_server_functions(core, &server_dir)?;
+    // The npm packages the server code imports (bare specifiers, Node built-ins excluded): the
+    // node / bun / deno adapters list them in dist/server/package.json and the vercel adapter
+    // copies them into its function. A JSON array of package names, sorted.
+    fs::write(
+        server_dir.join("server-deps.json"),
+        serde_json::to_string_pretty(&packages)? + "\n",
+    )?;
     // With env.ts the server validates only its server variables at startup; the public ones are
     // the values this build inlined, so server and client agree.
     if crate::env::env_file(&core.root).is_some() {
@@ -512,14 +524,15 @@ impl ServerAssets {
 
 /// SSR transform: TS stripping, JSX (automatic runtime, Preact), client defines, and import
 /// rewrites (virtual modules, CSS, assets, `?image`, relative imports to `.js`). Not minified, so
-/// the inline source map is exact and SSR stack traces stay readable.
+/// the inline source map is exact and SSR stack traces stay readable. Also returns the npm packages
+/// the emitted module imports (see [`package_of`]).
 fn transform_for_server(
     path: &Path,
     out_path: &Path,
     source: &str,
     core: &NowakiCore,
     assets: &ServerAssets,
-) -> Result<String> {
+) -> Result<(String, Vec<String>)> {
     let allocator = Allocator::default();
     let mut program = crate::transform::parse_program(
         &allocator,
@@ -640,10 +653,25 @@ fn transform_for_server(
         }
     }
     // `import("./x.ts")` must load the emitted `./x.js` too (build_server emits its target).
-    DynamicImportSpecs {
+    let mut dynamic = DynamicImportSpecs {
         allocator: &allocator,
+        packages: Vec::new(),
+    };
+    dynamic.visit_program(&mut program);
+    // What's left bare after the rewrites above is what Node resolves from node_modules. Type-only
+    // imports are gone by now (the TS transform dropped them).
+    let mut packages = dynamic.packages;
+    for stmt in &program.body {
+        let lit = match stmt {
+            Statement::ImportDeclaration(d) => &d.source,
+            Statement::ExportFromDeclaration(d) => &d.source,
+            Statement::ExportAllDeclaration(d) => &d.source,
+            _ => continue,
+        };
+        if let Some(name) = lit.value.as_str().and_then(package_of) {
+            packages.push(name.to_string());
+        }
     }
-    .visit_program(&mut program);
 
     // SSR isn't minified, so the inline source map is exact (for node --enable-source-maps).
     let ret = Codegen::new()
@@ -658,13 +686,87 @@ fn transform_for_server(
         code.push_str(&map.to_data_url());
         code.push('\n');
     }
-    Ok(code)
+    Ok((code, packages))
+}
+
+/// Node's built-in modules, imported without the `node:` prefix (`fs`, `fs/promises`, …).
+const NODE_BUILTINS: &[&str] = &[
+    "assert",
+    "async_hooks",
+    "buffer",
+    "child_process",
+    "cluster",
+    "console",
+    "constants",
+    "crypto",
+    "dgram",
+    "diagnostics_channel",
+    "dns",
+    "domain",
+    "events",
+    "fs",
+    "http",
+    "http2",
+    "https",
+    "inspector",
+    "module",
+    "net",
+    "os",
+    "path",
+    "perf_hooks",
+    "process",
+    "punycode",
+    "querystring",
+    "readline",
+    "repl",
+    "stream",
+    "string_decoder",
+    "sys",
+    "timers",
+    "tls",
+    "trace_events",
+    "tty",
+    "url",
+    "util",
+    "v8",
+    "vm",
+    "wasi",
+    "worker_threads",
+    "zlib",
+];
+
+/// The npm package a bare import specifier loads (`zod` → `zod`, `@a/b/c` → `@a/b`,
+/// `preact/hooks` → `preact`). None for anything else: relative and absolute paths, `#imports`,
+/// URLs and other `scheme:` specifiers (`node:`, `data:`, `bun:`, `npm:`), and Node built-ins.
+fn package_of(spec: &str) -> Option<&str> {
+    if spec.is_empty()
+        || spec.starts_with(['.', '/', '\\', '#'])
+        || spec.contains(':')
+        || spec.contains('\\')
+    {
+        return None;
+    }
+    let end = if spec.starts_with('@') {
+        let slash = spec.find('/')?;
+        match spec[slash + 1..].find('/') {
+            Some(i) => slash + 1 + i,
+            None => spec.len(),
+        }
+    } else {
+        spec.find('/').unwrap_or(spec.len())
+    };
+    let name = &spec[..end];
+    if name.ends_with('/') || name == "@" || NODE_BUILTINS.contains(&name) {
+        return None;
+    }
+    Some(name)
 }
 
 /// Rewrites string-literal `import()` specifiers the way static imports are (React packages →
-/// preact/compat, TS extension → .js).
+/// preact/compat, TS extension → .js), and collects the packages they load.
 struct DynamicImportSpecs<'a> {
     allocator: &'a Allocator,
+    packages: Vec<String>,
 }
 
 impl<'a> VisitMut<'a> for DynamicImportSpecs<'a> {
@@ -680,6 +782,9 @@ impl<'a> VisitMut<'a> for DynamicImportSpecs<'a> {
             if let Some(rewritten) = rewritten {
                 lit.value = self.allocator.alloc_str(&rewritten).into();
                 lit.raw = None;
+            }
+            if let Some(name) = lit.value.as_str().and_then(package_of) {
+                self.packages.push(name.to_string());
             }
         }
         walk_mut::walk_import_expression(self, it);
@@ -1330,6 +1435,35 @@ mod tests {
                 .unwrap_err()
                 .to_string();
             assert!(err.contains("which an island name can't"), "{bad}: {err}");
+        }
+    }
+
+    #[test]
+    fn package_of_names_the_npm_package_of_a_bare_import() {
+        for (spec, want) in [
+            ("zod", Some("zod")),
+            ("preact/hooks", Some("preact")),
+            ("@markdoc/markdoc", Some("@markdoc/markdoc")),
+            (
+                "@nowaki-dev/runtime/server/app.mjs",
+                Some("@nowaki-dev/runtime"),
+            ),
+            ("fs", None),
+            ("fs/promises", None),
+            ("node:crypto", None),
+            ("bun:sqlite", None),
+            ("npm:zod", None),
+            ("data:text/javascript,", None),
+            ("https://esm.sh/x", None),
+            ("./x.js", None),
+            ("../x.js", None),
+            ("/abs/x.js", None),
+            ("#internal", None),
+            ("@scope", None),
+            ("@scope/", None),
+            ("", None),
+        ] {
+            assert_eq!(super::package_of(spec), want, "{spec}");
         }
     }
 }

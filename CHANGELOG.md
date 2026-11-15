@@ -31,6 +31,30 @@ milestone's worth of work; the codename is noted per entry.
   passed that directory on as a changed path, which forced a full reload. A content or
   metadata change of a directory is now ignored (a directory created, renamed or removed still
   counts). CI runs the HMR browser test on Windows too.
+- **The app's own server packages in the deploy output.** The server build leaves npm imports
+  as bare specifiers, but the deploy output carried only the runtime packages: on Vercel an app
+  importing `zod` in `env.ts`, a database client in a loader, or `@markdoc/markdoc` through the
+  Markdoc plugin failed to start (CI ran the function inside the app, where the app's
+  node_modules resolved it), and `cd dist/server && npm install --omit=dev` left those packages
+  out on the node, bun and deno adapters. The server build now lists the packages its output
+  imports, statically or by a string-literal `import()`, in `dist/server/server-deps.json` (Node
+  built-ins, with or without `node:`, left out), and:
+  - **vercel** copies each of them into the function with the packages they need
+    (`dependencies`, plus installed `optionalDependencies` and non-optional
+    `peerDependencies`), resolved from each package's real directory so pnpm installs work, a
+    conflicting version nested under the package that needs it. Packages are copied as
+    installed: a native addon (`.node`) must have been built for Linux x64, and the build warns
+    when it copies one.
+  - **node / bun / deno** list them in `dist/server/package.json`: a registry package at its
+    installed version, a remote spec (`npm:`, git, a URL) as the app declares it, and a
+    `file:` / `link:` package copied to `dist/server/vendor/` and listed as `file:./vendor/...`.
+    A `workspace:` package is listed by its version, so it has to be published.
+  - **cloudflare** needed nothing: wrangler bundles the worker from `dist/worker`, inside the
+    app, so it already included them.
+  Builds whose server code imports no other package copy and list nothing more. CI now runs the
+  Vercel function from a copy outside the app (`e2e-adapters.sh`, `gallery-e2e.mjs`), and
+  `scripts/server-deps-e2e.mjs` checks a generated app with a `file:` package, `zod`, a dynamic
+  import and two versions of one package, on dist/ and the function copied out of the app.
 
 ## [0.20.0] — 2026-11-14 · API freeze (the last breaking release before 1.0)
 

@@ -1,5 +1,7 @@
 // Build-time generator for the Vercel adapter (runs on Node). Emits Build Output API v3 to `.vercel/output/`.
-// Functions must be self-contained, so dist/server and the needed node_modules are copied into the Function.
+// Functions must be self-contained, so dist/server and the needed node_modules are copied into the Function:
+// the runtime packages, every package the server code imports (dist/server/server-deps.json) and
+// what those need, and @vercel/functions when the app has it.
 //
 // Usage: node vercel-build.mjs <serverDir> <clientDir> <outputDir> <appRoot>
 
@@ -46,7 +48,10 @@ await mkdir(path.join(funcDir, "client"), { recursive: true });
 await cp(path.join(clientDir, "manifest.json"), path.join(funcDir, "client", "manifest.json"));
 
 const nodeModules = path.join(funcDir, "node_modules");
-for (const dep of ["@nowaki-dev/runtime", "preact", "preact-render-to-string"]) {
+const RUNTIME_PACKAGES = ["@nowaki-dev/runtime", "preact", "preact-render-to-string"];
+// Package directory in the function → the real directory it was copied from (installPackages).
+const placed = new Map();
+for (const dep of RUNTIME_PACKAGES) {
   const src = path.join(appRoot, "node_modules", dep);
   // Dependencies' nested node_modules are not copied: a second preact there (the runtime's
   // devDependency in a workspace) would split hooks across instances and break SSR. Node walks
@@ -58,9 +63,19 @@ for (const dep of ["@nowaki-dev/runtime", "preact", "preact-render-to-string"]) 
   });
 }
 
+// The function runs where no app node_modules is above it, so every package its server code
+// imports goes in, with the packages those need. The server build lists them
+// (server-deps.json: bare imports left in dist/server, Node built-ins excluded).
+const serverDeps = await readFile(path.join(serverDir, "server-deps.json"), "utf8").then(JSON.parse, () => []);
+const appDeps = serverDeps.filter((name) => !RUNTIME_PACKAGES.includes(name));
+const installed = await installPackages(appDeps, appRoot);
+for (const name of appDeps) {
+  if (!installed.has(name)) console.warn(`[nowaki] vercel adapter: the server imports ${name}, which isn't installed`);
+}
+
 // revalidatePath / revalidateTag purge Vercel's CDN through @vercel/functions when the app has it
 // installed: it goes into the function with its dependencies (purge-vercel.mjs loads it lazily).
-const vercelFunctions = await copyWithDeps("@vercel/functions", appRoot, nodeModules);
+const vercelFunctions = (await installPackages(["@vercel/functions"], appRoot)).size > 0;
 
 const handler = `// Generated: Vercel serverless function (Node).
 import path from "node:path";
@@ -152,25 +167,64 @@ function publicRoutes() {
   return out;
 }
 
-/// Copies the package `name` as the app resolves it, plus its `dependencies` (each resolved from
-/// the package's real directory, so pnpm's layout works too), flat into `dest`. Returns false when
-/// the app doesn't have the package. A dependency that can't be found is skipped with a warning.
-async function copyWithDeps(name, fromDir, dest, seen = new Set()) {
-  if (seen.has(name)) return true;
-  const dir = findPackage(name, fromDir);
-  if (!dir) return false;
-  seen.add(name);
-  const real = realpathSync(dir);
-  await cp(real, path.join(dest, name), {
-    recursive: true,
-    dereference: true,
-    filter: (s) => !path.relative(real, s).split(path.sep).includes("node_modules"),
-  });
-  const pkg = JSON.parse(await readFile(path.join(real, "package.json"), "utf8"));
-  for (const dep of Object.keys(pkg.dependencies ?? {})) {
-    if (!(await copyWithDeps(dep, real, dest, seen))) console.warn(`[nowaki] vercel adapter: ${name} needs ${dep}, which isn't installed`);
+/// Copies the packages `names`, as the app at `fromDir` resolves them, into the function's
+/// node_modules with their dependency closure, the way npm lays out an install: a package goes to
+/// the top level unless another version holds that name there, then under the package that needs
+/// it. Each dependency is resolved from its dependent's real directory, so pnpm's layout works
+/// too. Walked breadth first, so the packages the app imports get the top-level names. Followed:
+/// `dependencies`, and `optionalDependencies` and non-optional `peerDependencies` when installed.
+/// Packages are copied as they are, native addons included. Returns the names of `names` found.
+async function installPackages(names, fromDir) {
+  const found = new Set();
+  const queue = names.map((name) => ({ name, from: fromDir, at: funcDir, required: true }));
+  while (queue.length) {
+    const { name, from, at, required, parent } = queue.shift();
+    // Always the single top-level copy (see above).
+    if (RUNTIME_PACKAGES.includes(name)) continue;
+    const src = findPackage(name, from);
+    if (!src) {
+      if (required && parent) console.warn(`[nowaki] vercel adapter: ${parent} needs ${name}, which isn't installed`);
+      continue;
+    }
+    if (!parent) found.add(name);
+    const real = realpathSync(src);
+    // Where Node, from the dependent's directory `at`, would find `name` in the function.
+    let dest = null;
+    for (let dir = at; ; dir = path.dirname(dir)) {
+      const there = placed.get(path.join(dir, "node_modules", name));
+      if (there !== undefined) {
+        dest = there === real ? null : path.join(at, "node_modules", name);
+        break;
+      }
+      if (dir === funcDir || path.dirname(dir) === dir) {
+        dest = path.join(funcDir, "node_modules", name);
+        break;
+      }
+    }
+    if (!dest) continue; // already there
+    placed.set(dest, real);
+    let native = false;
+    await cp(real, dest, {
+      recursive: true,
+      dereference: true,
+      filter: (s) => {
+        if (s.endsWith(".node")) native = true;
+        return !path.relative(real, s).split(path.sep).includes("node_modules");
+      },
+    });
+    if (native) {
+      console.warn(`[nowaki] vercel adapter: ${name} has a native addon (.node), copied as installed: it runs on Vercel only if it was built for Linux x64 (install on Linux, or the package's linux-x64 build)`);
+    }
+    const pkg = JSON.parse(await readFile(path.join(real, "package.json"), "utf8"));
+    const optionalPeer = (dep) => pkg.peerDependenciesMeta?.[dep]?.optional === true;
+    const deps = [
+      ...Object.keys(pkg.dependencies ?? {}).map((dep) => [dep, true]),
+      ...Object.keys(pkg.optionalDependencies ?? {}).map((dep) => [dep, false]),
+      ...Object.keys(pkg.peerDependencies ?? {}).filter((dep) => !optionalPeer(dep)).map((dep) => [dep, false]),
+    ];
+    for (const [dep, req] of deps) queue.push({ name: dep, from: real, at: dest, required: req, parent: name });
   }
-  return true;
+  return found;
 }
 
 // Node's lookup: `node_modules/<name>` in `from` or any parent directory.
