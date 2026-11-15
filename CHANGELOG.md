@@ -51,6 +51,19 @@ milestone's worth of work; the codename is noted per entry.
   `.env.local`. SUPPORT.md and SECURITY.md name the supported 0.x line as 0.20.x, and SUPPORT.md
   lists the Node versions CI runs (22, 24 and 26).
 ### Fixed
+- `nowaki upgrade` runs npm, pnpm and yarn on Windows: they are `.cmd` shims there, which the CLI
+  didn't find by their bare name, so every install failed with "failed to start npm".
+- **`nowaki upgrade --to <version>` no longer refuses an app from before 0.19.3.** The CLI and
+  the runtime were released at different versions then, and the readiness report listed the
+  mismatch (say `nowaki 0.18.2` and `@nowaki-dev/runtime 0.17.2`) as "must change", so
+  nothing was installed, while its fix was to run `nowaki upgrade`. When the upgrade installs
+  both packages, the report now lists the mismatch under "Fixed by this upgrade" (with
+  `--check`: "Fixed by `nowaki upgrade --to <version>`") and it doesn't stop the install.
+  The mismatch is also found from the package.json ranges when nothing is installed.
+- `nowaki upgrade` installs both `nowaki` and `@nowaki-dev/runtime` at the target version
+  when the app has them in package.json or in node_modules, each in the section it is in
+  (the runtime is no longer skipped when it is in devDependencies), so the two end on the
+  same version.
 - **`nowaki dev` on Windows:** editing a module an island imports (a `lib/` util) updates the
   island in place with its state kept, as on macOS and Linux, instead of reloading the page.
   Windows reports a directory as modified whenever a file in it is written, and the watcher
