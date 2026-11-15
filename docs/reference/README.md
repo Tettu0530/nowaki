@@ -34,10 +34,10 @@ What is covered by semver, and what is not: [STABILITY.md](../STABILITY.md). The
 
 ## Other docs
 
-- Guides, one per feature: `docs/guides/`
-- Deployment, one page per adapter: `docs/deploy/`
-- Troubleshooting: `docs/troubleshooting.md`
-- Upgrading to 1.0: `docs/upgrade-to-1.0.md`
-- Migrating from Next.js: `docs/migrate-from-nextjs.md`
+- [Guides, one per feature (index)](../README.md)
+- [Deployment, one page per adapter](../deploy/README.md)
+- [Troubleshooting](../troubleshooting.md)
+- [Upgrading to 1.0](../upgrade-to-1.0.md)
+- [Migrating from Next.js](../migrate-from-nextjs.md)
 - [Migrating from Astro](../migrate-from-astro.md)
 - [Stability and versioning](../STABILITY.md)

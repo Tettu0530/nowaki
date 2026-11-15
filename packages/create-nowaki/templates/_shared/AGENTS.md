@@ -249,7 +249,7 @@ session.ts   ctx.session options (optional)
     `/__nowaki/health` answers `{"status":"ok"}` for load balancers.
 19. **Dev toolbar and HMR** — `nowaki dev` keeps island state across edits (Fast
     Refresh; adding or removing a hook remounts), updates CSS without a reload, and
-    re-renders the page in place on route / layout edits. Its toolbar (bottom right)
+    re-renders the page in place on route / layout edits. Its toolbar (bottom left)
     shows the route, layouts and timings, the page's islands, first-load JS against
     `budget`, ISR settings, live connections and errors. Turn it off with
     `nowaki dev --no-toolbar` or `NOWAKI_TOOLBAR=0`.

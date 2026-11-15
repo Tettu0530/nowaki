@@ -28,12 +28,17 @@ only additively. An app that runs on 0.20.x runs on 1.0.0 once both packages are
    npx nowaki@0.20.0 upgrade --to 0.20.0
    ```
    `nowaki upgrade --to <version>` runs the same report first and installs nothing while
-   something must change. Apps from before 0.19.3 had different CLI and runtime versions by
-   design (CLI 0.18.2 with runtime 0.17.2, for example), and the report lists that as a "Must
-   change" item that `nowaki upgrade` then won't install past. Install both by hand in that case:
-   ```sh
-   npm install @nowaki-dev/runtime@0.20.0 && npm install -D nowaki@0.20.0
-   ```
+   something must change.
+
+   **Apps from before 0.19.3.** Until 0.19.3 the CLI (`nowaki`) and the runtime
+   (`@nowaki-dev/runtime`) were released at different versions, so an older app has two
+   different versions installed, for example `nowaki 0.18.2` and `@nowaki-dev/runtime 0.17.2`.
+   You don't need to fix this by hand. The readiness report lists it under "Fixed by this
+   upgrade" (with `--check`: "Fixed by `nowaki upgrade --to <version>`"), and it doesn't stop
+   the upgrade. `nowaki upgrade --to <version>` installs both packages at that version, keeping
+   each in the dependency section it was in. The CLI usually stays in `devDependencies`. After
+   the upgrade both report the same version. Only the items under "Must change" need your
+   changes before you upgrade.
    Either way, keep both at the same version: since 0.20.0 the CLI refuses a runtime of another
    version line.
 5. Copy `nowaki-env.d.ts` and `nowaki-jsx.d.ts` from a new app (`npm create nowaki@latest`)

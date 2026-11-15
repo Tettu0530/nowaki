@@ -82,7 +82,7 @@ either covered by semver or listed below as not covered. Frozen and covered by s
   `data-nowaki-presence`; the `name` attribute of `<nowaki-slot>`.
 - **Adapter deploy contract** for `node`, `static`, `bun`, `deno`, `cloudflare` and `vercel`:
   the output paths (`dist/server/index.mjs` and its start command, `dist/static` with
-  `_redirects` / `_headers`, `dist/worker` with `wrangler.toml`, `.vercel/output`), the
+  `_redirects` / `_headers`, `dist/worker` with `wrangler.jsonc`, `.vercel/output`), the
   environment variables each reads, and `nowaki start` serving `dist/`.
 - **Observability**: the JSON log line fields (`time`, `level`, `msg`, `source`, `trace_id`,
   `span_id`) and the documented OpenTelemetry span names and attributes. New fields and
