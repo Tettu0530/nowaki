@@ -11,6 +11,27 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Fixed
+- **`nowaki upgrade --check` no longer flags a catch-all page's `export const head`.** The
+  readiness report took the dots of `[...slug]` (and `[[...slug]]`) for a file route's
+  extension, so `routes/docs/[...slug].tsx` exporting its document head was reported as a
+  lowercase `head` method to rename to `HEAD`, which stopped `nowaki upgrade --to <version>`.
+  It now decides page vs. file route as the runtime does (`feed.xml.ts`, `[card].png.ts`: an
+  extension after any `]`). The runtime itself already classified these files correctly.
+- **Static output: config redirects, rewrites and headers match with and without a trailing
+  slash.** Cloudflare Pages and Netlify match `_redirects` / `_headers` paths exactly, while the
+  servers ignore the slash, so a redirect from `/docs/routing` answered 404 at `/docs/routing/`.
+  Under `trailingSlash: "ignore"` (the default) a source is now written in both forms; under
+  `"always"` / `"never"` the rule is written for the canonical form and the other form redirects
+  to it (308), as the servers do. Sources ending in a file name (`/feed.xml`) or a splat, and
+  `/`, are written once.
+- **Highlighted code follows the page's color scheme.** Markdown and MDX code blocks were
+  always GitHub light (a white box on a dark site). Each inline color is now followed by
+  `light-dark(<light>, <dark>)` with a GitHub-dark counterpart, so a page with `color-scheme:
+  dark` (or `light dark` and a dark OS) gets dark code blocks. A page without `color-scheme`, and
+  a browser without `light-dark()`, renders exactly as before (the light declaration comes
+  first). No new option; see docs/guides/content.md.
+
 ## [1.0.0-rc.1] — 2026-11-15 · release candidate
 
 Packages: `nowaki`, `@nowaki-dev/runtime`, `create-nowaki` / `create-nowaki-app` and

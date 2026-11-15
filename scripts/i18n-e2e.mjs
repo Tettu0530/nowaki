@@ -259,8 +259,9 @@ function staticCombo(dir) {
   const redirects = read("_redirects");
   check(
     "static combo: config rules per locale in _redirects",
-    redirects.includes("/app/ja/old-about /app/ja/about 307\n/app/old-about /app/about 307\n") &&
-      redirects.includes("/app/ja/p/:id /app/ja/photos/:id 200\n/app/p/:id /app/photos/:id 200\n") &&
+    // trailingSlash "never": the slashed form of each source redirects to the canonical one
+    redirects.includes("/app/ja/old-about /app/ja/about 307\n/app/ja/old-about/ /app/ja/old-about 308\n/app/old-about /app/about 307\n/app/old-about/ /app/old-about 308\n") &&
+      redirects.includes("/app/ja/p/:id /app/ja/photos/:id 200\n/app/ja/p/:id/ /app/ja/p/:id 308\n/app/p/:id /app/photos/:id 200\n") &&
       redirects.includes("/app/ja/legacy /app/ja/about 307\n") &&
       redirects.indexOf("/app/ja/old-about") < redirects.indexOf("/app/en/* "),
     redirects,

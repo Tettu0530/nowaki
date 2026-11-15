@@ -438,6 +438,7 @@ try {
       const redirects = readFileSync(path.join(appA, "dist/static/_redirects"), "utf8");
       const headers = readFileSync(path.join(appA, "dist/static/_headers"), "utf8");
       check("static A: _redirects", redirects.includes("/old/* /new/:splat 308\n") && redirects.includes("/go/:to /:to 307\n") && redirects.includes("/p/:id /photo/:id 200\n") && redirects.includes("/ext https://example.com/landing 301\n"), redirects);
+      check("static A: trailingSlash ignore writes a literal source with and without the slash (a static host matches exactly)", redirects.includes("/ext https://example.com/landing 301\n/ext/ https://example.com/landing 301\n") && redirects.includes("/go/:to /:to 307\n/go/:to/ /:to 307\n") && !redirects.includes("/old/*/"), redirects);
       check("static A: _headers has the config headers after the defaults", /\/api\/\*\n {2}cache-control: no-store\n/.test(headers) && headers.indexOf("/api/*") > headers.indexOf("x-content-type-options"), headers);
       check("static A: warns about a header a host may merge", /x-frame-options/.test(outA));
       check("static A: pages rendered", readFileSync(path.join(appA, "dist/static/photo/1/index.html"), "utf8").includes("PHOTO id:1"));
@@ -450,7 +451,9 @@ try {
       check("static B: canonical without the slash", /rel="canonical" href="https:\/\/e\.x[^"]*\/about"/.test(aboutB), aboutB.match(/rel="canonical"[^>]*/)?.[0]);
       const sitemapB = existsSync(staticB("sitemap.xml")) ? readFileSync(staticB("sitemap.xml"), "utf8") : "";
       check("static B: sitemap URLs without the slash", /<loc>https:\/\/e\.x[^<]*\/photo\/1<\/loc>/.test(sitemapB) && !/\/<\/loc>/.test(sitemapB.replace(/<loc>https:\/\/e\.x(\/app)?\/?<\/loc>/, "")), sitemapB);
-      check("static B: _redirects carries basePath", readFileSync(path.join(appB, "dist/static/_redirects"), "utf8").includes("/app/legacy /app/about 307\n"));
+      const redirectsB = readFileSync(path.join(appB, "dist/static/_redirects"), "utf8");
+      check("static B: _redirects carries basePath", redirectsB.includes("/app/legacy /app/about 307\n"), redirectsB);
+      check("static B: trailingSlash never sends the slashed form to the canonical one", redirectsB.includes("/app/legacy/ /app/legacy 308\n"), redirectsB);
       check("static B: warns about basePath, not trailingSlash (the file layout carries it)", /basePath/.test(outB) && !/trailingSlash/.test(outB));
       const kit = readFileSync(staticB("kit.html"), "utf8");
       check("static B: pages reference assets under basePath, <Link> gets it", /src="\/app\/_nowaki\/islands\.[0-9a-f]+\.js"/.test(kit) && kit.includes('href="/app/about">LINK') && !/"\/_nowaki\//.test(kit), kit.slice(0, 300));

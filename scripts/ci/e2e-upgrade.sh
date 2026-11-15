@@ -21,6 +21,9 @@ grep -q 'routes/_error.tsx:1' "$TMP/report.txt"
 grep -q 'nothing was installed' "$TMP/report.txt"
 ! test -e "$TMP/node_modules" || exit 1
 mv "$TMP/routes/_error.tsx" "$TMP/routes/_500.tsx"
+# a catch-all page's document head is not a lowercase HEAD handler ([...slug] has no extension)
+mkdir -p "$TMP/routes/docs"
+printf 'export const head = "<style>a{}</style>";\nexport default () => null;\n' > "$TMP/routes/docs/[...slug].tsx"
 ./target/debug/nowaki upgrade "$TMP" --to 1.0.0 --check | grep -q 'nothing must change'
 ! test -e "$TMP/node_modules" || exit 1
 rm -rf "$TMP"

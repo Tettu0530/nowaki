@@ -1743,6 +1743,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "syntect",
  "tempfile",
  "two-face",
  "xxhash-rust",
