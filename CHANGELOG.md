@@ -11,6 +11,17 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] — 2026-11-15 · release candidate
+
+Packages: `nowaki`, `@nowaki-dev/runtime`, `create-nowaki` / `create-nowaki-app` 1.0.0-rc.2 on
+the npm `next` tag (crates.io: `nowaki` 1.0.0-rc.2); `nowaki-core` 0.20.2 (internal, pinned
+exactly); `@nowaki-dev/markdoc` stays 1.0.0-rc.1. No change to the frozen API (`api/`), so the
+release-candidate window continues from rc.1.
+
+Fixes found by running nowaki.dev on rc.1: `nowaki upgrade` no longer misreads a catch-all page
+exporting `head` as a lowercase method export (which blocked the upgrade); static `_redirects` /
+`_headers` cover both trailing-slash forms; highlighted code follows the page's color scheme.
+
 ### Fixed
 - **`nowaki upgrade --check` no longer flags a catch-all page's `export const head`.** The
   readiness report took the dots of `[...slug]` (and `[[...slug]]`) for a file route's
