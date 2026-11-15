@@ -131,6 +131,8 @@ class CDP {
     this.id = 0;
     this.pending = new Map();
     this.cspLogs = 0; // CSP violations Chrome logged, in any document this target showed
+    this.hmrSockets = 0; // HMR WebSockets opened (handshake answered), in any document
+    this.sockets = new Map(); // WebSocket requestId -> url
     this.ready = new Promise((res, rej) => {
       this.ws.onopen = () => res();
       this.ws.onerror = (e) => rej(e);
@@ -146,6 +148,8 @@ class CDP {
         console.log("  page log:", msg.params.entry.text, msg.params.entry.url ?? "");
         if (/Content Security Policy/.test(msg.params.entry.text)) this.cspLogs++;
       }
+      if (msg.method === "Network.webSocketCreated") this.sockets.set(msg.params.requestId, msg.params.url);
+      if (msg.method === "Network.webSocketHandshakeResponseReceived" && /\/__nowaki\/hmr$/.test(this.sockets.get(msg.params.requestId) ?? "")) this.hmrSockets++;
       if (msg.id && this.pending.has(msg.id)) {
         const { resolve, reject } = this.pending.get(msg.id);
         this.pending.delete(msg.id);
@@ -194,20 +198,35 @@ const latencies = {};
 
 // Edits `file` and waits until `expr` holds in the page. A MutationObserver (plus a check on
 // each `nowaki:hmr` event and stylesheet load) stamps when it first held, so the latency doesn't
-// include this script's polling.
+// include this script's polling. The probe is this edit's only: the previous one is removed
+// first (a late event from an earlier update, such as a <style> load, must not run an old probe
+// whose condition still holds and pass this edit early), and `expr` must not hold before the
+// write. Each `nowaki:page-load` during the edit is recorded in `window.__pageLoads` as whether
+// `expr` held when it fired.
 async function edit(cdp, dir, file, from, to, expr, kind) {
   const abs = path.join(dir, file);
   const text = readFileSync(abs, "utf8");
   if (!text.includes(from)) throw new Error(`${file} has no ${JSON.stringify(from)}`);
-  await cdp.eval(`
+  const armed = await cdp.eval(`
+    window.__probeOff?.();
     window.__hit = 0;
+    window.__pageLoads = [];
+    if (${expr}) return false;
     const probe = () => { if (!window.__hit && (${expr})) window.__hit = Date.now(); };
-    window.__probe?.disconnect();
-    window.__probe = new MutationObserver(probe);
-    window.__probe.observe(document, { subtree: true, childList: true, characterData: true, attributes: true });
+    const pageLoad = () => window.__pageLoads.push(!!(${expr}));
+    const observer = new MutationObserver(probe);
+    observer.observe(document, { subtree: true, childList: true, characterData: true, attributes: true });
     addEventListener("nowaki:hmr", probe);
     document.addEventListener("load", probe, true);
+    document.addEventListener("nowaki:page-load", pageLoad);
+    window.__probeOff = () => {
+      observer.disconnect();
+      removeEventListener("nowaki:hmr", probe);
+      document.removeEventListener("load", probe, true);
+      document.removeEventListener("nowaki:page-load", pageLoad);
+    };
     return true;`);
+  if (!armed) throw new Error(`${kind}: the page already shows the edit to ${file} before it is written`);
   const t0 = Date.now();
   writeFileSync(abs, text.replace(from, to));
   const ok = await waitFor(cdp, `window.__hit || (${expr})`);
@@ -259,6 +278,7 @@ async function run(mode) {
   await cdp.send("Page.enable");
   await cdp.send("Runtime.enable");
   await cdp.send("Log.enable");
+  await cdp.send("Network.enable");
   const go = async (p) => {
     await cdp.send("Page.navigate", { url: BASE + p });
     await sleep(300);
@@ -343,7 +363,7 @@ async function run(mode) {
 
   // Route / layout edits re-render the page in place: the DOM updates, the island keeps its
   // count, the scroll position stays, and no navigation happens.
-  await cdp.eval("window.scrollTo(0, 600); window.__pageLoads = 0; document.addEventListener('nowaki:page-load', () => window.__pageLoads++); return true;");
+  await cdp.eval("window.scrollTo(0, 600); return true;");
   const samePage = async (label) => {
     const s = await cdp.eval(`return { same: window.__sameDoc === 1 && performance.getEntriesByType('navigation').length === 1, y: Math.round(scrollY), count: document.getElementById("count")?.textContent };`);
     check(`${tag} ${label}: same document, count kept, scroll kept`, s.same && s.y === 600 && s.count === "CLICKS: 2", JSON.stringify(s));
@@ -351,7 +371,9 @@ async function run(mode) {
   ok = await edit(cdp, dir, "routes/index.tsx", `<h1 id="title">HMR</h1>`, `<h1 id="title">HMR page</h1>`, `document.getElementById("title")?.textContent === "HMR page"`, "route text");
   check(`${tag} route edit: text updated in place`, ok, await text("title"));
   await samePage("route edit");
-  check(`${tag} route edit: nowaki:page-load fired`, (await cdp.eval("return window.__pageLoads;")) === 1);
+  // Fired for the new page: each event since the write came with the edit on screen.
+  const loads = await cdp.eval("return window.__pageLoads;");
+  check(`${tag} route edit: nowaki:page-load fired`, loads.length > 0 && loads.every(Boolean), JSON.stringify(loads));
   check(`${tag} the route's global.css still applies`, (await color("title")) === "rgb(4, 5, 6)", await color("title"));
   ok = await edit(cdp, dir, "routes/_layout.tsx", `<a href="/photos">photos</a>`, `<a href="/photos">all photos</a>`, `document.getElementById("nav")?.textContent === "all photos"`, "layout nav");
   check(`${tag} layout edit: nav updated in place`, ok, await text("nav"));
@@ -429,8 +451,13 @@ async function run(mode) {
   await go("/");
   await sleep(500);
   const good = readFileSync(path.join(dir, "routes/index.tsx"), "utf8");
+  const sockets = cdp.hmrSockets;
   writeFileSync(path.join(dir, "routes/index.tsx"), good.replace("export default function Home() {", "export default function Home() {{ <"));
   check(`${tag} broken route edit: reloaded to the error page`, await waitFor(cdp, `!window.__sameDoc && /error/i.test(document.title)`, 10000), await cdp.eval("return document.title;"));
+  // The fix's update goes to the error page's HMR socket: wait until it is open (the server
+  // subscribes it just after the handshake), or the update is sent to no one.
+  for (let i = 0; i < 200 && cdp.hmrSockets === sockets; i++) await sleep(50);
+  await sleep(200);
   const t0 = Date.now();
   writeFileSync(path.join(dir, "routes/index.tsx"), good);
   const back = await waitFor(cdp, `document.getElementById("title")?.textContent === "HMR page" && document.body.dataset.hydrated === "1"`, 10000);
