@@ -33,8 +33,7 @@ Public API of `@nowaki-dev/runtime`: the types, and the functions index.js expor
 | [`LayoutProps`](#layoutprops) | Interface | Props a `_layout` component receives. |
 | [`LoadingComponent`](#loadingcomponent) | Type | Default export of `routes/loading.tsx`. |
 | [`ErrorPageProps`](#errorpageprops) | Interface | Props received by the default export of `routes/error.tsx`. |
-| [`Live`](#live) | Type | `export const live` in an island module: a live island (Jetstream). |
-| [`LiveOptions`](#liveoptions) | Interface | The fields of a `live` export (see [`Live`](#live), which also requires `state`, `room` or `shared`). |
+| [`Live`](#live) | Interface | `export const live` in an island module: a live island (Jetstream). |
 | [`publish`](#publish) | Function | Refreshes every live island subscribed to `topic` (`live.subscribe`) by running its `live.load` and pushing the patch. |
 | [`RouteTags`](#routetags) | Type | `export const tags` on an ISR page (one with `export const revalidate`): the cache tags its cached copies carry, so `revalidateTag(tag)` can purge them. |
 | [`revalidatePath`](#revalidatepath) | Function | Purges every cached copy of the page at `path` from the ISR cache, so the next request renders it fresh (and waits for that render). |
@@ -499,7 +498,8 @@ Members:
 - `bodyAttrs`: Attributes for `<body>` (see [`DocumentAttrs`](#documentattrs)).
 - `description`: `<meta name="description">`; Open Graph and Twitter fall back to it.
 - `canonical`: `<link rel="canonical">`: a URL or path (against the site), or `true` for this page's path.
-- `robots`: `<meta name="robots">`. A noindex page is left out of the generated sitemap.xml.
+- `robots`: `<meta name="robots">`. A noindex page is left out of the generated sitemap.xml: one whose
+  static `meta` object, else its nearest layout's, says noindex (`meta()` isn't run for it).
 - `openGraph`: Open Graph. `title` / `description` default to the page's; `url` to this page; relative URLs resolve against the site.
 - `twitter`: Twitter / X cards. `card` defaults to "summary_large_image"; the rest fall back to Open Graph.
 - `twitter.imageAlt`: Defaults to the Open Graph image's `alt`.
@@ -664,43 +664,10 @@ Members:
 
 ### Live
 
-Type. `import type { Live } from "@nowaki-dev/runtime";`
+Interface. `import type { Live } from "@nowaki-dev/runtime";`
 
 ```ts
-export type Live<S = any> = LiveOptions<S> & ({
-    state: (props?: any) => S;
-} | {
-    room: (props: any) => string;
-} | {
-    shared: (props?: any) => S;
-});
-```
-
-`export const live` in an island module: a live island (Jetstream). No component JS is sent to
-the browser: the server holds the state and sends HTML patches. The fields are
-[`LiveOptions`](#liveoptions); `state` is required unless `room` or `shared` is given (a room island's
-handlers get the room's shared state).
-
-Examples:
-
-```tsx
-export const live: Live<{ n: number }> = { state: () => ({ n: 0 }), on: { inc: (s) => ({ n: s.n + 1 }) } };
-```
-
-```tsx
-export const live: Live<Votes> = { room: () => "poll", shared: () => ({ a: 0 }), on: { … } };
-```
-
-Uses: [`LiveOptions`](#liveoptions).
-
-Used by: [`IslandModule`](#islandmodule).
-
-### LiveOptions
-
-Interface. `import type { LiveOptions } from "@nowaki-dev/runtime";`
-
-```ts
-export interface LiveOptions<S = any> {
+export interface Live<S = any> {
     state?: (props?: any) => S;
     on: Record<string, (state: S, payload?: any) => S | Promise<S>>;
     authorize?: (event: {
@@ -718,11 +685,15 @@ export interface LiveOptions<S = any> {
 }
 ```
 
-The fields of a `live` export (see [`Live`](#live), which also requires `state`, `room` or `shared`).
+`export const live` in an island module: a live island (Jetstream). No component JS is sent to
+the browser: the server holds the state and sends HTML patches. A plain live island sets
+`state`; a room island (`room`, with `shared`) may leave it out, since its handlers get the
+room's shared state.
 
 Members:
 
-- `state`: The initial state, from the island's props. Required unless `room` or `shared` is given.
+- `state`: The initial state, from the island's props. Set it on a plain live island (without it the
+  state starts as `{}`); a room island (`room` / `shared`) may omit it.
 - `on`: Event handlers by name (`data-live="name"`), each returning the new state.
 - `authorize`: Runs after the state signature is verified and before each handler; anything but `true`
   refuses the event (the client gets `{ type: "error", reason: "forbidden" }`). `getContext()`
@@ -738,7 +709,17 @@ Members:
   they are lost on restart.
 - `shared`: Initial shared state of a room (`live.room`).
 
-Used by: [`Live`](#live).
+Examples:
+
+```tsx
+export const live: Live<{ n: number }> = { state: () => ({ n: 0 }), on: { inc: (s) => ({ n: s.n + 1 }) } };
+```
+
+```tsx
+export const live: Live<Votes> = { room: () => "poll", shared: () => ({ a: 0 }), on: { … } };
+```
+
+Used by: [`IslandModule`](#islandmodule).
 
 ### publish
 

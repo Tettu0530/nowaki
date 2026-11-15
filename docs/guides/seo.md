@@ -101,8 +101,9 @@ file provides them. The static adapter writes both files.
 
 - The sitemap lists every page, including dynamic ones that have `staticPaths` (a dynamic page
   without it can't be enumerated).
-- `export const sitemap = false` leaves a page out, and so does a static `meta` with a noindex
-  `robots`.
+- `export const sitemap = false` leaves a page out, and so does a noindex `robots` in a static
+  `meta` object: the page's, else the nearest layout's (a `meta` function isn't run for the
+  sitemap).
 - With `i18n`, each page is listed in every locale with `xhtml:link` alternates.
 - URLs follow `basePath` and `trailingSlash`.
 - The generated robots.txt allows everything and points at the sitemap. For anything else, write

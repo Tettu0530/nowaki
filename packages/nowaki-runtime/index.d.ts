@@ -256,7 +256,10 @@ export interface Meta {
   description?: string;
   /** `<link rel="canonical">`: a URL or path (against the site), or `true` for this page's path. */
   canonical?: string | true;
-  /** `<meta name="robots">`. A noindex page is left out of the generated sitemap.xml. */
+  /**
+   * `<meta name="robots">`. A noindex page is left out of the generated sitemap.xml: one whose
+   * static `meta` object, else its nearest layout's, says noindex (`meta()` isn't run for it).
+   */
   robots?: string | { index?: boolean; follow?: boolean };
   /** Open Graph. `title` / `description` default to the page's; `url` to this page; relative URLs resolve against the site. */
   openGraph?: {
@@ -368,18 +371,17 @@ export interface ErrorPageProps {
 
 /**
  * `export const live` in an island module: a live island (Jetstream). No component JS is sent to
- * the browser: the server holds the state and sends HTML patches. The fields are
- * {@link LiveOptions}; `state` is required unless `room` or `shared` is given (a room island's
- * handlers get the room's shared state).
+ * the browser: the server holds the state and sends HTML patches. A plain live island sets
+ * `state`; a room island (`room`, with `shared`) may leave it out, since its handlers get the
+ * room's shared state.
  * @example export const live: Live<{ n: number }> = { state: () => ({ n: 0 }), on: { inc: (s) => ({ n: s.n + 1 }) } };
  * @example export const live: Live<Votes> = { room: () => "poll", shared: () => ({ a: 0 }), on: { … } };
  */
-export type Live<S = any> = LiveOptions<S> &
-  ({ state: (props?: any) => S } | { room: (props: any) => string } | { shared: (props?: any) => S });
-
-/** The fields of a `live` export (see {@link Live}, which also requires `state`, `room` or `shared`). */
-export interface LiveOptions<S = any> {
-  /** The initial state, from the island's props. Required unless `room` or `shared` is given. */
+export interface Live<S = any> {
+  /**
+   * The initial state, from the island's props. Set it on a plain live island (without it the
+   * state starts as `{}`); a room island (`room` / `shared`) may omit it.
+   */
   state?: (props?: any) => S;
   /** Event handlers by name (`data-live="name"`), each returning the new state. */
   on: Record<string, (state: S, payload?: any) => S | Promise<S>>;

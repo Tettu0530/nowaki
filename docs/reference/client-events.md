@@ -47,9 +47,10 @@ Read from the page's `<head>` (put them in `head` or `meta().head`).
 | Tag | Description |
 | --- | --- |
 | `meta[name="nowaki-live"]` | `<meta name="nowaki-live" content="ws">` or `content="post"` in the page's head pins the live transport: the WebSocket (`/__nowaki/live`, `nowaki dev` / `nowaki start` only) or one `POST /__nowaki/live-event` per event. It wins over the transport the server picks. |
+| `meta[name="nowaki-router-cache"]` | `<meta name="nowaki-router-cache" content="seconds">` sets how many seconds the client router keeps a visited or prefetched page (the Router Cache) for the next navigation to it. Default `30`; `0` turns the cache off. Read from the page the router starts on. |
 
 Slot elements: a layout's `slots.<name>` renders inside `<nowaki-slot name="<name>">` (`display: contents`); the `name` attribute is stable, for styling. See [LayoutProps](runtime.md#layoutprops).
 
 ## Not covered
 
-Dev-only events: `nowaki:hmr`, `nowaki:toolbar`, `nowaki:toolbar-ui`. Internal attributes of generated markup: `data-live-connections`, `data-live-transport`, `data-nowaki-attrs`, `data-nowaki-css`, `data-nowaki-head`, `data-nowaki-intercepts`, `data-nowaki-script`, `data-nowaki-slot`, `meta[name="nowaki-head"]`, `meta[name="nowaki-router-cache"]`, `meta[name="nowaki-view-transition"]`. The `<nowaki-island>` / `<nowaki-live>` elements and `window.__nowaki*` globals are internal too.
+Dev-only events: `nowaki:hmr`, `nowaki:toolbar`, `nowaki:toolbar-ui`. Internal attributes of generated markup: `data-live-connections`, `data-live-transport`, `data-nowaki-attrs`, `data-nowaki-css`, `data-nowaki-head`, `data-nowaki-intercepts`, `data-nowaki-script`, `data-nowaki-slot`, `meta[name="nowaki-head"]`, `meta[name="nowaki-view-transition"]`. The `<nowaki-island>` / `<nowaki-live>` elements and `window.__nowaki*` globals are internal too.

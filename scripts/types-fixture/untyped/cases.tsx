@@ -3,8 +3,12 @@
 import type { LayoutModule, Live, LoaderContext, PageProps } from "@nowaki-dev/runtime";
 import { route } from "@nowaki-dev/runtime/navigation";
 
-// Live: a room island needs no `state`; a plain one still does.
+// Live: a room island needs no `state`, and Live stays an interface code can extend.
 type Votes = { a: number; b: number };
+interface CounterLive extends Live<{ n: number }> {
+  label: string;
+}
+export const extended: CounterLive = { label: "c", state: () => ({ n: 0 }), on: {} };
 export const roomLive: Live<Votes> = {
   room: (props: { id?: string }) => `poll:${props.id ?? "demo"}`,
   shared: (): Votes => ({ a: 0, b: 0 }),
@@ -12,8 +16,8 @@ export const roomLive: Live<Votes> = {
 };
 export const sharedOnly: Live<Votes> = { shared: () => ({ a: 0, b: 0 }), on: {} };
 export const plainLive: Live<{ n: number }> = { state: () => ({ n: 0 }), on: { inc: (s) => ({ n: s.n + 1 }) } };
-// @ts-expect-error: without room or shared, `state` is required.
-export const noState: Live<{ n: number }> = { on: {} };
+// @ts-expect-error: `on` is still required.
+export const noHandlers: Live<{ n: number }> = { state: () => ({ n: 0 }) };
 
 // PageProps: a loader that can redirect still gives the page its data type.
 export async function loader(ctx: LoaderContext) {

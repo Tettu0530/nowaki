@@ -96,8 +96,12 @@ milestone's worth of work; the codename is noted per entry.
   `streaming = "early"`). `meta` objects are read once per module; a `meta()` that throws is
   now logged (and skipped, as before). `_404` / `_500` pages get their own `meta`, and their
   `title` export now wins over a layout's meta title.
-- **Types:** `Live<S>` takes a room island (`room` / `shared`) without `state` (it is now
-  `LiveOptions<S>` plus one of `state`, `room`, `shared`); `PageProps<typeof loader>` leaves
+- **The generated sitemap.xml honors a layout's `meta.robots`.** A noindex `robots` in a
+  layout's `meta` object now leaves the pages under it out of the sitemap, as it already marks
+  their documents noindex. The page's own `robots` wins, then the nearest layout's (root →
+  nested → page, like the document metadata); `meta` functions aren't run for the sitemap.
+- **Types:** `Live<S>` takes a room island (`room` / `shared`) without `state` (`state` is
+  optional now; plain live islands still set it); `PageProps<typeof loader>` leaves
   `ctx.redirect()` / `json()` / `html()` / `text()` results and `Response`s out of `data`;
   `route("/x/[id]", { id })` compiles before the first `nowaki typegen`; `<form action={fn}>`
   with a server function compiles (the new `@nowaki-dev/runtime/jsx-runtime` types, see

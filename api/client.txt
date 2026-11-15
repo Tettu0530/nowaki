@@ -18,6 +18,7 @@ data-nowaki-presence  # packages/nowaki-runtime/client/live.js
 data-nowaki-reset  # packages/nowaki-runtime/client/router.js
 data-nowaki-transition  # packages/nowaki-runtime/client/router.js
 meta[name="nowaki-live"]  # packages/nowaki-runtime/client/live.js
+meta[name="nowaki-router-cache"]  # packages/nowaki-runtime/client/router.js
 nowaki:action  # packages/nowaki-runtime/client/islands.js
 nowaki:live-error  # packages/nowaki-runtime/client/live.js
 nowaki:live-stale  # packages/nowaki-runtime/client/live.js
@@ -39,5 +40,4 @@ data-nowaki-intercepts  # packages/nowaki-runtime/client/hmr.js, packages/nowaki
 data-nowaki-script  # packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js
 data-nowaki-slot  # packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js
 meta[name="nowaki-head"]  # packages/nowaki-runtime/client/hmr.js, packages/nowaki-runtime/client/router.js
-meta[name="nowaki-router-cache"]  # packages/nowaki-runtime/client/router.js
 meta[name="nowaki-view-transition"]  # packages/nowaki-runtime/client/router.js

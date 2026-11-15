@@ -92,15 +92,14 @@ export type LoadingComponent = () => unknown;
 export interface ErrorPageProps {}
 ErrorPageProps.error: { message: string; };
 ErrorPageProps.reset: () => void;
-export type Live<S = any> = LiveOptions<S> & ({ state: (props?: any) => S; } | { room: (props: any) => string; } | { shared: (props?: any) => S; });
-export interface LiveOptions<S = any> {}
-LiveOptions.state?: (props?: any) => S;
-LiveOptions.on: Record<string, (state: S, payload?: any) => S | Promise<S>>;
-LiveOptions.authorize?: (event: { name: string; handler: string; state: S; payload?: any; }) => boolean | Promise<boolean>;
-LiveOptions.subscribe?: string[] | ((state: S) => string[]);
-LiveOptions.load?: (state: S, info: { topic: string; }) => S | Promise<S>;
-LiveOptions.room?: (props: any) => string;
-LiveOptions.shared?: (props?: any) => S;
+export interface Live<S = any> {}
+Live.state?: (props?: any) => S;
+Live.on: Record<string, (state: S, payload?: any) => S | Promise<S>>;
+Live.authorize?: (event: { name: string; handler: string; state: S; payload?: any; }) => boolean | Promise<boolean>;
+Live.subscribe?: string[] | ((state: S) => string[]);
+Live.load?: (state: S, info: { topic: string; }) => S | Promise<S>;
+Live.room?: (props: any) => string;
+Live.shared?: (props?: any) => S;
 export function publish(topic: string): void;
 export type RouteTags = string[] | ((info: { params: RouteParams; data: any; }) => string[]);
 export function revalidatePath(path: string): void;
