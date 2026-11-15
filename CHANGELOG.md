@@ -11,6 +11,25 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Docs
+- `docs/upgrade-to-1.0.md`: upgrading an app from any 0.x release to 1.0, by release (0.17
+  to 0.20 in detail), with code before and after and what `nowaki upgrade --check` reports for
+  each change; 1.0.0 adds no breaking change beyond 0.20.0, and the release-candidate phase.
+- `docs/migrate-from-nextjs.md`: moving a Next.js App Router app to Nowaki, written from the
+  Next.js and Nowaki versions of the `benchmarks/compare` blog: files, layouts, loaders,
+  `staticPaths`, ISR and `revalidatePath` / `revalidateTag`, islands, actions and server
+  functions, API routes, middleware, metadata, `<Link>`, `<Image>`, env vars, `next.config`,
+  deployment, what has no equivalent, and a Remix mapping.
+- `docs/migrate-from-astro.md` checked against 0.20: `defineConfig`, the CSP nonce rule for
+  inline scripts (`nonce()` in `meta()`), `ctx.formData()`, `ctx.routePath`, uppercase method
+  exports, `fonts` keys, and a new content collections section.
+- README: the 0.20 status (API frozen) and features, and links to `docs/`, STABILITY, SUPPORT and
+  the migration guides. ROADMAP: where 0.20.0 leaves 1.0, the done v1.0 items ticked, and the
+  deferred list moved to "1.x candidates". The scaffolded app's AGENTS.md covers
+  `nowaki upgrade --check`, `PORT` / `--host`, `_500`, default exports, `FormData` uploads and
+  `.env.local`. SUPPORT.md and SECURITY.md name the supported 0.x line as 0.20.x, and SUPPORT.md
+  lists the Node versions CI runs (22, 24 and 26).
+
 ## [0.20.0] — 2026-11-14 · API freeze (the last breaking release before 1.0)
 
 Packages: `nowaki` / `nowaki-core`, `@nowaki-dev/runtime`, `create-nowaki` /
