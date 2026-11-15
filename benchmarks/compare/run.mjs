@@ -25,7 +25,7 @@ import { posts } from "./lib/content.mjs";
 import { FRAMEWORKS, ORDER } from "./lib/frameworks.mjs";
 import { serve } from "./lib/serve.mjs";
 import { MARK_CONTACT, MARK_STATS } from "./lib/features.mjs";
-import { MARK_HOME, MARK_POST, V018_BASE } from "./lib/templates.mjs";
+import { MARK_HOME, MARK_POST, FEATURE_BASE } from "./lib/templates.mjs";
 
 const HERE = import.meta.dirname;
 const RESULTS = process.env.COMPARE_RESULTS ? path.resolve(process.env.COMPARE_RESULTS) : path.join(HERE, "results");
@@ -48,13 +48,13 @@ const pages = Number(arg("pages", 10));
 const islands = Number(arg("islands", 1));
 const RUNS = Number(arg("runs", 10));
 const only = new Set(arg("only", "dev,static,server").split(","));
-// Nowaki 0.18 features (as in prod.mjs --v018). The browser pages of the static run do not follow
+// Nowaki features (as in prod.mjs --features). The browser pages of the static run do not follow
 // basePath, so a basePath run measures dev and server only.
-const v018List = (arg("v018", "") || "").split(",").filter(Boolean);
-if (v018List.length && fwName !== "nowaki") throw new Error("--v018 applies to nowaki only");
-const v018 = Object.fromEntries(v018List.map((k) => [k, true]));
-if (v018.basePath && only.has("static")) throw new Error("--v018 basePath: pass --only dev,server");
-const BASE = v018.basePath ? V018_BASE : "";
+const featureList = (arg("features", "") || "").split(",").filter(Boolean);
+if (featureList.length && fwName !== "nowaki") throw new Error("--features applies to nowaki only");
+const features = Object.fromEntries(featureList.map((k) => [k, true]));
+if (features.basePath && only.has("static")) throw new Error("--features basePath: pass --only dev,server");
+const BASE = features.basePath ? FEATURE_BASE : "";
 
 const dir = path.join(APPS, fwName);
 // NOWAKI_BIN: another nowaki binary (a release build of the repo) for A/B runs.
@@ -72,7 +72,7 @@ const runtime = fwName === "nowaki" && existsSync(runtimePkg) ? JSON.parse(readF
 const env = {
   ...process.env,
   ...fw.env,
-  ...(v018.session ? { NOWAKI_SESSION_SECRET: "bench-session-secret-0123456789abcdef0123" } : {}),
+  ...(features.session ? { NOWAKI_SESSION_SECRET: "bench-session-secret-0123456789abcdef0123" } : {}),
   FORCE_COLOR: "0",
   NO_COLOR: "1",
   CI: "1",
@@ -88,7 +88,7 @@ mkdirSync(RESULTS, { recursive: true });
 const record = (file, row) =>
   appendFileSync(
     path.join(RESULTS, file),
-    `${JSON.stringify({ framework: fwName, label: fw.label, version, runtime, v018: v018List, runLabel: arg("label"), pages, islands, ...row, series, at: new Date().toISOString(), machine, commit })}\n`,
+    `${JSON.stringify({ framework: fwName, label: fw.label, version, runtime, features: featureList, runLabel: arg("label"), pages, islands, ...row, series, at: new Date().toISOString(), machine, commit })}\n`,
   );
 
 // Resolves once nothing accepts connections on the port (the previous server is gone).
@@ -177,7 +177,7 @@ const median = (xs) => {
 
 console.log(`${fw.label} ${version} · ${pages} pages · ${islands} islands · 1+${RUNS} runs · ${machine} · ${commit}`);
 
-if (only.has("dev") || only.has("static")) generate(fwName, { pages, islands, mode: "static", v018 });
+if (only.has("dev") || only.has("static")) generate(fwName, { pages, islands, mode: "static", features });
 
 if (only.has("dev")) {
   const rows = [];
@@ -226,7 +226,7 @@ if (only.has("static")) {
 }
 
 if (only.has("server")) {
-  generate(fwName, { pages, islands, mode: "server", v018 });
+  generate(fwName, { pages, islands, mode: "server", features });
   const times = [];
   for (let i = 0; i <= RUNS; i++) {
     const ms = buildRun(fw.serverBuild);

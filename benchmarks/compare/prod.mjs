@@ -25,7 +25,7 @@ import path from "node:path";
 import { generate, APPS } from "./gen.mjs";
 import { posts } from "./lib/content.mjs";
 import { FRAMEWORKS, ORDER } from "./lib/frameworks.mjs";
-import { MARK_HOME, MARK_POST, V018_BASE } from "./lib/templates.mjs";
+import { MARK_HOME, MARK_POST, FEATURE_BASE } from "./lib/templates.mjs";
 
 const HERE = import.meta.dirname;
 const RESULTS = process.env.COMPARE_RESULTS ? path.resolve(process.env.COMPARE_RESULTS) : path.join(HERE, "results");
@@ -40,7 +40,7 @@ const arg = (name, fallback) => {
 const fwName = process.argv[2];
 const fw = FRAMEWORKS[fwName];
 if (!fw) {
-  console.error(`usage: node benchmarks/compare/prod.mjs <${ORDER.join("|")}> [--pages N] [--islands N] [--runs N] [--label L] [--env K=V,...] [--isr] [--v018 rules,basePath,i18n,session,env]`);
+  console.error(`usage: node benchmarks/compare/prod.mjs <${ORDER.join("|")}> [--pages N] [--islands N] [--runs N] [--label L] [--env K=V,...] [--isr] [--features rules,basePath,i18n,session,env]`);
   process.exit(2);
 }
 const pages = Number(arg("pages", 100));
@@ -54,14 +54,14 @@ const extraEnv = Object.fromEntries(
     .filter(Boolean)
     .map((kv) => kv.split("=")),
 );
-// Nowaki 0.18 features to turn on in the app (comma-separated: rules,basePath,i18n,session,env;
-// see nowakiV018 in lib/templates.mjs). Recorded with each row.
-const v018List = (arg("v018", "") || "").split(",").filter(Boolean);
-const V018_KNOWN = ["rules", "basePath", "i18n", "session", "env"];
-for (const k of v018List) if (!V018_KNOWN.includes(k)) throw new Error(`--v018: unknown feature ${k} (known: ${V018_KNOWN.join(", ")})`);
-if (v018List.length && fwName !== "nowaki") throw new Error("--v018 applies to nowaki only");
-const v018 = Object.fromEntries(v018List.map((k) => [k, true]));
-const BASE = v018.basePath ? V018_BASE : "";
+// Nowaki features to turn on in the app (comma-separated: rules,basePath,i18n,session,env;
+// see nowakiFeatureFiles in lib/templates.mjs). Recorded with each row.
+const featureList = (arg("features", "") || "").split(",").filter(Boolean);
+const FEATURES_KNOWN = ["rules", "basePath", "i18n", "session", "env"];
+for (const k of featureList) if (!FEATURES_KNOWN.includes(k)) throw new Error(`--features: unknown feature ${k} (known: ${FEATURES_KNOWN.join(", ")})`);
+if (featureList.length && fwName !== "nowaki") throw new Error("--features applies to nowaki only");
+const features = Object.fromEntries(featureList.map((k) => [k, true]));
+const BASE = features.basePath ? FEATURE_BASE : "";
 const HOME_PATH = BASE || "/";
 // Isolating the session's cost: --no-session-cookie keeps session.ts but sends no cookie;
 // --cookie NAME=VALUE sends a fixed cookie on every request (with or without session.ts).
@@ -105,7 +105,7 @@ const runtime = fwName === "nowaki" && existsSync(runtimePkg) ? JSON.parse(readF
 const env = {
   ...process.env,
   ...fw.env,
-  ...(v018.session ? { NOWAKI_SESSION_SECRET: "bench-session-secret-0123456789abcdef0123" } : {}),
+  ...(features.session ? { NOWAKI_SESSION_SECRET: "bench-session-secret-0123456789abcdef0123" } : {}),
   ...extraEnv,
   NODE_ENV: "production",
   PORT: String(PORT),
@@ -117,6 +117,46 @@ const env = {
   FORCE_COLOR: "0",
   NO_COLOR: "1",
 };
+// --otel RATIO (Nowaki): OTLP/HTTP tracing at that sampling ratio (parentbased_traceidratio),
+// exported to a sink in this process. The sink counts exports and bytes and parses only the first
+// few bodies (to confirm they carry spans), so it costs this process little; its CPU is not the
+// server's either way.
+const otelRatio = arg("otel", null);
+const OTEL_PORT = 8945;
+const otel = otelRatio == null ? null : { ratio: Number(otelRatio), exports: 0, bytes: 0, spansSeen: 0 };
+if (otel) {
+  if (fwName !== "nowaki") throw new Error("--otel applies to nowaki only");
+  if (!(otel.ratio > 0 && otel.ratio <= 1)) throw new Error("--otel takes a ratio in (0, 1]");
+  const sink = http.createServer((req, res) => {
+    const chunks = [];
+    let bytes = 0;
+    const parse = otel.exports < 5;
+    req.on("data", (c) => {
+      bytes += c.length;
+      if (parse) chunks.push(c);
+    });
+    req.on("end", () => {
+      otel.exports++;
+      otel.bytes += bytes;
+      if (parse) {
+        try {
+          const j = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          for (const rs of j.resourceSpans ?? []) for (const ss of rs.scopeSpans ?? []) otel.spansSeen += (ss.spans ?? []).length;
+        } catch {}
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end("{}");
+    });
+  });
+  await new Promise((r) => sink.listen(OTEL_PORT, "127.0.0.1", r));
+  sink.unref();
+  Object.assign(env, {
+    OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${OTEL_PORT}`,
+    OTEL_TRACES_SAMPLER: "parentbased_traceidratio",
+    OTEL_TRACES_SAMPLER_ARG: String(otel.ratio),
+    OTEL_SERVICE_NAME: "compare-bench",
+  });
+}
 const machine = `${os.cpus()[0].model}, ${os.cpus().length} cores, ${Math.round(os.totalmem() / 2 ** 30)} GB, ${os.platform()} ${os.release()}, node ${process.version}`;
 const git = (args) => spawnSync("git", args, { cwd: HERE, encoding: "utf8" }).stdout.trim();
 const commit = `${git(["rev-parse", "--short", "HEAD"])}${git(["status", "--porcelain", "--", ".", ":!results"]) ? "+dirty" : ""}`;
@@ -134,7 +174,7 @@ mkdirSync(RESULTS, { recursive: true });
 const record = (row) =>
   appendFileSync(
     path.join(RESULTS, "prod.jsonl"),
-    `${JSON.stringify({ framework: fwName, label, fwLabel: fw.label, version, runtime, v018: v018List, cookie: fixedCookie ? "fixed" : v018.session && sendSessionCookie ? "session" : "none", pages, islands, env: extraEnv, isr, ...row, series, at: new Date().toISOString(), machine, commit, oha: ohaVersion })}\n`,
+    `${JSON.stringify({ framework: fwName, label, fwLabel: fw.label, version, runtime, features: featureList, cookie: fixedCookie ? "fixed" : features.session && sendSessionCookie ? "session" : "none", pages, islands, env: extraEnv, isr, otelRatio: otel?.ratio, ...row, series, at: new Date().toISOString(), machine, commit, oha: ohaVersion })}\n`,
   );
 
 function rssTreeMB(pgid) {
@@ -187,7 +227,7 @@ async function portFree() {
   throw new Error(`port ${PORT} still in use`);
 }
 
-// The session cookie (--v018 session): every request carries it, oha's too.
+// The session cookie (--features session): every request carries it, oha's too.
 let cookie = null;
 function get(agent, urlPath) {
   return new Promise((resolve, reject) => {
@@ -265,7 +305,7 @@ async function ohaWithPeak(pgid, url, opts) {
 }
 
 console.log(`${label}: ${fw.label} ${version} · ${pages} pages · ${islands} islands · ${RUNS} runs · ${machine} · ${commit}`);
-generate(fwName, { pages, islands, mode: "server", isr, v018 });
+generate(fwName, { pages, islands, mode: "server", isr, features });
 for (const c of fw.caches) spawnSync("rm", ["-rf", path.join(dir, c)]);
 const build = spawnSync(bin, fw.serverBuild, { cwd: dir, env: { ...env, NODE_ENV: "production" }, encoding: "utf8", maxBuffer: 256 << 20 });
 if (build.status !== 0) {
@@ -274,6 +314,7 @@ if (build.status !== 0) {
 }
 
 for (let run = 1; run <= RUNS; run++) {
+  if (otel) Object.assign(otel, { exports: 0, bytes: 0, spansSeen: 0 });
   await portFree();
   const [cmd, args] = SERVERS[fwName].cmd(bin);
   const t0 = now();
@@ -295,7 +336,7 @@ for (let run = 1; run <= RUNS; run++) {
     }
     if (startMs == null) throw new Error(`${fw.label} server did not start:\n${stderr.slice(-2000)}`);
     if (fixedCookie) cookie = fixedCookie;
-    else if (v018.session && sendSessionCookie) {
+    else if (features.session && sendSessionCookie) {
       cookie = null;
       const s = await get(undefined, `${BASE}/session-start`);
       const set = [].concat(s.headers["set-cookie"] ?? []).find((c) => c.startsWith("bench_session="));
@@ -304,7 +345,7 @@ for (let run = 1; run <= RUNS; run++) {
     }
     const check = await get(undefined, `${BASE}/posts/${pool[0]}`);
     if (check.status !== 200 || !check.body.includes(MARK_POST)) throw new Error(`${fw.label}: post page did not render (${check.status})`);
-    if (v018.rules && check.headers["x-bench-rule"] !== "post") throw new Error(`${fw.label}: the headers rule did not apply to the post page`);
+    if (features.rules && check.headers["x-bench-rule"] !== "post") throw new Error(`${fw.label}: the headers rule did not apply to the post page`);
     const api = await get(undefined, API_PATH);
     let hits = null;
     try {
@@ -335,7 +376,8 @@ for (let run = 1; run <= RUNS; run++) {
     await sleep(1000);
     const apiRun = await ohaCpu(pgid, `http://127.0.0.1:${PORT}${API_PATH}`, { seconds: 10 });
 
-    const row = { run, startMs, idleMB, peakMB: post.peakMB, latency, post, home, api: apiRun };
+    const row = { run, startMs, idleMB, peakMB: post.peakMB, latency, post, home, api: apiRun, ...(otel ? { otel: { ...otel } } : {}) };
+    if (otel && !otel.spansSeen) throw new Error(`${fw.label}: --otel ${otel.ratio} but the sink received no spans (${otel.exports} exports)`);
     record(row);
     console.log(
       `  run ${run}: start ${startMs} ms · idle ${idleMB} MB · peak ${post.peakMB} MB · ttfb p50 ${latency.ttfbP50} ms (p99 ${latency.ttfbP99}) · total p50 ${latency.totalP50} ms · post ${post.rps} req/s (p99 ${post.p99} ms, non-2xx ${post.non2xx}, cpu ${post.cpuUsPerReq} µs/req) · / ${home.rps} req/s (p99 ${home.p99} ms, non-2xx ${home.non2xx}, cpu ${home.cpuUsPerReq} µs/req) · api ${apiRun.rps} req/s (p99 ${apiRun.p99} ms, cpu ${apiRun.cpuUsPerReq} µs/req)`,

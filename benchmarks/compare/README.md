@@ -137,21 +137,32 @@ Notes:
   req/s of one build ranged from 48k to 132k across runs while its CPU per request stayed within
   about ±1 µs of 26 µs; compare CPU per request there.
 
-### Nowaki only: other builds and the 0.18 features
+### Nowaki only: other builds and features
 
 - `NOWAKI_BIN=path` builds and serves the app with that binary in place of the installed CLI (a
   release build of this repo, for an A/B against a published version). `run.mjs` takes it too.
   The runtime is whatever the app has installed; to test the repo's, set
   `"@nowaki-dev/runtime": "file:../../../../packages/nowaki-runtime"` in `apps/nowaki/package.json`
   and reinstall after `rm -rf node_modules` (pnpm never refreshes a `file:` copy).
-- `--v018 rules,basePath,i18n,session,env` turns 0.18 features on in the generated app (any
-  subset; `nowakiV018` in `lib/templates.mjs`): 20 config rules (10 redirects and 5 rewrites
+- `--features rules,basePath,i18n,session,env` turns Nowaki features on in the generated app (any
+  subset; `nowakiFeatureFiles` in `lib/templates.mjs`): 20 config rules (10 redirects and 5 rewrites
   that no measured URL matches, 5 headers rules of which one matches the post pages), basePath
   `/app`, i18n `en`/`ja` with `detect`, a `session.ts` with post pages reading `ctx.session`,
   and an `env.ts`. URLs follow the basePath. With `session`, `prod.mjs` takes a cookie from
   `/session-start` and sends it on every request; `--no-session-cookie` sends none, and
   `--cookie NAME=VALUE` sends a fixed one (with or without `session.ts`). `run.mjs` measures
   `--only dev,server` with basePath (its browser pages do not follow the base).
+- Observability: `--env NOWAKI_SERVER_TIMING=1` for Server-Timing, and `--otel RATIO` for OTLP/HTTP
+  tracing sampled at that ratio (`parentbased_traceidratio`). `--otel` starts a sink in
+  `prod.mjs` that counts exports and bytes (it parses the first few bodies, and the run fails if
+  they carry no spans); each row records them under `otel`. The sink's CPU is not counted in the
+  server's CPU per request.
+- CSP: `--env NOWAKI_CSP=enforce`.
+
+HMR latency (the 1.0 target "HMR update < 100 ms") is measured by
+[`../hmr-latency.mjs`](../hmr-latency.mjs), which runs `scripts/hmr-browser-test.mjs` (Chrome
+over CDP on `nowaki dev`, file written → DOM updated, per kind of edit) several times:
+`NOWAKI_BIN=path node benchmarks/hmr-latency.mjs --runs 5`.
 
 ## Rules
 
