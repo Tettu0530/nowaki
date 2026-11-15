@@ -268,7 +268,11 @@ fn scan_source(rel: &str, text: &str, facts: &Facts, out: &mut Vec<Finding>) {
                 format!("Rename it to `{to}`."),
             ));
         }
-        let is_api = route.starts_with("api/") || stem(route).contains('.');
+        // Decided as the runtime does (router.mjs, nowaki_core::routes): a file route's name has
+        // an extension after any `]` (`feed.xml.ts`, `[card].png.ts`); the dots of a `[...slug]`
+        // segment don't make one.
+        let is_api = nowaki_core::routes::is_api_route_rel(route)
+            || nowaki_core::routes::is_file_route_stem(stem(route));
         let mut write_handler = None;
         let mut has_csrf = false;
         for (i, line) in lines.iter().enumerate() {
@@ -871,6 +875,40 @@ mod tests {
             .filter(|f| f.level == level)
             .map(Finding::location)
             .collect()
+    }
+
+    #[test]
+    fn page_vs_file_route_matches_the_runtime() {
+        // A page's `export const head` is its document head, whatever dots its dynamic segment
+        // has; a file route's (`name.ext.ts`) `head` is a lowercase HEAD handler.
+        let page = "import { staticPaths } from \"x\";\nexport const head = \"<style>a{}</style>\";\nexport async function loader() {}\nexport default () => null;\n";
+        let dir = app(&[
+            ("routes/docs/[...slug].tsx", page),
+            ("routes/(site)/[[...slug]].tsx", page),
+            ("routes/blog/[id].tsx", page),
+            ("routes/index.tsx", page),
+            ("routes/v1.2/index.tsx", page),
+            (
+                "routes/feed.xml.ts",
+                "export function get() {}\nexport const head = () => null;\n",
+            ),
+            (
+                "routes/robots.txt.ts",
+                "export function GET() {}\nexport function head() {}\n",
+            ),
+            ("routes/og/[card].png.ts", "export function get() {}\n"),
+        ]);
+        let found = run(&dir, &facts());
+        assert_eq!(
+            locs(&found, Level::Must),
+            [
+                "routes/feed.xml.ts:1",
+                "routes/feed.xml.ts:2",
+                "routes/og/[card].png.ts:1",
+                "routes/robots.txt.ts:2",
+            ],
+            "{found:#?}"
+        );
     }
 
     #[test]

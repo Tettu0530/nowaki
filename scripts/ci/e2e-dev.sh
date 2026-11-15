@@ -157,7 +157,7 @@ curl -sf $B/guide | grep -q '<th align="left">Feature</th>'
 curl -sf $B/guide | grep -q '<nowaki-island name="Counter"'
 curl -sf $B/docs/components | grep -q 'an expression (42), and highlighted code'
 curl -sf $B/docs/components | grep -q 'client="visible"'
-curl -sf $B/docs/components | grep -q '<pre style="background-color:#ffffff;"><code class="language-ts"><span'
+curl -sf $B/docs/components | grep -q '<pre style="background-color:#ffffff;background-color:light-dark(#ffffff,#0d1117);"><code class="language-ts"><span'
 curl -sf $B/docs/components | grep -q '<picture><source type="image/avif"'
 curl -sf $B/docs | grep -q 'Components in MDX'
 # Markdoc (@nowaki-dev/markdoc): a page importing a .mdoc (a custom tag, an island, frontmatter,

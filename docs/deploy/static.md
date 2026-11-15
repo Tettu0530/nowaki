@@ -60,7 +60,9 @@ dist/static/
 prefix redirects with i18n. `_headers` gets the default security headers and the config header
 rules, after the contents of a `public/_headers` file. Rules a static host can't express (a
 parameter in the middle of a path, for some hosts) are left out with a warning naming them.
-These files follow the Cloudflare Pages / Netlify format; other hosts need the same rules in
+These hosts match a path exactly, so a source is written with and without its trailing slash
+under `trailingSlash: "ignore"`; under `"always"` / `"never"` the rule takes the canonical form
+and the other form redirects to it (308), as the servers do. These files follow the Cloudflare Pages / Netlify format; other hosts need the same rules in
 their own configuration.
 
 ## basePath

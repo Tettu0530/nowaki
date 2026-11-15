@@ -226,8 +226,8 @@ curl -sf http://127.0.0.1:3300/docs/toml | grep -q '<title>TOML frontmatter — 
 curl -sf http://127.0.0.1:3300/docs/toml | grep -q '<h2 id="plus-lines-in-the-body"'
 curl -sf http://127.0.0.1:3300/docs/toml | grep -q '<p>+++</p>'
 # fenced code is highlighted at build time (inline styles, no client JS)
-curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<pre style="background-color:#ffffff;">'
-curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<span style="font-weight:bold;color:#a71d5d;">export'
+curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<pre style="background-color:#ffffff;background-color:light-dark(#ffffff,#0d1117);">'
+curl -sf http://127.0.0.1:3300/docs/routing | grep -q '<span style="font-weight:bold;color:#a71d5d;color:light-dark(#a71d5d,#ff7b72);">export'
 # route / layout CSS: the layout's stylesheet is linked in the head (/styled is checked below)
 curl -sf http://127.0.0.1:3300/about | grep -qE '<link rel="stylesheet" href="/_nowaki/site\.[0-9a-f]+\.css"'
 # ?image + <Image> in the build: hashed AVIF / JPEG variants under /_nowaki/, served as images
@@ -282,7 +282,7 @@ curl -sf http://127.0.0.1:3300/guide | grep -q '<th align="left">Feature</th>'
 curl -sf http://127.0.0.1:3300/guide | grep -q '<nowaki-island name="Counter"'
 curl -sf http://127.0.0.1:3300/docs/components | grep -q 'an expression (42), and highlighted code'
 curl -sf http://127.0.0.1:3300/docs/components | grep -q 'client="visible"'
-curl -sf http://127.0.0.1:3300/docs/components | grep -q '<pre style="background-color:#ffffff;"><code class="language-ts"><span'
+curl -sf http://127.0.0.1:3300/docs/components | grep -q '<pre style="background-color:#ffffff;background-color:light-dark(#ffffff,#0d1117);"><code class="language-ts"><span'
 curl -sf http://127.0.0.1:3300/docs/components | grep -q '<picture><source type="image/avif"'
 curl -sf http://127.0.0.1:3300/docs | grep -q 'Components in MDX'
 # Markdoc (@nowaki-dev/markdoc): a page importing a .mdoc (a custom tag, an island, frontmatter,

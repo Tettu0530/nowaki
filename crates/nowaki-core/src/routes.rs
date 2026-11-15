@@ -505,6 +505,11 @@ mod tests {
         assert!(!is_file_route_stem("blog/[slug]"));
         assert!(!is_file_route_stem("about"));
         assert!(!is_file_route_stem("[...rest]"));
+        assert!(!is_file_route_stem("docs/[[...slug]]"));
+        assert!(!is_file_route_stem("[id]"));
+        assert!(is_file_route_stem("robots.txt"));
+        assert!(!is_endpoint_rel("docs/[...slug].tsx"));
+        assert!(is_endpoint_rel("feed.xml.ts"));
         assert!(!is_file_route_stem("v1.2/index"));
         assert!(is_endpoint_rel("og/[card].png.ts"));
         assert!(is_endpoint_rel("api/hello.ts"));

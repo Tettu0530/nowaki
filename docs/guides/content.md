@@ -121,6 +121,12 @@ strikethrough, footnotes and autolinks.
 - Fenced code with a language (` ```tsx `) is highlighted at build time with inline styles, so
   it needs no client JS or theme CSS and works under an enforced CSP. A block without a language,
   or with an unknown one, stays plain text.
+- The highlight colors follow the page's color scheme: each one is written as the light color
+  (GitHub light) followed by `light-dark(<light>, <dark>)` with its GitHub-dark counterpart. For
+  dark code blocks, set `color-scheme: dark` on the page (or `color-scheme: light dark` to follow
+  the OS setting), e.g. `:root { color-scheme: light dark; }`. A page without `color-scheme`
+  renders light code blocks, as before. `light-dark()` is Baseline 2024 (Chrome and Edge 123,
+  Firefox 120, Safari 17.5); an older browser ignores it and keeps the light colors.
 - `![alt](./hero.jpg "title")` with a local file becomes a responsive `<picture>` like
   [`<Image>`](./images-and-fonts.md); a missing file fails the build. Root-relative (`/logo.svg`)
   and remote URLs stay as written, except remote ones allowed by `images.remotePatterns`, which
