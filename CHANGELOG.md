@@ -24,6 +24,15 @@ milestone's worth of work; the codename is noted per entry.
   the markdoc `Schema`). `LayoutModule` now says what a layout's `meta`, `title`, `head` and
   `lang` exports do: only a `meta` object is read (a `meta` function is not called), and
   `title` / `lang` are not read on a layout (use `meta.title` / `htmlAttrs.lang`).
+- Guides, deploy pages and troubleshooting in the repo, for 1.0: `docs/README.md` (an index of
+  the guides, deploy pages, reference, migration guides and policies); `docs/guides/` with one
+  task-oriented guide per feature area (routing, data, layouts and middleware, islands,
+  Jetstream, content, images and fonts, SEO, routing config, i18n, sessions and env, caching,
+  View Transitions, observability, security, dev experience, plugins), each with examples from
+  `examples/hello` and `examples/gallery`; `docs/deploy/` with a page per adapter (node, bun,
+  deno, cloudflare, vercel, static) and for `nowaki start` (Docker, a reverse proxy, several
+  instances), plus a table of what works on which target; and `docs/troubleshooting.md` with
+  the error messages users hit, their cause and the fix.
 
 ## [0.20.0] — 2026-11-14 · API freeze (the last breaking release before 1.0)
 
