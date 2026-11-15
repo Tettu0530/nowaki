@@ -11,6 +11,26 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] — 2026-11-15 · release candidate
+
+Packages: `nowaki`, `@nowaki-dev/runtime`, `create-nowaki` / `create-nowaki-app` and
+`@nowaki-dev/markdoc` 1.0.0-rc.1 on the npm `next` tag (crates.io: `nowaki` 1.0.0-rc.1);
+`nowaki-core` 0.20.1 (internal, pinned exactly). Install with `npm create nowaki@next`, or
+`nowaki upgrade --to next` in an app.
+
+The first release candidate for 1.0. The public API is the one frozen in 0.20.0 (`api/`,
+docs/STABILITY.md); this release adds no breaking change. It fixes what the 1.0 docs work
+found: layouts honor `title` / `lang` / `meta()` as their types say, the Vercel function and
+`dist/server/package.json` carry the app's own server packages, a few type gaps, live events on
+Vercel / Cloudflare require `NOWAKI_LIVE_SECRET`, and `nowaki upgrade` works for apps from
+before 0.19.3 and on Windows. It also ships the documentation: `docs/reference/` (generated),
+guides, deploy pages, troubleshooting, and the 0.x → 1.0, Next.js and Astro guides.
+`@nowaki-dev/markdoc` moves to the 1.0 line and accepts the 1.0 release candidates of the
+runtime.
+
+1.0.0 follows after at least 14 days with no change to `api/`, real apps on the release
+candidate, and the 1.0 benchmark run.
+
 ### Upgrade notes
 - **Live islands on the cloudflare and vercel adapters need `NOWAKI_LIVE_SECRET`.** Without it
   `POST /__nowaki/live-event` now answers 503 (logged once per instance, naming the variable)
