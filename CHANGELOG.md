@@ -11,6 +11,12 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Documentation
+- The upgrade guide and `nowaki upgrade` docs now run the target version's CLI
+  (`npx nowaki@1.0.0 upgrade --to 1.0.0`, `npx nowaki@next upgrade --to next`). The installed
+  CLI reports with its own, older checks; the 0.20.0 one stops on a catch-all page exporting
+  `head` (fixed in 1.0.0-rc.2).
+
 ## [1.0.0-rc.2] — 2026-11-15 · release candidate
 
 Packages: `nowaki`, `@nowaki-dev/runtime`, `create-nowaki` / `create-nowaki-app` 1.0.0-rc.2 on
