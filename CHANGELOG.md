@@ -50,6 +50,13 @@ milestone's worth of work; the codename is noted per entry.
   `nowaki upgrade --check`, `PORT` / `--host`, `_500`, default exports, `FormData` uploads and
   `.env.local`. SUPPORT.md and SECURITY.md name the supported 0.x line as 0.20.x, and SUPPORT.md
   lists the Node versions CI runs (22, 24 and 26).
+### Fixed
+- **`nowaki dev` on Windows:** editing a module an island imports (a `lib/` util) updates the
+  island in place with its state kept, as on macOS and Linux, instead of reloading the page.
+  Windows reports a directory as modified whenever a file in it is written, and the watcher
+  passed that directory on as a changed path, which forced a full reload. A content or
+  metadata change of a directory is now ignored (a directory created, renamed or removed still
+  counts). CI runs the HMR browser test on Windows too.
 
 ## [0.20.0] — 2026-11-14 · API freeze (the last breaking release before 1.0)
 

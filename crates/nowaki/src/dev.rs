@@ -299,23 +299,7 @@ fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::Recommende
                 return;
             }
         };
-        if !matches!(
-            event.kind,
-            EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
-        ) {
-            return;
-        }
-        let relevant: Vec<PathBuf> = event
-            .paths
-            .into_iter()
-            .filter(|p| {
-                !under(
-                    &filter_state.core.root,
-                    p,
-                    &["node_modules", ".git", "dist", "target", ".nowaki"],
-                )
-            })
-            .collect();
+        let relevant = watched_changes(&filter_state.core.root, &event);
         if !relevant.is_empty() {
             let _ = tx.send(relevant);
         }
@@ -331,6 +315,35 @@ fn start_watcher(root: &Path, state: Arc<DevState>) -> Result<notify::Recommende
     });
     watcher.watch(&root_owned, RecursiveMode::Recursive)?;
     Ok(watcher)
+}
+
+/// The paths of a watcher event that can change the app: created, modified or removed files
+/// outside dependencies, build output and caches. A content or metadata change of a directory is
+/// not one: Windows reports one for a directory whenever a file in it is written (`lib` next to
+/// `lib/label.ts`), and an existing path that isn't a file reloads the page in `plan_changes`.
+/// A directory created, removed or renamed still counts.
+fn watched_changes(root: &Path, event: &notify::Event) -> Vec<PathBuf> {
+    use notify::event::ModifyKind;
+    if !matches!(
+        event.kind,
+        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+    ) {
+        return Vec::new();
+    }
+    let dir_touch = matches!(event.kind, EventKind::Modify(k) if !matches!(k, ModifyKind::Name(_)));
+    event
+        .paths
+        .iter()
+        .filter(|p| {
+            !under(
+                root,
+                p,
+                &["node_modules", ".git", "dist", "target", ".nowaki"],
+            )
+        })
+        .filter(|p| !(dir_touch && p.is_dir()))
+        .cloned()
+        .collect()
 }
 
 /// Whether `p` (relative to `root`) is inside a directory named one of `names`. Matches by path
@@ -2094,5 +2107,93 @@ mod tests {
         assert!(plan.css.is_empty(), "{plan:?}");
         assert_eq!(plan.islands, [root.join("islands/Counter.tsx")].into());
         assert!(plan.modules.contains(&module));
+    }
+
+    #[test]
+    fn directory_touches_are_not_changes() {
+        use notify::event::{CreateKind, DataChange, ModifyKind, RemoveKind, RenameMode};
+        let (_dir, core) = hmr_app();
+        let root = core.root.clone();
+        let event = |kind: EventKind, path: &Path| notify::Event {
+            kind,
+            paths: vec![path.to_path_buf()],
+            attrs: Default::default(),
+        };
+        let lib = root.join("lib");
+        let label = root.join("lib/label.ts");
+        // What Windows reports for a write to lib/label.ts: the file, and lib itself (the CI log
+        // had `hmr reload lib, lib/label.ts, styles` for it).
+        let batch: Vec<PathBuf> = [
+            event(EventKind::Modify(ModifyKind::Any), &lib),
+            event(EventKind::Modify(ModifyKind::Any), &label),
+            event(EventKind::Modify(ModifyKind::Any), &root.join("styles")),
+            event(
+                EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+                &root.join("islands"),
+            ),
+        ]
+        .iter()
+        .flat_map(|e| watched_changes(&root, e))
+        .collect();
+        assert_eq!(batch, vec![label.clone()]);
+        // So the edit stays a hot island update rather than a reload.
+        let plan = plan_changes(&core, &mut HmrGraph::default(), &batch, false);
+        assert_eq!(plan.islands, [root.join("islands/Counter.tsx")].into());
+        assert!(!plan.reload, "{plan:?}");
+
+        // A directory created, renamed or removed still counts (a removed one reloads).
+        let created = event(EventKind::Create(CreateKind::Folder), &lib);
+        assert_eq!(watched_changes(&root, &created), vec![lib.clone()]);
+        let renamed = event(EventKind::Modify(ModifyKind::Name(RenameMode::To)), &lib);
+        assert_eq!(watched_changes(&root, &renamed), vec![lib.clone()]);
+        let gone = root.join("old");
+        let removed = event(EventKind::Remove(RemoveKind::Folder), &gone);
+        assert_eq!(watched_changes(&root, &removed), vec![gone.clone()]);
+        let plan = plan_changes(&core, &mut HmrGraph::default(), &[gone], false);
+        assert!(plan.reload);
+        // Ignored places and event kinds stay ignored.
+        let dep = event(
+            EventKind::Modify(ModifyKind::Any),
+            &root.join("node_modules/x/index.js"),
+        );
+        assert!(watched_changes(&root, &dep).is_empty());
+        let access = event(EventKind::Access(notify::event::AccessKind::Any), &label);
+        assert!(watched_changes(&root, &access).is_empty());
+    }
+
+    /// The real watcher on this OS: a write to a file in a subdirectory gives that file, and no
+    /// directory reaches `plan_changes` (on Windows the subdirectory is reported as modified too).
+    #[test]
+    fn watcher_reports_the_written_file_not_its_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("lib")).unwrap();
+        let label = root.join("lib/label.ts");
+        std::fs::write(&label, "export const label = 1;\n").unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<PathBuf>>();
+        let watch_root = root.clone();
+        let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            if let Ok(event) = res {
+                let _ = tx.send(watched_changes(&watch_root, &event));
+            }
+        })
+        .unwrap();
+        watcher.watch(&root, RecursiveMode::Recursive).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        std::fs::write(&label, "export const label = 2;\n").unwrap();
+        let mut seen: Vec<PathBuf> = Vec::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !seen.contains(&label) && std::time::Instant::now() < deadline {
+            if let Ok(paths) = rx.recv_timeout(Duration::from_millis(100)) {
+                seen.extend(paths);
+            }
+        }
+        // Late events for the same write.
+        while let Ok(paths) = rx.recv_timeout(Duration::from_millis(500)) {
+            seen.extend(paths);
+        }
+        assert!(seen.contains(&label), "{seen:?}");
+        assert!(seen.iter().all(|p| !p.is_dir()), "{seen:?}");
     }
 }
