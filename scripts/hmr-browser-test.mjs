@@ -7,7 +7,7 @@
 // a basePath with the CSP. Prints the update latency (file written -> DOM updated) for each kind
 // of edit.
 // Builds a small app under target/ (linked to examples/hello's node_modules). e2e-dev.sh runs it
-// when it finds Chrome (not on Windows).
+// when it finds Chrome.
 // Usage: [PORT=5500] [CDP_PORT=5501] node scripts/hmr-browser-test.mjs
 // NOWAKI_BIN overrides the binary (default target/debug/nowaki), CHROME the browser.
 
