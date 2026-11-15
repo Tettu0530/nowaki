@@ -37,7 +37,7 @@ runtime.
 | Variable | |
 | --- | --- |
 | `NOWAKI_SESSION_SECRET` | required if the app uses sessions |
-| `NOWAKI_LIVE_SECRET` | required if the app has live islands: function instances don't share a random key |
+| `NOWAKI_LIVE_SECRET` | required if the app has live islands: function instances don't share a random key, so without it live events are refused (503); pages still render |
 | `NOWAKI_CSP`, `NOWAKI_SITE`, `NOWAKI_REVALIDATE_SECRET` | as on other servers |
 | `NOWAKI_SECURITY_HEADERS=off` | set it at build time too: the headers for static files are written into `config.json` |
 | `NOWAKI_SERVER_TIMING`, `NOWAKI_LOG`, `OTEL_*` | observability |

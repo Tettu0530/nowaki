@@ -16,6 +16,8 @@ What is covered by semver, and what is not: [STABILITY.md](../STABILITY.md). The
 | `@nowaki-dev/runtime/env` | [runtime-env.md](runtime-env.md) | `EnvDefinition`, `EnvOutput`, `EnvValues`, `ServerEnvOf`, `PublicEnvOf`, `defineEnv` |
 | `@nowaki-dev/runtime/env/server` | [runtime-env-server.md](runtime-env-server.md) | `ServerEnv`, `env` |
 | `@nowaki-dev/runtime/image` | [runtime-image.md](runtime-image.md) | `ImageSource`, `ImageProps`, `Image` |
+| `@nowaki-dev/runtime/jsx-dev-runtime` | [runtime-jsx-dev-runtime.md](runtime-jsx-dev-runtime.md) | `ServerFormAction`, `FormAttributes`, `Fragment`, `jsx`, `jsxDEV`, `jsxs` |
+| `@nowaki-dev/runtime/jsx-runtime` | [runtime-jsx-runtime.md](runtime-jsx-runtime.md) | `ServerFormAction`, `FormAttributes`, `Fragment`, `jsx`, `jsxDEV`, `jsxs` |
 | `@nowaki-dev/runtime/navigation` | [runtime-navigation.md](runtime-navigation.md) | `NowakiRoutes`, `RoutePath`, `Href`, `route`, `LinkProps`, `Link`, `HrefOptions`, `href`, `getLocale`, `localePath`, `setLocale`, `routePath`, `transitionName` |
 | `@nowaki-dev/runtime/session` | [runtime-session.md](runtime-session.md) | `StoredSession`, `SessionStore`, `SessionOptions`, `SessionConfig`, `defineSession` |
 | `@nowaki-dev/markdoc` | [markdoc.md](markdoc.md) | `Schema`, `MarkdocOptions`, `markdoc`, `compileMarkdoc`, `Tag`, `nodes`, `tags`, `functions`, `NowakiPlugin` |

@@ -371,6 +371,99 @@ const text = async (res) => res.body ?? (await new Response(res.stream).text());
   delete process.env.NOWAKI_REVALIDATE_SECRET;
 }
 
+// Layout metadata (`title`, `lang`, `head`, `htmlAttrs` / `bodyAttrs`, `meta` objects and meta()
+// functions): layouts root → leaf, then the page; the nearest module that sets `title` / `lang`
+// wins, and within a module `meta.*` beats the plain export.
+{
+  const { pageMeta } = await import("../packages/nowaki-runtime/server/document.mjs");
+  const metaCalls = [];
+  const lm = {
+    "routes/_layout.tsx": {
+      title: "Root",
+      lang: "en",
+      head: '<link rel="icon" href="/r.ico" />',
+      meta: { description: "site", openGraph: { siteName: "Site" } },
+      htmlAttrs: { class: "root", lang: "xx" },
+      loader: () => "RD",
+      default: ({ children }) => h("div", null, children),
+    },
+    "routes/docs/_layout.tsx": {
+      title: "Docs export",
+      loader: (ctx) => `docs:${ctx.params.slug ?? "-"}`,
+      meta: ({ data, params, url }) => (metaCalls.push({ data, params, path: url.pathname }), { title: `Docs ${data}`, lang: "fr", htmlAttrs: { class: "docs" }, bodyAttrs: { "data-l": "docs" }, openGraph: { type: "article" } }),
+      default: ({ children }) => h("section", null, children),
+    },
+    "routes/broken/_layout.tsx": {
+      meta: () => {
+        throw new Error("layout meta failed");
+      },
+      default: ({ children }) => h("main", null, children),
+    },
+    "routes/index.tsx": { default: () => h("p", null, "home") },
+    "routes/docs/[slug].tsx": { default: () => h("p", null, "doc") },
+    "routes/docs/own.tsx": { title: "Own", lang: "de", htmlAttrs: { class: "page" }, meta: () => ({ description: "page" }), default: () => h("p", null, "own") },
+    "routes/docs/early.tsx": { streaming: "early", default: () => h("p", null, "early") },
+    "routes/broken/x.tsx": { default: () => h("p", null, "x") },
+    "routes/_404.tsx": { title: "Missing", default: () => h("p", null, "404") },
+  };
+  const lt = {
+    routes: [
+      { file: "routes/index.tsx", segments: [], dir: "", isApi: false },
+      { file: "routes/docs/own.tsx", segments: [{ lit: "docs" }, { lit: "own" }], dir: "/docs", isApi: false },
+      { file: "routes/docs/early.tsx", segments: [{ lit: "docs" }, { lit: "early" }], dir: "/docs", isApi: false },
+      { file: "routes/docs/[slug].tsx", segments: [{ lit: "docs" }, { param: "slug" }], dir: "/docs", isApi: false },
+      { file: "routes/broken/x.tsx", segments: [{ lit: "broken" }, { lit: "x" }], dir: "/broken", isApi: false },
+    ],
+    layouts: [
+      { prefix: "", file: "routes/_layout.tsx" },
+      { prefix: "/docs", file: "routes/docs/_layout.tsx" },
+      { prefix: "/broken", file: "routes/broken/_layout.tsx" },
+    ],
+    middleware: [],
+    notFound: "routes/_404.tsx",
+  };
+  const doc = ({ mod, body, meta }) => JSON.stringify({ ...pageMeta(meta, mod), body });
+  const menv = {
+    ...env,
+    routeTable: async () => lt,
+    importModule: async (file) => lm[file],
+    renderDocument: doc,
+    renderShell: ({ mod, meta }) => ({ head: `${doc({ mod, body: "", meta })}\n`, tail: "" }),
+    onError: () => {},
+  };
+  const get = async (path) => {
+    const res = await handleRequest(menv, { method: "GET", url: new URL(`http://x.test${path}`), headers: {}, version: 1 });
+    const body = await text(res);
+    return { status: res.status, ...JSON.parse(body.split("\n")[0]) };
+  };
+  const home = await get("/");
+  check("layout meta: the root layout's title export is the fallback title", home.title === "Root");
+  check("layout meta: the root layout's lang export beats its htmlAttrs.lang", home.lang === "en" && !home.htmlAttrs.includes("lang="));
+  check("layout meta: a layout's head and meta object reach the page", home.head.includes('rel="icon"') && home.head.includes('<meta name="description" content="site" />'));
+
+  const d = await get("/docs/intro");
+  check("layout meta: a layout's meta() gets its loader's data, params and url", metaCalls.at(-1)?.data === "docs:intro" && metaCalls.at(-1)?.params.slug === "intro" && metaCalls.at(-1)?.path === "/docs/intro");
+  check("layout meta: the nearest layout's meta().title wins over its title export and the root's", d.title === "Docs docs:intro");
+  check("layout meta: the nearest layout's meta().lang wins", d.lang === "fr");
+  check("layout meta: meta() htmlAttrs / bodyAttrs merge after the layouts' exports", d.htmlAttrs.includes('class="root docs"') && d.bodyAttrs.includes('data-l="docs"'));
+  check("layout meta: meta() SEO fields merge over the root's (openGraph one level deep)", d.head.includes('og:type" content="article"') && d.head.includes('og:site_name" content="Site"') && d.head.includes('og:title" content="Docs docs:intro"'));
+
+  const own = await get("/docs/own");
+  check("layout meta: the page's title and lang win over every layout", own.title === "Own" && own.lang === "de");
+  check("layout meta: the page's htmlAttrs merge last", own.htmlAttrs.includes('class="root docs page"'));
+  check("layout meta: the page's meta() fields win over the layouts'", own.head.includes('content="page"') && !own.head.includes('content="site"'));
+
+  metaCalls.length = 0;
+  const early = await get("/docs/early");
+  check("layout meta: early streaming calls a layout's meta() before any loader (data undefined)", early.title === "Docs undefined" && metaCalls.length === 1 && metaCalls[0].data === undefined);
+
+  const broken = await get("/broken/x");
+  check("layout meta: a layout meta() that throws is skipped; the page renders", broken.status === 200 && broken.title === "Root" && broken.body.includes("<p>x</p>"));
+
+  const missing = await get("/nope");
+  check("layout meta: the 404 page's own title wins over the layouts'", missing.status === 404 && missing.title === "Missing" && missing.lang === "en");
+}
+
 if (failures) {
   console.error(`${failures} failure(s)`);
   process.exit(1);

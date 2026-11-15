@@ -4,10 +4,12 @@
 
 import { localePathFor } from "./i18n.mjs";
 import { runWithLocale } from "./i18n-context.mjs";
+import { routeUnderPrefix } from "./router.mjs";
 
-/// Pages whose module passes `keep(mod)`, at most `max`.
+/// Pages whose module passes `await keep(mod, route, table)`, at most `max`.
 export async function pageUrls(env, { keep, max = Infinity, version, label = "page list" } = {}) {
-  const { routes } = await env.routeTable(version);
+  const table = await env.routeTable(version);
+  const { routes } = table;
   const urls = new Set();
   for (const route of routes) {
     if (route.isApi || urls.size >= max) continue;
@@ -17,7 +19,7 @@ export async function pageUrls(env, { keep, max = Infinity, version, label = "pa
     } catch {
       continue; // the first real request reports it
     }
-    if (!keep(mod)) continue;
+    if (!(await keep(mod, route, table))) continue;
     if (env.i18n) {
       await localeUrls(env.i18n, route, mod, urls, max, label);
       continue;
@@ -79,19 +81,40 @@ export function isrUrls(env, { max = 1024 } = {}) {
 }
 
 /// The URLs the generated sitemap.xml lists: every page, except ones that opt out with
-/// `export const sitemap = false` or a static `meta.robots` of noindex.
+/// `export const sitemap = false` or are noindex by their static `meta.robots`. The robots value
+/// combines like the page's document metadata (handler.mjs `documentMeta`): the layouts' `meta`
+/// objects root → nested, then the page's, the last one setting `robots` winning. A `meta`
+/// function needs a request, so it isn't run here: such a module counts as not setting `robots`.
 export function sitemapUrls(env, version) {
   return pageUrls(env, {
     version,
     label: "sitemap.xml",
-    keep: (mod) => {
+    keep: async (mod, route, table) => {
       if (mod?.sitemap === false || typeof mod?.default !== "function") return false;
-      const robots = mod?.meta && typeof mod.meta === "object" ? mod.meta.robots : undefined;
-      if (typeof robots === "string" && /noindex/i.test(robots)) return false;
-      if (robots && typeof robots === "object" && robots.index === false) return false;
-      return true;
+      let robots = staticRobots(mod);
+      if (robots === undefined) {
+        // The nearest layout that sets one (the layouts are listed root first).
+        const layouts = (table.layouts ?? []).filter((l) => routeUnderPrefix(route, l.prefix));
+        for (let i = layouts.length - 1; i >= 0 && robots === undefined; i--) {
+          let lmod;
+          try {
+            lmod = await env.importModule(layouts[i].file, version);
+          } catch {
+            continue;
+          }
+          robots = staticRobots(lmod);
+        }
+      }
+      return !noindex(robots);
     },
   });
+}
+
+const staticRobots = (mod) => (mod?.meta && typeof mod.meta === "object" ? mod.meta.robots : undefined);
+
+function noindex(robots) {
+  if (typeof robots === "string") return /noindex/i.test(robots);
+  return !!robots && typeof robots === "object" && robots.index === false;
 }
 
 function urlOf(route, params) {

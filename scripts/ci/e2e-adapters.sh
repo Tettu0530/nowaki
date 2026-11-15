@@ -295,6 +295,24 @@ curl -s -D - -o /dev/null http://127.0.0.1:3320/isr | grep -qiE '^vercel-cache-t
 # revalidateTag in an action without @vercel/functions installed: a warned no-op, the redirect stands
 curl -s -o /dev/null -w '%{http_code}' -X POST -H 'origin: http://127.0.0.1:3320' -d kind=tag http://127.0.0.1:3320/isr-tagged | grep -q '^303$'
 kill $VERCEL_PID
+# live on Vercel (VERCEL=1): without NOWAKI_LIVE_SECRET the live page renders but its events are
+# refused (503, every instance would sign with its own key); with it they apply
+vercel_live() {
+  (cd examples/hello/.vercel/output/functions/index.func \
+    && exec env VERCEL=1 "$@" node -e 'import("./index.mjs").then(m=>require("http").createServer(m.default).listen(3320))') &
+  VERCEL_PID=$!
+  for i in $(seq 1 20); do curl -sf http://127.0.0.1:3320/live >/dev/null && break; sleep 1; done
+  curl -sf http://127.0.0.1:3320/live | grep -q 'nowaki-live name="LiveCounter"'
+  VSIG=$(curl -sf http://127.0.0.1:3320/live | grep -oE 'sig="v1\.[^"]+"' | head -1 | cut -d'"' -f2)
+  VEV="{\"name\":\"LiveCounter\",\"state\":{\"count\":0},\"sig\":\"$VSIG\",\"handler\":\"inc\"}"
+  VCODE=$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'content-type: application/json' -H 'x-nowaki-live: 1' -H 'origin: http://127.0.0.1:3320' -d "$VEV" http://127.0.0.1:3320/__nowaki/live-event)
+  kill $VERCEL_PID
+  wait $VERCEL_PID 2>/dev/null || true
+}
+vercel_live env -u NOWAKI_LIVE_SECRET
+test "$VCODE" = 503
+vercel_live NOWAKI_LIVE_SECRET=e2e-adapters-live-secret-0123456789
+test "$VCODE" = 200
 # nowaki.config redirects / rewrites / headers / basePath / trailingSlash on the node, cloudflare,
 # vercel and static adapters (a generated app; the servers listen on 3313 and 3314)
 node scripts/rules-e2e.mjs node cloudflare vercel static --port 3313

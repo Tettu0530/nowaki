@@ -351,11 +351,11 @@ export function genHttp(root, previous) {
 
 export function genClient(root, previous) {
   const files = walk(root, "packages/nowaki-runtime/client", /\.m?js$/);
-  const found = scanTokens(root, files, [/["'`](nowaki:[a-z-]+)/g, /\b(data-(?:live|nowaki)(?:-[a-z]+)*)\b/g]);
+  const found = scanTokens(root, files, [/["'`](nowaki:[a-z-]+)/g, /\b(data-(?:live|nowaki)(?:-[a-z]+)*)\b/g, /(meta\[name="nowaki-[a-z-]+"\])/g]);
   return classify(found, previous, [
-    "Client surface: nowaki:* DOM events and data-live* / data-nowaki-* attributes used by",
-    "packages/nowaki-runtime/client. Generated markup (<nowaki-island> and friends) and",
-    "window.__nowaki* globals are internal.",
+    "Client surface: nowaki:* DOM events, data-live* / data-nowaki-* attributes and the",
+    "<meta name=\"nowaki-*\"> tags read by packages/nowaki-runtime/client. Generated markup",
+    "(<nowaki-island> and friends) and window.__nowaki* globals are internal.",
     ...CLASSIFY_HELP,
   ]);
 }

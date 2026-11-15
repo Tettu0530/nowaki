@@ -278,7 +278,8 @@ session.ts   ctx.session options (optional)
   instead of cookies.
 - **Production checklist** (when you deploy): set `NOWAKI_SESSION_SECRET` (at
   least 32 characters) if the app uses `ctx.session`; set `NOWAKI_LIVE_SECRET` if
-  the app uses Jetstream live islands; try `NOWAKI_CSP=report-only` before `enforce`; behind
+  the app uses Jetstream live islands (the cloudflare and vercel adapters refuse live events
+  without it); try `NOWAKI_CSP=report-only` before `enforce`; behind
   a reverse proxy on `nowaki start`, set `NOWAKI_TRUST_PROXY=1` and forward the public
   host as `x-forwarded-host`. See the upstream [SECURITY.md](https://github.com/Tettu0530/nowaki/blob/main/SECURITY.md).
 - **Inline scripts and styles under `NOWAKI_CSP`.** The nonce goes only on Nowaki's own

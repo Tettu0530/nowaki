@@ -1,0 +1,4 @@
+{
+  "extends": "../tsconfig.base.json",
+  "include": ["../../../packages/create-nowaki/templates/_shared/nowaki-jsx.d.ts", "*.ts", "*.tsx"]
+}

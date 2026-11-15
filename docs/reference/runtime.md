@@ -48,7 +48,7 @@ Public API of `@nowaki-dev/runtime`: the types, and the functions index.js expor
 | [`Revalidate`](#revalidate) | Type | `export const revalidate` on a page route: ISR. |
 | [`PageScripts`](#pagescripts) | Type | `export const scripts` on a page route or layout: modules shipped to the browser as `<script type="module">`, bundled like an island but with no component and no hydration. |
 | [`PageModule`](#pagemodule) | Interface | The exports a page route module (`routes/**/*.tsx`, also `_404` / `_500`) may have, with their types. |
-| [`LayoutModule`](#layoutmodule) | Interface | The exports a `_layout` module may have (a layout's `meta` applies to every page under it). |
+| [`LayoutModule`](#layoutmodule) | Interface | The exports a `_layout` module may have. |
 | [`ApiModule`](#apimodule) | Interface | The exports an API route (`routes/api/**`) or a file route (`feed.xml.ts`, `og/[card].png.ts`) may have: one handler per request method (uppercase; a method without one gets 405 unless there is a `default`), `csrf`, and for prerendered file routes `staticPaths` / `prerender`. |
 | [`MiddlewareModule`](#middlewaremodule) | Interface | A `_middleware` module: its default export runs before the routes under its directory. |
 | [`IslandModule`](#islandmodule) | Interface | An island module (`islands/*.tsx`): the component, and `live` for a Jetstream island. |
@@ -173,7 +173,7 @@ Members:
 
 - `__nowakiResult`: Marks the object as a result. Internal: create results with the `ctx` methods.
 
-Used by: [`LoaderContext`](#loadercontext), [`ApiHandler`](#apihandler).
+Used by: [`LoaderContext`](#loadercontext), [`ApiHandler`](#apihandler), [`PageProps`](#pageprops).
 
 ### LoaderContext
 
@@ -398,8 +398,22 @@ Type. `import type { ApiHandler } from "@nowaki-dev/runtime";`
 export type ApiHandler = (ctx: LoaderContext) => Response | NowakiResult | unknown | Promise<Response | NowakiResult | unknown>;
 ```
 
-An API route handler (a method export or `default`). Returns a `Response`, a `ctx` result, or
-any other value, sent as JSON; in a file route (`feed.xml.ts`), a string or bytes is the file.
+An API route handler (a method export or `default`). What it returns becomes the response:
+- a `Response`, or a `ctx.json()` / `html()` / `text()` / `redirect()` result: sent as it is;
+- in a file route (`feed.xml.ts`), a string or bytes: the file, typed by the route's extension;
+- a plain `{ status?, headers?, body? }` object: `status` (default 200), the headers over
+  `content-type: application/json`, and `body` sent as written when it is a string, else as
+  JSON (an absent body is `null`);
+- anything else: JSON with status 200 (`undefined` is `null`).
+
+Any object with a `status` or `body` key counts as the third kind, so data that has one (say,
+`{ status: "active" }`) is sent wrong: wrap it (`{ data }`) or return `ctx.json(data)`.
+
+Example:
+
+```tsx
+export const GET: ApiHandler = () => ({ status: 201, headers: { "x-id": "1" }, body: { ok: true } });
+```
 
 Uses: [`LoaderContext`](#loadercontext), [`NowakiResult`](#nowakiresult).
 
@@ -484,7 +498,8 @@ Members:
 - `bodyAttrs`: Attributes for `<body>` (see [`DocumentAttrs`](#documentattrs)).
 - `description`: `<meta name="description">`; Open Graph and Twitter fall back to it.
 - `canonical`: `<link rel="canonical">`: a URL or path (against the site), or `true` for this page's path.
-- `robots`: `<meta name="robots">`. A noindex page is left out of the generated sitemap.xml.
+- `robots`: `<meta name="robots">`. A noindex page is left out of the generated sitemap.xml: one whose
+  static `meta` object, else its nearest layout's, says noindex (`meta()` isn't run for it).
 - `openGraph`: Open Graph. `title` / `description` default to the page's; `url` to this page; relative URLs resolve against the site.
 - `twitter`: Twitter / X cards. `card` defaults to "summary_large_image"; the rest fall back to Open Graph.
 - `twitter.imageAlt`: Defaults to the Open Graph image's `alt`.
@@ -525,8 +540,11 @@ export type MetaFn<D = unknown> = (info: {
 ```
 
 `export const meta` as a function: metadata from the loader data, params and URL, possibly
-async. Route metadata is either this or a [`Meta`](#meta) object. A layout's `meta` object applies
-to every page under it (page values win; `openGraph` and `twitter` merge one level deep).
+async. Route metadata is either this or a [`Meta`](#meta) object. In a layout, `data` is the
+layout's own loader data, and the result applies to every page under it like a `meta` object
+(see [`LayoutModule`](#layoutmodule) for how layouts and the page combine). Under `streaming = "early"`
+and on `_404` / `_500` pages it runs before any loader, so `data` is undefined there. One that
+throws is logged and skipped.
 
 Uses: [`RouteParams`](#routeparams), [`Meta`](#meta).
 
@@ -563,12 +581,14 @@ Used by: [`PageProps`](#pageprops), [`PageModule`](#pagemodule).
 Type. `import type { PageProps } from "@nowaki-dev/runtime";`
 
 ```ts
-export type PageProps<L extends Loader<any> = Loader<unknown>> = RouteProps<Awaited<ReturnType<L>>>;
+export type PageProps<L extends Loader<any> = Loader<unknown>> = RouteProps<Exclude<Awaited<ReturnType<L>>, NowakiResult | Response>>;
 ```
 
-Page props with `data` inferred from the loader type. Use as `PageProps<typeof loader>`.
+Page props with `data` inferred from the loader type. Use as `PageProps<typeof loader>`. What a
+loader returns to answer the request itself (`ctx.redirect()` / `json()` / `html()` / `text()`,
+a `Response`) never reaches the page, so it is left out of `data`.
 
-Uses: [`Loader`](#loader), [`RouteProps`](#routeprops).
+Uses: [`Loader`](#loader), [`RouteProps`](#routeprops), [`NowakiResult`](#nowakiresult).
 
 ### LayoutProps
 
@@ -648,7 +668,7 @@ Interface. `import type { Live } from "@nowaki-dev/runtime";`
 
 ```ts
 export interface Live<S = any> {
-    state: (props?: any) => S;
+    state?: (props?: any) => S;
     on: Record<string, (state: S, payload?: any) => S | Promise<S>>;
     authorize?: (event: {
         name: string;
@@ -666,11 +686,14 @@ export interface Live<S = any> {
 ```
 
 `export const live` in an island module: a live island (Jetstream). No component JS is sent to
-the browser: the server holds the state and sends HTML patches.
+the browser: the server holds the state and sends HTML patches. A plain live island sets
+`state`; a room island (`room`, with `shared`) may leave it out, since its handlers get the
+room's shared state.
 
 Members:
 
-- `state`: The initial state, from the island's props.
+- `state`: The initial state, from the island's props. Set it on a plain live island (without it the
+  state starts as `{}`); a room island (`room` / `shared`) may omit it.
 - `on`: Event handlers by name (`data-live="name"`), each returning the new state.
 - `authorize`: Runs after the state signature is verified and before each handler; anything but `true`
   refuses the event (the client gets `{ type: "error", reason: "forbidden" }`). `getContext()`
@@ -685,6 +708,16 @@ Members:
   the next start (`NOWAKI_LIVE_ROOMS_FILE` picks the file, `off` disables it); under `nowaki dev`
   they are lost on restart.
 - `shared`: Initial shared state of a room (`live.room`).
+
+Examples:
+
+```tsx
+export const live: Live<{ n: number }> = { state: () => ({ n: 0 }), on: { inc: (s) => ({ n: s.n + 1 }) } };
+```
+
+```tsx
+export const live: Live<Votes> = { room: () => "poll", shared: () => ({ a: 0 }), on: { … } };
+```
 
 Used by: [`IslandModule`](#islandmodule).
 
@@ -1088,19 +1121,32 @@ export interface LayoutModule<D = any> {
 }
 ```
 
-The exports a `_layout` module may have (a layout's `meta` applies to every page under it).
+The exports a `_layout` module may have. Its document metadata (`meta`, `title`, `head`,
+`lang`, `htmlAttrs`, `bodyAttrs`) applies to every page under it, the same on every server (dev,
+start, the adapters, prerender), combined root layout → nested layouts → page:
+- `title` and `lang`: the page's, else the nearest layout's (leaf → root) that sets one. Within
+  a module `meta.title` / `meta.lang` win over the `title` / `lang` exports. A `lang` from any
+  of them wins over the i18n locale, which wins over `htmlAttrs.lang`; the default is "en".
+- `head`: each layout's (root first), then the page's. Within a module `meta.head` wins over
+  the `head` export.
+- `htmlAttrs` / `bodyAttrs`: merged root → page, each module's export, then its `meta`'s (see
+  [`DocumentAttrs`](#documentattrs)).
+- the typed SEO fields (`description`, `openGraph`, `canonical`, …): merged root → page, later
+  values win; `openGraph` and `twitter` merge one level deep.
+
+A layout's `meta` function gets `{ data, params, url }` with its own loader's data, like a
+page's [`MetaFn`](#metafn). A `meta` object is read once per module; a function runs per request.
 
 Members:
 
 - `default`: The layout component.
 - `loader`: See [`Loader`](#loader).
-- `meta`: Defaults for every page under the layout: page values win, and `openGraph` and `twitter` merge
-  one level deep. Only an object is read on a layout; a function is not called.
-- `title`: Not read on a layout: set `meta.title`, the title of pages that have none of their own.
+- `meta`: Defaults for every page under the layout: the page's (and nearer layouts') values win, and
+  `openGraph` and `twitter` merge one level deep. A function gets the layout's loader data.
+- `title`: The `<title>` of pages under the layout that set none. `meta.title` wins over it.
 - `head`: Raw HTML added to the `<head>` of every page under the layout (root layout first, before the
-  page's own `head`). No escaping: never build it from user input.
-- `lang`: Not read on a layout: set `htmlAttrs.lang`, used by pages without their own `lang` (with
-  i18n, the request's locale comes first).
+  page's own `head`). `meta.head` wins over it. No escaping: never build it from user input.
+- `lang`: `<html lang>` of pages under the layout that set none. `meta.lang` wins over it.
 - `htmlAttrs`: See [`DocumentAttrs`](#documentattrs).
 - `bodyAttrs`: See [`DocumentAttrs`](#documentattrs).
 - `scripts`: See [`PageScripts`](#pagescripts).
@@ -1129,7 +1175,9 @@ export interface ApiModule {
 
 The exports an API route (`routes/api/**`) or a file route (`feed.xml.ts`, `og/[card].png.ts`)
 may have: one handler per request method (uppercase; a method without one gets 405 unless there
-is a `default`), `csrf`, and for prerendered file routes `staticPaths` / `prerender`.
+is a `default`), `csrf`, and for prerendered file routes `staticPaths` / `prerender`. See
+[`ApiHandler`](#apihandler) for what a handler may return (a `{ status, headers, body }` object among
+them).
 
 Members:
 

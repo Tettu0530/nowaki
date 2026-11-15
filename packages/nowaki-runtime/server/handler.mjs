@@ -500,7 +500,7 @@ async function renderRoute(env, table, match, mod, ctx, version, path) {
   // The trade-off: once it's sent, the status and headers are fixed, so `meta` only sees the static
   // exports, and a loader redirect or error is handled inside the stream (see earlyDocument).
   if (mod.streaming === "early" && typeof env.renderShell === "function") {
-    const meta = await withDocAttrs(env, table, match.file, mod, version, withFonts(env, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data: undefined, params: ctx.params, url: ctx.url }), slotFiles)), slotFiles)));
+    const meta = await documentMeta(env, table, match.file, mod, version, ctx, undefined, undefined, slotFiles);
     const { head, tail } = env.renderShell({ mod, meta });
     const revalidate = isrSeconds(mod);
     return {
@@ -531,8 +531,11 @@ async function renderRoute(env, table, match, mod, ctx, version, path) {
   const tok = tr?.begin("render", "render");
   // try / finally adds no frame, so an untraced render pays nothing for it.
   try {
-    const meta = await withDocAttrs(env, table, match.file, mod, version, withFonts(env, await withScripts(env, table, match.file, mod, version, await withSeo(env, table, match.file, mod, version, ctx, await withRouteCss(env, match.file, mod, version, await resolveMeta(mod, { data, params: ctx.params, url: ctx.url }), slotFiles)), slotFiles)));
-    const node = await wrapLayouts(env, table, match.file, h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url }), ctx, version, slots);
+    // The layouts' loaders run first (the node is built, not rendered yet), so a layout's meta()
+    // gets its loader's data.
+    const layoutData = [];
+    const node = await wrapLayouts(env, table, match.file, h(Page, { data, actionData: ctx.actionData, params: ctx.params, url: ctx.url }), ctx, version, slots, layoutData);
+    const meta = await documentMeta(env, table, match.file, mod, version, ctx, data, layoutData, slotFiles);
 
     // With a shared Cache-Control, CDNs do ISR as-is. The `nowaki start` Rust front
     // reads x-nowaki-revalidate and caches in memory.
@@ -712,55 +715,104 @@ function segmentsOverlap(a, b) {
   }
 }
 
-async function resolveMeta(mod, info) {
-  let dyn = null;
-  if (mod.meta && typeof mod.meta === "object") {
-    dyn = mod.meta; // `export const meta = { title, description, openGraph, … }`
-  } else if (typeof mod.meta === "function") {
-    try {
-      dyn = await mod.meta(info);
-    } catch {
-      dyn = null; // keep rendering the page even if meta throws
-    }
-  }
+// A page's document metadata (title, head, lang, <html> / <body> attributes) from its layouts and
+// its own exports, the same on every server. `data` is the page loader's, `layoutData[i]` the
+// loader data of the i-th layout in the chain (both undefined for `streaming = "early"` and the
+// 404 / 500 pages, whose meta resolves before any loader runs). Steps, in order: meta (layouts,
+// then the page), route CSS, SEO tags, page scripts, fonts, document attributes.
+async function documentMeta(env, table, file, mod, version, ctx, data, layoutData, slotFiles) {
+  const layers = await layoutLayers(env, table, file, version, ctx, layoutData);
+  const page = await pageLayer(mod, { data, params: ctx.params, url: ctx.url }, file);
+  const meta = await withRouteCss(env, file, mod, version, withLayouts(page, layers), slotFiles);
+  const seo = withSeo(env, ctx, mod, meta, page, layers);
+  return withDocAttrs(withFonts(env, await withScripts(env, table, file, mod, version, seo, slotFiles)), page, layers);
+}
+
+// One module's metadata (a page's or a layout's): `meta` (the object, or what meta() returned)
+// and the static exports. Within a module `meta.title` / `head` / `lang` win over the `title` /
+// `head` / `lang` exports; for `htmlAttrs` / `bodyAttrs` the export merges first, then meta's.
+function layer(mod, dyn) {
   const str = (v) => (typeof v === "string" ? v : undefined);
+  const m = isObj(dyn) ? dyn : undefined;
   return {
-    title: str(dyn?.title) ?? str(mod.title),
-    head: str(dyn?.head) ?? str(mod.head),
-    lang: str(dyn?.lang) ?? str(mod.lang),
-    htmlAttrs: dyn?.htmlAttrs,
-    bodyAttrs: dyn?.bodyAttrs,
-    seo: dyn && typeof dyn === "object" ? dyn : undefined,
+    seo: m,
+    title: str(m?.title) ?? str(mod.title),
+    head: str(m?.head) ?? str(mod.head),
+    lang: str(m?.lang) ?? str(mod.lang),
+    htmlAttrs: [mod.htmlAttrs, m?.htmlAttrs],
+    bodyAttrs: [mod.bodyAttrs, m?.bodyAttrs],
   };
 }
 
-// The typed meta's head tags (seo.mjs): layouts' `export const meta` objects first (site-wide
-// defaults like openGraph.siteName), then the route's meta. They go after the route CSS and before
-// the page's own `head`.
-// Layouts' own `export const head` strings (root first) go here too, before the page's `head`.
-async function withSeo(env, table, file, mod, version, ctx, meta) {
-  const layouts = [];
-  const layoutHeads = [];
-  for (const f of file ? layoutChain(table, file) : []) {
-    const l = await env.importModule(f, version);
-    if (l?.meta && typeof l.meta === "object") layouts.push(l.meta);
-    if (typeof l?.head === "string" && l.head) layoutHeads.push(l.head);
+// A module whose `meta` isn't a function has the same layer on every request: built once.
+const staticLayers = new WeakMap();
+function staticLayer(mod) {
+  let l = staticLayers.get(mod);
+  if (!l) staticLayers.set(mod, (l = Object.freeze(layer(mod, isObj(mod.meta) ? mod.meta : undefined))));
+  return l;
+}
+
+// A page's or layout's meta(), given `{ data, params, url }`. One that throws counts as returning
+// nothing (logged): the page still renders.
+async function callMeta(mod, info, file) {
+  try {
+    return await mod.meta(info);
+  } catch (err) {
+    logError(`${file ?? info.url.pathname}: meta() failed:`, err);
+    return undefined;
   }
-  const own = meta?.seo ?? (mod?.meta && typeof mod.meta === "object" ? mod.meta : undefined);
-  if (layouts.length === 0 && !own && layoutHeads.length === 0) return meta;
-  const merged = mergeMeta(...layouts, own);
-  const title = (typeof meta?.title === "string" ? meta.title : undefined) ?? merged.title ?? mod?.title;
-  const tags = [seoTags(merged, { title, pathname: ctx.url.pathname, origin: ctx.url.origin, site: env.site, trailingSlash: env.trailingSlash, staticOutput: env.staticOutput === true }), ...layoutHeads]
-    .filter(Boolean)
-    .join("\n");
-  const next = { ...(meta ?? {}) };
-  if (next.title === undefined && typeof merged.title === "string") next.title = merged.title;
-  if (!tags) return next;
-  const head = typeof next.head === "string" ? next.head : typeof mod?.head === "string" ? mod.head : "";
+}
+
+async function pageLayer(mod, info, file) {
+  return typeof mod.meta === "function" ? layer(mod, await callMeta(mod, info, file)) : staticLayer(mod);
+}
+
+// The layers of a file's layouts, root first. A layout's meta() gets its own loader's data.
+const NO_LAYERS = Object.freeze([]);
+async function layoutLayers(env, table, file, version, ctx, layoutData) {
+  const chain = file ? layoutChain(table, file) : NO_LAYERS;
+  if (chain.length === 0) return NO_LAYERS;
+  const out = [];
+  for (let i = 0; i < chain.length; i++) {
+    const l = await env.importModule(chain[i], version);
+    if (!l) continue;
+    out.push(typeof l.meta === "function" ? layer(l, await callMeta(l, { data: layoutData?.[i], params: ctx.params, url: ctx.url }, chain[i])) : staticLayer(l));
+  }
+  return out;
+}
+
+// The document's `title` and `lang`: the page's, else the nearest layout's that sets one (leaf →
+// root). `head` and the attributes combine in withSeo / withDocAttrs.
+function withLayouts(page, layers) {
+  let title = page.title;
+  let lang = page.lang;
+  for (let i = layers.length - 1; i >= 0 && (title === undefined || lang === undefined); i--) {
+    title ??= layers[i].title;
+    lang ??= layers[i].lang;
+  }
+  return { title, head: page.head, lang };
+}
+
+// The typed meta's head tags (seo.mjs), from the layers' meta merged root first and the page's
+// last (later values win; `openGraph` / `twitter` merge one level deep, so site-wide defaults like
+// openGraph.siteName stay). They go after the route CSS and before the page's own `head`, followed
+// by the layouts' `head` strings (root first).
+function withSeo(env, ctx, mod, meta, page, layers) {
+  const seos = [];
+  const layoutHeads = [];
+  for (const l of layers) {
+    if (l.seo) seos.push(l.seo);
+    if (l.head) layoutHeads.push(l.head);
+  }
+  if (page.seo) seos.push(page.seo);
+  if (seos.length === 0 && layoutHeads.length === 0) return meta;
+  const opts = { title: meta.title, pathname: ctx.url.pathname, origin: ctx.url.origin, site: env.site, trailingSlash: env.trailingSlash, staticOutput: env.staticOutput === true };
+  const tags = [seos.length ? seoTags(mergeMeta(...seos), opts) : "", ...layoutHeads].filter(Boolean).join("\n");
+  if (!tags) return meta;
+  const head = typeof meta.head === "string" ? meta.head : "";
   const lead = head.match(/^(?:<link rel="stylesheet"[^>]*>\n?)*/)?.[0] ?? "";
   const sep = lead && !lead.endsWith("\n") ? "\n" : "";
-  next.head = `${lead}${sep}${tags}${head.length > lead.length ? `\n${head.slice(lead.length)}` : ""}`;
-  return next;
+  return { ...meta, head: `${lead}${sep}${tags}${head.length > lead.length ? `\n${head.slice(lead.length)}` : ""}` };
 }
 
 // Page scripts (`export const scripts`) of the layouts (root first) and the route, as module
@@ -807,13 +859,11 @@ function withFonts(env, meta) {
   return { ...(meta ?? {}), head: head ? `${links}\n${head}` : links };
 }
 
-// `export const htmlAttrs` / `bodyAttrs` from the layouts (root first), then the route, then what
-// the route's meta() returned, merged into one object each (document.mjs `mergeAttrs`).
-async function withDocAttrs(env, table, file, mod, version, meta) {
-  const layouts = [];
-  for (const f of layoutChain(table, file)) layouts.push(await env.importModule(f, version));
-  const merged = (key) => mergeAttrs(...layouts.map((l) => l?.[key]), mod?.[key], meta?.[key]);
-  return { ...(meta ?? {}), htmlAttrs: merged("htmlAttrs"), bodyAttrs: merged("bodyAttrs") };
+// `htmlAttrs` / `bodyAttrs`, merged into one object each (document.mjs `mergeAttrs`): the layouts
+// (root first), then the page; within each, the export, then meta's.
+function withDocAttrs(meta, page, layers) {
+  const merged = (key) => mergeAttrs(...layers.flatMap((l) => l[key]), ...page[key]);
+  return { ...meta, htmlAttrs: merged("htmlAttrs"), bodyAttrs: merged("bodyAttrs") };
 }
 
 // The page wrapped in its layouts, with every loader run (route first, then layouts leaf → root).
@@ -827,7 +877,8 @@ const NO_SLOTS = Object.freeze({});
 // Wraps the page node in the file's layouts, leaf → root, running each layout's loader in turn.
 // `slots` (resolveSlots, aligned with the layout chain) holds what each layout's @slots render;
 // a layout's slots render (their loaders run) just before its own loader.
-async function wrapLayouts(env, table, file, node, ctx, version, slots) {
+// `layoutData`, when given, gets each layout's loader data at its index in the chain.
+async function wrapLayouts(env, table, file, node, ctx, version, slots, layoutData) {
   const layouts = layoutChain(table, file);
   for (let i = layouts.length - 1; i >= 0; i--) {
     const lmod = await env.importModule(layouts[i], version);
@@ -835,6 +886,7 @@ async function wrapLayouts(env, table, file, node, ctx, version, slots) {
     if (typeof Layout !== "function") continue;
     const slotNodes = slots?.[i] ? await renderSlots(env, slots[i], ctx, version) : NO_SLOTS;
     const ldata = lmod.loader ? await lmod.loader(ctx) : undefined;
+    if (layoutData) layoutData[i] = ldata;
     node = h(Layout, { data: ldata, params: ctx.params, url: ctx.url, slots: slotNodes, children: node });
   }
   return node;
@@ -1065,7 +1117,7 @@ async function render404(env, table, ctx, version) {
     if (typeof mod.default === "function") {
       await env.ensureIslands(version);
       const body = await renderToStringAsync(h(mod.default, { url: ctx.url }));
-      const meta = withFonts(env, await withScripts(env, table, table.notFound, mod, version, await withSeo(env, table, table.notFound, mod, version, ctx, await withRouteCss(env, table.notFound, mod, version))));
+      const meta = await documentMeta(env, table, table.notFound, mod, version, ctx);
       return { status: 404, headers: HTML, body: env.renderDocument({ mod, body, meta }) };
     }
   }
@@ -1086,7 +1138,7 @@ async function render500(env, table, ctx, version, err) {
         // logged above). Dev keeps the stack.
         const message = env.dev ? String(err?.stack ?? err) : "";
         const body = await renderToStringAsync(h(mod.default, { error: { message }, url: ctx.url }));
-        const meta = withFonts(env, await withScripts(env, table, table.errorRoute, mod, version, await withSeo(env, table, table.errorRoute, mod, version, ctx, await withRouteCss(env, table.errorRoute, mod, version))));
+        const meta = await documentMeta(env, table, table.errorRoute, mod, version, ctx);
         return { status: 500, headers: HTML, body: env.renderDocument({ mod, body, meta }) };
       }
     } catch {

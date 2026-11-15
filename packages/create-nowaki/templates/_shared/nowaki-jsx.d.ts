@@ -2,6 +2,8 @@
 // Extends preact's JSX.IntrinsicAttributes so client:* directives can go on any component.
 // The import makes this file a module, which a `declare module "preact"` augmentation needs.
 // The ambient asset declarations are in nowaki-env.d.ts, which must not be a module.
+// `<form action={serverFn}>` type-checks through `"jsxImportSource": "@nowaki-dev/runtime"` in
+// tsconfig.json (Preact's JSX, with that one attribute widened), not through this file.
 import "preact";
 
 declare module "preact" {

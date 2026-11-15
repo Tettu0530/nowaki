@@ -164,9 +164,12 @@ gets the new HTML.
 
 ```tsx
 // islands/LivePoll.tsx
+import type { Live } from "@nowaki-dev/runtime";
+
 type Votes = { a: number; b: number };
 
-export const live = {
+// A room island needs no `state`: its handlers get the room's shared state.
+export const live: Live<Votes> = {
   room: (props: { id?: string }) => `poll:${props.id ?? "demo"}`,
   shared: (): Votes => ({ a: 0, b: 0 }),
   on: {
@@ -242,7 +245,7 @@ A page can pin the transport with `<meta name="nowaki-live" content="ws">` or `"
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `NOWAKI_LIVE_SECRET` | a random key per process | The signing key. **Set it in production.** Without it, state can't resume after a restart or on another instance, and on the adapters events fail as soon as more than one instance or isolate runs. `nowaki start` and the node adapter warn at startup. |
+| `NOWAKI_LIVE_SECRET` | a random key per process | The signing key. **Set it in production.** Without it, state can't resume after a restart or on another instance, and on the node / bun / deno adapters events fail as soon as more than one instance runs. `nowaki start` and the node adapter warn at startup; the cloudflare and vercel adapters refuse live events (503) without it. |
 | `NOWAKI_LIVE_MAX_AGE` | 86400 (24 h) | Seconds a signed state stays valid. An active island is re-signed on every patch. |
 | `NOWAKI_LIVE_MAX` | 10000 | WebSocket connections per process; over it, a new connection is told "at capacity" and the page keeps its first HTML. |
 | `NOWAKI_LIVE_RENDER_TIMEOUT_MS` | 10000 | How long one live render may take. |

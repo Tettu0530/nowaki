@@ -11,7 +11,7 @@
 [stable]
 <METHOD>: ApiHandler (API / file routes: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, ... as ApiModule lists them; uppercase only, a lowercase export is an error)  # packages/nowaki-runtime/server/handler.mjs
 action: Action (page)  # packages/nowaki-runtime/server/handler.mjs
-bodyAttrs: DocumentAttrs (page, layout)  # packages/nowaki-runtime/server/document.mjs
+bodyAttrs: DocumentAttrs (page, layout)  # packages/nowaki-runtime/server/document.mjs, packages/nowaki-runtime/server/handler.mjs
 budget: RouteBudget (page; a literal, read from the AST)  # crates/nowaki-core/src/budget.rs
 client:idle: boolean (island usage)  # packages/nowaki-runtime/server/island-directive.mjs
 client:load: boolean (island usage)  # packages/nowaki-runtime/server/island-directive.mjs

@@ -23,7 +23,7 @@ import { configureSessions, sessionConfigOf } from "./session.mjs";
 import { liveProps, warnIfEphemeralLiveKey } from "./live-sign.mjs";
 import { indexPublic, lookupPublic } from "./public-files.mjs";
 import { resolveSite } from "./seo.mjs";
-import { requestOrigin, requestUrl } from "./origin.mjs";
+import { requestOrigin, requestUrl, vercelHosted } from "./origin.mjs";
 import { compileRules } from "./rules.mjs";
 import { compileI18n } from "./i18n.mjs";
 import { LOCALE_VARY, frontHeaders, frontLocale, frontStep, withVaryHeaders } from "./front.mjs";
@@ -99,7 +99,9 @@ const contentTypeOf = (name) => {
 /// revalidate*() seams of handler.mjs. Without it ISR pages only send `s-maxage`.
 /// `liveTransport`: what live.js is told to use, `"post"` (the default; this server has no
 /// /__nowaki/live WebSocket) or `"auto"` (prod-sidecar.mjs: the `nowaki start` front has one).
-export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = true, cdn = null, liveTransport = "post" } = {}) {
+/// `requireLiveSecret`: refuse live events (503) while NOWAKI_LIVE_SECRET is unset, for hosts that
+/// run many short-lived instances; the default is on under Vercel (`VERCEL=1`, origin.mjs `vercelHosted`).
+export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = true, cdn = null, liveTransport = "post", requireLiveSecret = vercelHosted() } = {}) {
   if (!clientDir || !serverDir) {
     throw new Error("createApp requires clientDir and serverDir");
   }
@@ -145,7 +147,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
   const liveRegistry = new Map();
   const liveByName = new Map();
   let liveCounter = 0;
-  if ((manifest.liveIslands ?? []).length > 0) warnIfEphemeralLiveKey();
+  if ((manifest.liveIslands ?? []).length > 0) warnIfEphemeralLiveKey({ refused: requireLiveSecret });
   for (const name of manifest.liveIslands ?? []) {
     const mod = await import(
       pathToFileURL(path.join(serverDir, "islands", `${name}.js`)).href
@@ -257,7 +259,7 @@ export async function createApp({ clientDir, serverDir, publicDir, loadDotenv = 
     ensureIslands: () => {},
     serverFunctions,
     live: liveByName.size
-      ? { lookup: (name) => liveByName.get(name) ?? null, render: liveRender }
+      ? { lookup: (name) => liveByName.get(name) ?? null, render: liveRender, requireSecret: requireLiveSecret }
       : null,
     renderDocument: (args) => prodDocument(manifest, args, docOpts),
     renderShell: ({ mod, meta }) => prodShell(manifest, mod, meta, docOpts),

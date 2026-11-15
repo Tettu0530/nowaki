@@ -24,14 +24,27 @@ const home = await req("/");
 const homeHtml = await home.text();
 check("page renders with islands (200)", home.status === 200 && homeHtml.includes("nowaki-island"));
 check("page has the default security headers", secure(home));
+const liveEv = (body, h = {}) =>
+  req("/__nowaki/live-event", { method: "POST", headers: { "content-type": "application/json", "x-nowaki-live": "1", ...h }, body: JSON.stringify(body) });
+// Without NOWAKI_LIVE_SECRET the worker refuses live events (every isolate would sign with its
+// own random key); the page and its live islands' first HTML still render.
+const savedLiveSecret = process.env.NOWAKI_LIVE_SECRET;
+delete process.env.NOWAKI_LIVE_SECRET;
+{
+  const page = await req("/live");
+  const html = await page.text();
+  check("no live secret: the live page still renders", page.status === 200 && /live:\s*0/.test(html));
+  const sig = html.match(/<nowaki-live\b[^>]*\bsig="([^"]*)"/)?.[1];
+  const refused = await liveEv({ name: "LiveCounter", state: { count: 0 }, sig, handler: "inc" }, { origin: ORIGIN });
+  check("no live secret: live-event is refused (503)", refused.status === 503);
+}
+process.env.NOWAKI_LIVE_SECRET = "edge-handler-test-live-secret-0123456789";
 const live = await req("/live");
 const liveHtml = await live.text();
 check("live island renders its initial state", live.status === 200 && /live:\s*0/.test(liveHtml));
 check("live page ships live.js in POST mode", /<script[^>]*\/_nowaki\/live\.[0-9a-f]+\.js"[^>]*data-live-transport="post"/.test(liveHtml));
 const liveTag = liveHtml.match(/<nowaki-live\b[^>]*>/)?.[0] ?? "";
 const liveAttr = (n) => liveTag.match(new RegExp(`${n}="([^"]*)"`))?.[1];
-const liveEv = (body, h = {}) =>
-  req("/__nowaki/live-event", { method: "POST", headers: { "content-type": "application/json", "x-nowaki-live": "1", ...h }, body: JSON.stringify(body) });
 const ev = { name: "LiveCounter", state: { count: 0 }, sig: liveAttr("sig"), handler: "inc" };
 const inc = await liveEv(ev, { origin: ORIGIN });
 const incBody = inc.status === 200 ? await inc.json() : {};
@@ -39,6 +52,8 @@ check("live-event inc → live: 1 with a new signature",
   /live:\s*1/.test(incBody.html ?? "") && incBody.state?.count === 1 && /^v1\./.test(incBody.sig ?? "") && incBody.sig !== ev.sig);
 check("live-event cross-site rejected (403)", (await liveEv(ev, { origin: "https://evil.test" })).status === 403);
 check("live-event forged signature rejected (403)", (await liveEv({ ...ev, sig: "FORGED" })).status === 403);
+if (savedLiveSecret === undefined) delete process.env.NOWAKI_LIVE_SECRET;
+else process.env.NOWAKI_LIVE_SECRET = savedLiveSecret;
 const doc = await req("/docs/intro");
 const docHtml = await doc.text();
 check("content collection page renders on the edge (inlined content)", doc.status === 200 && docHtml.includes('id="why-content-collections"'));

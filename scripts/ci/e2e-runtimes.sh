@@ -12,6 +12,8 @@ APP=examples/hello
 port=3500
 # ctx.session (routes/api/session.ts) needs a secret in production.
 export NOWAKI_SESSION_SECRET="${NOWAKI_SESSION_SECRET:-e2e-session-secret-0123456789abcdef}"
+# The cloudflare and vercel adapters refuse live events without a shared signing key.
+export NOWAKI_LIVE_SECRET="${NOWAKI_LIVE_SECRET:-e2e-live-secret-0123456789abcdef0123}"
 
 case "$target" in
   bun)
@@ -24,7 +26,7 @@ case "$target" in
     ;;
   cloudflare)
     ./target/debug/nowaki build $APP --adapter cloudflare
-    (cd $APP/dist/worker && npx --yes wrangler@4 dev --var "NOWAKI_SESSION_SECRET:$NOWAKI_SESSION_SECRET" --port $port --ip 127.0.0.1 --show-interactive-dev-session=false) &
+    (cd $APP/dist/worker && npx --yes wrangler@4 dev --var "NOWAKI_SESSION_SECRET:$NOWAKI_SESSION_SECRET" --var "NOWAKI_LIVE_SECRET:$NOWAKI_LIVE_SECRET" --port $port --ip 127.0.0.1 --show-interactive-dev-session=false) &
     ;;
   *)
     echo "unknown runtime: $target" >&2

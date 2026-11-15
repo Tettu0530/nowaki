@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "strict": true,
+    "skipLibCheck": false,
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "@nowaki-dev/runtime",
+    "types": [],
+    "paths": {
+      "@nowaki-dev/runtime": ["../../packages/nowaki-runtime/index.d.ts"],
+      "@nowaki-dev/runtime/*": ["../../packages/nowaki-runtime/*"],
+      "preact": ["../../packages/nowaki-runtime/node_modules/preact"],
+      "preact/*": ["../../packages/nowaki-runtime/node_modules/preact/*"]
+    }
+  }
+}

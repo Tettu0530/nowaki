@@ -37,7 +37,9 @@
     "session.js",
     "session.d.ts",
     "config.js",
-    "config.d.ts"
+    "config.d.ts",
+    "jsx-runtime.js",
+    "jsx-runtime.d.ts"
   ],
   "exports": {
     ".": {
@@ -71,6 +73,14 @@
     "./config": {
       "types": "./config.d.ts",
       "default": "./config.js"
+    },
+    "./jsx-runtime": {
+      "types": "./jsx-runtime.d.ts",
+      "default": "./jsx-runtime.js"
+    },
+    "./jsx-dev-runtime": {
+      "types": "./jsx-runtime.d.ts",
+      "default": "./jsx-runtime.js"
     },
     "./client/*": "./client/*",
     "./server/*": "./server/*"

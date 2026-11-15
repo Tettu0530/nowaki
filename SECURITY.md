@@ -157,7 +157,10 @@ not run on the production request path unless you embed their output in the app.
   can't resume after a restart or on another instance, and `nowaki start` /
   the node adapter log a warning at startup. On the adapters every live event
   is a POST that any instance may serve, so without a shared secret events fail
-  as soon as more than one instance (or Worker isolate) is running.
+  as soon as more than one instance (or Worker isolate) is running. The
+  cloudflare and vercel adapters, whose instances always come and go, refuse
+  live events (503, logged once per instance) while it is unset; pages still
+  render.
 - **Cross-site writes.** Page actions and API routes (`routes/api/**` and file
   routes such as `feed.xml.ts`) reject cross-site POST / PUT / PATCH / DELETE
   requests with 403 (since 0.19.3 for API routes). A route that must accept

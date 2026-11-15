@@ -53,7 +53,7 @@ or set in the dashboard.
 | Variable | |
 | --- | --- |
 | `NOWAKI_SESSION_SECRET` | required if the app uses sessions |
-| `NOWAKI_LIVE_SECRET` | required if the app has live islands: without it each isolate signs with its own key, and events fail as soon as a second isolate serves them |
+| `NOWAKI_LIVE_SECRET` | required if the app has live islands: without it each isolate would sign with its own key, so live events are refused (503); pages still render |
 | `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_API_TOKEN` | a global ISR purge by tag (the token needs the Cache Purge permission) |
 | `NOWAKI_CSP`, `NOWAKI_SECURITY_HEADERS`, `NOWAKI_SITE`, `NOWAKI_REVALIDATE_SECRET` | as on other servers |
 | `NOWAKI_SERVER_TIMING`, `NOWAKI_LOG`, `OTEL_*` | observability |
