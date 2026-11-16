@@ -87,11 +87,11 @@
   },
   "peerDependencies": {
     "preact": "^10.25.0 || ^11.1.0",
-    "preact-render-to-string": "^6.8.2"
+    "preact-render-to-string": "^6.8.3"
   },
   "devDependencies": {
     "preact": "^11.2.0",
-    "preact-render-to-string": "^6.8.2"
+    "preact-render-to-string": "^6.8.3"
   },
   "engines": {
     "node": ">=22"
