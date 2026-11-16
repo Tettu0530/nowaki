@@ -9,78 +9,78 @@ importers:
   .:
     dependencies:
       '@nowaki-dev/runtime':
-        specifier: 0.16.3
-        version: 0.16.3(preact-render-to-string@6.8.2)(preact@11.2.0)
+        specifier: 0.19.3
+        version: 0.19.3(preact-render-to-string@6.8.3)(preact@11.2.0)
       marked:
-        specifier: 18.1.3
-        version: 18.1.3
+        specifier: 18.2.0
+        version: 18.2.0
       preact:
         specifier: 11.2.0
-        version: 11.2.0(preact-render-to-string@6.8.2)
+        version: 11.2.0(preact-render-to-string@6.8.3)
       preact-render-to-string:
-        specifier: 6.8.2
-        version: 6.8.2(preact@11.2.0)
+        specifier: 6.8.3
+        version: 6.8.3(preact@11.2.0)
       zod:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
       nowaki:
-        specifier: 0.17.3
-        version: 0.17.3
+        specifier: 0.19.3
+        version: 0.19.3
 
 packages:
 
-  '@nowaki-dev/cli-darwin-arm64@0.17.3':
-    resolution: {integrity: sha512-G4sQJx6A7CGVywrFUyyEjYtvOMaX2sZdSitbdzAnzTwrKp6cA5HQ1PaOYhb/X47sU6iH+y28h3rztvUuyppUlQ==}
+  '@nowaki-dev/cli-darwin-arm64@0.19.3':
+    resolution: {integrity: sha512-gWskj07pBfjfem1i8D+bg4R7fOLiZLAL5rGL6bY5yDJ6/skh2csfMAnykUVY5KpK1+1VJ66Vog7Ujshnz7JtIA==}
     engines: {node: '>=22'}
     cpu: [arm64]
     os: [darwin]
 
-  '@nowaki-dev/cli-darwin-x64@0.17.3':
-    resolution: {integrity: sha512-yh6mckfsY9H4uy1MWZ2jfoXia+XPuJbtpilArzGKPPcHmKJF6IUqURiA507rjGxYLhwZs1azl8QZf3+0p4poYA==}
+  '@nowaki-dev/cli-darwin-x64@0.19.3':
+    resolution: {integrity: sha512-zu+QtGeuZ2vO9JdPC/msJlPWT3AFjeF/EOLfUE7evLmN+QVWir/AY1eZJVCVPNluuT0cb+1Z2qC3Fss526Epuw==}
     engines: {node: '>=22'}
     cpu: [x64]
     os: [darwin]
 
-  '@nowaki-dev/cli-linux-arm64-gnu@0.17.3':
-    resolution: {integrity: sha512-6Hnyh9uydoKFaHdUaQWqDdF3ZdpxJB2o5MpjE9r0WtE6Jzceiz++9bQdYKPVBhcgAYS6EEpsFvAkybPTPOKVRg==}
+  '@nowaki-dev/cli-linux-arm64-gnu@0.19.3':
+    resolution: {integrity: sha512-e3Na//cW5e9B8NiUjtDe+Jg/PENjNjrvODDQVbUZGnRPaeYUi99nL2FDIfPo322hdcxLKo+9cPQerL32zGatdQ==}
     engines: {node: '>=22'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@nowaki-dev/cli-linux-x64-gnu@0.17.3':
-    resolution: {integrity: sha512-6AcFxxPLW15otEt/284E6XeR3y4dMuBQtl/HzAWR/l3sWK7vp7EtYOjKEdUwIowIZ6jWtl9l1YRn8dDbFUBK0g==}
+  '@nowaki-dev/cli-linux-x64-gnu@0.19.3':
+    resolution: {integrity: sha512-bUlmhsW+akeNYRxGP4AoJv61mThShMOuBfX++lSmwv7eQMvs6rmhOMgEftf0cJBokm/s6zKxZmiCIWcO1dr9fA==}
     engines: {node: '>=22'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@nowaki-dev/cli-win32-x64@0.17.3':
-    resolution: {integrity: sha512-buBKGkt3+iOYJO22LY3uLnjZ2U9J39UEQcr67MzI0sMAGN7Rvp5Yzy6AWopVBgFoXLxaJhan7o3Z2iS5XW6qyg==}
+  '@nowaki-dev/cli-win32-x64@0.19.3':
+    resolution: {integrity: sha512-QhB5NceaGlDAGvFWRRHHiFmMXlvH/OiEE49jE7cSmk9gylW9kJVKOymb4y8AResG2+oEXk+XnPTMzgGdEhm1eA==}
     engines: {node: '>=22'}
     cpu: [x64]
     os: [win32]
 
-  '@nowaki-dev/runtime@0.16.3':
-    resolution: {integrity: sha512-CeGDBmRYiVKOCtOdtuVYvAzVcRywdImLifXiMzeficOkGa7d00u4EHEjyS/59a5pLwVtbdTkqUmMKKFc8Us3IQ==}
+  '@nowaki-dev/runtime@0.19.3':
+    resolution: {integrity: sha512-VxoJJdf/mAw3CyNryq1waGXm+4gp3ibkmL39m0ZzW5LmYBC5Ajtg11Jyy8uZnEPLSh9FZX/3zdTIqgRBUrSLkQ==}
     engines: {node: '>=22'}
     peerDependencies:
       preact: ^10.25.0 || ^11.1.0
       preact-render-to-string: ^6.8.2
 
-  marked@18.1.3:
-    resolution: {integrity: sha512-9ChMH8EVVgjgID49nsL6IWxWk5c6GtAsq/xw7U1ggkjkU5AGuv68oLTVlFRtvcUYZtpbNyjyvGo3YDu0fGapiw==}
+  marked@18.2.0:
+    resolution: {integrity: sha512-KaeL+tAbtvI930q7HE2PN5lYXYdT8EiSmxHlN6F3rsfb57wd5mp5W5TLazpdj4inTQBJdgjYwbs40W/0VUGU+Q==}
     engines: {node: '>= 20'}
     hasBin: true
 
-  nowaki@0.17.3:
-    resolution: {integrity: sha512-C0GOfzkPul+Lx5i/KQGqfEnan8oRKFeKtH3SQU85da2DfFYLxonnB7T1cjqVn05J/vYqWjVxO6fIvypJLeyFkA==}
+  nowaki@0.19.3:
+    resolution: {integrity: sha512-fOeM48A8hpM9dB1NUZezw9zKeN8FNu5sw5jgjHgUI4+UkMd+7kG9AKjE+0M78tiqTmbcYP/SwPvCUO33NO1rtA==}
     engines: {node: '>=22'}
     hasBin: true
 
-  preact-render-to-string@6.8.2:
-    resolution: {integrity: sha512-Hdx7cKD3AMYgt795TdddBpUbuGEFoL/VeA6s7VrBt9Gjt0r6rCy5wMp5xkDjQ9cbKj62frHsEx1x8yV6EjoOpg==}
+  preact-render-to-string@6.8.3:
+    resolution: {integrity: sha512-yg04edGH7f5yfBUV4uyL2brzPB3e26AimLO5WNfUtwoCv8LBJ7Z+dElG8P5v+o8UqMUM6kZhnn4I/HEXNyP0ZQ==}
     peerDependencies:
       preact: '>=10 || >= 11.0.0-0'
 
@@ -97,42 +97,42 @@ packages:
 
 snapshots:
 
-  '@nowaki-dev/cli-darwin-arm64@0.17.3':
+  '@nowaki-dev/cli-darwin-arm64@0.19.3':
     optional: true
 
-  '@nowaki-dev/cli-darwin-x64@0.17.3':
+  '@nowaki-dev/cli-darwin-x64@0.19.3':
     optional: true
 
-  '@nowaki-dev/cli-linux-arm64-gnu@0.17.3':
+  '@nowaki-dev/cli-linux-arm64-gnu@0.19.3':
     optional: true
 
-  '@nowaki-dev/cli-linux-x64-gnu@0.17.3':
+  '@nowaki-dev/cli-linux-x64-gnu@0.19.3':
     optional: true
 
-  '@nowaki-dev/cli-win32-x64@0.17.3':
+  '@nowaki-dev/cli-win32-x64@0.19.3':
     optional: true
 
-  '@nowaki-dev/runtime@0.16.3(preact-render-to-string@6.8.2)(preact@11.2.0)':
+  '@nowaki-dev/runtime@0.19.3(preact-render-to-string@6.8.3)(preact@11.2.0)':
     dependencies:
-      preact: 11.2.0(preact-render-to-string@6.8.2)
-      preact-render-to-string: 6.8.2(preact@11.2.0)
+      preact: 11.2.0(preact-render-to-string@6.8.3)
+      preact-render-to-string: 6.8.3(preact@11.2.0)
 
-  marked@18.1.3: {}
+  marked@18.2.0: {}
 
-  nowaki@0.17.3:
+  nowaki@0.19.3:
     optionalDependencies:
-      '@nowaki-dev/cli-darwin-arm64': 0.17.3
-      '@nowaki-dev/cli-darwin-x64': 0.17.3
-      '@nowaki-dev/cli-linux-arm64-gnu': 0.17.3
-      '@nowaki-dev/cli-linux-x64-gnu': 0.17.3
-      '@nowaki-dev/cli-win32-x64': 0.17.3
+      '@nowaki-dev/cli-darwin-arm64': 0.19.3
+      '@nowaki-dev/cli-darwin-x64': 0.19.3
+      '@nowaki-dev/cli-linux-arm64-gnu': 0.19.3
+      '@nowaki-dev/cli-linux-x64-gnu': 0.19.3
+      '@nowaki-dev/cli-win32-x64': 0.19.3
 
-  preact-render-to-string@6.8.2(preact@11.2.0):
+  preact-render-to-string@6.8.3(preact@11.2.0):
     dependencies:
-      preact: 11.2.0(preact-render-to-string@6.8.2)
+      preact: 11.2.0(preact-render-to-string@6.8.3)
 
-  preact@11.2.0(preact-render-to-string@6.8.2):
+  preact@11.2.0(preact-render-to-string@6.8.3):
     optionalDependencies:
-      preact-render-to-string: 6.8.2(preact@11.2.0)
+      preact-render-to-string: 6.8.3(preact@11.2.0)
 
   zod@4.6.7: {}
