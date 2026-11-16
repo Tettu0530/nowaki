@@ -46,8 +46,14 @@ only additively. An app that runs on 0.20.x runs on 1.0.0 once both packages are
 6. Build and run it: `nowaki build`, then `nowaki start` (or your adapter), and try the pages
    that post forms, call API routes from the browser, or use inline scripts under
    `NOWAKI_CSP`.
-7. When 1.0.0 is out, `npx nowaki upgrade --to 1.0.0`. To try a release candidate first,
-   `npx nowaki upgrade --to next` (see [Release candidates](#release-candidates)).
+7. When 1.0.0 is out, `npx nowaki@1.0.0 upgrade --to 1.0.0`. To try a release candidate first,
+   `npx nowaki@next upgrade --to next` (see [Release candidates](#release-candidates)).
+
+   Run the CLI of the version you upgrade to (`npx nowaki@<version>`), as in step 4. A plain
+   `npx nowaki` runs the CLI already installed in the app, and its report only knows the checks
+   of that older version. For example, the 0.20.0 CLI wrongly reports a catch-all page
+   (`[...slug].tsx`) that exports `head` as a lowercase method export and stops the upgrade;
+   1.0.0-rc.2 and later don't.
 
 ## What `nowaki upgrade --check` reports
 
@@ -437,7 +443,7 @@ Not flagged: check keys set in both files.
 1.0.0 adds no breaking change beyond 0.20.0. Once the app runs on 0.20.x:
 
 ```sh
-npx nowaki upgrade --to 1.0.0
+npx nowaki@1.0.0 upgrade --to 1.0.0
 ```
 
 The readiness report runs first (1.0 is a new version line) and should report nothing. After
@@ -453,11 +459,14 @@ docs and performance work land between candidates, and the API snapshots in `api
 change.
 
 ```sh
-npx nowaki upgrade --to next          # the latest release candidate
-npx nowaki upgrade --to 1.0.0-rc.1    # a specific one
+npx nowaki@next upgrade --to next              # the latest release candidate
+npx nowaki@1.0.0-rc.2 upgrade --to 1.0.0-rc.2  # a specific one
 npm create nowaki@next my-app         # a new app on the release candidate
-cargo install nowaki --version 1.0.0-rc.1
+cargo install nowaki --version 1.0.0-rc.2
 ```
+
+Right after a release, `npx` can answer `ETARGET` from cached package data; add
+`--prefer-online` (`npx --prefer-online nowaki@next ...`).
 
 `nowaki upgrade` without `--to` goes back to `latest`. The candidate phase ends after at least
 14 days without an API snapshot change since the last candidate; then 1.0.0 is published on

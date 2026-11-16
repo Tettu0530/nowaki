@@ -104,10 +104,14 @@ The scaffold's `tsconfig.json` includes it, with `nowaki-env.d.ts` (asset, `?ima
 ## Upgrading: `nowaki upgrade`
 
 ```sh
-npx nowaki upgrade                    # to the latest release
-npx nowaki upgrade --to 1.0.0         # to a version, or a dist-tag (--to next)
-npx nowaki upgrade --to 1.0.0 --check # only print the readiness report
+npx nowaki@latest upgrade                           # to the latest release
+npx nowaki@1.0.0 upgrade --to 1.0.0                 # to a version, or a dist-tag
+npx nowaki@next upgrade --to next                   # the latest release candidate
+npx nowaki@1.0.0 upgrade --to 1.0.0 --check         # only print the readiness report
 ```
+
+Run the CLI of the target version, as above: a plain `npx nowaki` runs the CLI installed in the
+app, and its report only has that version's checks and fixes.
 
 `nowaki upgrade` updates the `nowaki` CLI and `@nowaki-dev/runtime` together (they must have the
 same version). For a target on a newer major (on 0.x, a newer minor), it first prints a
