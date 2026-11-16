@@ -148,56 +148,82 @@ jobs:
           node: ${{ matrix.node }}
       - run: cargo build -p nowaki --locked
       - name: Router snapshot/unit test (scanRoutes + matchRoute)
+        timeout-minutes: 5
         run: node scripts/router-test.mjs
       - name: Routing rules (redirects / rewrites / headers / basePath; shared fixture with nowaki-core)
+        timeout-minutes: 5
         run: node scripts/rules-test.mjs
       - name: Routing rules at the JS fronts (front.mjs, Vercel routes against the shared fixture)
+        timeout-minutes: 5
         run: node scripts/rules-front-test.mjs
       - name: Client router-cache unit test (matchBoundary + Router Cache TTL/LRU)
+        timeout-minutes: 5
         run: node scripts/router-cache-test.mjs
       - name: SSG staticPaths expansion
+        timeout-minutes: 5
         run: node scripts/static-paths-test.mjs
       - name: SSR React alias (react* in node_modules → preact/compat)
+        timeout-minutes: 5
         run: node scripts/react-alias-test.mjs
       - name: CSP nonce injection (adapters)
+        timeout-minutes: 5
         run: node scripts/csp-test.mjs
       - name: Live state signing (iat, max age, tampering)
+        timeout-minutes: 5
         run: node scripts/live-sign-test.mjs
       - name: Jetstream rooms file (save, load, corrupt files)
+        timeout-minutes: 5
         run: node scripts/live-rooms-file-test.mjs
       - name: ISR warm-up URL list
+        timeout-minutes: 5
         run: node scripts/isr-urls-test.mjs
       - name: Same-origin host resolution (adapters + trust proxy)
+        timeout-minutes: 5
         run: node scripts/origin-test.mjs
       - name: Dev SSR loader hooks (which modules re-evaluate after an edit)
+        timeout-minutes: 5
         run: node scripts/loader-hooks-test.mjs
       - name: Request handler (layouts, routePath, commit hook)
+        timeout-minutes: 5
         run: node scripts/handler-test.mjs
       - name: On-demand revalidation (purge encoding vs the shared fixture, tags, purge on the response, endpoint)
+        timeout-minutes: 5
         run: node scripts/revalidate-test.mjs
       - name: CDN purge per adapter (Vercel-Cache-Tag encoding, purge before the response, timeout, generated function)
+        timeout-minutes: 5
         run: node scripts/purge-adapters-test.mjs
       - name: Cloudflare Worker ISR cache (Cache API HIT / STALE / variants, never per-user pages, local delete, zone purge by tag)
+        timeout-minutes: 5
         run: node scripts/cf-cache-test.mjs
       - name: Observability (traceparent / sampler / OTLP shape vs the shared fixture, Server-Timing, exporter, OTel API bridge, JSON logs)
+        timeout-minutes: 5
         run: node scripts/otel-test.mjs
       - name: i18n (locale split and localePath against the shared fixture, hreflang, per-locale content)
+        timeout-minutes: 5
         run: node scripts/i18n-test.mjs
       - name: Sessions (encryption, tampering, expiry, key rotation, store mode, CSRF read-only)
+        timeout-minutes: 5
         run: node scripts/session-test.mjs
       - name: Multipart form bodies (LoaderContext.formData)
+        timeout-minutes: 8
         run: node scripts/form-data-test.mjs
       - name: Live session hub (join/event, queue, timeout, cap, presence)
+        timeout-minutes: 5
         run: node scripts/live-hub-test.mjs
       - name: Markdoc plugin (compile, validation errors, escaping, frontmatter)
+        timeout-minutes: 5
         run: node --test "packages/nowaki-markdoc/test/*.test.mjs"
       - name: Typed env (env.ts schema, build / start / worker refusal, client import guard)
+        timeout-minutes: 8
         run: node scripts/env-schema-test.mjs
       - name: Remote images (allow-list fixture, SSRF limits, build + dev against a local server)
+        timeout-minutes: 8
         run: node scripts/images-fetch-test.mjs
       - name: nowaki upgrade (command surface + non-app guard)
+        timeout-minutes: 8
         run: bash scripts/ci/e2e-upgrade.sh
       - name: Typed routes (typegen)
+        timeout-minutes: 8
         run: bash scripts/ci/e2e-typegen.sh
       - name: Dev server (SSR, islands, API, routing, security)
         # Shorter than the job's 30 min: a hang fails this step with its log kept, instead of
