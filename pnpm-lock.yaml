@@ -19,10 +19,10 @@ importers:
         version: link:../../../packages/nowaki-runtime
       preact:
         specifier: ^11.2.0
-        version: 11.2.0(preact-render-to-string@6.8.2)
+        version: 11.2.0(preact-render-to-string@6.8.3)
       preact-render-to-string:
-        specifier: ^6.8.2
-        version: 6.8.2(preact@11.2.0)
+        specifier: ^6.8.3
+        version: 6.8.3(preact@11.2.0)
 
   examples/gallery:
     dependencies:
@@ -31,10 +31,10 @@ importers:
         version: link:../../packages/nowaki-runtime
       preact:
         specifier: ^11.2.0
-        version: 11.2.0(preact-render-to-string@6.8.2)
+        version: 11.2.0(preact-render-to-string@6.8.3)
       preact-render-to-string:
-        specifier: ^6.8.2
-        version: 6.8.2(preact@11.2.0)
+        specifier: ^6.8.3
+        version: 6.8.3(preact@11.2.0)
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -48,14 +48,14 @@ importers:
         specifier: workspace:*
         version: link:../../packages/nowaki-runtime
       '@tsrx/preact':
-        specifier: ^0.3.5
-        version: 0.3.5(preact@11.2.0)
+        specifier: ^0.4.0
+        version: 0.4.0(preact@11.2.0)
       preact:
         specifier: ^11.2.0
-        version: 11.2.0(preact-render-to-string@6.8.2)
+        version: 11.2.0(preact-render-to-string@6.8.3)
       preact-render-to-string:
-        specifier: ^6.8.2
-        version: 6.8.2(preact@11.2.0)
+        specifier: ^6.8.3
+        version: 6.8.3(preact@11.2.0)
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -71,42 +71,40 @@ importers:
   packages/nowaki-markdoc:
     dependencies:
       '@markdoc/markdoc':
-        specifier: 0.5.11
-        version: 0.5.11
+        specifier: 0.5.13
+        version: 0.5.13(@types/react@19.3.0)
     devDependencies:
       '@nowaki-dev/runtime':
         specifier: workspace:*
         version: link:../nowaki-runtime
       preact:
         specifier: ^11.2.0
-        version: 11.2.0(preact-render-to-string@6.8.2)
+        version: 11.2.0(preact-render-to-string@6.8.3)
       preact-render-to-string:
-        specifier: ^6.8.2
-        version: 6.8.2(preact@11.2.0)
+        specifier: ^6.8.3
+        version: 6.8.3(preact@11.2.0)
 
   packages/nowaki-runtime:
     devDependencies:
       preact:
         specifier: ^11.2.0
-        version: 11.2.0(preact-render-to-string@6.8.2)
+        version: 11.2.0(preact-render-to-string@6.8.3)
       preact-render-to-string:
-        specifier: ^6.8.2
-        version: 6.8.2(preact@11.2.0)
+        specifier: ^6.8.3
+        version: 6.8.3(preact@11.2.0)
 
 packages:
 
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@markdoc/markdoc@0.5.11':
-    resolution: {integrity: sha512-Jyoyv7Ieq2/L9fzz9lTN+ojoufpqiiWOZT3xPgssReZwGze84XFEU/xDNbM4iIua5sJ6JjhDDlBuwZoQLrqAgw==}
+  '@markdoc/markdoc@0.5.13':
+    resolution: {integrity: sha512-0nqTrlIaQ6ppHNelsvKXiS6xqmOoBdbl0NicQauVmquhxQJTVN383KaLyomIMcRV+XWRjkCJmgO5YuziTnsw5Q==}
     engines: {node: '>=14.7.0'}
     peerDependencies:
       '@types/react': '*'
       react: '*'
     peerDependenciesMeta:
-      '@types/react':
-        optional: true
       react:
         optional: true
 
@@ -119,21 +117,21 @@ packages:
     peerDependencies:
       acorn: ^8.9.0
 
-  '@tsrx/core@0.5.5':
-    resolution: {integrity: sha512-22Eym4Dtxm1d4INJHT560WQC9cxKT/YWXKztM7utjzHLtVB8egSycFmFt3D9g01Tb6G4g7GiF5YpgCOexx15uA==}
+  '@tsrx/core@0.6.0':
+    resolution: {integrity: sha512-3yBH0YkVBTbatXf4QNbWtV/+JdExIr8dym1YsW5VbFphM+6eMrOINmWpgKI7O7Mwdydhx4Uua3RVwJZa2iq+Rg==}
 
-  '@tsrx/preact-runtime@0.1.12':
-    resolution: {integrity: sha512-cli5m4gXX+FQFwc+bASROJFjOXa6erYtJxEwfg5yjyQjpByiC/YHwJSfY99FWqra+syepfgSFk4M4AXbRKFRiA==}
+  '@tsrx/preact-runtime@0.2.0':
+    resolution: {integrity: sha512-ZdAzTWwbCMWIJNFYWVo1FRbyg89Q6l6bKIH0rSCW6L9tCwCMgBZWCU+ovm+Dv5GMJR5wy+kOY2thEZmrAxj6/A==}
     peerDependencies:
       preact: '>=10'
 
-  '@tsrx/preact@0.3.5':
-    resolution: {integrity: sha512-nOV4iv8MdRDJphgfPqhJp9y21nc0M0DUd8iycl+B3uXJKx/t1GMriaw3MIrIACvA5zrbKEWze9NSbK/FrDBQLw==}
+  '@tsrx/preact@0.4.0':
+    resolution: {integrity: sha512-j7D7MQkKe9qZ1KneBcD6Swd90fBABhZJxzwWNykeYZtgrDaNp9ojprQxPP3GX5vqgyUMa5gbfTdYZMGtxRfAXg==}
     peerDependencies:
       preact: '>=10'
 
-  '@tsrx/runtime@0.2.4':
-    resolution: {integrity: sha512-rLwKYml/Qbb1D9LtB+NE5bcJDs/SowSKaL+lMR0m6Mr61lKZNuK43IFK+jxFmLvRlG+7ico1kOszMyhA5rObNA==}
+  '@tsrx/runtime@0.2.5':
+    resolution: {integrity: sha512-ueNjgjxe+LhLehJm46c4WeOsaiVKFV36DXwGRK4XGQUUMMto4zyxNp4LB/nLAmLhOed9CcIq/WMzHXvny+WPHA==}
 
   '@types/estree-jsx@1.0.5':
     resolution: {integrity: sha512-52CcUVNFyfb1A2ALocQw/Dd1BQFNmSdkuC3BkZ6iqhdMfQz7JWOFRuJFloOzjk+6WijU56m9oKXFAXc7o3Towg==}
@@ -141,10 +139,16 @@ packages:
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
+  '@types/react@19.3.0':
+    resolution: {integrity: sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==}
+
   acorn@8.19.0:
     resolution: {integrity: sha512-oJlA3XiRm7Cyk6qFD2Jn8ak9B7jSy0qy00ADO3+8dpT0LSjFihQYv4C02LFCSYJV3Q37xYwwRy5m+IpIiUzqWw==}
     engines: {node: '>=0.4.0'}
     hasBin: true
+
+  csstype@3.2.3:
+    resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
   esrap@2.4.0:
     resolution: {integrity: sha512-CQPcneEHw/czj32uwQC52nYnax8H4SXt25FCM+LIwGZ49cMIxpOj3bP8wmzcI+Z0HIy5KkClaPhRLfCySzwHPA==}
@@ -161,8 +165,8 @@ packages:
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
-  preact-render-to-string@6.8.2:
-    resolution: {integrity: sha512-Hdx7cKD3AMYgt795TdddBpUbuGEFoL/VeA6s7VrBt9Gjt0r6rCy5wMp5xkDjQ9cbKj62frHsEx1x8yV6EjoOpg==}
+  preact-render-to-string@6.8.3:
+    resolution: {integrity: sha512-yg04edGH7f5yfBUV4uyL2brzPB3e26AimLO5WNfUtwoCv8LBJ7Z+dElG8P5v+o8UqMUM6kZhnn4I/HEXNyP0ZQ==}
     peerDependencies:
       preact: '>=10 || >= 11.0.0-0'
 
@@ -192,7 +196,9 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@markdoc/markdoc@0.5.11': {}
+  '@markdoc/markdoc@0.5.13(@types/react@19.3.0)':
+    dependencies:
+      '@types/react': 19.3.0
 
   '@noble/hashes@2.2.0': {}
 
@@ -200,12 +206,12 @@ snapshots:
     dependencies:
       acorn: 8.19.0
 
-  '@tsrx/core@0.5.5':
+  '@tsrx/core@0.6.0':
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
       '@noble/hashes': 2.2.0
       '@sveltejs/acorn-typescript': 1.0.13(acorn@8.19.0)
-      '@tsrx/runtime': 0.2.4
+      '@tsrx/runtime': 0.2.5
       '@types/estree': 1.0.9
       '@types/estree-jsx': 1.0.5
       acorn: 8.19.0
@@ -216,22 +222,22 @@ snapshots:
     transitivePeerDependencies:
       - '@typescript-eslint/types'
 
-  '@tsrx/preact-runtime@0.1.12(preact@11.2.0)':
+  '@tsrx/preact-runtime@0.2.0(preact@11.2.0)':
     dependencies:
-      '@tsrx/runtime': 0.2.4
-      preact: 11.2.0(preact-render-to-string@6.8.2)
+      '@tsrx/runtime': 0.2.5
+      preact: 11.2.0(preact-render-to-string@6.8.3)
 
-  '@tsrx/preact@0.3.5(preact@11.2.0)':
+  '@tsrx/preact@0.4.0(preact@11.2.0)':
     dependencies:
-      '@tsrx/core': 0.5.5
-      '@tsrx/preact-runtime': 0.1.12(preact@11.2.0)
+      '@tsrx/core': 0.6.0
+      '@tsrx/preact-runtime': 0.2.0(preact@11.2.0)
       esrap: 2.4.0
-      preact: 11.2.0(preact-render-to-string@6.8.2)
+      preact: 11.2.0(preact-render-to-string@6.8.3)
       zimmerframe: 1.1.4
     transitivePeerDependencies:
       - '@typescript-eslint/types'
 
-  '@tsrx/runtime@0.2.4': {}
+  '@tsrx/runtime@0.2.5': {}
 
   '@types/estree-jsx@1.0.5':
     dependencies:
@@ -239,7 +245,13 @@ snapshots:
 
   '@types/estree@1.0.9': {}
 
+  '@types/react@19.3.0':
+    dependencies:
+      csstype: 3.2.3
+
   acorn@8.19.0: {}
+
+  csstype@3.2.3: {}
 
   esrap@2.4.0:
     dependencies:
@@ -253,13 +265,13 @@ snapshots:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  preact-render-to-string@6.8.2(preact@11.2.0):
+  preact-render-to-string@6.8.3(preact@11.2.0):
     dependencies:
-      preact: 11.2.0(preact-render-to-string@6.8.2)
+      preact: 11.2.0(preact-render-to-string@6.8.3)
 
-  preact@11.2.0(preact-render-to-string@6.8.2):
+  preact@11.2.0(preact-render-to-string@6.8.3):
     optionalDependencies:
-      preact-render-to-string: 6.8.2(preact@11.2.0)
+      preact-render-to-string: 6.8.3(preact@11.2.0)
 
   resolve-pkg-maps@1.0.0: {}
 
