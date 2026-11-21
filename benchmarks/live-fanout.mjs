@@ -36,6 +36,8 @@ const ROUNDS = Number(arg("rounds", 50));
 const WARMUP = 3;
 const scenarios = arg("scenario", "both") === "both" ? ["ticks", "poll"] : [arg("scenario")];
 const out = arg("out", null);
+// Recorded with each row (e.g. "nowaki 1.0.0-rc.2 · 096db2a"), so rows of different builds stay apart.
+const label = arg("label", null);
 const wsUrl = `${base.replace(/^http/, "ws")}/__nowaki/live`;
 const now = () => performance.now();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -151,6 +153,6 @@ let failed = false;
 for (const s of scenarios) {
   const res = await run(s);
   if (res.missing) failed = true;
-  if (out) appendFileSync(out, `${JSON.stringify({ ...res, base, at: new Date().toISOString(), machine })}\n`);
+  if (out) appendFileSync(out, `${JSON.stringify({ ...res, base, ...(label ? { label } : {}), at: new Date().toISOString(), machine })}\n`);
 }
 process.exit(failed ? 1 : 0);
