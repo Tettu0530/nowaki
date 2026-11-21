@@ -657,6 +657,9 @@ struct StaticHostRules {
 /// Rules a static host can't express are left out with a warning. `rendered` lists the prerendered
 /// page URLs (a rewrite can only reach a page that exists as a file).
 ///
+/// A static host matches a source exactly, while the servers match it with or without a trailing
+/// slash; so each literal or `:param` source gets both forms (see [`slash_forms`]).
+///
 /// With i18n, a rule matches without the locale prefix (as `Rules::apply` does): redirects and
 /// rewrites get one line per locale ahead of the unprefixed one (`/ja/a /ja/b`), header rules one
 /// block per prefixed locale. A static host has no lookahead, so the unprefixed line of a source
@@ -668,6 +671,7 @@ fn static_host_rules(
 ) -> StaticHostRules {
     let mut out = StaticHostRules::default();
     let base = config.base_path.as_str();
+    let trailing = config.trailing_slash;
     if !base.is_empty() {
         out.warnings.push(format!(
             "basePath {base:?}: pages are written at the root of the output; deploy them under {base} (the rules below include it)"
@@ -701,12 +705,13 @@ fn static_host_rules(
             (Some(from), Some(to)) => {
                 let i18n = i18n.filter(|_| r.locale);
                 for (from, to) in locale_lines(i18n, &from, &to, &r.destination, true) {
-                    out.redirects.push_str(&format!(
-                        "{} {} {}\n",
-                        internal(&from),
-                        internal(&to),
-                        r.status
-                    ));
+                    for (from, canonical) in slash_forms(&internal(&from), trailing) {
+                        let line = match canonical {
+                            Some(c) => format!("{from} {c} 308\n"),
+                            None => format!("{from} {} {}\n", internal(&to), r.status),
+                        };
+                        out.redirects.push_str(&line);
+                    }
                 }
                 if i18n.is_some() && param_first(&r.source) {
                     warn_param(&mut out, "redirect", &r.source);
@@ -740,8 +745,13 @@ fn static_host_rules(
         }
         let locale_aware = i18n.filter(|_| r.locale);
         for (from, to) in locale_lines(locale_aware, &from, &to, &r.destination, false) {
-            out.redirects
-                .push_str(&format!("{} {} 200\n", internal(&from), internal(&to)));
+            for (from, canonical) in slash_forms(&internal(&from), trailing) {
+                let line = match canonical {
+                    Some(c) => format!("{from} {c} 308\n"),
+                    None => format!("{from} {} 200\n", internal(&to)),
+                };
+                out.redirects.push_str(&line);
+            }
         }
         if locale_aware.is_some() && param_first(&r.source) {
             warn_param(&mut out, "rewrite", &r.source);
@@ -787,12 +797,38 @@ fn static_host_rules(
             block.push_str(&format!("  {}: {}\n", header.key, header.value));
         }
         for path in paths {
-            out.headers.push_str(&internal(&path));
-            out.headers.push('\n');
-            out.headers.push_str(&block);
+            for (path, canonical) in slash_forms(&internal(&path), trailing) {
+                // The other form only redirects (no page answers there): no headers for it.
+                if canonical.is_none() {
+                    out.headers.push_str(&path);
+                    out.headers.push('\n');
+                    out.headers.push_str(&block);
+                }
+            }
         }
     }
     out
+}
+
+/// The forms of a `_redirects` / `_headers` source path a static host needs, which matches a
+/// source exactly: `(path, None)` takes the rule, `(path, Some(canonical))` redirects (308) to the
+/// canonical form first, as the servers do (`Rules::apply`). A path whose last segment is a file
+/// name (`/feed.xml`) or a splat, `/` and an external URL are kept as written. Otherwise
+/// `trailingSlash: "ignore"` takes the rule with and without the slash, `"always"` / `"never"` on
+/// the canonical form only, plus the redirect from the other one.
+fn slash_forms(path: &str, trailing: TrailingSlash) -> Vec<(String, Option<String>)> {
+    let bare = path.trim_end_matches('/');
+    let last = bare.rsplit('/').next().unwrap_or("");
+    if !path.starts_with('/') || bare.is_empty() || last == "*" || last.contains('.') {
+        return vec![(path.to_string(), None)];
+    }
+    let slashed = format!("{bare}/");
+    let bare = bare.to_string();
+    match trailing {
+        TrailingSlash::Ignore => vec![(bare, None), (slashed, None)],
+        TrailingSlash::Always => vec![(slashed.clone(), None), (bare, Some(slashed))],
+        TrailingSlash::Never => vec![(bare.clone(), None), (slashed, Some(bare))],
+    }
 }
 
 /// `path` (a `_redirects` path) under `/<locale>`.
@@ -1037,7 +1073,9 @@ mod tests {
         );
         assert_eq!(
             host.redirects,
-            "/old/* /new/:splat 308\n/blog/:slug https://example.com/b/:slug 301\n/p/:id /photo/:id 200\n/x /nowhere 200\n"
+            "/old/* /new/:splat 308\n\
+             /blog/:slug https://example.com/b/:slug 301\n/blog/:slug/ https://example.com/b/:slug 301\n\
+             /p/:id /photo/:id 200\n/p/:id/ /photo/:id 200\n/x /nowhere 200\n/x/ /nowhere 200\n"
         );
         assert_eq!(
             host.headers,
@@ -1059,7 +1097,8 @@ mod tests {
             ),
             &["/home"],
         );
-        assert_eq!(host.redirects, "/app /app/home 307\n");
+        // `trailingSlash: "always"`: the canonical /app/ takes the rule, /app redirects to it.
+        assert_eq!(host.redirects, "/app/ /app/home 307\n/app /app/ 308\n");
         assert!(host.warnings.iter().any(|w| w.contains("basePath")));
         // The file layout carries the trailing-slash policy (out_file_for), so no warning.
         assert!(!host.warnings.iter().any(|w| w.contains("trailingSlash")));
@@ -1075,6 +1114,59 @@ mod tests {
             &[],
         );
         assert!(no_detect.warnings.is_empty());
+    }
+
+    #[test]
+    fn static_host_rules_cover_both_trailing_slash_forms() {
+        let config = |trailing: &str| {
+            routing(&format!(
+                r#"{{"trailingSlash":"{trailing}",
+                "redirects":[
+                    {{"source":"/docs/routing","destination":"/docs/guides/routing/","status":308}},
+                    {{"source":"/docs/old/","destination":"/docs/new","status":301}},
+                    {{"source":"/feed.xml","destination":"/rss.xml","status":308}},
+                    {{"source":"/","destination":"/home","status":307}}
+                ],
+                "headers":[
+                    {{"source":"/docs/[slug]","headers":[{{"key":"x-doc","value":"1"}}]}},
+                    {{"source":"/robots.txt","headers":[{{"key":"x-r","value":"1"}}]}}
+                ]}}"#
+            ))
+        };
+        let ignore = static_host_rules(&config("ignore"), &[]);
+        assert_eq!(
+            ignore.redirects,
+            "/docs/routing /docs/guides/routing/ 308\n/docs/routing/ /docs/guides/routing/ 308\n\
+             /docs/old /docs/new 301\n/docs/old/ /docs/new 301\n\
+             /feed.xml /rss.xml 308\n/ /home 307\n"
+        );
+        assert_eq!(
+            ignore.headers,
+            "/docs/:slug\n  x-doc: 1\n/docs/:slug/\n  x-doc: 1\n/robots.txt\n  x-r: 1\n"
+        );
+        // The servers move the other form to the canonical URL (308) before the rule applies.
+        let always = static_host_rules(&config("always"), &[]);
+        assert_eq!(
+            always.redirects,
+            "/docs/routing/ /docs/guides/routing/ 308\n/docs/routing /docs/routing/ 308\n\
+             /docs/old/ /docs/new 301\n/docs/old /docs/old/ 308\n\
+             /feed.xml /rss.xml 308\n/ /home 307\n"
+        );
+        assert_eq!(
+            always.headers,
+            "/docs/:slug/\n  x-doc: 1\n/robots.txt\n  x-r: 1\n"
+        );
+        let never = static_host_rules(&config("never"), &[]);
+        assert_eq!(
+            never.redirects,
+            "/docs/routing /docs/guides/routing/ 308\n/docs/routing/ /docs/routing 308\n\
+             /docs/old /docs/new 301\n/docs/old/ /docs/old 308\n\
+             /feed.xml /rss.xml 308\n/ /home 307\n"
+        );
+        assert_eq!(
+            never.headers,
+            "/docs/:slug\n  x-doc: 1\n/robots.txt\n  x-r: 1\n"
+        );
     }
 
     #[test]
@@ -1101,16 +1193,24 @@ mod tests {
         );
         assert_eq!(
             host.redirects,
-            "/app/en/a /app/b 307\n/app/ja/a /app/ja/b 307\n/app/a /app/b 307\n\
+            "/app/en/a /app/b 307\n/app/en/a/ /app/b 307\n/app/ja/a /app/ja/b 307\n/app/ja/a/ /app/ja/b 307\n\
+             /app/a /app/b 307\n/app/a/ /app/b 307\n\
              /app/en/old/* /app/:splat 308\n/app/ja/old/* /app/ja/:splat 308\n/app/old/* /app/:splat 308\n\
-             /app/ja/x /app/y 307\n\
-             /app/en/to /app/ja/welcome 307\n/app/ja/to /app/ja/welcome 307\n/app/to /app/ja/welcome 307\n\
-             /app/en/:slug https://example.com/:slug 302\n/app/ja/:slug https://example.com/:slug 302\n/app/:slug https://example.com/:slug 302\n\
-             /app/en/p/:id /app/photo/:id 200\n/app/ja/p/:id /app/ja/photo/:id 200\n/app/p/:id /app/photo/:id 200\n"
+             /app/ja/x /app/y 307\n/app/ja/x/ /app/y 307\n\
+             /app/en/to /app/ja/welcome 307\n/app/en/to/ /app/ja/welcome 307\n\
+             /app/ja/to /app/ja/welcome 307\n/app/ja/to/ /app/ja/welcome 307\n\
+             /app/to /app/ja/welcome 307\n/app/to/ /app/ja/welcome 307\n\
+             /app/en/:slug https://example.com/:slug 302\n/app/en/:slug/ https://example.com/:slug 302\n\
+             /app/ja/:slug https://example.com/:slug 302\n/app/ja/:slug/ https://example.com/:slug 302\n\
+             /app/:slug https://example.com/:slug 302\n/app/:slug/ https://example.com/:slug 302\n\
+             /app/en/p/:id /app/photo/:id 200\n/app/en/p/:id/ /app/photo/:id 200\n\
+             /app/ja/p/:id /app/ja/photo/:id 200\n/app/ja/p/:id/ /app/ja/photo/:id 200\n\
+             /app/p/:id /app/photo/:id 200\n/app/p/:id/ /app/photo/:id 200\n"
         );
         assert_eq!(
             host.headers,
-            "/app/ja/login\n  x-robots-tag: noindex\n/app/login\n  x-robots-tag: noindex\n\
+            "/app/ja/login\n  x-robots-tag: noindex\n/app/ja/login/\n  x-robots-tag: noindex\n\
+             /app/login\n  x-robots-tag: noindex\n/app/login/\n  x-robots-tag: noindex\n\
              /app/*\n  x-all: 1\n/app/ja/*\n  x-ja: 1\n"
         );
         assert!(host.warnings.iter().any(|w| w.contains("redirect /[slug]")));
@@ -1123,7 +1223,7 @@ mod tests {
         );
         assert_eq!(
             prefixed.redirects,
-            "/en/a /en/b 307\n/ja/a /ja/b 307\n/a /en/b 307\n"
+            "/en/a /en/b 307\n/en/a/ /en/b 307\n/ja/a /ja/b 307\n/ja/a/ /ja/b 307\n/a /en/b 307\n/a/ /en/b 307\n"
         );
     }
 

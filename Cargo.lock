@@ -1699,7 +1699,7 @@ dependencies = [
 
 [[package]]
 name = "nowaki"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -1726,7 +1726,7 @@ dependencies = [
 
 [[package]]
 name = "nowaki-core"
-version = "0.20.1"
+version = "0.20.2"
 dependencies = [
  "anyhow",
  "brotli",
@@ -1743,6 +1743,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "syntect",
  "tempfile",
  "two-face",
  "xxhash-rust",
