@@ -50,3 +50,10 @@ minimumReleaseAgeExclude:
   - '@nowaki-dev/cli-win32-x64@1.0.0-rc.1'
   - '@nowaki-dev/runtime@1.0.0-rc.1'
   - nowaki@1.0.0-rc.1
+  - '@nowaki-dev/cli-darwin-arm64@1.0.0-rc.2'
+  - '@nowaki-dev/cli-darwin-x64@1.0.0-rc.2'
+  - '@nowaki-dev/cli-linux-arm64-gnu@1.0.0-rc.2'
+  - '@nowaki-dev/cli-linux-x64-gnu@1.0.0-rc.2'
+  - '@nowaki-dev/cli-win32-x64@1.0.0-rc.2'
+  - '@nowaki-dev/runtime@1.0.0-rc.2'
+  - nowaki@1.0.0-rc.2
