@@ -180,7 +180,10 @@ the next page and swaps the body, keeping the islands runtime loaded. Pages with
 load no router; their links are plain page loads.
 
 - The router loads when a link is hovered, focused or touched, so a visitor who never navigates
-  never downloads it.
+  never downloads it. `<Link prefetch>` (or `<a data-nowaki-prefetch>`) also loads it when that
+  link is in the viewport, and fetches the page then. Other links stay on hover and touch.
+  Save-Data or a 2g connection skips the viewport fetch. A page with no islands still has no
+  router.
 - Visited pages stay in a Router Cache for 30 seconds (`<meta name="nowaki-router-cache"
   content="0">` turns it off, another number sets the seconds).
 - `data-no-router` on a link (or `<Link data-no-router>`) makes a click a full page load.

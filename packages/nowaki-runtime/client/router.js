@@ -131,6 +131,63 @@ function prefetch(url) {
     .catch(() => {});
 }
 
+// <Link prefetch> renders data-nowaki-prefetch (a plain <a> can too). The page is fetched once
+// that anchor is in the viewport. Hover and touch below still prefetch every internal link.
+// Save-Data and 2g skip only this path. The observer is installed with the router, so a page
+// that never loads the router never watches.
+let prefetchObserver;
+let prefetchWatch;
+let prefetchWatchBody;
+
+function holdViewportPrefetch() {
+  const c = navigator.connection;
+  return !!(c && (c.saveData || /2g/.test(c.effectiveType || "")));
+}
+
+function observePrefetch(root) {
+  if (typeof IntersectionObserver != "function" || holdViewportPrefetch()) return;
+  if (root?.nodeType !== 1 && !root?.querySelectorAll) return;
+  prefetchObserver ??= new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      prefetchObserver.unobserve(e.target);
+      const url = internalAnchor(e.target);
+      if (!url || (url.pathname === location.pathname && url.search === location.search)) continue;
+      prefetch(url);
+    }
+  });
+  const list = [];
+  if (root.nodeType === 1 && root.matches?.("a[data-nowaki-prefetch]")) list.push(root);
+  if (root.querySelectorAll) for (const a of root.querySelectorAll("a[data-nowaki-prefetch]")) list.push(a);
+  for (const a of list) prefetchObserver.observe(a);
+}
+
+// Only once a prefetch anchor has been on the page. A hover that loads the router, with no
+// such anchor, does not watch the DOM. The body is replaced on navigation, so rebind then.
+function armPrefetchWatch() {
+  prefetchWatch ??= new MutationObserver((recs) => {
+    for (const r of recs) {
+      for (const n of r.addedNodes) {
+        if (n.nodeType !== 1) continue;
+        if (n.matches?.("a[data-nowaki-prefetch]") || n.querySelector?.("a[data-nowaki-prefetch]")) observePrefetch(n);
+      }
+    }
+  });
+  if (prefetchWatchBody === document.body) return;
+  prefetchWatch.disconnect();
+  prefetchWatch.observe(document.body, { childList: true, subtree: true });
+  prefetchWatchBody = document.body;
+}
+
+function watchPrefetch() {
+  if (document.querySelector("a[data-nowaki-prefetch]")) {
+    observePrefetch(document);
+    armPrefetchWatch();
+  } else if (prefetchWatch) {
+    armPrefetchWatch();
+  }
+}
+
 // `intercept`: whether a slot on screen may take the URL (not when going back to an entry that
 // showed the full page). `vt`: the element that opted the link into a View Transition
 // (data-nowaki-transition), false when the browser already animated a back/forward gesture, or
@@ -203,6 +260,7 @@ function apply(entry, slot, push, token, hash) {
       hydrateIslands(document);
       loadPageScripts(doc.head);
       syncLive();
+      watchPrefetch();
       removeProgressBar();
       // Page scripts run once (they are modules); this is their cue to set up the new page's DOM.
       document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl, timing } }));
@@ -231,6 +289,7 @@ function apply(entry, slot, push, token, hash) {
   }, () => {
     if (tpl) loadPageScripts(tpl.content);
     slotShown(slot);
+    watchPrefetch();
     document.dispatchEvent(new CustomEvent("nowaki:page-load", { detail: { url: finalUrl, slot: slot.getAttribute("name"), timing } }));
   });
 }
@@ -517,6 +576,12 @@ export function installRouter() {
   };
   document.addEventListener("mouseover", onHover, { passive: true });
   document.addEventListener("touchstart", onHover, { passive: true });
+  // islands.js calls this for a prefetch anchor rendered after the router loaded (an island).
+  window.__nowakiObservePrefetch = (root) => {
+    observePrefetch(root);
+    armPrefetchWatch();
+  };
+  watchPrefetch();
 
   // Back/forward, and #hash links (the browser scrolls to those after this event).
   window.addEventListener("popstate", (e) => {

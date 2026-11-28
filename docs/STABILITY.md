@@ -78,7 +78,7 @@ either covered by semver or listed below as not covered. Frozen and covered by s
   `nowaki_locale` cookie, and the session cookie's documented options.
 - **Client events and attributes**: `nowaki:page-load`, `nowaki:action`, `nowaki:live-error`,
   `nowaki:live-stale`, `nowaki:presence`; `data-live`, `data-live-submit` / `-input` /
-  `-change` / `-debounce`, `data-nowaki-transition`, `data-nowaki-error`, `data-nowaki-reset`,
+  `-change` / `-debounce`, `data-nowaki-transition`, `data-nowaki-prefetch`, `data-nowaki-error`, `data-nowaki-reset`,
   `data-nowaki-presence`; the `name` attribute of `<nowaki-slot>`.
 - **Adapter deploy contract** for `node`, `static`, `bun`, `deno`, `cloudflare` and `vercel`:
   the output paths (`dist/server/index.mjs` and its start command, `dist/static` with

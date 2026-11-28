@@ -101,6 +101,7 @@ export interface LinkProps {
     basePath?: boolean;
     locale?: string | false;
     viewTransition?: boolean;
+    prefetch?: boolean;
     children?: unknown;
     [key: string]: unknown;
 }
@@ -128,6 +129,13 @@ Members:
   reduced motion; otherwise it swaps the page as usual. A page can opt in all navigations to and
   from it with `export const viewTransition = true` instead. The transition carries the type
   `"forward"` (`"back"` for a back navigation) for `:active-view-transition-type()`.
+- `prefetch`: Fetches this page when the link is in the viewport, ahead of a click. Renders
+  `data-nowaki-prefetch`, which does the same on a plain `<a>`. Without it, or with `false`,
+  nothing is added and the link is prefetched on hover or touch only, like any other `<a>`.
+  The client router itself still loads on that hover, focus or touch, or when a prefetch link
+  actually scrolls into view; a page that never does either downloads neither the router nor
+  the next page. Skipped when the browser reports Save-Data or a 2g connection. A page with no
+  islands has no client router, so this does nothing there.
 - `children`: The link's content.
 
 Uses: [`StaticRoutePath`](#staticroutepath), [`Href`](#href).

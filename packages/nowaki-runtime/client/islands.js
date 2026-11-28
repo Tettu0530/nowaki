@@ -50,12 +50,19 @@ function schedule(el, strategy) {
   }
 }
 
+// Set once the router loader below is installed. An island that renders <a data-nowaki-prefetch>
+// after this module's first scan (client:only, a later render) still has to load the router.
+let seePrefetch = () => {};
+
 function mount(el, clientOnly) {
   const src = el.getAttribute("src");
   if (!ours(src)) return console.error(`[nowaki] not an island module: ${src}`);
   const props = JSON.parse(el.getAttribute("props") || "{}");
   import(src).then(
-    (mod) => (clientOnly ? render : hydrate)(h(mod.default, props), el),
+    (mod) => {
+      (clientOnly ? render : hydrate)(h(mod.default, props), el);
+      seePrefetch(el);
+    },
     (err) => console.error(`[nowaki] failed to load island ${src}:`, err),
   );
 }
@@ -132,9 +139,10 @@ if (typeof window !== "undefined") window.__nowakiHydrateIslands = hydrateIsland
 hydrateIslands();
 
 // The SPA router (data-router) loads on intent, not on every page: when a same-origin link is
-// hovered, focused, or touched, which is usually well before the click. A click that comes first
+// hovered, focused, or touched, which is usually well before the click, or when an
+// <a data-nowaki-prefetch> (<Link prefetch>) is in the viewport. A click that comes first
 // (keyboard, script) waits for the router and is replayed as a client navigation. Visitors who
-// never follow a link never download it.
+// never follow a link, and whose page has no such link in view, never download it.
 if (typeof document !== "undefined") {
   const routerSrc = own?.getAttribute("data-router");
   if (routerSrc && ours(routerSrc)) {
@@ -171,5 +179,50 @@ if (typeof document !== "undefined") {
       e.preventDefault();
       load().then(() => (window.__nowakiRouter ? a.click() : location.assign(url.href)));
     });
+
+    // Viewport prefetch only loads the router. router.js fetches the page, and only for anchors
+    // it would navigate (internalAnchor). Pages with none of these anchors pay for one query.
+    // Save-Data and 2g skip it; hover and touch above are unchanged.
+    const held = () => {
+      const c = navigator.connection;
+      return !!(c && (c.saveData || /2g/.test(c.effectiveType || "")));
+    };
+    let io = null;
+    seePrefetch = (root) => {
+      if (typeof IntersectionObserver != "function" || held()) return;
+      const found = [];
+      if (root?.nodeType === 1 && root.matches?.("a[data-nowaki-prefetch]")) found.push(root);
+      if (root?.querySelectorAll) for (const a of root.querySelectorAll("a[data-nowaki-prefetch]")) found.push(a);
+      const list = found.filter((a) => {
+        if (!link(a)) return false;
+        let url;
+        try {
+          url = new URL(a.href, location.href);
+        } catch {
+          return false;
+        }
+        if (url.pathname === location.pathname && url.search === location.search) return false;
+        // A path ending in a file name is not a page (router.js internalAnchor).
+        if (/\.[A-Za-z0-9]+$/.test(url.pathname.split("/").pop())) return false;
+        // Outside basePath is another app. The comparison folds away when there is no base.
+        if (import.meta.env.BASE_URL !== "/") {
+          const base = import.meta.env.BASE_URL.slice(0, -1);
+          if (url.pathname !== base && !url.pathname.startsWith(base + "/")) return false;
+        }
+        return true;
+      });
+      if (!list.length) return;
+      // The router fetches. It may already be loaded (a hover, or a previous navigation).
+      window.__nowakiObservePrefetch?.(root);
+      io ??= new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          io.unobserve(e.target);
+          load();
+        }
+      });
+      for (const a of list) io.observe(a);
+    };
+    seePrefetch(document);
   }
 }

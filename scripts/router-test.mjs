@@ -667,9 +667,13 @@ eq(stripRouteGroups("/(.)/x"), "/(.)/x", "(.) stays literal");
   eq(render(h(Link, { href: "/x", viewTransition: true }, "x")), '<a href="/x" data-nowaki-transition>x</a>', "<Link viewTransition> renders data-nowaki-transition");
   eq(render(h(Link, { href: "/x", viewTransition: false }, "x")), '<a href="/x">x</a>', "<Link viewTransition={false}> renders nothing extra");
   eq(render(h(Link, { href: "/x" }, "x")), '<a href="/x">x</a>', "<Link> without it is unchanged");
+  eq(render(h(Link, { href: "/x", prefetch: true }, "x")), '<a href="/x" data-nowaki-prefetch>x</a>', "<Link prefetch> renders data-nowaki-prefetch");
+  eq(render(h(Link, { href: "/x", prefetch: false }, "x")), '<a href="/x">x</a>', "<Link prefetch={false}> renders nothing extra");
+  eq(render(h(Link, { href: "/x", prefetch: true, viewTransition: true }, "x")), '<a href="/x" data-nowaki-transition data-nowaki-prefetch>x</a>', "<Link prefetch> keeps viewTransition");
   const prevBase = globalThis.__nowakiBase;
   globalThis.__nowakiBase = "/app";
   eq(render(h(Link, { href: "/x", viewTransition: true }, "x")), '<a href="/app/x" data-nowaki-transition>x</a>', "<Link viewTransition> under basePath");
+  eq(render(h(Link, { href: "/x", prefetch: true }, "x")), '<a href="/app/x" data-nowaki-prefetch>x</a>', "<Link prefetch> under basePath");
   globalThis.__nowakiBase = prevBase;
 
   eq(
