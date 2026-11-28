@@ -323,6 +323,7 @@ LinkProps."data-no-router"?: boolean;
 LinkProps.basePath?: boolean;
 LinkProps.locale?: string | false;
 LinkProps.viewTransition?: boolean;
+LinkProps.prefetch?: boolean;
 LinkProps.children?: unknown;
 LinkProps.[key: string]: unknown;
 export function Link(props: LinkProps): VNode;

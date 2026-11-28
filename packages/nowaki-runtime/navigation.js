@@ -23,11 +23,14 @@ export function route(pattern, params = {}) {
 // locale (`locale="ja"` links to another one, `locale={false}` leaves the href alone). A plain <a>
 // is left alone. Inside an island, a click on a `locale` link also remembers the choice
 // (setLocale) before the router navigates. `viewTransition` renders data-nowaki-transition: the
-// client router runs that navigation as a View Transition (client/router.js).
+// client router runs that navigation as a View Transition (client/router.js). `prefetch` renders
+// data-nowaki-prefetch: that link is fetched once it is in the viewport. Omitted, the <a> is
+// unchanged and prefetch stays on hover / touch.
 export function Link(props) {
-  if (!globalThis.__nowakiBase && props.basePath === undefined && props.locale === undefined && props.viewTransition === undefined && !localeState()) return h("a", props);
-  const { basePath, locale, viewTransition, ...rest } = props;
+  if (!globalThis.__nowakiBase && props.basePath === undefined && props.locale === undefined && props.viewTransition === undefined && props.prefetch === undefined && !localeState()) return h("a", props);
+  const { basePath, locale, viewTransition, prefetch, ...rest } = props;
   if (viewTransition) rest["data-nowaki-transition"] = "";
+  if (prefetch) rest["data-nowaki-prefetch"] = "";
   if (locale) {
     rest.hreflang ??= locale;
     const onClick = rest.onClick;

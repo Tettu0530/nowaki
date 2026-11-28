@@ -14,6 +14,7 @@ data-live-debounce  # packages/nowaki-runtime/client/live.js
 data-live-input  # packages/nowaki-runtime/client/live.js
 data-live-submit  # packages/nowaki-runtime/client/live.js
 data-nowaki-error  # packages/nowaki-runtime/client/router.js
+data-nowaki-prefetch  # packages/nowaki-runtime/client/islands.js, packages/nowaki-runtime/client/router.js
 data-nowaki-presence  # packages/nowaki-runtime/client/live.js
 data-nowaki-reset  # packages/nowaki-runtime/client/router.js
 data-nowaki-transition  # packages/nowaki-runtime/client/router.js

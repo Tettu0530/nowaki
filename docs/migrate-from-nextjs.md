@@ -568,8 +568,10 @@ title per page, or build it in a helper.
 
 **`next/link` → `<Link>` or `<a>`.** On pages with islands, Nowaki's client router handles
 clicks on any same-origin `<a>` and prefetches on hover; pages without islands navigate with
-full loads and ship no router. `<Link>` from `@nowaki-dev/runtime/navigation` adds the
-basePath and the current locale, type-checks static paths, and takes `viewTransition`:
+full loads and ship no router. `<Link prefetch>` also prefetches when that link is in the
+viewport. Without the prop, a port does not fetch every link on the page. `<Link>` from
+`@nowaki-dev/runtime/navigation` adds the basePath and the current locale, type-checks static
+paths, and takes `viewTransition`:
 
 ```tsx
 import { Link, route } from "@nowaki-dev/runtime/navigation";
@@ -577,8 +579,9 @@ import { Link, route } from "@nowaki-dev/runtime/navigation";
 <Link href={route("/posts/[slug]", { slug })}>{title}</Link>
 ```
 
-The compare twin uses plain `<a>` (no basePath, no i18n). Next.js also prefetches every
-`<Link>` in the viewport; Nowaki prefetches on hover or touch only.
+The compare twin uses plain `<a>` (no basePath, no i18n). Next.js prefetches every `<Link>`
+in the viewport. Nowaki does that for `<Link prefetch>` (or `<a data-nowaki-prefetch>`); other
+links prefetch on hover or touch only.
 
 **`next/image` → `<Image>`.**
 

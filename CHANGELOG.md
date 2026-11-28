@@ -11,6 +11,13 @@ milestone's worth of work; the codename is noted per entry.
 
 ## [Unreleased]
 
+### Added
+- **`<Link prefetch>` fetches that page when the link is in the viewport.** A plain
+  `<a data-nowaki-prefetch>` does the same. Links without it still prefetch only on hover or
+  touch, and a page that never shows one does not download the router any sooner. Save-Data
+  and 2g connections skip the viewport fetch. A page with no islands has no client router, so
+  there is nothing to prefetch with.
+
 ### Documentation
 - The upgrade guide and `nowaki upgrade` docs now run the target version's CLI
   (`npx nowaki@1.0.0 upgrade --to 1.0.0`, `npx nowaki@next upgrade --to next`). The installed

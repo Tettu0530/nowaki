@@ -252,6 +252,8 @@ export const CLIENT = {
   "data-live-debounce": "Milliseconds `data-live-input` waits after the last keystroke. Default `150`.",
   "data-nowaki-transition":
     "On an `<a>` or an element around links: client navigations from those links run as View Transitions. `<Link viewTransition>` renders it.",
+  "data-nowaki-prefetch":
+    "On an `<a>`: the client router fetches that page when the link is in the viewport. `<Link prefetch>` renders it. Links without it are prefetched on hover or touch only. Skipped when the browser reports Save-Data or a 2g connection. A page with no islands has no client router, so the attribute does nothing there.",
   "data-nowaki-error": "In `error.tsx`: the element the client router writes the failed navigation's error message into.",
   "data-nowaki-reset": "In `error.tsx`: a click on this element retries the failed navigation.",
   "data-nowaki-presence":

@@ -497,6 +497,36 @@ try {
   await sleep(300);
   check(`no injected island or router is fetched (${evilRequests()} requests to evil.invalid)`, evilRequests() === 0);
 
+  // <Link prefetch> (examples/hello/routes/prefetch.tsx): the in-view link is fetched without a
+  // hover, the layout's plain links are not, and the one below the fold waits for a scroll.
+  // The expressions are literals. Building one from a path (JSON.stringify included) is code
+  // construction: JSON.stringify does not escape U+2028/U+2029, which CodeQL flags.
+  await cdp.load(BASE + "/prefetch");
+  const fetchOf = {
+    "/styled":
+      "performance.getEntriesByType('resource').some((e) => e.initiatorType === 'fetch' && e.name.split('?')[0].split('#')[0].endsWith('/styled'))",
+    "/about":
+      "performance.getEntriesByType('resource').some((e) => e.initiatorType === 'fetch' && e.name.split('?')[0].split('#')[0].endsWith('/about'))",
+    "/gallery":
+      "performance.getEntriesByType('resource').some((e) => e.initiatorType === 'fetch' && e.name.split('?')[0].split('#')[0].endsWith('/gallery'))",
+  };
+  check(
+    "a prefetch link in view loads the router and fetches its page",
+    await cdp.waitFor(`window.__nowakiRouter && (${fetchOf["/styled"]})`),
+  );
+  const early = await cdp.evalAsync(`return {
+    styled: ${fetchOf["/styled"]},
+    about: ${fetchOf["/about"]},
+    gallery: ${fetchOf["/gallery"]},
+    below: (document.getElementById('prefetch-below')?.getBoundingClientRect().top ?? 0) >= innerHeight,
+  };`);
+  check(
+    `viewport prefetch left the other links and the off-screen one (${JSON.stringify(early)})`,
+    early.styled === true && early.about === false && early.gallery === false && early.below === true,
+  );
+  await cdp.evalAsync(`document.getElementById('prefetch-below').scrollIntoView(); return true;`);
+  check("scrolling a prefetch link into view fetches it", await cdp.waitFor(fetchOf["/gallery"]));
+
   // Under a basePath, a same-origin link outside it belongs to another app: a full load.
   if (P) {
     await cdp.load(BASE + "/");

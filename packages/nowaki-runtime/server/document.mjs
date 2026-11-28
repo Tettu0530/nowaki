@@ -183,7 +183,8 @@ function liveScript(manifest, assetBase, opts) {
   return `<script${nonceAttr()} id="nowaki-live" type="module" src="${assetBase}${manifest.liveRuntime}"${transport}></script>`;
 }
 
-// islands.js imports the SPA router from this URL on link intent (hover, focus, touch, or a click).
+// islands.js imports the SPA router from this URL on link intent (hover, focus, touch, or a click)
+// or when an <a data-nowaki-prefetch> scrolls into view.
 function dataRouter(manifest, assetBase) {
   return manifest.routerRuntime ? ` data-router="${assetBase}${manifest.routerRuntime}"` : "";
 }

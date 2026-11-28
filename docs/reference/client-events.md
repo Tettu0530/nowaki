@@ -36,6 +36,7 @@ Put one on an island element in a page or layout to choose when it hydrates. Typ
 | `data-live-input` | Inside a live island: sends the named event while the user types (debounced, see `data-live-debounce`), with the field's value. |
 | `data-live-submit` | On a `<form>` inside a live island: submitting it sends the named event with the form's fields as an object, without navigating. |
 | `data-nowaki-error` | In `error.tsx`: the element the client router writes the failed navigation's error message into. |
+| `data-nowaki-prefetch` | On an `<a>`: the client router fetches that page when the link is in the viewport. `<Link prefetch>` renders it. Links without it are prefetched on hover or touch only. Skipped when the browser reports Save-Data or a 2g connection. A page with no islands has no client router, so the attribute does nothing there. |
 | `data-nowaki-presence` | An element whose text the live runtime keeps set to the number of live connections: `""` counts every connection, a room id counts that room's members. |
 | `data-nowaki-reset` | In `error.tsx`: a click on this element retries the failed navigation. |
 | `data-nowaki-transition` | On an `<a>` or an element around links: client navigations from those links run as View Transitions. `<Link viewTransition>` renders it. |
